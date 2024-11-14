@@ -1,7 +1,12 @@
-[package]
-name = "openharmony-activity"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = ["crates/*"]
+resolver = "2"
 
-[dependencies]
-napi-sys-ohos = {version = "1.0"}
+[workspace.dependencies]
+openharmon-activity-derive = { path = "crates/derive" }
+openharmony-activity = { path = "crates/activity" }
+
+napi-sys-ohos = { version = "1.0" }
+syn = { version = "2", features = ["fold", "full", "extra-traits"] }
+quote = { version = "1.0" }
+proc-macro2 = { version = "1.0" }
