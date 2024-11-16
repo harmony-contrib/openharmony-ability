@@ -1,5 +1,5 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { MyApp } from 'libexample.so';
+import { init } from 'libexample.so';
 import { AbilityLifecycleCallback, common, EnvironmentCallback } from '@kit.AbilityKit';
 import { NodeContent } from '@kit.ArkUI';
 
@@ -8,9 +8,9 @@ import { NodeContent } from '@kit.ArkUI';
 struct Index {
   private rootSlot = new NodeContent();
   private uiContext = getContext(this) as common.UIAbilityContext;
-  private app: MyApp | null = null;
 
   aboutToAppear(): void {
+    const lifecycle = init();
     const applicationContext = this.uiContext.getApplicationContext();
 
     const abilityCallback = {
@@ -21,13 +21,8 @@ struct Index {
 
     const environmentCallback = {} as EnvironmentCallback;
 
-    applicationContext.on("abilityLifecycle", abilityCallback)
+    applicationContext.on("abilityLifecycle", lifecycle as ESObject as AbilityLifecycleCallback)
     applicationContext.on("environment", environmentCallback)
-
-    if (!this.app) {
-      this.app = new MyApp(this.rootSlot);
-    }
-    this.app!.createNativeNode();
   }
 
   build() {

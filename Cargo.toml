@@ -1,12 +1,20 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "example"]
 resolver = "2"
 
 [workspace.dependencies]
-openharmon-activity-derive = { path = "crates/derive" }
-openharmony-activity = { path = "crates/activity" }
+openharmony-activity-derive = { version = "0.0.1", path = "crates/derive" }
+openharmony-activity = { version = "0.0.1", path = "crates/activity" }
 
 napi-sys-ohos = { version = "1.0" }
+napi-ohos = { version = "1.0" }
+napi-derive-ohos = { version = "1.0" }
+napi-build-ohos = { version = "1.0" }
+
 syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
+
+
+ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "feat-xcomponent" }
+ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "feat-xcomponent" }

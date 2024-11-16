@@ -1,6 +1,6 @@
 [package]
-name = "openharmon-activity-derive"
-version = "0.1.0"
+name = "openharmony-activity-derive"
+version = "0.0.1"
 edition = "2021"
 
 [lib]
