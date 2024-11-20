@@ -6,21 +6,39 @@ use napi_ohos::{bindgen_prelude::Function, Env, JsObject};
 use crate::App;
 
 #[napi(object)]
-pub struct ApplicationLifecycle<'a> {
-    pub on_ability_foreground: Function<'a, (), ()>,
+pub struct EnvironmentCallback<'a> {
+    pub on_configuration_updated: Function<'a, (), ()>,
+    pub on_memory_level: Function<'a, (), ()>,
+}
+
+#[napi(object)]
+pub struct WindowStageEventCallback<'a> {
     pub on_window_stage_create: Function<'a, (), ()>,
+    pub on_window_stage_destroy: Function<'a, (), ()>,
+    pub on_ability_create: Function<'a, (), ()>,
+    pub on_ability_destroy: Function<'a, (), ()>,
+}
+
+#[napi(object)]
+pub struct ApplicationLifecycle<'a> {
+    pub environment_callback: EnvironmentCallback<'a>,
+    pub window_stage_event_callback: WindowStageEventCallback<'a>,
 }
 
 /// create lifecycle object and return to arkts
 pub fn create_lifecycle_handle(env: &Env, app: Rc<RefCell<App>>) -> ApplicationLifecycle {
-    let foreground_app = app.clone();
-    let foreground = env
-        .create_function_from_closure("on_ability_foreground", move |_ctx| {
-            let app = foreground_app.borrow();
-            let handle = app.event_loop.borrow_mut();
-            if let Some(h) = *handle {
-                h()
-            }
+    let memory_level_app = app.clone();
+    let on_memory_level = env
+        .create_function_from_closure("memory_level", move |ctx| {
+            let level = ctx.first_arg::<i32>()?;
+            Ok(())
+        })
+        .unwrap();
+
+    let configuration_updated_app = app.clone();
+    let on_configuration_updated = env
+        .create_function_from_closure("configuration_updated", move |ctx| {
+            let level = ctx.first_arg::<JsObject>()?;
             Ok(())
         })
         .unwrap();
@@ -34,18 +52,45 @@ pub fn create_lifecycle_handle(env: &Env, app: Rc<RefCell<App>>) -> ApplicationL
                 ability.get_named_property("on")?;
 
             let app = on_window_stage_create_app.borrow();
-            let handle = app.event_loop.clone();
-
-            let on_handle_callback = ctx.env.create_function_from_closure("", move |_| {
-                if let Some(h) = *handle.borrow_mut() {
-                    h()
-                }
-                Ok(())
-            })?;
-
             (*app.ability.borrow_mut()) = Some(ability);
-            let event_name = String::from("windowStageEvent");
-            on_handle.call((event_name, on_handle_callback))?;
+            let window_stage_event_handle = app.event_loop.clone();
+
+            let window_stage_event =
+                ctx.env
+                    .create_function_from_closure("window_stage_event", move |_| {
+                        if let Some(h) = *window_stage_event_handle.borrow_mut() {
+                            h()
+                        }
+                        Ok(())
+                    })?;
+            let event_func_name = String::from("windowStageEvent");
+            on_handle.call((event_func_name, window_stage_event))?;
+
+            let window_size_handle = app.event_loop.clone();
+            let window_resize =
+                ctx.env
+                    .create_function_from_closure("window_resize", move |_| {
+                        if let Some(h) = *window_size_handle.borrow_mut() {
+                            h()
+                        }
+                        Ok(())
+                    })?;
+
+            let window_size_func_name = String::from("windowSizeChange");
+            on_handle.call((window_size_func_name, window_resize))?;
+
+            let window_rect_handle = app.event_loop.clone();
+            let window_rect_change =
+                ctx.env
+                    .create_function_from_closure("window_rect_change", move |_| {
+                        if let Some(h) = *window_rect_handle.borrow_mut() {
+                            h()
+                        }
+                        Ok(())
+                    })?;
+
+            let window_rect_func_name = String::from("windowRectChange");
+            on_handle.call((window_rect_func_name, window_rect_change))?;
 
             let ability_handle = app.event_loop.clone();
             if let Some(h) = *ability_handle.borrow_mut() {
@@ -54,8 +99,41 @@ pub fn create_lifecycle_handle(env: &Env, app: Rc<RefCell<App>>) -> ApplicationL
             Ok(())
         })
         .unwrap();
+
+    let on_window_stage_destroy_app = app.clone();
+    let on_window_stage_destroy = env
+        .create_function_from_closure("on_window_stage_destroy", move |ctx| {
+            let ability = ctx.first_arg::<JsObject>()?;
+            Ok(())
+        })
+        .unwrap();
+
+    let on_ability_create_app = app.clone();
+    let on_ability_create = env
+        .create_function_from_closure("on_ability_create", move |ctx| {
+            let ability = ctx.first_arg::<JsObject>()?;
+            Ok(())
+        })
+        .unwrap();
+
+    let on_ability_destroy_app = app.clone();
+    let on_ability_destroy = env
+        .create_function_from_closure("on_ability_destroy", move |ctx| {
+            let ability = ctx.first_arg::<JsObject>()?;
+            Ok(())
+        })
+        .unwrap();
+
     ApplicationLifecycle {
-        on_ability_foreground: foreground,
-        on_window_stage_create,
+        environment_callback: EnvironmentCallback {
+            on_configuration_updated,
+            on_memory_level,
+        },
+        window_stage_event_callback: WindowStageEventCallback {
+            on_window_stage_create,
+            on_window_stage_destroy,
+            on_ability_create,
+            on_ability_destroy,
+        },
     }
 }

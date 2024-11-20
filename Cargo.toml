@@ -6,10 +6,10 @@ resolver = "2"
 openharmony-activity-derive = { version = "0.0.1", path = "crates/derive" }
 openharmony-activity = { version = "0.0.1", path = "crates/activity" }
 
-napi-sys-ohos = { version = "1.0" }
-napi-ohos = { version = "1.0" }
-napi-derive-ohos = { version = "1.0" }
-napi-build-ohos = { version = "1.0" }
+napi-sys-ohos = { version = "1.0.3" }
+napi-ohos = { version = "1.0.3" }
+napi-derive-ohos = { version = "1.0.3" }
+napi-build-ohos = { version = "1.0.3" }
 
 syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
