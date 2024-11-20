@@ -17,8 +17,7 @@ pub fn activity(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             #fn_name(&inner_app_ref);
 
-            let lifecycle = openharmony_activity::create_lifecycle_handle(ctx.env, inner_app.clone());
-            Ok(lifecycle)
+            openharmony_activity::create_lifecycle_handle(ctx, inner_app.clone())
         }
 
         #[napi_derive_ohos::module_exports]
