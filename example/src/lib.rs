@@ -4,5 +4,5 @@ use openharmony_activity_derive::activity;
 
 #[activity]
 fn openharmony_app(app: &App) {
-    app.run_loop(|| hilog_info!("ohos-rs macro"));
+    app.run_loop(|_| hilog_info!("ohos-rs macro"));
 }

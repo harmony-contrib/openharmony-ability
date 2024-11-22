@@ -64,9 +64,9 @@ dependencies = [
 
 [[package]]
 name = "ctor"
-version = "0.2.8"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edb49164822f3ee45b17acd4a208cfc1251410cf0cad9a833234c9890774dd9f"
+checksum = "32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501"
 dependencies = [
  "quote",
  "syn",
@@ -75,7 +75,6 @@ dependencies = [
 [[package]]
 name = "enum_macro"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#769a80316be8131d522f55e98e97895dfab4559d"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -104,9 +103,9 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "libc"
-version = "0.2.162"
+version = "0.2.164"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18d287de67fe55fd7e1581fe933d965a5a9477b38e949cfa9f8574ef01506398"
+checksum = "433bfe06b8c75da9b2e3fbea6e5329ff87748f0b144ef75306e674c3f6f7c13f"
 
 [[package]]
 name = "libloading"
@@ -199,7 +198,6 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-binding"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#769a80316be8131d522f55e98e97895dfab4559d"
 dependencies = [
  "bitflags",
  "enum_macro",
@@ -213,7 +211,6 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-sys"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#769a80316be8131d522f55e98e97895dfab4559d"
 dependencies = [
  "napi-sys-ohos",
 ]
@@ -236,8 +233,8 @@ checksum = "ed07615005d0f8d7bcf901f89c8ff4870666a9bdb00382f588af383f40c160b7"
 [[package]]
 name = "ohos-xcomponent-binding"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#769a80316be8131d522f55e98e97895dfab4559d"
 dependencies = [
+ "enum_macro",
  "napi-derive-ohos",
  "napi-ohos",
  "napi-sys-ohos",
@@ -247,7 +244,6 @@ dependencies = [
 [[package]]
 name = "ohos-xcomponent-sys"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#769a80316be8131d522f55e98e97895dfab4559d"
 dependencies = [
  "ohos-arkui-sys",
 ]
@@ -265,6 +261,7 @@ dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
  "ohos-arkui-binding",
+ "ohos-hilog-binding",
  "ohos-xcomponent-binding",
 ]
 
@@ -285,9 +282,9 @@ checksum = "915a1e146535de9163f3987b8944ed8cf49a18bb0056bcebcdcece385cece4ff"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.89"
+version = "1.0.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f139b0662de085916d1fb67d2b4169d1addddda1919e696f3252b740b629986e"
+checksum = "307e3004becf10f5a6e0d59d20f3cd28231b0e0827a96cd3e0ce6d14bc1e4bb3"
 dependencies = [
  "unicode-ident",
 ]
@@ -344,9 +341,9 @@ checksum = "61697e0a1c7e512e84a621326239844a24d8207b4669b41bc18b32ea5cbf988b"
 
 [[package]]
 name = "syn"
-version = "2.0.87"
+version = "2.0.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25aa4ce346d03a6dcd68dd8b4010bcb74e54e62c90c573f394c46eae99aba32d"
+checksum = "44d46482f1c1c87acd84dea20c1bf5ebff4c757009ed6bf19cfd36fb10e92c4e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -365,9 +362,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91b56cd4cadaeb79bbf1a5645f6b4f8dc5bde8834ad5894a8db35fda9efa1fe"
+checksum = "adb9e6ca4f869e1180728b7950e35922a7fc6397f7b641499e8f3ef06e50dc83"
 
 [[package]]
 name = "unicode-segmentation"

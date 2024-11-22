@@ -1,10 +1,15 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{LazyLock, Mutex},
+};
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
-use ohos_arkui_binding::ArkUIHandle;
+use napi_ohos::{bindgen_prelude::Function, CallContext, Error, JsObject, Result};
+use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
+use ohos_hilog_binding::hilog_info;
 
-use crate::App;
+use crate::{App, Event};
 
 #[napi(object)]
 pub struct EnvironmentCallback<'a> {
@@ -18,6 +23,7 @@ pub struct WindowStageEventCallback<'a> {
     pub on_window_stage_destroy: Function<'a, (), ()>,
     pub on_ability_create: Function<'a, (), ()>,
     pub on_ability_destroy: Function<'a, (), ()>,
+    pub on_ability_save_state: Function<'a, (), ()>,
 }
 
 #[napi(object)]
@@ -26,19 +32,61 @@ pub struct ApplicationLifecycle<'a> {
     pub window_stage_event_callback: WindowStageEventCallback<'a>,
 }
 
+static GL_CTX: LazyLock<Mutex<Option<RootNode>>> = LazyLock::new(|| Mutex::new(None));
+
 /// create lifecycle object and return to arkts
 pub fn create_lifecycle_handle(
     ctx: CallContext,
     app: Rc<RefCell<App>>,
 ) -> Result<ApplicationLifecycle> {
     let slot = ctx.get::<ArkUIHandle>(0)?;
+    let mut this: JsObject = ctx.this_unchecked();
     let env = ctx.env;
+
+    let mut root = RootNode::new(slot);
+    {
+        let mut gl_ctx_guard = GL_CTX.lock().unwrap();
+        *gl_ctx_guard = Some(root);
+    }
+    // let mut this: This = ctx.this_unchecked();
+    // ref the root avoid dropping
+    // env.wrap(&mut this, root, None)?;
+    let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason))?;
+
+    let xcomponent = xcomponent_native.native_xcomponent();
+
+    xcomponent.on_surface_created(|_,_| {
+        hilog_info!("ohos-rs macro on_surface_created");
+        Ok(())
+    });
+
+    xcomponent.register_callback()?;
+
+    // let redraw_app = app.clone();
+    // xcomponent.on_frame_callback(move |_xcomponent, _time, _time_stamp| {
+    //     let event = redraw_app.borrow();
+    //     if let Some(h) = *event.event_loop.borrow() {
+    //         h(Event::WindowRedraw)
+    //     }
+    //     Ok(())
+    // })?;
+
+    {
+        let mut gl_ctx_guard = GL_CTX.lock().unwrap();
+        match &mut *gl_ctx_guard {
+            Some(root) => {
+                root.mount(xcomponent_native)
+                    .map_err(|e| Error::from_reason(e.reason))?;
+            }
+            None => {}
+        }
+    }
 
     let memory_level_app = app.clone();
     let on_memory_level = env.create_function_from_closure("memory_level", move |_ctx| {
         let event = memory_level_app.borrow();
         if let Some(h) = *event.event_loop.borrow() {
-            h()
+            h(Event::LowMemory)
         }
         Ok(())
     })?;
@@ -48,7 +96,7 @@ pub fn create_lifecycle_handle(
         env.create_function_from_closure("configuration_updated", move |_ctx| {
             let event = configuration_updated_app.borrow();
             if let Some(h) = *event.event_loop.borrow() {
-                h()
+                h(Event::ConfigChanged)
             }
             Ok(())
         })?;
@@ -69,7 +117,7 @@ pub fn create_lifecycle_handle(
                 ctx.env
                     .create_function_from_closure("window_stage_event", move |_| {
                         if let Some(h) = *window_stage_event_handle.borrow_mut() {
-                            h()
+                            h(Event::LostFocus)
                         }
                         Ok(())
                     })?;
@@ -81,7 +129,7 @@ pub fn create_lifecycle_handle(
                 ctx.env
                     .create_function_from_closure("window_resize", move |_| {
                         if let Some(h) = *window_size_handle.borrow_mut() {
-                            h()
+                            h(Event::WindowResize)
                         }
                         Ok(())
                     })?;
@@ -94,7 +142,7 @@ pub fn create_lifecycle_handle(
                 ctx.env
                     .create_function_from_closure("window_rect_change", move |_| {
                         if let Some(h) = *window_rect_handle.borrow_mut() {
-                            h()
+                            h(Event::ContentRectChange)
                         }
                         Ok(())
                     })?;
@@ -104,7 +152,7 @@ pub fn create_lifecycle_handle(
 
             let ability_handle = app.event_loop.clone();
             if let Some(h) = *ability_handle.borrow_mut() {
-                h()
+                h(Event::WindowCreate)
             }
             Ok(())
         })?;
@@ -114,7 +162,7 @@ pub fn create_lifecycle_handle(
         env.create_function_from_closure("on_window_stage_destroy", move |_ctx| {
             let event = on_window_stage_destroy_app.borrow();
             if let Some(h) = *event.event_loop.borrow() {
-                h()
+                h(Event::WindowDestroy)
             }
             Ok(())
         })?;
@@ -123,7 +171,7 @@ pub fn create_lifecycle_handle(
     let on_ability_create = env.create_function_from_closure("on_ability_create", move |_ctx| {
         let event = on_ability_create_app.borrow();
         if let Some(h) = *event.event_loop.borrow() {
-            h()
+            h(Event::Start)
         }
         Ok(())
     })?;
@@ -133,7 +181,17 @@ pub fn create_lifecycle_handle(
         env.create_function_from_closure("on_ability_destroy", move |_ctx| {
             let event = on_ability_destroy_app.borrow();
             if let Some(h) = *event.event_loop.borrow() {
-                h()
+                h(Event::Destroy)
+            }
+            Ok(())
+        })?;
+
+    let on_ability_save_state_app = app.clone();
+    let on_ability_save_state =
+        env.create_function_from_closure("on_ability_save_state", move |_ctx| {
+            let event = on_ability_save_state_app.borrow();
+            if let Some(h) = *event.event_loop.borrow() {
+                h(Event::SaveState)
             }
             Ok(())
         })?;
@@ -148,6 +206,7 @@ pub fn create_lifecycle_handle(
             on_window_stage_destroy,
             on_ability_create,
             on_ability_destroy,
+            on_ability_save_state,
         },
     })
 }

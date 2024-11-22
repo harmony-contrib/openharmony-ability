@@ -10,7 +10,7 @@ pub fn activity(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let f = quote::quote! {
         fn #fn_name(app: &openharmony_activity::App) #block
 
-        #[napi_derive_ohos::js_function]
+        #[napi_derive_ohos::js_function(1)]
         pub fn init(ctx: napi_ohos::CallContext) -> napi_ohos::Result<openharmony_activity::ApplicationLifecycle> {
             let inner_app = std::rc::Rc::new(std::cell::RefCell::new(App::new()));
             let inner_app_ref = inner_app.borrow();

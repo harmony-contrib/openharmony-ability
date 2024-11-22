@@ -16,5 +16,5 @@ quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
 
-ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "feat-xcomponent" }
-ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "feat-xcomponent" }
+ohos-arkui-binding = { path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/arkui" }
+ohos-xcomponent-binding = { path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/xcomponent" }

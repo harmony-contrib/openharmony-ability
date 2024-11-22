@@ -1,4 +1,3 @@
-import { hilog } from '@kit.PerformanceAnalysisKit';
 import { init } from 'libexample.so';
 import { AbilityLifecycleCallback, common, EnvironmentCallback } from '@kit.AbilityKit';
 import { NodeContent } from '@kit.ArkUI';
@@ -10,19 +9,12 @@ struct Index {
   private uiContext = getContext(this) as common.UIAbilityContext;
 
   aboutToAppear(): void {
-    const lifecycle = init();
+    const lifecycle = init(this.rootSlot);
     const applicationContext = this.uiContext.getApplicationContext();
 
-    const abilityCallback = {
-      onAbilityForeground: ability => {
-        hilog.info(0x0000, "test", "onAbilityForeground")
-      }
-    } as AbilityLifecycleCallback;
-
-    const environmentCallback = {} as EnvironmentCallback;
-
-    applicationContext.on("abilityLifecycle", lifecycle as ESObject as AbilityLifecycleCallback)
-    applicationContext.on("environment", environmentCallback)
+    applicationContext.on("abilityLifecycle",
+      lifecycle.windowStageEventCallback as ESObject as AbilityLifecycleCallback)
+    applicationContext.on("environment", lifecycle.environmentCallback as ESObject as EnvironmentCallback)
   }
 
   build() {

@@ -8,3 +8,5 @@ napi-ohos = { workspace = true }
 napi-derive-ohos = { workspace = true }
 ohos-arkui-binding = { workspace = true, features = ["napi"]}
 ohos-xcomponent-binding = { workspace = true }
+
+ohos-hilog-binding = { version = "*"}
