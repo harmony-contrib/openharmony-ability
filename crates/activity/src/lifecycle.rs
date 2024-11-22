@@ -9,7 +9,7 @@ use napi_ohos::{bindgen_prelude::Function, CallContext, Error, JsObject, Result}
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_hilog_binding::hilog_info;
 
-use crate::{App, Event};
+use crate::{App, ContentRect, Event, Rect, Size};
 
 #[napi(object)]
 pub struct EnvironmentCallback<'a> {
@@ -150,27 +150,48 @@ pub fn create_lifecycle_handle(
             on_handle.call((event_func_name, window_stage_event))?;
 
             let window_size_handle = app.event_loop.clone();
-            let window_resize =
-                ctx.env
-                    .create_function_from_closure("window_resize", move |_| {
-                        if let Some(h) = *window_size_handle.borrow_mut() {
-                            h(Event::WindowResize)
-                        }
-                        Ok(())
-                    })?;
+            let window_resize = ctx.env.create_function_from_closure(
+                "window_resize",
+                move |window_resize_ctx| {
+                    let size = window_resize_ctx.first_arg::<JsObject>()?;
+                    let width = size.get_named_property::<i32>("width")?;
+                    let height = size.get_named_property::<i32>("height")?;
+                    if let Some(h) = *window_size_handle.borrow_mut() {
+                        h(Event::WindowResize(Size { width, height }))
+                    }
+                    Ok(())
+                },
+            )?;
 
             let window_size_func_name = String::from("windowSizeChange");
             on_handle.call((window_size_func_name, window_resize))?;
 
             let window_rect_handle = app.event_loop.clone();
-            let window_rect_change =
-                ctx.env
-                    .create_function_from_closure("window_rect_change", move |_| {
-                        if let Some(h) = *window_rect_handle.borrow_mut() {
-                            h(Event::ContentRectChange)
-                        }
-                        Ok(())
-                    })?;
+            let window_rect_change = ctx.env.create_function_from_closure(
+                "window_rect_change",
+                move |window_rect_change_ctx| {
+                    let options = window_rect_change_ctx.first_arg::<JsObject>()?;
+                    let reason = options.get_named_property::<i32>("reason")?;
+                    let rect = options.get_named_property::<JsObject>("rect")?;
+                    let top = rect.get_named_property::<i32>("top")?;
+                    let left = rect.get_named_property::<i32>("left")?;
+                    let width = rect.get_named_property::<i32>("width")?;
+                    let height = rect.get_named_property::<i32>("height")?;
+
+                    if let Some(h) = *window_rect_handle.borrow_mut() {
+                        h(Event::ContentRectChange(ContentRect {
+                            reason: reason.into(),
+                            rect: Rect {
+                                top,
+                                left,
+                                width,
+                                height,
+                            },
+                        }))
+                    }
+                    Ok(())
+                },
+            )?;
 
             let window_rect_func_name = String::from("windowRectChange");
             on_handle.call((window_rect_func_name, window_rect_change))?;

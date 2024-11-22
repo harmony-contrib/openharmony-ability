@@ -1,4 +1,4 @@
-use crate::Configuration;
+use crate::{Configuration, ContentRect, Size};
 
 pub enum Event {
     /// window stage create event
@@ -14,11 +14,11 @@ pub enum Event {
     /// window resize event
     /// alias window.on("windowSizeChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowsizechange7
-    WindowResize,
+    WindowResize(Size),
     /// window rect change event
     /// alias window.on("windowRectChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowrectchange12
-    ContentRectChange,
+    ContentRectChange(ContentRect),
 
 
     /// window configuration changed
