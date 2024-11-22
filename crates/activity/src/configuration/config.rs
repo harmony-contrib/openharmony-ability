@@ -1,7 +1,5 @@
-use super::{ColorMode, Direction,ScreenDensity};
-use napi_derive_ohos::napi;
+use super::{ColorMode, Direction, ScreenDensity};
 
-#[napi(object)]
 pub struct Configuration {
     pub language: String,
     pub color_mode: ColorMode,
@@ -9,8 +7,8 @@ pub struct Configuration {
     pub screen_density: ScreenDensity,
     pub display_id: i32,
     pub has_pointer_device: bool,
-    pub font_size_scale: f32,
-    pub font_weight_scale: f32,
+    pub font_size_scale: f64,
+    pub font_weight_scale: f64,
     pub mcc: String,
     pub mnc: String,
 }

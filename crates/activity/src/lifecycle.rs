@@ -55,13 +55,15 @@ pub fn create_lifecycle_handle(
 
     let xcomponent = xcomponent_native.native_xcomponent();
 
-    xcomponent.on_surface_created(|_,_| {
+    xcomponent.on_surface_created(|_, _| {
         hilog_info!("ohos-rs macro on_surface_created");
         Ok(())
     });
 
     xcomponent.register_callback()?;
 
+    // TODO: on_frame_callback will crash if xcomponent is created by C API
+    // TODO: System will provide a new method to add callback for redraw
     // let redraw_app = app.clone();
     // xcomponent.on_frame_callback(move |_xcomponent, _time, _time_stamp| {
     //     let event = redraw_app.borrow();
@@ -93,10 +95,33 @@ pub fn create_lifecycle_handle(
 
     let configuration_updated_app = app.clone();
     let on_configuration_updated =
-        env.create_function_from_closure("configuration_updated", move |_ctx| {
+        env.create_function_from_closure("configuration_updated", move |ctx| {
+            let configuration = ctx.first_arg::<JsObject>()?;
+            let language = configuration.get_named_property::<String>("config")?;
+            let color_mode = configuration.get_named_property::<i32>("colorMode")?;
+            let direction = configuration.get_named_property::<i32>("direction")?;
+            let screen_density = configuration.get_named_property::<i32>("screenDensity")?;
+            let display_id = configuration.get_named_property::<i32>("displayId")?;
+            let has_pointer_device =
+                configuration.get_named_property::<bool>("hasPointerDevice")?;
+            let font_size_scale = configuration.get_named_property::<f64>("fontSizeScale")?;
+            let font_weight_scale = configuration.get_named_property::<f64>("fontWeightScale")?;
+            let mcc = configuration.get_named_property::<String>("mcc")?;
+            let mnc = configuration.get_named_property::<String>("mnc")?;
             let event = configuration_updated_app.borrow();
             if let Some(h) = *event.event_loop.borrow() {
-                h(Event::ConfigChanged)
+                h(Event::ConfigChanged(crate::Configuration {
+                    language,
+                    color_mode: color_mode.into(),
+                    direction: direction.into(),
+                    screen_density: screen_density.into(),
+                    display_id,
+                    has_pointer_device,
+                    font_size_scale,
+                    font_weight_scale,
+                    mcc,
+                    mnc,
+                }))
             }
             Ok(())
         })?;

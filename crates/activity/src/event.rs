@@ -1,3 +1,5 @@
+use crate::Configuration;
+
 pub enum Event {
     /// window stage create event
     /// alias onWindowStageCreate
@@ -22,7 +24,7 @@ pub enum Event {
     /// window configuration changed
     /// alias onWindowConfigurationChanged
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-environmentcallback-V5#environmentcallbackonconfigurationupdated
-    ConfigChanged,
+    ConfigChanged(Configuration),
     /// low memory event
     /// alias onMemoryLevel
     /// it will execute when system memory is low(MEMORY_LEVEL_CRITICAL)

@@ -75,6 +75,7 @@ dependencies = [
 [[package]]
 name = "enum_macro"
 version = "0.0.1"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -198,6 +199,7 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-binding"
 version = "0.0.1"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "bitflags",
  "enum_macro",
@@ -211,6 +213,7 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-sys"
 version = "0.0.1"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "napi-sys-ohos",
 ]
@@ -233,6 +236,7 @@ checksum = "ed07615005d0f8d7bcf901f89c8ff4870666a9bdb00382f588af383f40c160b7"
 [[package]]
 name = "ohos-xcomponent-binding"
 version = "0.0.1"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "enum_macro",
  "napi-derive-ohos",
@@ -244,6 +248,7 @@ dependencies = [
 [[package]]
 name = "ohos-xcomponent-sys"
 version = "0.0.1"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "ohos-arkui-sys",
 ]
