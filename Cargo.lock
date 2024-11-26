@@ -91,6 +91,7 @@ dependencies = [
  "napi-build-ohos",
  "napi-derive-ohos",
  "napi-ohos",
+ "ohos-arkui-binding",
  "ohos-hilog-binding",
  "openharmony-activity",
  "openharmony-activity-derive",

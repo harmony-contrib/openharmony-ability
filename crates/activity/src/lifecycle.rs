@@ -1,20 +1,14 @@
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::{LazyLock, Mutex},
-};
+use std::cell::RefCell;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, CallContext, Error, JsObject, Result};
-use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
-use ohos_hilog_binding::hilog_info;
+use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
 
 use crate::{App, ContentRect, Event, Rect, Size};
 
 #[napi(object)]
 pub struct EnvironmentCallback<'a> {
     pub on_configuration_updated: Function<'a, (), ()>,
-    pub on_memory_level: Function<'a, (), ()>,
+    pub on_memory_level: Function<'a, i32, ()>,
 }
 
 #[napi(object)]
@@ -32,66 +26,22 @@ pub struct ApplicationLifecycle<'a> {
     pub window_stage_event_callback: WindowStageEventCallback<'a>,
 }
 
-static GL_CTX: LazyLock<Mutex<Option<RootNode>>> = LazyLock::new(|| Mutex::new(None));
-
 /// create lifecycle object and return to arkts
 pub fn create_lifecycle_handle(
     ctx: CallContext,
-    app: Rc<RefCell<App>>,
+    app: RefCell<App>,
 ) -> Result<ApplicationLifecycle> {
-    let slot = ctx.get::<ArkUIHandle>(0)?;
-    let mut this: JsObject = ctx.this_unchecked();
     let env = ctx.env;
 
-    let mut root = RootNode::new(slot);
-    {
-        let mut gl_ctx_guard = GL_CTX.lock().unwrap();
-        *gl_ctx_guard = Some(root);
-    }
-    // let mut this: This = ctx.this_unchecked();
-    // ref the root avoid dropping
-    // env.wrap(&mut this, root, None)?;
-    let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason))?;
-
-    let xcomponent = xcomponent_native.native_xcomponent();
-
-    xcomponent.on_surface_created(|_, _| {
-        hilog_info!("ohos-rs macro on_surface_created");
-        Ok(())
-    });
-
-    xcomponent.register_callback()?;
-
-    // TODO: on_frame_callback will crash if xcomponent is created by C API
-    // TODO: System will provide a new method to add callback for redraw
-    // let redraw_app = app.clone();
-    // xcomponent.on_frame_callback(move |_xcomponent, _time, _time_stamp| {
-    //     let event = redraw_app.borrow();
-    //     if let Some(h) = *event.event_loop.borrow() {
-    //         h(Event::WindowRedraw)
-    //     }
-    //     Ok(())
-    // })?;
-
-    {
-        let mut gl_ctx_guard = GL_CTX.lock().unwrap();
-        match &mut *gl_ctx_guard {
-            Some(root) => {
-                root.mount(xcomponent_native)
-                    .map_err(|e| Error::from_reason(e.reason))?;
-            }
-            None => {}
-        }
-    }
-
     let memory_level_app = app.clone();
-    let on_memory_level = env.create_function_from_closure("memory_level", move |_ctx| {
-        let event = memory_level_app.borrow();
-        if let Some(h) = *event.event_loop.borrow() {
-            h(Event::LowMemory)
-        }
-        Ok(())
-    })?;
+    let on_memory_level: Function<'_, i32, ()> =
+        env.create_function_from_closure("memory_level", move |_ctx| {
+            let event = memory_level_app.borrow();
+            if let Some(h) = *event.event_loop.borrow() {
+                h(Event::LowMemory)
+            }
+            Ok(())
+        })?;
 
     let configuration_updated_app = app.clone();
     let on_configuration_updated =
@@ -129,10 +79,14 @@ pub fn create_lifecycle_handle(
     let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
         env.create_function_from_closure("on_ability_create", move |ctx| {
-            let ability = ctx.first_arg::<JsObject>()?;
+            let l = ctx.length();
+            let (ability, stage) = ctx.args::<(JsObject, JsObject)>()?;
 
-            let on_handle: Function<(String, Function<(), ()>), ()> =
+            let ability_on_handle: Function<(String, Function<(), ()>), ()> =
                 ability.get_named_property("on")?;
+
+            let stage_on_handle: Function<(String, Function<(), ()>), ()> =
+                stage.get_named_property("on")?;
 
             let app = on_window_stage_create_app.borrow();
             (*app.ability.borrow_mut()) = Some(ability);
@@ -147,7 +101,7 @@ pub fn create_lifecycle_handle(
                         Ok(())
                     })?;
             let event_func_name = String::from("windowStageEvent");
-            on_handle.call((event_func_name, window_stage_event))?;
+            stage_on_handle.call((event_func_name, window_stage_event))?;
 
             let window_size_handle = app.event_loop.clone();
             let window_resize = ctx.env.create_function_from_closure(
@@ -164,7 +118,7 @@ pub fn create_lifecycle_handle(
             )?;
 
             let window_size_func_name = String::from("windowSizeChange");
-            on_handle.call((window_size_func_name, window_resize))?;
+            stage_on_handle.call((window_size_func_name, window_resize))?;
 
             let window_rect_handle = app.event_loop.clone();
             let window_rect_change = ctx.env.create_function_from_closure(
@@ -194,7 +148,7 @@ pub fn create_lifecycle_handle(
             )?;
 
             let window_rect_func_name = String::from("windowRectChange");
-            on_handle.call((window_rect_func_name, window_rect_change))?;
+            stage_on_handle.call((window_rect_func_name, window_rect_change))?;
 
             let ability_handle = app.event_loop.clone();
             if let Some(h) = *ability_handle.borrow_mut() {

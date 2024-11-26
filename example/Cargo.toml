@@ -17,6 +17,7 @@ napi-derive-ohos = { workspace = true }
 openharmony-activity = { workspace = true }
 openharmony-activity-derive = { workspace = true }
 ohos-hilog-binding = { version = "*" }
+ohos-arkui-binding = { workspace = true }
 
 [build-dependencies]
 napi-build-ohos = { workspace = true }

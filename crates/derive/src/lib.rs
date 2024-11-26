@@ -10,19 +10,41 @@ pub fn activity(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let f = quote::quote! {
         fn #fn_name(app: &openharmony_activity::App) #block
 
-        #[napi_derive_ohos::js_function(1)]
-        pub fn init(ctx: napi_ohos::CallContext) -> napi_ohos::Result<openharmony_activity::ApplicationLifecycle> {
-            let inner_app = std::rc::Rc::new(std::cell::RefCell::new(App::new()));
-            let inner_app_ref = inner_app.borrow();
-
-            #fn_name(&inner_app_ref);
-
-            openharmony_activity::create_lifecycle_handle(ctx, inner_app.clone())
+        thread_local! {
+            pub static APP: std::cell::RefCell<App> = std::cell::RefCell::new(App::new());
+            pub static ROOT_NODE: std::cell::RefCell<Option<ohos_arkui_binding::RootNode>> = std::cell::RefCell::new(None);
         }
-
+        
+        #[napi_derive_ohos::js_function(1)]
+        pub fn init(
+            ctx: napi_ohos::CallContext,
+        ) -> napi_ohos::Result<openharmony_activity::ApplicationLifecycle> {
+            let lifecycle = APP.with(|app| {
+                let app_ref = app.borrow();
+                #fn_name(&*app_ref);
+        
+                let lifecycle_handle = openharmony_activity::create_lifecycle_handle(ctx, app.clone())?;
+                Ok(lifecycle_handle)
+            });
+            lifecycle
+        }
+        
+        #[napi_derive_ohos::js_function(1)]
+        pub fn render(ctx: napi_ohos::CallContext) -> napi_ohos::Result<()> {
+            let app_ref = APP.with(|app| app.clone());
+            ROOT_NODE.with(|root_node| {
+                openharmony_activity::render(ctx, app_ref.clone(), root_node).unwrap();
+            });
+            Ok(())
+        }
+        
         #[napi_derive_ohos::module_exports]
-        fn module_export_init(mut exports: napi_ohos::JsObject, _env: napi_ohos::Env) -> napi_ohos::Result<()> {
+        fn module_export_init(
+            mut exports: napi_ohos::JsObject,
+            _env: napi_ohos::Env,
+        ) -> napi_ohos::Result<()> {
             exports.create_named_method("init", init)?;
+            exports.create_named_method("render", render)?;
             Ok(())
         }
     };

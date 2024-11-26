@@ -1,0 +1,11 @@
+{
+  "module": {
+    "name": "ability_rust",
+    "type": "har",
+    "deviceTypes": [
+      "default",
+      "tablet",
+      "2in1"
+    ]
+  }
+}

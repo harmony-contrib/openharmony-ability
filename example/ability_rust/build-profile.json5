@@ -4,15 +4,8 @@
     "externalNativeOptions": {
       "path": "./src/main/cpp/CMakeLists.txt",
       "arguments": "",
-      "cppFlags": "",
+      "cppFlags": ""
     },
-    "arkOptions": {
-      "runtimeOnly": {
-        "packages": [
-          "libexample.so"
-        ]
-      }
-    }
   },
   "buildOptionSet": [
     {
@@ -24,7 +17,10 @@
             "files": [
               "./obfuscation-rules.txt"
             ]
-          }
+          },
+          "consumerFiles": [
+            "./consumer-rules.txt"
+          ]
         }
       },
       "nativeLib": {
@@ -40,7 +36,7 @@
       "name": "default"
     },
     {
-      "name": "ohosTest",
+      "name": "ohosTest"
     }
   ]
 }

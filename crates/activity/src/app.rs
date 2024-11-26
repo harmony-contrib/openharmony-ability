@@ -25,3 +25,7 @@ impl App {
         *self.event_loop.borrow_mut() = Some(event_handle);
     }
 }
+
+thread_local! {
+    pub static APP: RefCell<Option<App>> = RefCell::new(None);
+}

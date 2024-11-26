@@ -10,10 +10,12 @@ struct Index {
 
   aboutToAppear(): void {
     const lifecycle = init(this.rootSlot);
+
     const applicationContext = this.uiContext.getApplicationContext();
 
     applicationContext.on("abilityLifecycle",
-      lifecycle.windowStageEventCallback as ESObject as AbilityLifecycleCallback)
+      {
+      } as ESObject as AbilityLifecycleCallback)
     applicationContext.on("environment", lifecycle.environmentCallback as ESObject as EnvironmentCallback)
   }
 

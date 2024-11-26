@@ -50,6 +50,10 @@
           ]
         }
       ]
+    },
+    {
+      "name": "ability_rust",
+      "srcPath": "./ability_rust",
     }
   ]
 }
