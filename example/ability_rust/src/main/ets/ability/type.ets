@@ -16,6 +16,9 @@ export interface WindowStageEventCallback {
   onAbilityCreate: () => void
   onAbilityDestroy: () => void
   onAbilitySaveState: () => void
+  onWindowStageEvent: (arg: number) => void
+  onWindowSizeChange: (arg: object) => void
+  onWindowRectChange: (arg: object) => void
 }
 
 export interface Module {

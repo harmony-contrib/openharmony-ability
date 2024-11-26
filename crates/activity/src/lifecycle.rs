@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
 
-use crate::{App, ContentRect, Event, Rect, Size};
+use crate::{event, App, ContentRect, Event, Rect, Size};
 
 #[napi(object)]
 pub struct EnvironmentCallback<'a> {
@@ -18,6 +18,9 @@ pub struct WindowStageEventCallback<'a> {
     pub on_ability_create: Function<'a, (), ()>,
     pub on_ability_destroy: Function<'a, (), ()>,
     pub on_ability_save_state: Function<'a, (), ()>,
+    pub on_window_stage_event: Function<'a, i32, ()>,
+    pub on_window_size_change: Function<'a, JsObject, ()>,
+    pub on_window_rect_change: Function<'a, JsObject, ()>,
 }
 
 #[napi(object)]
@@ -76,82 +79,59 @@ pub fn create_lifecycle_handle(
             Ok(())
         })?;
 
+    let window_stage_event_app = app.clone();
+    let window_stage_event = env.create_function_from_closure("window_stage_event", move |_| {
+        let event = window_stage_event_app.borrow();
+        if let Some(h) = *event.event_loop.borrow() {
+            h(Event::LostFocus)
+        }
+        Ok(())
+    })?;
+
+    let window_size_app = app.clone();
+    let window_resize = env.create_function_from_closure("window_resize", move |ctx| {
+        let size = ctx.first_arg::<JsObject>()?;
+        let width = size.get_named_property::<i32>("width")?;
+        let height = size.get_named_property::<i32>("height")?;
+        let event: std::cell::Ref<'_, App> = window_size_app.borrow();
+        if let Some(h) = *event.event_loop.borrow() {
+            h(Event::WindowResize(Size { width, height }))
+        }
+        Ok(())
+    })?;
+
+    let window_rect_app = app.clone();
+
+    let window_rect_change =
+        env.create_function_from_closure("window_rect_change", move |ctx| {
+            let options = ctx.first_arg::<JsObject>()?;
+            let reason = options.get_named_property::<i32>("reason")?;
+            let rect = options.get_named_property::<JsObject>("rect")?;
+            let top = rect.get_named_property::<i32>("top")?;
+            let left = rect.get_named_property::<i32>("left")?;
+            let width = rect.get_named_property::<i32>("width")?;
+            let height = rect.get_named_property::<i32>("height")?;
+            let event = window_rect_app.borrow();
+
+            if let Some(h) = *event.event_loop.borrow() {
+                h(Event::ContentRectChange(ContentRect {
+                    reason: reason.into(),
+                    rect: Rect {
+                        top,
+                        left,
+                        width,
+                        height,
+                    },
+                }))
+            }
+            Ok(())
+        })?;
+
     let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
         env.create_function_from_closure("on_ability_create", move |ctx| {
-            let l = ctx.length();
-            let (ability, stage) = ctx.args::<(JsObject, JsObject)>()?;
-
-            let ability_on_handle: Function<(String, Function<(), ()>), ()> =
-                ability.get_named_property("on")?;
-
-            let stage_on_handle: Function<(String, Function<(), ()>), ()> =
-                stage.get_named_property("on")?;
-
-            let app = on_window_stage_create_app.borrow();
-            (*app.ability.borrow_mut()) = Some(ability);
-            let window_stage_event_handle = app.event_loop.clone();
-
-            let window_stage_event =
-                ctx.env
-                    .create_function_from_closure("window_stage_event", move |_| {
-                        if let Some(h) = *window_stage_event_handle.borrow_mut() {
-                            h(Event::LostFocus)
-                        }
-                        Ok(())
-                    })?;
-            let event_func_name = String::from("windowStageEvent");
-            stage_on_handle.call((event_func_name, window_stage_event))?;
-
-            let window_size_handle = app.event_loop.clone();
-            let window_resize = ctx.env.create_function_from_closure(
-                "window_resize",
-                move |window_resize_ctx| {
-                    let size = window_resize_ctx.first_arg::<JsObject>()?;
-                    let width = size.get_named_property::<i32>("width")?;
-                    let height = size.get_named_property::<i32>("height")?;
-                    if let Some(h) = *window_size_handle.borrow_mut() {
-                        h(Event::WindowResize(Size { width, height }))
-                    }
-                    Ok(())
-                },
-            )?;
-
-            let window_size_func_name = String::from("windowSizeChange");
-            stage_on_handle.call((window_size_func_name, window_resize))?;
-
-            let window_rect_handle = app.event_loop.clone();
-            let window_rect_change = ctx.env.create_function_from_closure(
-                "window_rect_change",
-                move |window_rect_change_ctx| {
-                    let options = window_rect_change_ctx.first_arg::<JsObject>()?;
-                    let reason = options.get_named_property::<i32>("reason")?;
-                    let rect = options.get_named_property::<JsObject>("rect")?;
-                    let top = rect.get_named_property::<i32>("top")?;
-                    let left = rect.get_named_property::<i32>("left")?;
-                    let width = rect.get_named_property::<i32>("width")?;
-                    let height = rect.get_named_property::<i32>("height")?;
-
-                    if let Some(h) = *window_rect_handle.borrow_mut() {
-                        h(Event::ContentRectChange(ContentRect {
-                            reason: reason.into(),
-                            rect: Rect {
-                                top,
-                                left,
-                                width,
-                                height,
-                            },
-                        }))
-                    }
-                    Ok(())
-                },
-            )?;
-
-            let window_rect_func_name = String::from("windowRectChange");
-            stage_on_handle.call((window_rect_func_name, window_rect_change))?;
-
-            let ability_handle = app.event_loop.clone();
-            if let Some(h) = *ability_handle.borrow_mut() {
+            let event = on_window_stage_create_app.borrow();
+            if let Some(h) = *event.event_loop.borrow() {
                 h(Event::WindowCreate)
             }
             Ok(())
@@ -207,6 +187,9 @@ pub fn create_lifecycle_handle(
             on_ability_create,
             on_ability_destroy,
             on_ability_save_state,
+            on_window_rect_change: window_rect_change,
+            on_window_size_change: window_resize,
+            on_window_stage_event: window_stage_event,
         },
     })
 }
