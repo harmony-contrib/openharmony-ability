@@ -9,11 +9,10 @@ use crate::App;
 /// create lifecycle object and return to arkts
 pub fn render(
     ctx: CallContext,
-    app: RefCell<App>,
+    _app: RefCell<App>,
     root_node: &RefCell<Option<RootNode>>,
 ) -> Result<()> {
     let slot = ctx.get::<ArkUIHandle>(0)?;
-    let env = ctx.env;
 
     let root = RootNode::new(slot);
     root_node.replace_with(|_| Some(root));

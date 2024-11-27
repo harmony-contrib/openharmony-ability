@@ -7,6 +7,6 @@ export default class EntryAbility extends RustAbility {
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     super.onCreate(want, launchParam);
-    
+
   }
 }

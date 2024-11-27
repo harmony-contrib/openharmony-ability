@@ -6,16 +6,16 @@ export interface ApplicationLifecycle {
 }
 
 export interface EnvironmentCallback {
-  onConfigurationUpdated: () => void
-  onMemoryLevel: () => void
+  onConfigurationUpdated: (arg: object) => void
+  onMemoryLevel: (arg: number) => void
 }
 
 export interface WindowStageEventCallback {
   onWindowStageCreate: () => void
   onWindowStageDestroy: () => void
-  onAbilityCreate: () => void
+  onAbilityCreate: (arg: string) => void
   onAbilityDestroy: () => void
-  onAbilitySaveState: () => void
+  onAbilitySaveState: () => string
   onWindowStageEvent: (arg: number) => void
   onWindowSizeChange: (arg: object) => void
   onWindowRectChange: (arg: object) => void

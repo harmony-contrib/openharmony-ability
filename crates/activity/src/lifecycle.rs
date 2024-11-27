@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
 
-use crate::{event, App, ContentRect, Event, Rect, Size};
+use crate::{App, ContentRect, Event, Rect, SaveLoader, SaveSaver, Size, StageEventType};
 
 #[napi(object)]
 pub struct EnvironmentCallback<'a> {
@@ -18,6 +18,7 @@ pub struct WindowStageEventCallback<'a> {
     pub on_ability_create: Function<'a, (), ()>,
     pub on_ability_destroy: Function<'a, (), ()>,
     pub on_ability_save_state: Function<'a, (), ()>,
+    pub on_ability_restore_state: Function<'a, (), ()>,
     pub on_window_stage_event: Function<'a, i32, ()>,
     pub on_window_size_change: Function<'a, JsObject, ()>,
     pub on_window_rect_change: Function<'a, JsObject, ()>,
@@ -80,13 +81,26 @@ pub fn create_lifecycle_handle(
         })?;
 
     let window_stage_event_app = app.clone();
-    let window_stage_event = env.create_function_from_closure("window_stage_event", move |_| {
-        let event = window_stage_event_app.borrow();
-        if let Some(h) = *event.event_loop.borrow() {
-            h(Event::LostFocus)
-        }
-        Ok(())
-    })?;
+    let window_stage_event =
+        env.create_function_from_closure("window_stage_event", move |ctx| {
+            let event_type = ctx.first_arg::<i32>()?;
+            let event = window_stage_event_app.borrow();
+            if let Some(h) = *event.event_loop.borrow() {
+                let state_event = StageEventType::from(event_type);
+                let e = match state_event {
+                    StageEventType::Shown => Event::Start,
+                    StageEventType::Active => Event::GainedFocus,
+                    StageEventType::Inactive => Event::LostFocus,
+                    StageEventType::Hidden => Event::Stop,
+                    StageEventType::Resumed => Event::Resume(SaveLoader {
+                        app: window_stage_event_app.clone(),
+                    }),
+                    StageEventType::Paused => Event::Pause,
+                };
+                h(e)
+            }
+            Ok(())
+        })?;
 
     let window_size_app = app.clone();
     let window_resize = env.create_function_from_closure("window_resize", move |ctx| {
@@ -129,7 +143,7 @@ pub fn create_lifecycle_handle(
 
     let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
-        env.create_function_from_closure("on_ability_create", move |ctx| {
+        env.create_function_from_closure("on_ability_create", move |_ctx| {
             let event = on_window_stage_create_app.borrow();
             if let Some(h) = *event.event_loop.borrow() {
                 h(Event::WindowCreate)
@@ -166,12 +180,29 @@ pub fn create_lifecycle_handle(
             Ok(())
         })?;
 
+    let on_ability_restore_state_app = app.clone();
+
+    let on_ability_restore_state =
+        env.create_function_from_closure("on_ability_restore_state", move |_ctx| {
+            let save_loader = SaveLoader {
+                app: on_ability_restore_state_app.clone(),
+            };
+            let event = on_ability_restore_state_app.borrow();
+            if let Some(h) = *event.event_loop.borrow() {
+                h(Event::Resume(save_loader))
+            }
+            Ok(())
+        })?;
+
     let on_ability_save_state_app = app.clone();
     let on_ability_save_state =
         env.create_function_from_closure("on_ability_save_state", move |_ctx| {
+            let save_saver = SaveSaver {
+                app: on_ability_save_state_app.clone(),
+            };
             let event = on_ability_save_state_app.borrow();
             if let Some(h) = *event.event_loop.borrow() {
-                h(Event::SaveState)
+                h(Event::SaveState(save_saver))
             }
             Ok(())
         })?;
@@ -187,6 +218,7 @@ pub fn create_lifecycle_handle(
             on_ability_create,
             on_ability_destroy,
             on_ability_save_state,
+            on_ability_restore_state,
             on_window_rect_change: window_rect_change,
             on_window_size_change: window_resize,
             on_window_stage_event: window_stage_event,

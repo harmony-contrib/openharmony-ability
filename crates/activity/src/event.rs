@@ -1,4 +1,4 @@
-use crate::{Configuration, ContentRect, Size};
+use crate::{Configuration, ContentRect, SaveLoader, SaveSaver, Size};
 
 pub enum Event {
     /// window stage create event
@@ -43,7 +43,7 @@ pub enum Event {
     LostFocus,
     /// window resume
     /// alias WindowStageEventType.RESUMED
-    Resume,
+    Resume(SaveLoader),
     /// window pause
     /// alias WindowStageEventType.PAUSED
     Pause,
@@ -54,7 +54,7 @@ pub enum Event {
     /// ability save state event
     /// alias onAbilitySaveState
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitysavestate12
-    SaveState,
+    SaveState(SaveSaver),
     /// ability destroy event
     /// alias onAbilityDestroy
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitydestroy
@@ -74,10 +74,10 @@ impl Event {
             Event::Start => "Start",
             Event::GainedFocus => "GainedFocus",
             Event::LostFocus => "LostFocus",
-            Event::Resume => "Resume",
+            Event::Resume(_) => "Resume",
             Event::Pause => "Pause",
             Event::Stop => "Stop",
-            Event::SaveState => "SaveState",
+            Event::SaveState(_) => "SaveState",
             Event::Destroy => "Destroy",
         }
     }

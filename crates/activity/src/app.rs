@@ -1,31 +1,56 @@
 use std::{cell::RefCell, rc::Rc};
 
-use napi_ohos::JsObject;
-
 use crate::Event;
 
 #[derive(Clone)]
 pub struct App {
     pub(crate) event_loop: Rc<RefCell<Option<fn(Event) -> ()>>>,
 
-    pub(crate) ability: Rc<RefCell<Option<JsObject>>>,
+    pub(crate) state: Rc<RefCell<Vec<u8>>>,
+    pub(crate) save_state: bool,
 }
 
 impl App {
     pub fn new() -> Self {
         App {
             event_loop: Rc::new(RefCell::new(None)),
-            ability: Rc::new(RefCell::new(None)),
+            state: Rc::new(RefCell::new(Vec::new())),
+            save_state: false,
         }
     }
 
-    pub fn config() {}
+    pub fn load(&self) -> Option<Vec<u8>> {
+        if self.save_state {
+            Some(self.state.borrow().clone())
+        } else {
+            None
+        }
+    }
+    pub fn save(&self, state: Vec<u8>) {
+        *self.state.borrow_mut() = state;
+    }
 
     pub fn run_loop(&self, event_handle: fn(event: Event) -> ()) {
         *self.event_loop.borrow_mut() = Some(event_handle);
     }
 }
 
-thread_local! {
-    pub static APP: RefCell<Option<App>> = RefCell::new(None);
+pub struct SaveSaver {
+    pub(crate) app: RefCell<App>,
+}
+
+impl SaveSaver {
+    pub fn save(&self, state: Vec<u8>) {
+        self.app.borrow().save(state);
+    }
+}
+
+pub struct SaveLoader {
+    pub(crate) app: RefCell<App>,
+}
+
+impl SaveLoader {
+    pub fn load(&self) -> Option<Vec<u8>> {
+        self.app.borrow().load()
+    }
 }
