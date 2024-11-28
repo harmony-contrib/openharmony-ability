@@ -2,14 +2,13 @@ use std::cell::RefCell;
 
 use napi_ohos::{CallContext, Error, Result};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
-use ohos_hilog_binding::hilog_info;
 
-use crate::App;
+use crate::{App, Event};
 
 /// create lifecycle object and return to arkts
 pub fn render(
     ctx: CallContext,
-    _app: RefCell<App>,
+    app: RefCell<App>,
     root_node: &RefCell<Option<RootNode>>,
 ) -> Result<()> {
     let slot = ctx.get::<ArkUIHandle>(0)?;
@@ -20,8 +19,21 @@ pub fn render(
 
     let xcomponent = xcomponent_native.native_xcomponent();
 
-    xcomponent.on_surface_created(|_, _| {
-        hilog_info!("ohos-rs macro on_surface_created");
+    let surface_create_app = app.clone();
+    xcomponent.on_surface_created(move |_, _| {
+        let event = surface_create_app.borrow();
+        if let Some(h) = *event.event_loop.borrow() {
+            h(Event::SurfaceCreate)
+        }
+        Ok(())
+    });
+
+    let surface_destroy_app = app.clone();
+    xcomponent.on_surface_destroyed(move |_, _| {
+        let event = surface_destroy_app.borrow();
+        if let Some(h) = *event.event_loop.borrow() {
+            h(Event::SurfaceDestroy)
+        }
         Ok(())
     });
 

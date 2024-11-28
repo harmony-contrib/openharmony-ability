@@ -19,6 +19,7 @@ impl App {
         }
     }
 
+    /// load current app state
     pub fn load(&self) -> Option<Vec<u8>> {
         if self.save_state {
             Some(self.state.borrow().clone())
@@ -26,10 +27,13 @@ impl App {
             None
         }
     }
+
+    /// save current app state
     pub fn save(&self, state: Vec<u8>) {
         *self.state.borrow_mut() = state;
     }
 
+    /// register event loop
     pub fn run_loop(&self, event_handle: fn(event: Event) -> ()) {
         *self.event_loop.borrow_mut() = Some(event_handle);
     }

@@ -59,6 +59,17 @@ pub enum Event {
     /// alias onAbilityDestroy
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitydestroy
     Destroy,
+
+    /// surface create event
+    /// alias onSurfaceCreated for XComponent
+    /// We can render EGL/OpenGL in this event
+    SurfaceCreate,
+    /// surface destroy event
+    /// alias onSurfaceDestroyed for XComponent
+    SurfaceDestroy,
+    /// surface input event
+    /// IME
+    Input
 }
 
 impl Event {
@@ -79,6 +90,9 @@ impl Event {
             Event::Stop => "Stop",
             Event::SaveState(_) => "SaveState",
             Event::Destroy => "Destroy",
+            Event::SurfaceCreate => "SurfaceCreate",
+            Event::SurfaceDestroy => "SurfaceDestroy",
+            Event::Input => "Input",
         }
     }
 }
