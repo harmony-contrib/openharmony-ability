@@ -17,3 +17,6 @@ pub use memory::*;
 pub use render::*;
 pub use stage::*;
 pub use draw::*;
+
+// re-export arkui and avoid the need to import it in the lib.rs
+pub use ohos_arkui_binding as arkui;

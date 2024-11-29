@@ -3,8 +3,8 @@ members = ["crates/*", "example"]
 resolver = "2"
 
 [workspace.dependencies]
-openharmony-activity-derive = { version = "0.0.1", path = "crates/derive" }
-openharmony-activity = { version = "0.0.1", path = "crates/activity" }
+openharmony-ability-derive = { version = "0.0.1", path = "crates/derive" }
+openharmony-ability = { version = "0.0.1", path = "crates/ability" }
 
 napi-sys-ohos = { version = "1.0.3" }
 napi-ohos = { version = "1.0.3" }

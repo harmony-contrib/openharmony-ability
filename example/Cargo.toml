@@ -14,10 +14,9 @@ napi-ohos = { workspace = true, default-features = false, features = [
     "async",
 ] }
 napi-derive-ohos = { workspace = true }
-openharmony-activity = { workspace = true }
-openharmony-activity-derive = { workspace = true }
+openharmony-ability = { workspace = true }
+openharmony-ability-derive = { workspace = true }
 ohos-hilog-binding = { version = "*" }
-ohos-arkui-binding = { workspace = true }
 
 [build-dependencies]
 napi-build-ohos = { workspace = true }
