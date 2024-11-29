@@ -30,7 +30,7 @@
    }
    ```
 
-> Note: `ohos_hilog_binding` is a optional dependency and you can add or remove it.
+   > Note: `ohos_hilog_binding` is a optional dependency and you can add or remove it.
 
 3. Add `@ohos-rs/ability` to your `(Open-)Harmony(Next)` project and change the `EntryAbility.ets` file to the follow code:
 
