@@ -51,7 +51,7 @@ pub fn create_lifecycle_handle(
     let on_configuration_updated =
         env.create_function_from_closure("configuration_updated", move |ctx| {
             let configuration = ctx.first_arg::<JsObject>()?;
-            let language = configuration.get_named_property::<String>("config")?;
+            let language = configuration.get_named_property::<String>("language")?;
             let color_mode = configuration.get_named_property::<i32>("colorMode")?;
             let direction = configuration.get_named_property::<i32>("direction")?;
             let screen_density = configuration.get_named_property::<i32>("screenDensity")?;
@@ -165,7 +165,7 @@ pub fn create_lifecycle_handle(
     let on_ability_create = env.create_function_from_closure("on_ability_create", move |_ctx| {
         let event = on_ability_create_app.borrow();
         if let Some(h) = *event.event_loop.borrow() {
-            h(Event::Start)
+            h(Event::Create)
         }
         Ok(())
     })?;

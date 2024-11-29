@@ -1,20 +1,21 @@
 use std::cell::RefCell;
 
-use napi_ohos::{CallContext, Error, Result};
+use napi_derive_ohos::napi;
+use napi_ohos::{bindgen_prelude::Function, CallContext, Error, JsObject, Result};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 
-use crate::{App, Event};
+use crate::{App, Event, IntervalInfo};
+
+#[napi(object)]
+pub struct Render<'a> {
+    pub on_frame: Function<'a, (), ()>,
+}
 
 /// create lifecycle object and return to arkts
-pub fn render(
-    ctx: CallContext,
-    app: RefCell<App>,
-    root_node: &RefCell<Option<RootNode>>,
-) -> Result<()> {
+pub fn render(ctx: CallContext, app: RefCell<App>) -> Result<(RootNode, Render)> {
     let slot = ctx.get::<ArkUIHandle>(0)?;
 
-    let root = RootNode::new(slot);
-    root_node.replace_with(|_| Some(root));
+    let mut root = RootNode::new(slot);
     let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason))?;
 
     let xcomponent = xcomponent_native.native_xcomponent();
@@ -50,10 +51,25 @@ pub fn render(
     //     Ok(())
     // })?;
 
-    let mut r = root_node.borrow_mut();
-    if let Some(root) = r.as_mut() {
-        root.mount(xcomponent_native).unwrap();
-    }
+    root.mount(xcomponent_native)
+        .map_err(|e| Error::from_reason(e.reason))?;
 
-    Ok(())
+    let frame_app = app.clone();
+    let on_frame = ctx
+        .env
+        .create_function_from_closure("on_frame", move |ctx| {
+            let info = ctx.first_arg::<JsObject>()?;
+            let time = info.get_named_property::<i64>("timestamp")?;
+            let target_time = info.get_named_property::<i64>("targetTimestamp")?;
+            let event = frame_app.borrow();
+            if let Some(h) = *event.event_loop.borrow() {
+                h(Event::WindowRedraw(IntervalInfo {
+                    time_stamp: time,
+                    target_time_stamp: target_time,
+                }))
+            }
+            Ok(())
+        })?;
+
+    Ok((root, Render { on_frame }))
 }

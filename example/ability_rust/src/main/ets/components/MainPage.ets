@@ -1,5 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { NodeContent } from '@kit.ArkUI';
+import { displaySync } from '@kit.ArkGraphics2D';
+import { Render } from '../ability/type';
 
 export const RouteName = 'RustAbility';
 
@@ -8,13 +10,22 @@ export const RouteName = 'RustAbility';
 struct Index {
   private rootSlot = new NodeContent();
   private uiContext = getContext(this) as common.UIAbilityContext;
+  private render: Render | null = null;
+  private displaySyncInstance = displaySync.create();
 
   @LocalStorageLink("moduleName") name: string = "";
 
   async aboutToAppear(): Promise<void> {
     const moduleName = `lib${this.name}.so`;
     const module: ESObject = await import(moduleName);
-    module.default.render(this.rootSlot);
+    this.render = module.default.render(this.rootSlot);
+
+    this.displaySyncInstance.on("frame", this.render!.onFrame);
+    this.displaySyncInstance.start();
+  }
+
+  aboutToDisappear(): void {
+    this.displaySyncInstance.off("frame", this.render!.onFrame);
   }
 
   build() {

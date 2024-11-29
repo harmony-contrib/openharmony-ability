@@ -6,8 +6,9 @@ use crate::Event;
 pub struct App {
     pub(crate) event_loop: Rc<RefCell<Option<fn(Event) -> ()>>>,
 
-    pub(crate) state: Rc<RefCell<Vec<u8>>>,
-    pub(crate) save_state: bool,
+    state: Rc<RefCell<Vec<u8>>>,
+    save_state: RefCell<bool>,
+    frame_rate: RefCell<u32>,
 }
 
 impl App {
@@ -15,13 +16,14 @@ impl App {
         App {
             event_loop: Rc::new(RefCell::new(None)),
             state: Rc::new(RefCell::new(Vec::new())),
-            save_state: false,
+            save_state: RefCell::new(false),
+            frame_rate: RefCell::new(60),
         }
     }
 
     /// load current app state
     pub fn load(&self) -> Option<Vec<u8>> {
-        if self.save_state {
+        if *self.save_state.borrow() {
             Some(self.state.borrow().clone())
         } else {
             None
@@ -31,6 +33,10 @@ impl App {
     /// save current app state
     pub fn save(&self, state: Vec<u8>) {
         *self.state.borrow_mut() = state;
+    }
+
+    pub fn set_frame_rate(&self, frame_rate: u32) {
+        self.frame_rate.replace(frame_rate);
     }
 
     /// register event loop

@@ -1,4 +1,4 @@
-use crate::{Configuration, ContentRect, SaveLoader, SaveSaver, Size};
+use crate::{Configuration, ContentRect, IntervalInfo, SaveLoader, SaveSaver, Size};
 
 pub enum Event {
     /// window stage create event
@@ -10,7 +10,7 @@ pub enum Event {
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonwindowstagedestroy
     WindowDestroy,
 
-    WindowRedraw,
+    WindowRedraw(IntervalInfo),
     /// window resize event
     /// alias window.on("windowSizeChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowsizechange7
@@ -55,6 +55,10 @@ pub enum Event {
     /// alias onAbilitySaveState
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitysavestate12
     SaveState(SaveSaver),
+    /// ability create event
+    /// alias onAbilityCreate
+    /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitycreate
+    Create,
     /// ability destroy event
     /// alias onAbilityDestroy
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitydestroy
@@ -77,7 +81,7 @@ impl Event {
         match self {
             Event::WindowCreate => "WindowCreate",
             Event::WindowDestroy => "WindowDestroy",
-            Event::WindowRedraw => "WindowRedraw",
+            Event::WindowRedraw(_) => "WindowRedraw",
             Event::WindowResize(_) => "WindowResize",
             Event::ContentRectChange(_) => "ContentRectChange",
             Event::ConfigChanged(_) => "ConfigChanged",
@@ -89,6 +93,7 @@ impl Event {
             Event::Pause => "Pause",
             Event::Stop => "Stop",
             Event::SaveState(_) => "SaveState",
+            Event::Create => "Create",
             Event::Destroy => "Destroy",
             Event::SurfaceCreate => "SurfaceCreate",
             Event::SurfaceDestroy => "SurfaceDestroy",

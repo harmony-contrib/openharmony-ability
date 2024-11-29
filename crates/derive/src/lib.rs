@@ -30,12 +30,11 @@ pub fn activity(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
         
         #[napi_derive_ohos::js_function(1)]
-        pub fn render(ctx: napi_ohos::CallContext) -> napi_ohos::Result<()> {
-            let app_ref = APP.with(|app| app.clone());
-            ROOT_NODE.with(|root_node| {
-                openharmony_activity::render(ctx, app_ref.clone(), root_node).unwrap();
-            });
-            Ok(())
+        pub fn render(ctx: napi_ohos::CallContext) -> napi_ohos::Result<openharmony_activity::Render> {
+            let app_ref: std::cell::RefCell<App> = APP.with(|app| app.clone());
+            let (root, ret) = openharmony_activity::render(ctx, app_ref.clone())?;
+            ROOT_NODE.replace(Some(root));
+            Ok(ret)
         }
         
         #[napi_derive_ohos::module_exports]

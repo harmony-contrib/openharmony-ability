@@ -6,6 +6,7 @@ mod area;
 mod memory;
 mod render;
 mod stage;
+mod draw;
 
 pub use app::*;
 pub use lifecycle::*;
@@ -15,3 +16,4 @@ pub use area::*;
 pub use memory::*;
 pub use render::*;
 pub use stage::*;
+pub use draw::*;

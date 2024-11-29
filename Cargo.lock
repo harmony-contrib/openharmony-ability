@@ -75,7 +75,6 @@ dependencies = [
 [[package]]
 name = "enum_macro"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -105,9 +104,9 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "libc"
-version = "0.2.164"
+version = "0.2.166"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "433bfe06b8c75da9b2e3fbea6e5329ff87748f0b144ef75306e674c3f6f7c13f"
+checksum = "c2ccc108bbc0b1331bd061864e7cd823c0cab660bbe6970e66e2c0614decde36"
 
 [[package]]
 name = "libloading"
@@ -200,7 +199,6 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-binding"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "bitflags",
  "enum_macro",
@@ -214,7 +212,6 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-sys"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "napi-sys-ohos",
 ]
@@ -235,9 +232,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed07615005d0f8d7bcf901f89c8ff4870666a9bdb00382f588af383f40c160b7"
 
 [[package]]
+name = "ohos-vsync-binding"
+version = "0.0.1"
+dependencies = [
+ "ohos-vsync-sys",
+]
+
+[[package]]
+name = "ohos-vsync-sys"
+version = "0.0.1"
+
+[[package]]
 name = "ohos-xcomponent-binding"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "enum_macro",
  "napi-derive-ohos",
@@ -249,7 +256,6 @@ dependencies = [
 [[package]]
 name = "ohos-xcomponent-sys"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=feat-xcomponent#b310d2e5fc60c1a3312a9ea2eb93d340c29ec944"
 dependencies = [
  "ohos-arkui-sys",
 ]
@@ -268,6 +274,7 @@ dependencies = [
  "napi-ohos",
  "ohos-arkui-binding",
  "ohos-hilog-binding",
+ "ohos-vsync-binding",
  "ohos-xcomponent-binding",
 ]
 
@@ -288,9 +295,9 @@ checksum = "915a1e146535de9163f3987b8944ed8cf49a18bb0056bcebcdcece385cece4ff"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.91"
+version = "1.0.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "307e3004becf10f5a6e0d59d20f3cd28231b0e0827a96cd3e0ce6d14bc1e4bb3"
+checksum = "37d3544b3f2748c54e147655edb5025752e2303145b5aefb3c3ea2c78b973bb0"
 dependencies = [
  "unicode-ident",
 ]

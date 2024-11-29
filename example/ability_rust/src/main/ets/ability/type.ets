@@ -25,3 +25,7 @@ export interface Module {
   init: () => ApplicationLifecycle,
   render: (slot: NodeContent) => void
 }
+
+export interface Render {
+  onFrame: () => void
+}
