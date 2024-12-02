@@ -18,10 +18,11 @@ struct Index {
   async aboutToAppear(): Promise<void> {
     const moduleName = `lib${this.name}.so`;
     const module: ESObject = await import(moduleName);
-    this.render = module.default.render(this.rootSlot);
-
-    this.displaySyncInstance.on("frame", this.render!.onFrame);
-    this.displaySyncInstance.start();
+    this.render = module.default.render(this.rootSlot, () => {
+      // make sure redraw after surface is created
+      this.displaySyncInstance.on("frame", this.render!.onFrame);
+      this.displaySyncInstance.start();
+    });
   }
 
   aboutToDisappear(): void {

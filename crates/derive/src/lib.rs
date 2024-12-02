@@ -29,7 +29,7 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
             lifecycle
         }
         
-        #[napi_derive_ohos::js_function(1)]
+        #[napi_derive_ohos::js_function(2)]
         pub fn render(ctx: napi_ohos::CallContext) -> napi_ohos::Result<openharmony_ability::Render> {
             let app_ref: std::cell::RefCell<App> = APP.with(|app| app.clone());
             let (root, ret) = openharmony_ability::render(ctx, app_ref.clone())?;

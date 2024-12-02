@@ -1,7 +1,10 @@
 use std::cell::RefCell;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, CallContext, Error, JsObject, Result};
+use napi_ohos::{
+    bindgen_prelude::Function, threadsafe_function::ThreadsafeFunctionCallMode, CallContext, Error,
+    JsObject, Result,
+};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 
 use crate::{App, Event, IntervalInfo};
@@ -14,6 +17,9 @@ pub struct Render<'a> {
 /// create lifecycle object and return to arkts
 pub fn render(ctx: CallContext, app: RefCell<App>) -> Result<(RootNode, Render)> {
     let slot = ctx.get::<ArkUIHandle>(0)?;
+    let callback = ctx.get::<Function<(), ()>>(1)?;
+
+    let tsfn = callback.build_threadsafe_function().build()?;
 
     let mut root = RootNode::new(slot);
     let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason))?;
@@ -22,6 +28,7 @@ pub fn render(ctx: CallContext, app: RefCell<App>) -> Result<(RootNode, Render)>
 
     let surface_create_app = app.clone();
     xcomponent.on_surface_created(move |_, _| {
+        tsfn.call((), ThreadsafeFunctionCallMode::NonBlocking);
         let event = surface_create_app.borrow();
         if let Some(h) = *event.event_loop.borrow() {
             h(Event::SurfaceCreate)
