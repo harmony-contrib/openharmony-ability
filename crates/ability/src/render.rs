@@ -7,7 +7,7 @@ use napi_ohos::{
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 
-use crate::{App, Event, IntervalInfo};
+use crate::{App, Event, InputEvent, IntervalInfo};
 
 #[napi(object)]
 pub struct Render<'a> {
@@ -45,7 +45,25 @@ pub fn render(ctx: CallContext, app: RefCell<App>) -> Result<(RootNode, Render)>
         Ok(())
     });
 
+    let touch_event_app = app.clone();
+    xcomponent.on_touch_event(move |_, _, data| {
+        let event = touch_event_app.borrow();
+        if let Some(h) = *event.event_loop.borrow() {
+            h(Event::Input(InputEvent::TouchEvent(data)))
+        }
+        Ok(())
+    });
+
     xcomponent.register_callback()?;
+
+    let key_event_app = app.clone();
+    xcomponent.on_key_event(move |_, _, data| {
+        let event = key_event_app.borrow();
+        if let Some(h) = *event.event_loop.borrow() {
+            h(Event::Input(InputEvent::KeyEvent(data)))
+        }
+        Ok(())
+    })?;
 
     // TODO: on_frame_callback will crash if xcomponent is created by C API
     // TODO: System will provide a new method to add callback for redraw
@@ -77,6 +95,11 @@ pub fn render(ctx: CallContext, app: RefCell<App>) -> Result<(RootNode, Render)>
             }
             Ok(())
         })?;
+
+    // IME register
+    let ime = app.clone().borrow().ime.clone();
+
+    // ime.
 
     Ok((root, Render { on_frame }))
 }

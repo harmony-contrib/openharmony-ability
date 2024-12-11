@@ -19,3 +19,4 @@ proc-macro2 = { version = "1.0" }
 ohos-arkui-binding = { path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/arkui" }
 ohos-xcomponent-binding = { path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/xcomponent" }
 ohos-vsync-binding = { path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/vsync" }
+ohos-ime-binding = {path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/ime" }

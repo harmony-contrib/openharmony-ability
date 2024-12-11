@@ -231,6 +231,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed07615005d0f8d7bcf901f89c8ff4870666a9bdb00382f588af383f40c160b7"
 
 [[package]]
+name = "ohos-ime-binding"
+version = "0.0.1"
+dependencies = [
+ "enum_macro",
+ "ohos-input-method-sys",
+]
+
+[[package]]
+name = "ohos-input-method-sys"
+version = "0.0.1"
+
+[[package]]
 name = "ohos-vsync-binding"
 version = "0.0.1"
 dependencies = [
@@ -273,6 +285,7 @@ dependencies = [
  "napi-ohos",
  "ohos-arkui-binding",
  "ohos-hilog-binding",
+ "ohos-ime-binding",
  "ohos-vsync-binding",
  "ohos-xcomponent-binding",
 ]

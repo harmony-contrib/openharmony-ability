@@ -1,4 +1,4 @@
-use crate::{Configuration, ContentRect, IntervalInfo, SaveLoader, SaveSaver, Size};
+use crate::{Configuration, ContentRect, InputEvent, IntervalInfo, SaveLoader, SaveSaver, Size};
 
 pub enum Event {
     /// window stage create event
@@ -73,7 +73,7 @@ pub enum Event {
     SurfaceDestroy,
     /// surface input event
     /// IME
-    Input
+    Input(InputEvent)
 }
 
 impl Event {
@@ -97,7 +97,7 @@ impl Event {
             Event::Destroy => "Destroy",
             Event::SurfaceCreate => "SurfaceCreate",
             Event::SurfaceDestroy => "SurfaceDestroy",
-            Event::Input => "Input",
+            Event::Input(_) => "Input",
         }
     }
 }

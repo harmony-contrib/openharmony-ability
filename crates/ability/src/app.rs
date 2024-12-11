@@ -1,10 +1,13 @@
 use std::{cell::RefCell, rc::Rc};
 
+use ohos_ime_binding::IME;
+
 use crate::Event;
 
 #[derive(Clone)]
 pub struct App {
     pub(crate) event_loop: Rc<RefCell<Option<fn(Event) -> ()>>>,
+    pub(crate) ime: Rc<RefCell<IME>>,
 
     state: Rc<RefCell<Vec<u8>>>,
     save_state: RefCell<bool>,
@@ -13,11 +16,13 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let ime = IME::new(Default::default());
         App {
             event_loop: Rc::new(RefCell::new(None)),
             state: Rc::new(RefCell::new(Vec::new())),
             save_state: RefCell::new(false),
             frame_rate: RefCell::new(60),
+            ime: Rc::new(RefCell::new(ime)),
         }
     }
 
@@ -37,6 +42,14 @@ impl App {
 
     pub fn set_frame_rate(&self, frame_rate: u32) {
         self.frame_rate.replace(frame_rate);
+    }
+
+    pub fn show_keyboard(&self) {
+        self.ime.borrow().show_keyboard();
+    }
+
+    pub fn hide_keyboard(&self) {
+        self.ime.borrow().hide_keyboard();
     }
 
     /// register event loop
