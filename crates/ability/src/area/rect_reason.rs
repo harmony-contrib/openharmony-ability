@@ -5,7 +5,7 @@ pub enum RectChangeReason {
     Move,
     Drag,
     DragStart,
-    DragEnd
+    DragEnd,
 }
 
 impl From<i32> for RectChangeReason {

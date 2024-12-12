@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use ohos_ime_binding::IME;
 
-use crate::Event;
+use crate::{Event, InputEvent, TextInputEventData};
 
 #[derive(Clone)]
 pub struct App {
@@ -55,6 +55,17 @@ impl App {
     /// register event loop
     pub fn run_loop(&self, event_handle: fn(event: Event) -> ()) {
         *self.event_loop.borrow_mut() = Some(event_handle);
+
+        let e = self.event_loop.borrow().clone();
+
+        let ime = self.ime.borrow();
+        ime.insert_text(move |data| {
+            if let Some(h) = e {
+                h(Event::Input(InputEvent::TextInputEvent(
+                    TextInputEventData { text: data },
+                )));
+            }
+        });
     }
 }
 

@@ -1,3 +1,3 @@
 pub struct TextInputEventData {
-   pub text: String
+    pub text: String,
 }

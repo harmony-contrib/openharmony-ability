@@ -96,10 +96,5 @@ pub fn render(ctx: CallContext, app: RefCell<App>) -> Result<(RootNode, Render)>
             Ok(())
         })?;
 
-    // IME register
-    let ime = app.clone().borrow().ime.clone();
-
-    // ime.
-
     Ok((root, Render { on_frame }))
 }

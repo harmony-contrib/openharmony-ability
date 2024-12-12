@@ -14,7 +14,7 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
             pub static APP: std::cell::RefCell<App> = std::cell::RefCell::new(App::new());
             pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
         }
-        
+
         #[napi_derive_ohos::js_function(1)]
         pub fn init(
             ctx: napi_ohos::CallContext,
@@ -22,13 +22,13 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
             let lifecycle = APP.with(|app| {
                 let app_ref = app.borrow();
                 #fn_name(&*app_ref);
-        
+
                 let lifecycle_handle = openharmony_ability::create_lifecycle_handle(ctx, app.clone())?;
                 Ok(lifecycle_handle)
             });
             lifecycle
         }
-        
+
         #[napi_derive_ohos::js_function(2)]
         pub fn render(ctx: napi_ohos::CallContext) -> napi_ohos::Result<openharmony_ability::Render> {
             let app_ref: std::cell::RefCell<App> = APP.with(|app| app.clone());
@@ -36,7 +36,7 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
             ROOT_NODE.replace(Some(root));
             Ok(ret)
         }
-        
+
         #[napi_derive_ohos::module_exports]
         fn module_export_init(
             mut exports: napi_ohos::JsObject,

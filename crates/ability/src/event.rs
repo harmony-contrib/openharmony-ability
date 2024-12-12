@@ -73,7 +73,7 @@ pub enum Event {
     SurfaceDestroy,
     /// surface input event
     /// IME
-    Input(InputEvent)
+    Input(InputEvent),
 }
 
 impl Event {
