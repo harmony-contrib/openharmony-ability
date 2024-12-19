@@ -7,7 +7,7 @@ use napi_ohos::{
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 
-use crate::{App, Event, InputEvent, IntervalInfo};
+use crate::{OpenHarmonyApp, Event, InputEvent, IntervalInfo};
 
 #[napi(object)]
 pub struct Render<'a> {
@@ -15,7 +15,7 @@ pub struct Render<'a> {
 }
 
 /// create lifecycle object and return to arkts
-pub fn render(ctx: CallContext, app: RefCell<App>) -> Result<(RootNode, Render)> {
+pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNode, Render)> {
     let slot = ctx.get::<ArkUIHandle>(0)?;
     let callback = ctx.get::<Function<(), ()>>(1)?;
 

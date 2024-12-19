@@ -2,10 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use ohos_ime_binding::IME;
 
-use crate::{Event, InputEvent, TextInputEventData};
+use crate::{Event, InputEvent, OpenHarmonyWaker, TextInputEventData, WAKER};
 
 #[derive(Clone)]
-pub struct App {
+pub struct OpenHarmonyApp {
     pub(crate) event_loop: Rc<RefCell<Option<fn(Event) -> ()>>>,
     pub(crate) ime: Rc<RefCell<IME>>,
 
@@ -14,10 +14,10 @@ pub struct App {
     frame_rate: RefCell<u32>,
 }
 
-impl App {
+impl OpenHarmonyApp {
     pub fn new() -> Self {
         let ime = IME::new(Default::default());
-        App {
+        OpenHarmonyApp {
             event_loop: Rc::new(RefCell::new(None)),
             state: Rc::new(RefCell::new(Vec::new())),
             save_state: RefCell::new(false),
@@ -37,7 +37,7 @@ impl App {
 
     /// save current app state
     pub fn save(&self, state: Vec<u8>) {
-        *self.state.borrow_mut() = state;
+        self.state.replace(state);
     }
 
     pub fn set_frame_rate(&self, frame_rate: u32) {
@@ -52,9 +52,14 @@ impl App {
         self.ime.borrow().hide_keyboard();
     }
 
+    pub fn create_waker(&self) -> OpenHarmonyWaker {
+        let guard = (&*WAKER).read().expect("Failed to read WAKER");
+        OpenHarmonyWaker::new((*guard).clone())
+    }
+
     /// register event loop
     pub fn run_loop(&self, event_handle: fn(event: Event) -> ()) {
-        *self.event_loop.borrow_mut() = Some(event_handle);
+        self.event_loop.replace(Some(event_handle));
 
         let e = self.event_loop.borrow().clone();
 
@@ -70,7 +75,7 @@ impl App {
 }
 
 pub struct SaveSaver {
-    pub(crate) app: RefCell<App>,
+    pub(crate) app: RefCell<OpenHarmonyApp>,
 }
 
 impl SaveSaver {
@@ -80,7 +85,7 @@ impl SaveSaver {
 }
 
 pub struct SaveLoader {
-    pub(crate) app: RefCell<App>,
+    pub(crate) app: RefCell<OpenHarmonyApp>,
 }
 
 impl SaveLoader {

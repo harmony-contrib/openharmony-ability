@@ -1,9 +1,11 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::Arc};
 
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
 
-use crate::{App, ContentRect, Event, Rect, SaveLoader, SaveSaver, Size, StageEventType};
+use crate::{
+    ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
+};
 
 #[napi(object)]
 pub struct EnvironmentCallback<'a> {
@@ -33,9 +35,29 @@ pub struct ApplicationLifecycle<'a> {
 /// create lifecycle object and return to arkts
 pub fn create_lifecycle_handle(
     ctx: CallContext,
-    app: RefCell<App>,
+    app: RefCell<OpenHarmonyApp>,
 ) -> Result<ApplicationLifecycle> {
     let env = ctx.env;
+
+    let waker_app = app.clone();
+    let waker: Function<'_, (), ()> = env.create_function_from_closure("waker", move |_ctx| {
+        let event = waker_app.borrow();
+        if let Some(h) = *event.event_loop.borrow() {
+            h(Event::UserEvent)
+        }
+        Ok(())
+    })?;
+
+    let tsfn = waker
+        .build_threadsafe_function()
+        .callee_handled::<true>()
+        .build()?;
+
+    let mut guard = (&*WAKER)
+        .write()
+        .map_err(|_| napi_ohos::Error::from_reason("Failed to write WAKER"))?;
+
+    guard.replace(Arc::new(tsfn));
 
     let memory_level_app = app.clone();
     let on_memory_level: Function<'_, i32, ()> =
@@ -107,7 +129,7 @@ pub fn create_lifecycle_handle(
         let size = ctx.first_arg::<JsObject>()?;
         let width = size.get_named_property::<i32>("width")?;
         let height = size.get_named_property::<i32>("height")?;
-        let event: std::cell::Ref<'_, App> = window_size_app.borrow();
+        let event: std::cell::Ref<'_, OpenHarmonyApp> = window_size_app.borrow();
         if let Some(h) = *event.event_loop.borrow() {
             h(Event::WindowResize(Size { width, height }))
         }

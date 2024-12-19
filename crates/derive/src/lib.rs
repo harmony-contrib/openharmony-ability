@@ -8,10 +8,10 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let block = &ast.block;
 
     let f = quote::quote! {
-        fn #fn_name(app: &openharmony_ability::App) #block
+        fn #fn_name(app: &OpenHarmonyApp) #block
 
         thread_local! {
-            pub static APP: std::cell::RefCell<App> = std::cell::RefCell::new(App::new());
+            pub static APP: std::cell::RefCell<openharmony_ability::OpenHarmonyApp> = std::cell::RefCell::new(openharmony_ability::OpenHarmonyApp::new());
             pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
         }
 
@@ -31,7 +31,7 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[napi_derive_ohos::js_function(2)]
         pub fn render(ctx: napi_ohos::CallContext) -> napi_ohos::Result<openharmony_ability::Render> {
-            let app_ref: std::cell::RefCell<App> = APP.with(|app| app.clone());
+            let app_ref: std::cell::RefCell<openharmony_ability::OpenHarmonyApp> = APP.with(|app| app.clone());
             let (root, ret) = openharmony_ability::render(ctx, app_ref.clone())?;
             ROOT_NODE.replace(Some(root));
             Ok(ret)

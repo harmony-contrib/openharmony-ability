@@ -74,6 +74,8 @@ pub enum Event {
     /// surface input event
     /// IME
     Input(InputEvent),
+
+    UserEvent
 }
 
 impl Event {
@@ -98,6 +100,7 @@ impl Event {
             Event::SurfaceCreate => "SurfaceCreate",
             Event::SurfaceDestroy => "SurfaceDestroy",
             Event::Input(_) => "Input",
+            Event::UserEvent => "UserEvent",
         }
     }
 }
