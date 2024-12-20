@@ -9,6 +9,11 @@ pub struct OpenHarmonyWaker {
     waker: Option<Arc<ThreadsafeFunction<(), ()>>>,
 }
 
+
+// Safety: ThreadsafeFunction can be called from any thread.
+unsafe impl Send for OpenHarmonyWaker {}
+unsafe impl Sync for OpenHarmonyWaker {}
+
 impl OpenHarmonyWaker {
     pub fn new(waker: Option<Arc<ThreadsafeFunction<(), ()>>>) -> Self {
         Self { waker }
