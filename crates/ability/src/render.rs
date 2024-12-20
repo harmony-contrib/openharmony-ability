@@ -26,6 +26,9 @@ pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNod
 
     let xcomponent = xcomponent_native.native_xcomponent();
 
+    let raw_window = xcomponent.native_window();
+    app.borrow_mut().raw_window.replace(raw_window);
+
     let surface_create_app = app.clone();
     xcomponent.on_surface_created(move |_, _| {
         tsfn.call((), ThreadsafeFunctionCallMode::NonBlocking);
