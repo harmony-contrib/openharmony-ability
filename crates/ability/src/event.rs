@@ -1,3 +1,5 @@
+use std::fmt::{self, Debug, Formatter};
+
 use crate::{Configuration, ContentRect, InputEvent, IntervalInfo, SaveLoader, SaveSaver, Size};
 
 pub enum Event {
@@ -75,7 +77,7 @@ pub enum Event {
     /// IME
     Input(InputEvent),
 
-    UserEvent
+    UserEvent,
 }
 
 impl Event {
@@ -102,5 +104,11 @@ impl Event {
             Event::Input(_) => "Input",
             Event::UserEvent => "UserEvent",
         }
+    }
+}
+
+impl Debug for Event {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }

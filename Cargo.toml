@@ -6,7 +6,7 @@ resolver = "2"
 openharmony-ability-derive = { version = "0.0.1", path = "crates/derive" }
 openharmony-ability = { version = "0.0.1", path = "crates/ability" }
 
-napi-sys-ohos = { version = "1.0.3" }
+napi-sys-ohos = { version = "1.0.3", features = ["napi8"] }
 napi-ohos = { version = "1.0.3" }
 napi-derive-ohos = { version = "1.0.3" }
 napi-build-ohos = { version = "1.0.3" }
@@ -16,7 +16,7 @@ quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
 
-ohos-arkui-binding = { path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/arkui" }
-ohos-xcomponent-binding = { path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/xcomponent" }
-ohos-vsync-binding = { path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/vsync" }
-ohos-ime-binding = {path = "/Users/ranger/Desktop/project/ohos-rs/ohos-native-bindings/crates/ime" }
+ohos-arkui-binding = { path = "../ohos-native-bindings/crates/arkui" }
+ohos-xcomponent-binding = { path = "../ohos-native-bindings/crates/xcomponent" }
+ohos-vsync-binding = { path = "../ohos-native-bindings/crates/vsync" }
+ohos-ime-binding = { path = "../ohos-native-bindings/crates/ime" }

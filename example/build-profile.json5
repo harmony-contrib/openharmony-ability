@@ -23,19 +23,6 @@
       }
     ],
     "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "/Users/ranger/.ohos/config/default_example_xXXERAdx7CUxdALLGhVgus8zALTWasd8TNLpuk6pzlw=.cer",
-          "storePassword": "0000001BEF94A017ABA465096599D6EEC3DF515E667B8B3ACC86719A0A30A8FA92F2C2B5C79F08D8384263",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001B87B51E8B673B48001076D4AEA1F6670BCE8580B1A5B8501BDAF1B1B14ECFA79F1ED6E1892598F2",
-          "profile": "/Users/ranger/.ohos/config/default_example_xXXERAdx7CUxdALLGhVgus8zALTWasd8TNLpuk6pzlw=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "/Users/ranger/.ohos/config/default_example_xXXERAdx7CUxdALLGhVgus8zALTWasd8TNLpuk6pzlw=.p12"
-        }
-      }
     ]
   },
   "modules": [

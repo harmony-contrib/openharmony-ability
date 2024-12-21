@@ -3,11 +3,11 @@ use std::{cell::RefCell, rc::Rc};
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
-use crate::{Event, InputEvent, OpenHarmonyWaker, TextInputEventData, WAKER};
+use crate::{Configuration, Event, InputEvent, OpenHarmonyWaker, TextInputEventData, WAKER};
 
 #[derive(Clone)]
 pub struct OpenHarmonyApp {
-    pub(crate) event_loop: Rc<RefCell<Option<fn(Event) -> ()>>>,
+    pub(crate) event_loop: Rc<RefCell<Option<Box<dyn Fn(Event)>>>>,
     pub(crate) ime: Rc<RefCell<IME>>,
     pub(crate) raw_window: Rc<RefCell<Option<RawWindow>>>,
 
@@ -60,19 +60,23 @@ impl OpenHarmonyApp {
         OpenHarmonyWaker::new((*guard).clone())
     }
 
+    // pub fn config(&self) -> Configuration {
+    //     Configuration::default()
+    // }
+
     pub fn native_window(&self) -> Option<RawWindow> {
         self.raw_window.borrow().clone()
     }
 
     /// register event loop
-    pub fn run_loop(&self, event_handle: fn(event: Event) -> ()) {
-        self.event_loop.replace(Some(event_handle));
+    pub fn run_loop<'a, F: Fn(Event) -> () + 'static>(&self, event_handle: F) {
+        self.event_loop.replace(Some(Box::new(event_handle)));
 
-        let e = self.event_loop.borrow().clone();
+        let e = self.event_loop.clone();
 
         let ime = self.ime.borrow();
         ime.insert_text(move |data| {
-            if let Some(h) = e {
+            if let Some(h) = e.borrow().as_ref() {
                 h(Event::Input(InputEvent::TextInputEvent(
                     TextInputEventData { text: data },
                 )));
@@ -80,6 +84,9 @@ impl OpenHarmonyApp {
         });
     }
 }
+
+unsafe impl Send for OpenHarmonyApp {}
+unsafe impl Sync for OpenHarmonyApp {}
 
 pub struct SaveSaver {
     pub(crate) app: RefCell<OpenHarmonyApp>,
