@@ -33,7 +33,7 @@ pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNod
     xcomponent.on_surface_created(move |_, _| {
         tsfn.call((), ThreadsafeFunctionCallMode::NonBlocking);
         let event = surface_create_app.borrow();
-        if let Some(h) = event.event_loop.borrow().as_ref() {
+        if let Some(h) = event.event_loop.borrow_mut().as_mut() {
             h(Event::SurfaceCreate)
         }
         Ok(())
@@ -42,7 +42,7 @@ pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNod
     let surface_destroy_app = app.clone();
     xcomponent.on_surface_destroyed(move |_, _| {
         let event = surface_destroy_app.borrow();
-        if let Some(h) = event.event_loop.borrow().as_ref() {
+        if let Some(h) = event.event_loop.borrow_mut().as_mut() {
             h(Event::SurfaceDestroy)
         }
         Ok(())
@@ -51,7 +51,7 @@ pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNod
     let touch_event_app = app.clone();
     xcomponent.on_touch_event(move |_, _, data| {
         let event = touch_event_app.borrow();
-        if let Some(h) = event.event_loop.borrow().as_ref() {
+        if let Some(h) = event.event_loop.borrow_mut().as_mut() {
             h(Event::Input(InputEvent::TouchEvent(data)))
         }
         Ok(())
@@ -62,7 +62,7 @@ pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNod
     let key_event_app = app.clone();
     xcomponent.on_key_event(move |_, _, data| {
         let event = key_event_app.borrow();
-        if let Some(h) = event.event_loop.borrow().as_ref() {
+        if let Some(h) = event.event_loop.borrow_mut().as_mut() {
             h(Event::Input(InputEvent::KeyEvent(data)))
         }
         Ok(())
@@ -90,7 +90,7 @@ pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNod
             let time = info.get_named_property::<i64>("timestamp")?;
             let target_time = info.get_named_property::<i64>("targetTimestamp")?;
             let event = frame_app.borrow();
-            if let Some(h) = event.event_loop.borrow().as_ref() {
+            if let Some(h) = event.event_loop.borrow_mut().as_mut() {
                 h(Event::WindowRedraw(IntervalInfo {
                     time_stamp: time,
                     target_time_stamp: target_time,

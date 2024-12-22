@@ -6,9 +6,10 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let ast = syn::parse_macro_input!(item as ItemFn);
     let fn_name = &ast.sig.ident;
     let block = &ast.block;
+    let arg = &ast.sig.inputs;
 
     let f = quote::quote! {
-        fn #fn_name(app: &OpenHarmonyApp) #block
+        fn #fn_name(#arg) #block
 
         thread_local! {
             pub static APP: std::cell::RefCell<openharmony_ability::OpenHarmonyApp> = std::cell::RefCell::new(openharmony_ability::OpenHarmonyApp::new());
@@ -21,7 +22,7 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
         ) -> napi_ohos::Result<openharmony_ability::ApplicationLifecycle> {
             let lifecycle = APP.with(|app| {
                 let app_ref = app.borrow();
-                #fn_name(&*app_ref);
+                #fn_name((&*app_ref).clone());
 
                 let lifecycle_handle = openharmony_ability::create_lifecycle_handle(ctx, app.clone())?;
                 Ok(lifecycle_handle)
