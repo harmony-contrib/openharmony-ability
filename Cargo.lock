@@ -216,6 +216,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohos-display-binding"
+version = "0.0.1"
+dependencies = [
+ "enum_macro",
+ "ohos-display-sys",
+]
+
+[[package]]
+name = "ohos-display-sys"
+version = "0.0.1"
+
+[[package]]
 name = "ohos-hilog-binding"
 version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -261,6 +273,7 @@ dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
  "napi-sys-ohos",
+ "ohos-display-binding",
  "ohos-xcomponent-sys",
  "raw-window-handle",
 ]
@@ -285,6 +298,7 @@ dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
  "ohos-arkui-binding",
+ "ohos-display-binding",
  "ohos-hilog-binding",
  "ohos-ime-binding",
  "ohos-vsync-binding",

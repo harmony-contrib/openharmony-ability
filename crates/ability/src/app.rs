@@ -3,7 +3,10 @@ use std::{cell::RefCell, rc::Rc};
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
-use crate::{Configuration, Event, InputEvent, OpenHarmonyWaker, Rect, TextInputEventData, WAKER};
+use crate::{
+    hook::Hooks, Configuration, Event, InputEvent, OpenHarmonyWaker, Rect, TextInputEventData,
+    WAKER,
+};
 
 pub struct OpenHarmonyApp {
     pub(crate) event_loop: Rc<RefCell<Option<Box<dyn FnMut(Event)>>>>,
@@ -11,10 +14,11 @@ pub struct OpenHarmonyApp {
     pub(crate) raw_window: Rc<RefCell<Option<RawWindow>>>,
 
     state: Rc<RefCell<Vec<u8>>>,
-    save_state: RefCell<bool>,
-    frame_rate: RefCell<u32>,
-    configuration: RefCell<Configuration>,
-    rect: RefCell<Rect>,
+    save_state: Rc<RefCell<bool>>,
+    frame_rate: Rc<RefCell<u32>>,
+    hooks: Rc<RefCell<Hooks>>,
+    pub(crate) configuration: Rc<RefCell<Configuration>>,
+    pub(crate) rect: Rc<RefCell<Rect>>,
 }
 
 impl PartialEq for OpenHarmonyApp {
@@ -22,9 +26,9 @@ impl PartialEq for OpenHarmonyApp {
         Rc::ptr_eq(&self.event_loop, &other.event_loop)
             && Rc::ptr_eq(&self.ime, &other.ime)
             && Rc::ptr_eq(&self.raw_window, &other.raw_window)
-            && *self.state.borrow() == *other.state.borrow()
-            && *self.save_state.borrow() == *other.save_state.borrow()
-            && *self.frame_rate.borrow() == *other.frame_rate.borrow()
+            && Rc::ptr_eq(&self.state, &other.state)
+            && Rc::ptr_eq(&self.save_state, &other.save_state)
+            && Rc::ptr_eq(&self.frame_rate, &other.frame_rate)
     }
 }
 
@@ -35,9 +39,9 @@ impl std::hash::Hash for OpenHarmonyApp {
         Rc::as_ptr(&self.event_loop).hash(state);
         Rc::as_ptr(&self.ime).hash(state);
         Rc::as_ptr(&self.raw_window).hash(state);
-        self.state.borrow().hash(state);
-        self.save_state.borrow().hash(state);
-        self.frame_rate.borrow().hash(state);
+        Rc::as_ptr(&self.state).hash(state);
+        Rc::as_ptr(&self.save_state).hash(state);
+        Rc::as_ptr(&self.frame_rate).hash(state);
     }
 }
 
@@ -48,11 +52,12 @@ impl OpenHarmonyApp {
             event_loop: Rc::new(RefCell::new(None)),
             state: Rc::new(RefCell::new(Vec::new())),
             raw_window: Rc::new(RefCell::new(None)),
-            save_state: RefCell::new(false),
-            frame_rate: RefCell::new(60),
+            save_state: Rc::new(RefCell::new(false)),
+            frame_rate: Rc::new(RefCell::new(60)),
+            hooks: Rc::new(RefCell::new(Hooks::default())),
             ime: Rc::new(RefCell::new(ime)),
-            configuration: RefCell::new(Configuration::default()),
-            rect: RefCell::new(Rect::default()),
+            configuration: Rc::new(RefCell::new(Configuration::default())),
+            rect: Rc::new(RefCell::new(Rect::default())),
         }
     }
 
@@ -88,27 +93,26 @@ impl OpenHarmonyApp {
     }
 
     pub fn config(&self) -> Configuration {
-        Configuration::default()
+        self.configuration.borrow().clone()
     }
 
     pub fn content_rect(&self) -> Rect {
-        Rect::default()
+        self.rect.borrow().clone()
     }
 
     pub fn native_window(&self) -> Option<RawWindow> {
         self.raw_window.borrow().clone()
     }
 
-    /// register event loop
-    pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, mut event_handle: F) {
-        let handler = Box::new(move |event| {
-            event_handle(event);
-        });
+    pub fn scale(&self) -> f32 {
+        self.hooks.borrow().scale()
+    }
 
-        // 使用 unsafe 将生命周期扩展为 'static
+    /// register event loop
+    pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, event_handle: F) {
         let static_handler = unsafe {
             std::mem::transmute::<Box<dyn FnMut(Event) + 'a>, Box<dyn FnMut(Event) + 'static>>(
-                handler,
+                Box::new(event_handle),
             )
         };
 
@@ -118,7 +122,7 @@ impl OpenHarmonyApp {
 
         let ime = self.ime.borrow();
         ime.insert_text(move |data| {
-            if let Some(h) = e.borrow_mut().as_mut() {
+            if let Some(ref mut h) = *e.borrow_mut() {
                 h(Event::Input(InputEvent::TextInputEvent(
                     TextInputEventData { text: data },
                 )));
@@ -133,14 +137,15 @@ unsafe impl Sync for OpenHarmonyApp {}
 impl Clone for OpenHarmonyApp {
     fn clone(&self) -> Self {
         OpenHarmonyApp {
-            event_loop: self.event_loop.clone(),
-            state: self.state.clone(),
-            raw_window: self.raw_window.clone(),
-            save_state: self.save_state.clone(),
-            frame_rate: self.frame_rate.clone(),
-            ime: self.ime.clone(),
-            configuration: self.configuration.clone(),
-            rect: self.rect.clone(),
+            event_loop: Rc::clone(&self.event_loop),
+            state: Rc::clone(&self.state),
+            raw_window: Rc::clone(&self.raw_window),
+            save_state: Rc::clone(&self.save_state),
+            frame_rate: Rc::clone(&self.frame_rate),
+            ime: Rc::clone(&self.ime),
+            configuration: Rc::clone(&self.configuration),
+            rect: Rc::clone(&self.rect),
+            hooks: Rc::clone(&self.hooks),
         }
     }
 }

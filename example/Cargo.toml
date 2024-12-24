@@ -10,8 +10,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 napi-ohos = { workspace = true, default-features = false, features = [
-    "napi8",
-    "async",
+  "napi8",
+  "async",
 ] }
 napi-derive-ohos = { workspace = true }
 openharmony-ability = { workspace = true }

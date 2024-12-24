@@ -20,3 +20,4 @@ ohos-arkui-binding = { path = "../ohos-native-bindings/crates/arkui" }
 ohos-xcomponent-binding = { path = "../ohos-native-bindings/crates/xcomponent" }
 ohos-vsync-binding = { path = "../ohos-native-bindings/crates/vsync" }
 ohos-ime-binding = { path = "../ohos-native-bindings/crates/ime" }
+ohos-display-binding = { path = "../ohos-native-bindings/crates/display" }

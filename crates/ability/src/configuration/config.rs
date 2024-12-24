@@ -1,6 +1,6 @@
 use super::{ColorMode, Direction, ScreenDensity};
 
-#[derive(Clone,PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Configuration {
     pub language: String,
     pub color_mode: ColorMode,

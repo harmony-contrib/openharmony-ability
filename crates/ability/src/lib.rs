@@ -3,6 +3,7 @@ mod area;
 mod configuration;
 mod draw;
 mod event;
+mod hook;
 mod input;
 mod lifecycle;
 mod memory;
