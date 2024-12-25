@@ -16,10 +16,10 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
             pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
         }
 
-        #[napi_derive_ohos::js_function(1)]
+        #[openharmony_ability::napi_derive::js_function(1)]
         pub fn init(
-            ctx: napi_ohos::CallContext,
-        ) -> napi_ohos::Result<openharmony_ability::ApplicationLifecycle> {
+            ctx: openharmony_ability::napi::CallContext,
+        ) -> openharmony_ability::napi::Result<openharmony_ability::ApplicationLifecycle> {
             let lifecycle = APP.with(|app| {
                 let app_ref = app.borrow();
                 #fn_name((&*app_ref).clone());
@@ -30,19 +30,19 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
             lifecycle
         }
 
-        #[napi_derive_ohos::js_function(2)]
-        pub fn render(ctx: napi_ohos::CallContext) -> napi_ohos::Result<openharmony_ability::Render> {
+        #[openharmony_ability::napi_derive::js_function(2)]
+        pub fn render(ctx: openharmony_ability::napi::CallContext) -> openharmony_ability::napi::Result<openharmony_ability::Render> {
             let app_ref: std::cell::RefCell<openharmony_ability::OpenHarmonyApp> = APP.with(|app| app.clone());
             let (root, ret) = openharmony_ability::render(ctx, app_ref.clone())?;
             ROOT_NODE.replace(Some(root));
             Ok(ret)
         }
 
-        #[napi_derive_ohos::module_exports]
+        #[openharmony_ability::napi_derive::module_exports]
         fn module_export_init(
-            mut exports: napi_ohos::JsObject,
-            _env: napi_ohos::Env,
-        ) -> napi_ohos::Result<()> {
+            mut exports: openharmony_ability::napi::JsObject,
+            _env: openharmony_ability::napi::Env,
+        ) -> openharmony_ability::napi::Result<()> {
             exports.create_named_method("init", init)?;
             exports.create_named_method("render", render)?;
             Ok(())

@@ -4,7 +4,7 @@ use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
-    hook::Hooks, Configuration, Event, InputEvent, OpenHarmonyWaker, Rect, TextInputEventData,
+    helper::Helper, Configuration, Event, InputEvent, OpenHarmonyWaker, Rect, TextInputEventData,
     WAKER,
 };
 
@@ -16,7 +16,7 @@ pub struct OpenHarmonyApp {
     state: Rc<RefCell<Vec<u8>>>,
     save_state: Rc<RefCell<bool>>,
     frame_rate: Rc<RefCell<u32>>,
-    hooks: Rc<RefCell<Hooks>>,
+    pub(crate) helper: Rc<RefCell<Helper>>,
     pub(crate) configuration: Rc<RefCell<Configuration>>,
     pub(crate) rect: Rc<RefCell<Rect>>,
 }
@@ -54,7 +54,7 @@ impl OpenHarmonyApp {
             raw_window: Rc::new(RefCell::new(None)),
             save_state: Rc::new(RefCell::new(false)),
             frame_rate: Rc::new(RefCell::new(60)),
-            hooks: Rc::new(RefCell::new(Hooks::default())),
+            helper: Rc::new(RefCell::new(Helper::default())),
             ime: Rc::new(RefCell::new(ime)),
             configuration: Rc::new(RefCell::new(Configuration::default())),
             rect: Rc::new(RefCell::new(Rect::default())),
@@ -105,7 +105,7 @@ impl OpenHarmonyApp {
     }
 
     pub fn scale(&self) -> f32 {
-        self.hooks.borrow().scale()
+        self.helper.borrow().scale()
     }
 
     /// register event loop
@@ -145,7 +145,7 @@ impl Clone for OpenHarmonyApp {
             ime: Rc::clone(&self.ime),
             configuration: Rc::clone(&self.configuration),
             rect: Rc::clone(&self.rect),
-            hooks: Rc::clone(&self.hooks),
+            helper: Rc::clone(&self.helper),
         }
     }
 }

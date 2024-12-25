@@ -4,7 +4,8 @@ use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
 
 use crate::{
-    ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
+    ArkHelper, ArkTSHelper, ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader, SaveSaver, Size,
+    StageEventType, WAKER,
 };
 
 #[napi(object)]
@@ -37,7 +38,14 @@ pub fn create_lifecycle_handle(
     ctx: CallContext,
     app: RefCell<OpenHarmonyApp>,
 ) -> Result<ApplicationLifecycle> {
+    let ark_helper = ctx.get::<ArkTSHelper>(0)?;
     let env = ctx.env;
+
+    let helper = ArkHelper::from_ark_ts_helper(ark_helper)?;
+    app.borrow().helper.replace_with(|h| {
+        h.ark.replace(Some(helper));
+        h.clone()
+    });
 
     let waker_app = app.clone();
     let waker: Function<'_, (), ()> = env.create_function_from_closure("waker", move |_ctx| {

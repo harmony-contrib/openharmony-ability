@@ -1,7 +1,8 @@
 import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit";
 import window from "@ohos.window";
 import * as Entry from '../components/MainPage'
-import { ApplicationLifecycle, Module } from './type'
+import { exit } from "../helper";
+import { ApplicationLifecycle, ArkHelper, Module } from './type'
 
 const storage: LocalStorage = new LocalStorage();
 
@@ -20,7 +21,10 @@ export class RustAbility extends UIAbility {
     const packageName = `lib${this.moduleName}.so`;
     const module: ESObject = await import(packageName);
     this.nativeModule = module.default;
-    this.lifecycle = this.nativeModule!.init();
+    const helper: ArkHelper = {
+      exit
+    }
+    this.lifecycle = this.nativeModule!.init(helper);
     this.lifecycle?.windowStageEventCallback.onAbilityCreate(state);
   }
 
