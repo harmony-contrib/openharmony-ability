@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::atomic::AtomicI64};
 
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
@@ -8,6 +8,8 @@ use crate::{
     WAKER,
 };
 
+static ID: AtomicI64 = AtomicI64::new(0);
+
 pub struct OpenHarmonyApp {
     pub(crate) event_loop: Rc<RefCell<Option<Box<dyn FnMut(Event)>>>>,
     pub(crate) ime: Rc<RefCell<IME>>,
@@ -16,6 +18,7 @@ pub struct OpenHarmonyApp {
     state: Rc<RefCell<Vec<u8>>>,
     save_state: Rc<RefCell<bool>>,
     frame_rate: Rc<RefCell<u32>>,
+    id: i64,
     pub(crate) helper: Rc<RefCell<Helper>>,
     pub(crate) configuration: Rc<RefCell<Configuration>>,
     pub(crate) rect: Rc<RefCell<Rect>>,
@@ -23,12 +26,7 @@ pub struct OpenHarmonyApp {
 
 impl PartialEq for OpenHarmonyApp {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.event_loop, &other.event_loop)
-            && Rc::ptr_eq(&self.ime, &other.ime)
-            && Rc::ptr_eq(&self.raw_window, &other.raw_window)
-            && Rc::ptr_eq(&self.state, &other.state)
-            && Rc::ptr_eq(&self.save_state, &other.save_state)
-            && Rc::ptr_eq(&self.frame_rate, &other.frame_rate)
+        self.id == other.id
     }
 }
 
@@ -45,9 +43,30 @@ impl std::hash::Hash for OpenHarmonyApp {
     }
 }
 
+impl PartialOrd for OpenHarmonyApp {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.id.cmp(&other.id))
+    }
+}
+
+impl Ord for OpenHarmonyApp {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+impl Debug for OpenHarmonyApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenHarmonyApp")
+            .field("id", &self.id)
+            .finish()
+    }
+}
+
 impl OpenHarmonyApp {
     pub fn new() -> Self {
         let ime = IME::new(Default::default());
+        let id = ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         OpenHarmonyApp {
             event_loop: Rc::new(RefCell::new(None)),
             state: Rc::new(RefCell::new(Vec::new())),
@@ -58,6 +77,7 @@ impl OpenHarmonyApp {
             ime: Rc::new(RefCell::new(ime)),
             configuration: Rc::new(RefCell::new(Configuration::default())),
             rect: Rc::new(RefCell::new(Rect::default())),
+            id,
         }
     }
 
@@ -146,6 +166,7 @@ impl Clone for OpenHarmonyApp {
             configuration: Rc::clone(&self.configuration),
             rect: Rc::clone(&self.rect),
             helper: Rc::clone(&self.helper),
+            id: self.id.clone()
         }
     }
 }
