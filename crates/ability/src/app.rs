@@ -171,6 +171,7 @@ impl Clone for OpenHarmonyApp {
     }
 }
 
+#[derive(Clone)]
 pub struct SaveSaver {
     pub(crate) app: RefCell<OpenHarmonyApp>,
 }
@@ -181,6 +182,7 @@ impl SaveSaver {
     }
 }
 
+#[derive(Clone)]
 pub struct SaveLoader {
     pub(crate) app: RefCell<OpenHarmonyApp>,
 }

@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub enum RectChangeReason {
     Undefined = 0,
     Maximize,

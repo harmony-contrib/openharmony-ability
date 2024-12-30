@@ -2,6 +2,7 @@ use std::fmt::{self, Debug, Formatter};
 
 use crate::{Configuration, ContentRect, InputEvent, IntervalInfo, SaveLoader, SaveSaver, Size};
 
+#[derive(Clone)]
 pub enum Event {
     /// window stage create event
     /// alias onWindowStageCreate
