@@ -1,4 +1,9 @@
-use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::atomic::AtomicI64};
+use std::{
+    cell::RefCell,
+    fmt::Debug,
+    rc::Rc,
+    sync::{atomic::AtomicI64, Arc, LazyLock, RwLock},
+};
 
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
@@ -10,8 +15,11 @@ use crate::{
 
 static ID: AtomicI64 = AtomicI64::new(0);
 
+pub static EVENT: LazyLock<Arc<RwLock<Option<Box<dyn Fn(Event) + Sync + Send>>>>> =
+    LazyLock::new(|| Arc::new(RwLock::new(None)));
+
+
 pub struct OpenHarmonyApp {
-    pub(crate) event_loop: Rc<RefCell<Option<Box<dyn FnMut(Event)>>>>,
     pub(crate) ime: Rc<RefCell<IME>>,
     pub(crate) raw_window: Rc<RefCell<Option<RawWindow>>>,
 
@@ -34,7 +42,6 @@ impl Eq for OpenHarmonyApp {}
 
 impl std::hash::Hash for OpenHarmonyApp {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Rc::as_ptr(&self.event_loop).hash(state);
         Rc::as_ptr(&self.ime).hash(state);
         Rc::as_ptr(&self.raw_window).hash(state);
         Rc::as_ptr(&self.state).hash(state);
@@ -68,7 +75,6 @@ impl OpenHarmonyApp {
         let ime = IME::new(Default::default());
         let id = ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         OpenHarmonyApp {
-            event_loop: Rc::new(RefCell::new(None)),
             state: Rc::new(RefCell::new(Vec::new())),
             raw_window: Rc::new(RefCell::new(None)),
             save_state: Rc::new(RefCell::new(false)),
@@ -129,25 +135,29 @@ impl OpenHarmonyApp {
     }
 
     /// register event loop
-    pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, event_handle: F) {
+    pub fn run_loop<'a, F: Fn(Event) -> () + 'a>(&self, event_handle: F) {
         let static_handler = unsafe {
-            std::mem::transmute::<Box<dyn FnMut(Event) + 'a>, Box<dyn FnMut(Event) + 'static>>(
-                Box::new(event_handle),
-            )
+            std::mem::transmute::<
+                Box<dyn Fn(Event) + 'a>,
+                Box<dyn Fn(Event) + 'static + Sync + Send>,
+            >(Box::new(event_handle))
         };
 
-        self.event_loop.replace(Some(static_handler));
+        let mut guard = EVENT.write().expect("Failed to write EVENT");
+        *guard = Some(static_handler);
 
-        let e = self.event_loop.clone();
+        // self.event_loop.replace(Some(static_handler));
 
-        let ime = self.ime.borrow();
-        ime.insert_text(move |data| {
-            if let Some(ref mut h) = *e.borrow_mut() {
-                h(Event::Input(InputEvent::TextInputEvent(
-                    TextInputEventData { text: data },
-                )));
-            }
-        });
+        // let e = self.event_loop.clone();
+
+        // let ime = self.ime.borrow();
+        // ime.insert_text(move |data| {
+        //     if let Some(ref mut h) = *e.borrow_mut() {
+        //         h(Event::Input(InputEvent::TextInputEvent(
+        //             TextInputEventData { text: data },
+        //         )));
+        //     }
+        // });
     }
 }
 
@@ -157,7 +167,6 @@ unsafe impl Sync for OpenHarmonyApp {}
 impl Clone for OpenHarmonyApp {
     fn clone(&self) -> Self {
         OpenHarmonyApp {
-            event_loop: Rc::clone(&self.event_loop),
             state: Rc::clone(&self.state),
             raw_window: Rc::clone(&self.raw_window),
             save_state: Rc::clone(&self.save_state),
@@ -166,7 +175,7 @@ impl Clone for OpenHarmonyApp {
             configuration: Rc::clone(&self.configuration),
             rect: Rc::clone(&self.rect),
             helper: Rc::clone(&self.helper),
-            id: self.id.clone()
+            id: self.id.clone(),
         }
     }
 }
