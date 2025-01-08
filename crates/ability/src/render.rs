@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::Function, threadsafe_function::ThreadsafeFunctionCallMode, CallContext, Error,
@@ -15,7 +13,7 @@ pub struct Render<'a> {
 }
 
 /// create lifecycle object and return to arkts
-pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNode, Render)> {
+pub fn render(ctx: CallContext, app: OpenHarmonyApp) -> Result<(RootNode, Render)> {
     let slot = ctx.get::<ArkUIHandle>(0)?;
     let callback = ctx.get::<Function<(), ()>>(1)?;
 
@@ -26,10 +24,13 @@ pub fn render(ctx: CallContext, app: RefCell<OpenHarmonyApp>) -> Result<(RootNod
 
     let xcomponent = xcomponent_native.native_xcomponent();
 
-    let raw_window = xcomponent.native_window();
-    app.borrow_mut().raw_window.replace(raw_window);
+    let xc = xcomponent.clone();
 
     xcomponent.on_surface_created(move |_, _| {
+        {
+            let raw_window = xc.native_window();
+            app.inner.write().unwrap().raw_window = raw_window;
+        }
         tsfn.call((), ThreadsafeFunctionCallMode::NonBlocking);
         let mut event_loop = EVENT.write().unwrap();
         if let Some(ref mut h) = *event_loop {

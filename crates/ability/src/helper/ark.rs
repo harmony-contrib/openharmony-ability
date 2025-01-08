@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Env, Result};
 
@@ -9,7 +11,7 @@ pub struct ArkTSHelper<'a> {
 
 // Inner helper struct
 pub struct ArkHelper {
-    pub exit: ThreadsafeFunction<u32, ()>,
+    pub exit: Arc<ThreadsafeFunction<u32, ()>>,
 }
 
 impl ArkHelper {
@@ -20,6 +22,16 @@ impl ArkHelper {
             .build_threadsafe_function()
             .callee_handled::<true>()
             .build()?;
-        Ok(Self { exit })
+        Ok(Self {
+            exit: Arc::new(exit),
+        })
+    }
+}
+
+impl Clone for ArkHelper {
+    fn clone(&self) -> Self {
+        Self {
+            exit: Arc::clone(&self.exit),
+        }
     }
 }

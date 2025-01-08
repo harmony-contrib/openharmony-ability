@@ -1,4 +1,4 @@
-use std::{cell::RefCell, sync::Arc};
+use std::sync::Arc;
 
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
@@ -36,16 +36,14 @@ pub struct ApplicationLifecycle<'a> {
 /// create lifecycle object and return to arkts
 pub fn create_lifecycle_handle(
     ctx: CallContext,
-    app: RefCell<OpenHarmonyApp>,
+    app: OpenHarmonyApp,
 ) -> Result<ApplicationLifecycle> {
     let ark_helper = ctx.get::<ArkTSHelper>(0)?;
     let env = ctx.env;
 
     let helper = ArkHelper::from_ark_ts_helper(ark_helper)?;
-    app.borrow().helper.replace_with(|h| {
-        h.ark.replace(Some(helper));
-        h.clone()
-    });
+
+    app.inner.write().unwrap().helper.ark = Some(helper);
 
     let waker: Function<'_, (), ()> = env.create_function_from_closure("waker", move |_ctx| {
         let mut event_loop = EVENT.write().unwrap();
@@ -90,7 +88,6 @@ pub fn create_lifecycle_handle(
             let font_weight_scale = configuration.get_named_property::<f64>("fontWeightScale")?;
             let mcc = configuration.get_named_property::<String>("mcc")?;
             let mnc = configuration.get_named_property::<String>("mnc")?;
-            let app = configuration_updated_app.borrow();
             let mut event_loop = EVENT.write().unwrap();
 
             let configuration = crate::Configuration {
@@ -105,9 +102,13 @@ pub fn create_lifecycle_handle(
                 mcc,
                 mnc,
             };
-            app.configuration.replace(configuration);
-            let conf = app.configuration.borrow().clone();
-            if let Some(ref h) = *event_loop {
+            configuration_updated_app
+                .inner
+                .write()
+                .unwrap()
+                .configuration = configuration.clone();
+            let conf = configuration.clone();
+            if let Some(ref mut h) = *event_loop {
                 h(Event::ConfigChanged(conf))
             }
             Ok(())
@@ -127,7 +128,7 @@ pub fn create_lifecycle_handle(
                     StageEventType::Inactive => Event::LostFocus,
                     StageEventType::Hidden => Event::Stop,
                     StageEventType::Resumed => Event::Resume(SaveLoader {
-                        app: window_stage_event_app.clone(),
+                        app: &window_stage_event_app,
                     }),
                     StageEventType::Paused => Event::Pause,
                 };
@@ -135,7 +136,6 @@ pub fn create_lifecycle_handle(
             }
             Ok(())
         })?;
-
 
     let window_resize = env.create_function_from_closure("window_resize", move |ctx| {
         let size = ctx.first_arg::<JsObject>()?;
@@ -160,7 +160,6 @@ pub fn create_lifecycle_handle(
             let left = rect.get_named_property::<i32>("left")?;
             let width = rect.get_named_property::<i32>("width")?;
             let height = rect.get_named_property::<i32>("height")?;
-            let app = window_rect_app.borrow();
             let mut event_loop = EVENT.write().unwrap();
 
             let rect = Rect {
@@ -169,9 +168,9 @@ pub fn create_lifecycle_handle(
                 width,
                 height,
             };
-            app.rect.replace(rect);
+            window_rect_app.inner.write().unwrap().rect = rect;
 
-            let rect = app.rect.borrow().clone();
+            let rect = rect.clone();
 
             if let Some(ref mut h) = *event_loop {
                 h(Event::ContentRectChange(ContentRect {
@@ -222,7 +221,7 @@ pub fn create_lifecycle_handle(
     let on_ability_restore_state =
         env.create_function_from_closure("on_ability_restore_state", move |_ctx| {
             let save_loader = SaveLoader {
-                app: on_ability_restore_state_app.clone(),
+                app: &on_ability_restore_state_app,
             };
 
             let mut event_loop = EVENT.write().unwrap();
@@ -236,7 +235,7 @@ pub fn create_lifecycle_handle(
     let on_ability_save_state =
         env.create_function_from_closure("on_ability_save_state", move |_ctx| {
             let save_saver = SaveSaver {
-                app: on_ability_save_state_app.clone(),
+                app: &on_ability_save_state_app,
             };
 
             let mut event_loop = EVENT.write().unwrap();

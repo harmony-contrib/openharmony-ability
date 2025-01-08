@@ -11,8 +11,10 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let f = quote::quote! {
         fn #fn_name(#arg) #block
 
+        pub static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
+            std::sync::LazyLock::new(|| openharmony_ability::OpenHarmonyApp::new());
+
         thread_local! {
-            pub static APP: std::cell::RefCell<openharmony_ability::OpenHarmonyApp> = std::cell::RefCell::new(openharmony_ability::OpenHarmonyApp::new());
             pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
         }
 
@@ -20,20 +22,16 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
         pub fn init(
             ctx: openharmony_ability::napi::CallContext,
         ) -> openharmony_ability::napi::Result<openharmony_ability::ApplicationLifecycle> {
-            let lifecycle = APP.with(|app| {
-                let app_ref = app.borrow();
-                #fn_name((&*app_ref).clone());
-
-                let lifecycle_handle = openharmony_ability::create_lifecycle_handle(ctx, app.clone())?;
-                Ok(lifecycle_handle)
-            });
-            lifecycle
+            #fn_name((*APP).clone());
+            let lifecycle_handle = openharmony_ability::create_lifecycle_handle(ctx, (*APP).clone())?;
+            Ok(lifecycle_handle)
         }
 
         #[openharmony_ability::napi_derive::js_function(2)]
-        pub fn render(ctx: openharmony_ability::napi::CallContext) -> openharmony_ability::napi::Result<openharmony_ability::Render> {
-            let app_ref: std::cell::RefCell<openharmony_ability::OpenHarmonyApp> = APP.with(|app| app.clone());
-            let (root, ret) = openharmony_ability::render(ctx, app_ref.clone())?;
+        pub fn render(
+            ctx: openharmony_ability::napi::CallContext,
+        ) -> openharmony_ability::napi::Result<openharmony_ability::Render> {
+            let (root, ret) = openharmony_ability::render(ctx, (*APP).clone())?;
             ROOT_NODE.replace(Some(root));
             Ok(ret)
         }

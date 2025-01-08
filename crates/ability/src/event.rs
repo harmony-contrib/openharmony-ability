@@ -3,7 +3,7 @@ use std::fmt::{self, Debug, Formatter};
 use crate::{Configuration, ContentRect, InputEvent, IntervalInfo, SaveLoader, SaveSaver, Size};
 
 #[derive(Clone)]
-pub enum Event {
+pub enum Event<'a> {
     /// window stage create event
     /// alias onWindowStageCreate
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonwindowstagecreate
@@ -46,7 +46,7 @@ pub enum Event {
     LostFocus,
     /// window resume
     /// alias WindowStageEventType.RESUMED
-    Resume(SaveLoader),
+    Resume(SaveLoader<'a>),
     /// window pause
     /// alias WindowStageEventType.PAUSED
     Pause,
@@ -57,7 +57,7 @@ pub enum Event {
     /// ability save state event
     /// alias onAbilitySaveState
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitysavestate12
-    SaveState(SaveSaver),
+    SaveState(SaveSaver<'a>),
     /// ability create event
     /// alias onAbilityCreate
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitycreate
@@ -81,7 +81,7 @@ pub enum Event {
     UserEvent,
 }
 
-impl Event {
+impl<'a> Event<'a> {
     pub fn as_str(&self) -> &'static str {
         match self {
             Event::WindowCreate => "WindowCreate",
@@ -108,7 +108,7 @@ impl Event {
     }
 }
 
-impl Debug for Event {
+impl<'a> Debug for Event<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }

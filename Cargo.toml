@@ -6,10 +6,10 @@ resolver = "2"
 openharmony-ability-derive = { version = "0.0.1", path = "crates/derive" }
 openharmony-ability = { version = "0.0.1", path = "crates/ability" }
 
-napi-sys-ohos = { path= "../ohos-rs/crates/sys", features = ["napi8"] }
-napi-ohos = { path= "../ohos-rs/crates/napi" }
-napi-derive-ohos = { path= "../ohos-rs/crates/macro" }
-napi-build-ohos = { path= "../ohos-rs/crates/build" }
+napi-sys-ohos = { version = "1.0", features = ["napi8"] }
+napi-ohos = { version = "1.0" }
+napi-derive-ohos = { version = "1.0" }
+napi-build-ohos = { version = "1.0" }
 
 syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }

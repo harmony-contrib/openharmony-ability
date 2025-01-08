@@ -1,8 +1,6 @@
 use std::{
-    cell::RefCell,
     fmt::Debug,
-    rc::Rc,
-    sync::{atomic::AtomicI64, Arc, LazyLock, RwLock},
+    sync::{atomic::AtomicI64, Arc, LazyLock, Mutex, RwLock},
 };
 
 use ohos_ime_binding::IME;
@@ -18,51 +16,45 @@ static ID: AtomicI64 = AtomicI64::new(0);
 pub static EVENT: LazyLock<Arc<RwLock<Option<Box<dyn Fn(Event) + Sync + Send>>>>> =
     LazyLock::new(|| Arc::new(RwLock::new(None)));
 
+#[derive(Clone)]
+pub struct OpenHarmonyAppInner {
+    pub(crate) ime: IME,
+    pub(crate) raw_window: Option<RawWindow>,
 
-pub struct OpenHarmonyApp {
-    pub(crate) ime: Rc<RefCell<IME>>,
-    pub(crate) raw_window: Rc<RefCell<Option<RawWindow>>>,
-
-    state: Rc<RefCell<Vec<u8>>>,
-    save_state: Rc<RefCell<bool>>,
-    frame_rate: Rc<RefCell<u32>>,
+    state: Vec<u8>,
+    save_state: bool,
+    frame_rate: u32,
     id: i64,
-    pub(crate) helper: Rc<RefCell<Helper>>,
-    pub(crate) configuration: Rc<RefCell<Configuration>>,
-    pub(crate) rect: Rc<RefCell<Rect>>,
+    pub(crate) helper: Helper,
+    pub(crate) configuration: Configuration,
+    pub(crate) rect: Rect,
 }
 
-impl PartialEq for OpenHarmonyApp {
+impl PartialEq for OpenHarmonyAppInner {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
 
-impl Eq for OpenHarmonyApp {}
+impl Eq for OpenHarmonyAppInner {}
 
-impl std::hash::Hash for OpenHarmonyApp {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Rc::as_ptr(&self.ime).hash(state);
-        Rc::as_ptr(&self.raw_window).hash(state);
-        Rc::as_ptr(&self.state).hash(state);
-        Rc::as_ptr(&self.save_state).hash(state);
-        Rc::as_ptr(&self.frame_rate).hash(state);
-    }
+impl std::hash::Hash for OpenHarmonyAppInner {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {}
 }
 
-impl PartialOrd for OpenHarmonyApp {
+impl PartialOrd for OpenHarmonyAppInner {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.id.cmp(&other.id))
     }
 }
 
-impl Ord for OpenHarmonyApp {
+impl Ord for OpenHarmonyAppInner {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.id.cmp(&other.id)
     }
 }
 
-impl Debug for OpenHarmonyApp {
+impl Debug for OpenHarmonyAppInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpenHarmonyApp")
             .field("id", &self.id)
@@ -70,47 +62,47 @@ impl Debug for OpenHarmonyApp {
     }
 }
 
-impl OpenHarmonyApp {
+impl OpenHarmonyAppInner {
     pub fn new() -> Self {
         let ime = IME::new(Default::default());
         let id = ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        OpenHarmonyApp {
-            state: Rc::new(RefCell::new(Vec::new())),
-            raw_window: Rc::new(RefCell::new(None)),
-            save_state: Rc::new(RefCell::new(false)),
-            frame_rate: Rc::new(RefCell::new(60)),
-            helper: Rc::new(RefCell::new(Helper::default())),
-            ime: Rc::new(RefCell::new(ime)),
-            configuration: Rc::new(RefCell::new(Configuration::default())),
-            rect: Rc::new(RefCell::new(Rect::default())),
+        OpenHarmonyAppInner {
+            ime,
+            raw_window: None,
+            state: vec![],
+            save_state: false,
+            frame_rate: 60,
             id,
+            helper: Helper::new(),
+            configuration: Default::default(),
+            rect: Default::default(),
         }
     }
 
     /// load current app state
     pub fn load(&self) -> Option<Vec<u8>> {
-        if *self.save_state.borrow() {
-            Some(self.state.borrow().clone())
+        if self.save_state {
+            Some(self.state.clone())
         } else {
             None
         }
     }
 
     /// save current app state
-    pub fn save(&self, state: Vec<u8>) {
-        self.state.replace(state);
+    pub fn save(&mut self, state: Vec<u8>) {
+        self.state = state;
     }
 
-    pub fn set_frame_rate(&self, frame_rate: u32) {
-        self.frame_rate.replace(frame_rate);
+    pub fn set_frame_rate(&mut self, frame_rate: u32) {
+        self.frame_rate = frame_rate;
     }
 
     pub fn show_keyboard(&self) {
-        self.ime.borrow().show_keyboard();
+        self.ime.show_keyboard();
     }
 
     pub fn hide_keyboard(&self) {
-        self.ime.borrow().hide_keyboard();
+        self.ime.hide_keyboard();
     }
 
     pub fn create_waker(&self) -> OpenHarmonyWaker {
@@ -119,32 +111,23 @@ impl OpenHarmonyApp {
     }
 
     pub fn config(&self) -> Configuration {
-        self.configuration.borrow().clone()
+        self.configuration.clone()
     }
 
     pub fn content_rect(&self) -> Rect {
-        self.rect.borrow().clone()
+        self.rect.clone()
     }
 
     pub fn native_window(&self) -> Option<RawWindow> {
-        self.raw_window.borrow().clone()
+        self.raw_window.clone()
     }
 
     pub fn scale(&self) -> f32 {
-        self.helper.borrow().scale()
+        self.helper.scale()
     }
 
     /// register event loop
     pub fn run_loop<'a, F: Fn(Event) -> () + 'a>(&self, event_handle: F) {
-        let static_handler = unsafe {
-            std::mem::transmute::<
-                Box<dyn Fn(Event) + 'a>,
-                Box<dyn Fn(Event) + 'static + Sync + Send>,
-            >(Box::new(event_handle))
-        };
-
-        let mut guard = EVENT.write().expect("Failed to write EVENT");
-        *guard = Some(static_handler);
 
         // self.event_loop.replace(Some(static_handler));
 
@@ -161,43 +144,135 @@ impl OpenHarmonyApp {
     }
 }
 
-unsafe impl Send for OpenHarmonyApp {}
-unsafe impl Sync for OpenHarmonyApp {}
+#[derive(Debug)]
+pub struct OpenHarmonyApp {
+    pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
+}
 
 impl Clone for OpenHarmonyApp {
     fn clone(&self) -> Self {
-        OpenHarmonyApp {
-            state: Rc::clone(&self.state),
-            raw_window: Rc::clone(&self.raw_window),
-            save_state: Rc::clone(&self.save_state),
-            frame_rate: Rc::clone(&self.frame_rate),
-            ime: Rc::clone(&self.ime),
-            configuration: Rc::clone(&self.configuration),
-            rect: Rc::clone(&self.rect),
-            helper: Rc::clone(&self.helper),
-            id: self.id.clone(),
+        Self {
+            inner: self.inner.clone(),
         }
     }
 }
 
-#[derive(Clone)]
-pub struct SaveSaver {
-    pub(crate) app: RefCell<OpenHarmonyApp>,
+impl PartialEq for OpenHarmonyApp {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
 }
 
-impl SaveSaver {
+impl Eq for OpenHarmonyApp {}
+
+impl std::hash::Hash for OpenHarmonyApp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.inner).hash(state);
+    }
+}
+
+impl PartialOrd for OpenHarmonyApp {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let self_id = self.inner.read().unwrap().id;
+        let other_id = other.inner.read().unwrap().id;
+        Some(self_id.cmp(&other_id))
+    }
+}
+
+impl Ord for OpenHarmonyApp {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let self_id = self.inner.read().unwrap().id;
+        let other_id = other.inner.read().unwrap().id;
+        self_id.cmp(&other_id)
+    }
+}
+
+impl Drop for OpenHarmonyApp {
+    fn drop(&mut self) {
+        println!("drop app");
+    }
+}
+
+impl OpenHarmonyApp {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
+        }
+    }
+
     pub fn save(&self, state: Vec<u8>) {
-        self.app.borrow().save(state);
+        self.inner.write().unwrap().save(state);
+    }
+    pub fn load(&self) -> Option<Vec<u8>> {
+        self.inner.read().unwrap().load()
+    }
+    pub fn set_frame_rate(&self, frame_rate: u32) {
+        self.inner.write().unwrap().set_frame_rate(frame_rate);
+    }
+    pub fn show_keyboard(&self) {
+        self.inner.read().unwrap().show_keyboard();
+    }
+    pub fn hide_keyboard(&self) {
+        self.inner.read().unwrap().hide_keyboard();
+    }
+    pub fn create_waker(&self) -> OpenHarmonyWaker {
+        self.inner.read().unwrap().create_waker()
+    }
+    pub fn config(&self) -> Configuration {
+        self.inner.read().unwrap().config()
+    }
+    pub fn content_rect(&self) -> Rect {
+        self.inner.read().unwrap().content_rect()
+    }
+    pub fn native_window(&self) -> Option<RawWindow> {
+        self.inner.read().unwrap().native_window()
+    }
+    pub fn scale(&self) -> f32 {
+        self.inner.read().unwrap().scale()
+    }
+
+    pub fn run_loop<'a, F: Fn(Event) -> () + 'a>(&self, event_handle: F) {
+        let weak_inner = Arc::downgrade(&self.inner);
+
+        let static_handler = unsafe {
+            std::mem::transmute::<Box<dyn Fn(Event) + 'a>, Box<dyn Fn(Event) + 'static + Sync + Send>>(
+                Box::new(move |event| {
+                    if let Some(inner) = weak_inner.upgrade() {
+                        // Use the inner object safely here
+                        let inner_read = inner.read().unwrap();
+                        // Call the event handler with the event
+                        event_handle(event);
+                    }
+                }),
+            )
+        };
+
+        let mut guard = EVENT.write().expect("Failed to write EVENT");
+        *guard = Some(static_handler);
+    }
+}
+
+unsafe impl Send for OpenHarmonyApp {}
+unsafe impl Sync for OpenHarmonyApp {}
+
+#[derive(Clone)]
+pub struct SaveSaver<'a> {
+    pub(crate) app: &'a OpenHarmonyApp,
+}
+
+impl<'a> SaveSaver<'a> {
+    pub fn save(&self, state: Vec<u8>) {
+        self.app.save(state);
     }
 }
 
 #[derive(Clone)]
-pub struct SaveLoader {
-    pub(crate) app: RefCell<OpenHarmonyApp>,
+pub struct SaveLoader<'a> {
+    pub(crate) app: &'a OpenHarmonyApp,
 }
 
-impl SaveLoader {
+impl<'a> SaveLoader<'a> {
     pub fn load(&self) -> Option<Vec<u8>> {
-        self.app.borrow().load()
+        self.app.load()
     }
 }

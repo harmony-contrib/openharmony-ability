@@ -1,5 +1,3 @@
-use std::{cell::RefCell, rc::Rc};
-
 use napi_ohos::{threadsafe_function::ThreadsafeFunctionCallMode, Status};
 use ohos_display_binding::default_display_scaled_density;
 
@@ -10,7 +8,7 @@ pub use ark::*;
 
 pub(crate) struct Helper {
     #[allow(dead_code)]
-    pub(crate) ark: Rc<RefCell<Option<ArkHelper>>>,
+    pub(crate) ark: Option<ArkHelper>,
 }
 
 impl Clone for Helper {
@@ -23,17 +21,13 @@ impl Clone for Helper {
 
 impl Default for Helper {
     fn default() -> Self {
-        Helper {
-            ark: Rc::new(RefCell::new(None)),
-        }
+        Helper { ark: None }
     }
 }
 
 impl Helper {
     pub fn new() -> Self {
-        Helper {
-            ark: Rc::new(RefCell::new(None)),
-        }
+        Helper { ark: None }
     }
 
     pub fn scale(&self) -> f32 {
@@ -42,7 +36,7 @@ impl Helper {
 
     /// exit current app
     pub fn exit(&self, code: u32) -> i32 {
-        if let Some(ark) = self.ark.borrow().as_ref() {
+        if let Some(ark) = self.ark.as_ref() {
             let ret = ark
                 .exit
                 .call(Ok(code), ThreadsafeFunctionCallMode::NonBlocking);
