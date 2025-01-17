@@ -4,6 +4,15 @@
 
 `openharmony-ability` is a crate to manage openharmony applcation's activity with rust, be similar to [android-activity](https://github.com/rust-mobile/android-activity).
 
+## Architecture
+
+The architecture of OpenHarmony is similar to Node.js, where we need to manage the application's lifecycle via callbacks. Hence, there are a few key points to keep in mind.
+
+1. Don't block the main thread as it can lead to application freezing and crashing.
+2. openharmony-ability's run_loop doesn't retain the resource and ownership, so if you create a new resource, you should leak it to prevent NULL pointer.
+
+![Architecture](/fixtures/openharmony-ability.png)
+
 ## Usage
 
 1. use `ohrs` to init project and add `openharmony-ability` dependencies.
