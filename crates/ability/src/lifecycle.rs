@@ -5,7 +5,7 @@ use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
 
 use crate::{
     ArkHelper, ArkTSHelper, ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader, SaveSaver, Size,
-    StageEventType, EVENT, WAKER,
+    StageEventType, WAKER,
 };
 
 #[napi(object)]
@@ -45,11 +45,12 @@ pub fn create_lifecycle_handle(
 
     app.inner.write().unwrap().helper.ark = Some(helper);
 
+    let waker_app = app.clone();
     let waker: Function<'_, (), ()> = env.create_function_from_closure("waker", move |_ctx| {
-        let mut event_loop = EVENT.write().unwrap();
-        if let Some(ref mut h) = *event_loop {
+        if let Some(ref mut h) = *waker_app.event_loop.borrow_mut() {
             h(Event::UserEvent)
         }
+
         Ok(())
     })?;
 
@@ -64,10 +65,10 @@ pub fn create_lifecycle_handle(
 
     guard.replace(Arc::new(tsfn));
 
+    let on_memory_level_app = app.clone();
     let on_memory_level: Function<'_, i32, ()> =
         env.create_function_from_closure("memory_level", move |_ctx| {
-            let mut event_loop = EVENT.write().unwrap();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *on_memory_level_app.event_loop.borrow_mut() {
                 h(Event::LowMemory)
             }
             Ok(())
@@ -88,7 +89,6 @@ pub fn create_lifecycle_handle(
             let font_weight_scale = configuration.get_named_property::<f64>("fontWeightScale")?;
             let mcc = configuration.get_named_property::<String>("mcc")?;
             let mnc = configuration.get_named_property::<String>("mnc")?;
-            let mut event_loop = EVENT.write().unwrap();
 
             let configuration = crate::Configuration {
                 language,
@@ -108,7 +108,7 @@ pub fn create_lifecycle_handle(
                 .unwrap()
                 .configuration = configuration.clone();
             let conf = configuration.clone();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *configuration_updated_app.event_loop.borrow_mut() {
                 h(Event::ConfigChanged(conf))
             }
             Ok(())
@@ -119,8 +119,7 @@ pub fn create_lifecycle_handle(
         env.create_function_from_closure("window_stage_event", move |ctx| {
             let event_type = ctx.first_arg::<i32>()?;
 
-            let mut event_loop = EVENT.write().unwrap();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *window_stage_event_app.event_loop.borrow_mut() {
                 let state_event = StageEventType::from(event_type);
                 let e = match state_event {
                     StageEventType::Shown => Event::Start,
@@ -137,20 +136,19 @@ pub fn create_lifecycle_handle(
             Ok(())
         })?;
 
+    let window_resize_app = app.clone();
     let window_resize = env.create_function_from_closure("window_resize", move |ctx| {
         let size = ctx.first_arg::<JsObject>()?;
         let width = size.get_named_property::<i32>("width")?;
         let height = size.get_named_property::<i32>("height")?;
 
-        let mut event_loop = EVENT.write().unwrap();
-        if let Some(ref mut h) = *event_loop {
+        if let Some(ref mut h) = *window_resize_app.event_loop.borrow_mut() {
             h(Event::WindowResize(Size { width, height }))
         }
         Ok(())
     })?;
 
     let window_rect_app = app.clone();
-
     let window_rect_change =
         env.create_function_from_closure("window_rect_change", move |ctx| {
             let options = ctx.first_arg::<JsObject>()?;
@@ -160,7 +158,6 @@ pub fn create_lifecycle_handle(
             let left = rect.get_named_property::<i32>("left")?;
             let width = rect.get_named_property::<i32>("width")?;
             let height = rect.get_named_property::<i32>("height")?;
-            let mut event_loop = EVENT.write().unwrap();
 
             let rect = Rect {
                 top,
@@ -172,7 +169,7 @@ pub fn create_lifecycle_handle(
 
             let rect = rect.clone();
 
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *window_rect_app.event_loop.borrow_mut() {
                 h(Event::ContentRectChange(ContentRect {
                     reason: reason.into(),
                     rect,
@@ -181,36 +178,36 @@ pub fn create_lifecycle_handle(
             Ok(())
         })?;
 
+    let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
         env.create_function_from_closure("on_ability_create", move |_ctx| {
-            let mut event_loop = EVENT.write().unwrap();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *on_window_stage_create_app.event_loop.borrow_mut() {
                 h(Event::WindowCreate)
             }
             Ok(())
         })?;
 
+    let on_window_stage_destroy_app = app.clone();
     let on_window_stage_destroy =
         env.create_function_from_closure("on_window_stage_destroy", move |_ctx| {
-            let mut event_loop = EVENT.write().unwrap();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *on_window_stage_destroy_app.event_loop.borrow_mut() {
                 h(Event::WindowDestroy)
             }
             Ok(())
         })?;
 
-    let on_ability_create = env.create_function_from_closure("on_ability_create", |_ctx| {
-        let mut event_loop = EVENT.write().unwrap();
-        if let Some(ref mut h) = *event_loop {
+    let on_ability_create_app = app.clone();
+    let on_ability_create = env.create_function_from_closure("on_ability_create", move |_ctx| {
+        if let Some(ref mut h) = *on_ability_create_app.event_loop.borrow_mut() {
             h(Event::Create)
         }
         Ok(())
     })?;
 
+    let on_ability_destroy_app = app.clone();
     let on_ability_destroy =
         env.create_function_from_closure("on_ability_destroy", move |_ctx| {
-            let mut event_loop = EVENT.write().unwrap();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *on_ability_destroy_app.event_loop.borrow_mut() {
                 h(Event::Destroy)
             }
             Ok(())
@@ -224,8 +221,7 @@ pub fn create_lifecycle_handle(
                 app: &on_ability_restore_state_app,
             };
 
-            let mut event_loop = EVENT.write().unwrap();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *on_ability_restore_state_app.event_loop.borrow_mut() {
                 h(Event::Resume(save_loader))
             }
             Ok(())
@@ -238,8 +234,7 @@ pub fn create_lifecycle_handle(
                 app: &on_ability_save_state_app,
             };
 
-            let mut event_loop = EVENT.write().unwrap();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *on_ability_save_state_app.event_loop.borrow_mut() {
                 h(Event::SaveState(save_saver))
             }
             Ok(())

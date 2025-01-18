@@ -1,6 +1,10 @@
 use std::{
+    cell::RefCell,
     fmt::Debug,
-    sync::{atomic::AtomicI64, Arc, LazyLock, Mutex, RwLock},
+    sync::{
+        atomic::{AtomicBool, AtomicI64},
+        Arc, RwLock,
+    },
 };
 
 use ohos_ime_binding::IME;
@@ -13,8 +17,7 @@ use crate::{
 
 static ID: AtomicI64 = AtomicI64::new(0);
 
-pub static EVENT: LazyLock<Arc<RwLock<Option<Box<dyn Fn(Event) + Sync + Send>>>>> =
-    LazyLock::new(|| Arc::new(RwLock::new(None)));
+pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
 pub struct OpenHarmonyAppInner {
@@ -144,16 +147,25 @@ impl OpenHarmonyAppInner {
     }
 }
 
-#[derive(Debug)]
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
+    pub(crate) event_loop: Arc<RefCell<Option<Box<dyn Fn(Event) + Sync + Send>>>>,
 }
 
 impl Clone for OpenHarmonyApp {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
+            event_loop: self.event_loop.clone(),
         }
+    }
+}
+
+impl Debug for OpenHarmonyApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenHarmonyApp")
+            .field("id", &self.inner.read().unwrap().id)
+            .finish()
     }
 }
 
@@ -197,6 +209,7 @@ impl OpenHarmonyApp {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
+            event_loop: Arc::new(RefCell::new(None)),
         }
     }
 
@@ -232,23 +245,20 @@ impl OpenHarmonyApp {
     }
 
     pub fn run_loop<'a, F: Fn(Event) -> () + 'a>(&self, event_handle: F) {
-        let weak_inner = Arc::downgrade(&self.inner);
+        if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
 
         let static_handler = unsafe {
             std::mem::transmute::<Box<dyn Fn(Event) + 'a>, Box<dyn Fn(Event) + 'static + Sync + Send>>(
                 Box::new(move |event| {
-                    if let Some(inner) = weak_inner.upgrade() {
-                        // Use the inner object safely here
-                        let inner_read = inner.read().unwrap();
-                        // Call the event handler with the event
-                        event_handle(event);
-                    }
+                    event_handle(event);
                 }),
             )
         };
 
-        let mut guard = EVENT.write().expect("Failed to write EVENT");
-        *guard = Some(static_handler);
+        self.event_loop.replace(Some(static_handler));
+        HAS_EVENT.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

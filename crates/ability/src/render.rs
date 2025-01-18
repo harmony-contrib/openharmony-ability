@@ -5,7 +5,7 @@ use napi_ohos::{
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 
-use crate::{Event, InputEvent, IntervalInfo, OpenHarmonyApp, EVENT};
+use crate::{Event, InputEvent, IntervalInfo, OpenHarmonyApp};
 
 #[napi(object)]
 pub struct Render<'a> {
@@ -26,30 +26,30 @@ pub fn render(ctx: CallContext, app: OpenHarmonyApp) -> Result<(RootNode, Render
 
     let xc = xcomponent.clone();
 
+    let on_surface_created_app = app.clone();
     xcomponent.on_surface_created(move |_, _| {
         {
             let raw_window = xc.native_window();
-            app.inner.write().unwrap().raw_window = raw_window;
+            on_surface_created_app.inner.write().unwrap().raw_window = raw_window;
         }
         tsfn.call((), ThreadsafeFunctionCallMode::NonBlocking);
-        let mut event_loop = EVENT.write().unwrap();
-        if let Some(ref mut h) = *event_loop {
+        if let Some(ref mut h) = *on_surface_created_app.event_loop.borrow_mut() {
             h(Event::SurfaceCreate)
         }
         Ok(())
     });
 
+    let on_surface_destroyed_app = app.clone();
     xcomponent.on_surface_destroyed(move |_, _| {
-        let mut event_loop = EVENT.write().unwrap();
-        if let Some(ref mut h) = *event_loop {
+        if let Some(ref mut h) = *on_surface_destroyed_app.event_loop.borrow_mut() {
             h(Event::SurfaceDestroy)
         }
         Ok(())
     });
 
+    let on_touch_event_app = app.clone();
     xcomponent.on_touch_event(move |_, _, data| {
-        let mut event_loop = EVENT.write().unwrap();
-        if let Some(ref mut h) = *event_loop {
+        if let Some(ref mut h) = *on_touch_event_app.event_loop.borrow_mut() {
             h(Event::Input(InputEvent::TouchEvent(data)))
         }
         Ok(())
@@ -57,9 +57,9 @@ pub fn render(ctx: CallContext, app: OpenHarmonyApp) -> Result<(RootNode, Render
 
     xcomponent.register_callback()?;
 
+    let on_key_event_app = app.clone();
     xcomponent.on_key_event(move |_, _, data| {
-        let mut event_loop = EVENT.write().unwrap();
-        if let Some(ref mut h) = *event_loop {
+        if let Some(ref mut h) = *on_key_event_app.event_loop.borrow_mut() {
             h(Event::Input(InputEvent::KeyEvent(data)))
         }
         Ok(())
@@ -79,6 +79,7 @@ pub fn render(ctx: CallContext, app: OpenHarmonyApp) -> Result<(RootNode, Render
     root.mount(xcomponent_native)
         .map_err(|e| Error::from_reason(e.reason))?;
 
+    let on_frame_app = app.clone();
     let on_frame = ctx
         .env
         .create_function_from_closure("on_frame", move |ctx| {
@@ -86,8 +87,7 @@ pub fn render(ctx: CallContext, app: OpenHarmonyApp) -> Result<(RootNode, Render
             let time = info.get_named_property::<i64>("timestamp")?;
             let target_time = info.get_named_property::<i64>("targetTimestamp")?;
 
-            let mut event_loop = EVENT.write().unwrap();
-            if let Some(ref mut h) = *event_loop {
+            if let Some(ref mut h) = *on_frame_app.event_loop.borrow_mut() {
                 h(Event::WindowRedraw(IntervalInfo {
                     time_stamp: time,
                     target_time_stamp: target_time,
