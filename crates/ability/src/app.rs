@@ -42,7 +42,9 @@ impl PartialEq for OpenHarmonyAppInner {
 impl Eq for OpenHarmonyAppInner {}
 
 impl std::hash::Hash for OpenHarmonyAppInner {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {}
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
 }
 
 impl PartialOrd for OpenHarmonyAppInner {
@@ -128,28 +130,11 @@ impl OpenHarmonyAppInner {
     pub fn scale(&self) -> f32 {
         self.helper.scale()
     }
-
-    /// register event loop
-    pub fn run_loop<'a, F: Fn(Event) -> () + 'a>(&self, event_handle: F) {
-
-        // self.event_loop.replace(Some(static_handler));
-
-        // let e = self.event_loop.clone();
-
-        // let ime = self.ime.borrow();
-        // ime.insert_text(move |data| {
-        //     if let Some(ref mut h) = *e.borrow_mut() {
-        //         h(Event::Input(InputEvent::TextInputEvent(
-        //             TextInputEventData { text: data },
-        //         )));
-        //     }
-        // });
-    }
 }
 
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
-    pub(crate) event_loop: Arc<RefCell<Option<Box<dyn Fn(Event) + Sync + Send>>>>,
+    pub(crate) event_loop: Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>,
 }
 
 impl Clone for OpenHarmonyApp {
@@ -244,13 +229,13 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().scale()
     }
 
-    pub fn run_loop<'a, F: Fn(Event) -> () + 'a>(&self, event_handle: F) {
+    pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, mut event_handle: F) {
         if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
             return;
         }
 
         let static_handler = unsafe {
-            std::mem::transmute::<Box<dyn Fn(Event) + 'a>, Box<dyn Fn(Event) + 'static + Sync + Send>>(
+            std::mem::transmute::<Box<dyn FnMut(Event) + 'a>, Box<dyn FnMut(Event) + 'static + Sync + Send>>(
                 Box::new(move |event| {
                     event_handle(event);
                 }),

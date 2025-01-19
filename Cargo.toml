@@ -15,9 +15,7 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-
-ohos-arkui-binding = { path = "../ohos-native-bindings/crates/arkui" }
-ohos-xcomponent-binding = { path = "../ohos-native-bindings/crates/xcomponent" }
-ohos-vsync-binding = { path = "../ohos-native-bindings/crates/vsync" }
-ohos-ime-binding = { path = "../ohos-native-bindings/crates/ime" }
-ohos-display-binding = { path = "../ohos-native-bindings/crates/display" }
+ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "master" }
+ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "master" }
+ohos-ime-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "master" }
+ohos-display-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "master" }
