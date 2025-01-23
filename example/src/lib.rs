@@ -1,10 +1,23 @@
 use ohos_hilog_binding::hilog_info;
-use openharmony_ability::OpenHarmonyApp;
+use openharmony_ability::{Event, InputEvent, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
 
 #[ability]
 fn openharmony_app(app: OpenHarmonyApp) {
-    app.run_loop(|types| {
-        hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()).as_str());
+    app.run_loop(|types| match types {
+        Event::Input(k) => match k {
+            InputEvent::TextInputEvent(s) => {
+                hilog_info!(format!("ohos-rs macro input_text: {:?}", s).as_str());
+            }
+            _ => {
+                hilog_info!(format!("ohos-rs macro input:").as_str());
+            }
+        },
+        Event::WindowRedraw(_) => {
+            
+        },
+        _ => {
+            hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()).as_str());
+        }
     });
 }

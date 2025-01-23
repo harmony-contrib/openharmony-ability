@@ -3,17 +3,14 @@ use std::{
     fmt::Debug,
     sync::{
         atomic::{AtomicBool, AtomicI64},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
 };
 
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
-use crate::{
-    helper::Helper, Configuration, Event, InputEvent, OpenHarmonyWaker, Rect, TextInputEventData,
-    WAKER,
-};
+use crate::{helper::Helper, Configuration, Event, OpenHarmonyWaker, Rect, WAKER};
 
 static ID: AtomicI64 = AtomicI64::new(0);
 
@@ -21,7 +18,6 @@ pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone)]
 pub struct OpenHarmonyAppInner {
-    pub(crate) ime: IME,
     pub(crate) raw_window: Option<RawWindow>,
 
     state: Vec<u8>,
@@ -69,10 +65,8 @@ impl Debug for OpenHarmonyAppInner {
 
 impl OpenHarmonyAppInner {
     pub fn new() -> Self {
-        let ime = IME::new(Default::default());
         let id = ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         OpenHarmonyAppInner {
-            ime,
             raw_window: None,
             state: vec![],
             save_state: false,
@@ -102,14 +96,6 @@ impl OpenHarmonyAppInner {
         self.frame_rate = frame_rate;
     }
 
-    pub fn show_keyboard(&self) {
-        self.ime.show_keyboard();
-    }
-
-    pub fn hide_keyboard(&self) {
-        self.ime.hide_keyboard();
-    }
-
     pub fn create_waker(&self) -> OpenHarmonyWaker {
         let guard = (&*WAKER).read().expect("Failed to read WAKER");
         OpenHarmonyWaker::new((*guard).clone())
@@ -132,18 +118,12 @@ impl OpenHarmonyAppInner {
     }
 }
 
+#[derive(Clone)]
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>,
-}
-
-impl Clone for OpenHarmonyApp {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            event_loop: self.event_loop.clone(),
-        }
-    }
+    pub(crate) ime: Arc<RefCell<Option<IME>>>,
+    is_keyboard_show: Arc<Mutex<bool>>,
 }
 
 impl Debug for OpenHarmonyApp {
@@ -184,17 +164,13 @@ impl Ord for OpenHarmonyApp {
     }
 }
 
-impl Drop for OpenHarmonyApp {
-    fn drop(&mut self) {
-        println!("drop app");
-    }
-}
-
 impl OpenHarmonyApp {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
             event_loop: Arc::new(RefCell::new(None)),
+            ime: Arc::new(RefCell::new(None)),
+            is_keyboard_show: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -208,10 +184,22 @@ impl OpenHarmonyApp {
         self.inner.write().unwrap().set_frame_rate(frame_rate);
     }
     pub fn show_keyboard(&self) {
-        self.inner.read().unwrap().show_keyboard();
+        let _guard = self
+            .is_keyboard_show
+            .lock()
+            .expect("Failed to lock is_keyboard_show");
+        if let Some(ime) = self.ime.borrow().as_ref() {
+            ime.show_keyboard();
+        }
     }
     pub fn hide_keyboard(&self) {
-        self.inner.read().unwrap().hide_keyboard();
+        let _guard = self
+            .is_keyboard_show
+            .lock()
+            .expect("Failed to lock is_keyboard_show");
+        if let Some(ime) = self.ime.borrow().as_ref() {
+            ime.hide_keyboard();
+        }
     }
     pub fn create_waker(&self) -> OpenHarmonyWaker {
         self.inner.read().unwrap().create_waker()
@@ -235,11 +223,12 @@ impl OpenHarmonyApp {
         }
 
         let static_handler = unsafe {
-            std::mem::transmute::<Box<dyn FnMut(Event) + 'a>, Box<dyn FnMut(Event) + 'static + Sync + Send>>(
-                Box::new(move |event| {
-                    event_handle(event);
-                }),
-            )
+            std::mem::transmute::<
+                Box<dyn FnMut(Event) + 'a>,
+                Box<dyn FnMut(Event) + 'static + Sync + Send>,
+            >(Box::new(move |event| {
+                event_handle(event);
+            }))
         };
 
         self.event_loop.replace(Some(static_handler));

@@ -4,8 +4,9 @@ use napi_ohos::{
     JsObject, Result,
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
+use ohos_ime_binding::IME;
 
-use crate::{Event, InputEvent, IntervalInfo, OpenHarmonyApp};
+use crate::{Event, InputEvent, IntervalInfo, OpenHarmonyApp, TextInputEventData};
 
 #[napi(object)]
 pub struct Render<'a> {
@@ -31,6 +32,17 @@ pub fn render(ctx: CallContext, app: OpenHarmonyApp) -> Result<(RootNode, Render
         {
             let raw_window = xc.native_window();
             on_surface_created_app.inner.write().unwrap().raw_window = raw_window;
+            // We need to create IME instance when app is foucsed
+            let ime = IME::new(Default::default());
+            let insert_text_app = on_surface_created_app.clone();
+            ime.insert_text(move |s| {
+                if let Some(ref mut h) = *insert_text_app.event_loop.borrow_mut() {
+                    h(Event::Input(InputEvent::TextInputEvent(
+                        TextInputEventData { text: s },
+                    )))
+                }
+            });
+            on_surface_created_app.ime.replace(Some(ime));
         }
         tsfn.call((), ThreadsafeFunctionCallMode::NonBlocking);
         if let Some(ref mut h) = *on_surface_created_app.event_loop.borrow_mut() {

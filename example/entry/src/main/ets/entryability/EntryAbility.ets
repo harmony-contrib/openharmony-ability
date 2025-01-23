@@ -3,7 +3,7 @@ import Want from '@ohos.app.ability.Want'
 import { AbilityConstant } from '@kit.AbilityKit';
 
 export default class EntryAbility extends RustAbility {
-  public moduleName: string = "winit_ohos"
+  public moduleName: string = "example"
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     super.onCreate(want, launchParam);

@@ -12,12 +12,14 @@ struct Index {
   private uiContext = getContext(this) as common.UIAbilityContext;
   private render: Render | null = null;
   private displaySyncInstance = displaySync.create();
+  private nativeModule: ESObject;
 
   @LocalStorageLink("moduleName") name: string = "";
 
   async aboutToAppear(): Promise<void> {
     const moduleName = `lib${this.name}.so`;
     const module: ESObject = await import(moduleName);
+    this.nativeModule = module.default;
     this.render = module.default.render(this.rootSlot, () => {
       // make sure redraw after surface is created
       this.displaySyncInstance.on("frame", this.render!.onFrame);
