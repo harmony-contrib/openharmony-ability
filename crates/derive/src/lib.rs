@@ -36,15 +36,6 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
             Ok(ret)
         }
 
-        #[openharmony_ability::napi_derive::js_function(2)]
-        pub fn show_keyboard(
-            ctx: openharmony_ability::napi::CallContext,
-        ) -> openharmony_ability::napi::Result<()> {
-            let app = &*APP;
-            app.show_keyboard();
-            Ok(())
-        }
-
         #[openharmony_ability::napi_derive::module_exports]
         fn module_export_init(
             mut exports: openharmony_ability::napi::JsObject,
@@ -52,7 +43,6 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
         ) -> openharmony_ability::napi::Result<()> {
             exports.create_named_method("init", init)?;
             exports.create_named_method("render", render)?;
-            exports.create_named_method("show_keyboard", show_keyboard)?;
             Ok(())
         }
     };

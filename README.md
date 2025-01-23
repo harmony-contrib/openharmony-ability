@@ -2,7 +2,7 @@
 
 > This project is in progress, and the API is not stable.
 
-`openharmony-ability` is a crate to manage openharmony applcation's activity with rust, be similar to [android-activity](https://github.com/rust-mobile/android-activity).
+`openharmony-ability` is a crate to manage OpenHarmony application's activity with rust, be similar to [android-activity](https://github.com/rust-mobile/android-activity).
 
 ## Architecture
 
@@ -12,6 +12,22 @@ The architecture of OpenHarmony is similar to Node.js, where we need to manage t
 2. openharmony-ability's run_loop doesn't retain the resource and ownership, so if you create a new resource, you should leak it to prevent NULL pointer.
 
 ![Architecture](/fixtures/openharmony-ability.png)
+
+We provide some packages or crates to help you develop OpenHarmony application with Rust.
+
+### ArkTS
+
+We need a entry-point to start the application, and we use ArkTS to manage the application's lifecycle.
+
+- @ohos-rs/ability
+  All of ability need to extend `RustAbility` and all lifecycle need to call `super.xx` to make sure the ability can work normally.
+
+### Rust
+- openharmony-ability
+  Basic crate to manage the application's lifecycle.
+
+- openharmony-ability-derive
+  Macro to generate the ability's implementation.
 
 ## Usage
 
@@ -55,6 +71,7 @@ The architecture of OpenHarmony is similar to Node.js, where we need to manage t
        want: Want,
        launchParam: AbilityConstant.LaunchParam
      ): Promise<void> {
+       // Note: you should call super.onCreate to make sure the ability can work normally.
        super.onCreate(want, launchParam);
      }
    }
@@ -65,3 +82,8 @@ The architecture of OpenHarmony is similar to Node.js, where we need to manage t
 5. Build your rust project and copy the dynamic library to (Open-)Harmony(Next) project.
 
 6. Now, you can enjoy it.
+
+
+## Example
+
+See example with [example](./example/src/lib.rs)

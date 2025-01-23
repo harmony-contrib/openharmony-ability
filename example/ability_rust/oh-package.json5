@@ -1,9 +1,9 @@
 {
   "name": "@ohos-rs/ability",
-  "version": "1.0.0",
-  "description": "Please describe the basic information.",
+  "version": "0.0.1",
+  "description": "Adaptor for OpenHarmony/HarmonyNext Application with Rust",
   "main": "index.ets",
-  "author": "",
+  "author": "richerfu",
   "license": "Apache-2.0",
   "dependencies": {
     "libability_rust.so": "file:./src/main/cpp/types/libability_rust"
