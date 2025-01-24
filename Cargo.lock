@@ -306,7 +306,6 @@ dependencies = [
  "napi-ohos",
  "ohos-arkui-binding",
  "ohos-display-binding",
- "ohos-hilog-binding",
  "ohos-ime-binding",
  "ohos-xcomponent-binding",
 ]
