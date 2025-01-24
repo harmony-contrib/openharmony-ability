@@ -6,3 +6,4 @@
 *.har
 package/src/main/ets
 package/libs
+/dist
