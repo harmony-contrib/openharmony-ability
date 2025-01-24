@@ -58,7 +58,13 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
 
    > Note: `ohos_hilog_binding` is a optional dependency and you can add or remove it.
 
-3. Add `@ohos-rs/ability` to your `(Open-)Harmony(Next)` project and change the `EntryAbility.ets` file to the follow code:
+3. Add `@ohos-rs/ability` to your `OpenHarmony/HarmonyNext` project.
+
+   ```bash
+   ohpm install @ohos-rs/ability
+   ```
+
+4. change the `EntryAbility.ets` file to the follow code:
 
    ```ts
    import { RustAbility } from "@ohos-rs/ability";
@@ -78,11 +84,11 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
    }
    ```
 
-4. Change the `moduleName` to your rust project name. For example, we need to change it with `hello` in this project.
+5. Change the `moduleName` to your rust project name. For example, we need to change it with `hello` in this project.
 
-5. Build your rust project and copy the dynamic library to (Open-)Harmony(Next) project.
+6. Build your rust project and copy the dynamic library to (Open-)Harmony(Next) project.
 
-6. Now, you can enjoy it.
+7. Now, you can enjoy it.
 
 ## Example
 

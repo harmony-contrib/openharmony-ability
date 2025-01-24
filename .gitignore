@@ -3,3 +3,6 @@
 .DS_Store
 .vscode
 *.so
+*.har
+package/src/main/ets
+package/libs
