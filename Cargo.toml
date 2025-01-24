@@ -15,7 +15,7 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "master" }
-ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "master" }
-ohos-ime-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "master" }
-ohos-display-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", branch = "master" }
+ohos-arkui-binding = { version = "0.0.1" }
+ohos-xcomponent-binding = { version = "0.0.3" }
+ohos-ime-binding = { version = "0.0.1" }
+ohos-display-binding = { version = "0.0.1" }

@@ -73,18 +73,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "enum_macro"
-version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
-dependencies = [
- "convert_case",
- "proc-macro2",
- "quote",
- "regex",
- "syn",
-]
-
-[[package]]
 name = "example"
 version = "0.1.0"
 dependencies = [
@@ -199,21 +187,23 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-binding"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68212424b93104f63d99cdfa0a40214b9b4911e9ad7639aa7c96648dad809bb8"
 dependencies = [
  "bitflags",
- "enum_macro",
  "napi-ohos",
  "napi-sys-ohos",
  "ohos-arkui-sys",
  "ohos-xcomponent-binding",
  "ohos-xcomponent-sys",
+ "ohos_enum_macro",
 ]
 
 [[package]]
 name = "ohos-arkui-sys"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a19176486bbe46d33830aca4213b07bb46c745200118e57106639db4962e1c3"
 dependencies = [
  "napi-sys-ohos",
 ]
@@ -221,16 +211,18 @@ dependencies = [
 [[package]]
 name = "ohos-display-binding"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "157fe09232fd0af55ed9207d30b47a5f5ff7f84a0673a3b47f65acb7bbc9b8a9"
 dependencies = [
- "enum_macro",
  "ohos-display-sys",
+ "ohos_enum_macro",
 ]
 
 [[package]]
 name = "ohos-display-sys"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe9e1bba4d94159d0a65f1b4e748c148d4bce7930912c424522693f1837dad77"
 
 [[package]]
 name = "ohos-hilog-binding"
@@ -250,37 +242,54 @@ checksum = "ed07615005d0f8d7bcf901f89c8ff4870666a9bdb00382f588af383f40c160b7"
 [[package]]
 name = "ohos-ime-binding"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "171f89885fb438a88071f85136b92d96121c66bb8c829c6317da0b32215c812a"
 dependencies = [
- "enum_macro",
  "ohos-input-method-sys",
+ "ohos_enum_macro",
 ]
 
 [[package]]
 name = "ohos-input-method-sys"
 version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e219fd916dd23f2bc01ffe408563c14a8fb8c516e23a0a3803723199452202fd"
 
 [[package]]
 name = "ohos-xcomponent-binding"
-version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5069df7da4e9e9a25a1ff7080993b7a9b52cc2f08bb0abc0e1eee1ae7eb70548"
 dependencies = [
- "enum_macro",
  "napi-derive-ohos",
  "napi-ohos",
  "napi-sys-ohos",
  "ohos-display-binding",
  "ohos-xcomponent-sys",
+ "ohos_enum_macro",
  "raw-window-handle",
 ]
 
 [[package]]
 name = "ohos-xcomponent-sys"
-version = "0.0.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?branch=master#6a21f083c20bd939ec590903bc6995ff7202e9d3"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5613209329ff61bc8695871ef985d57fc59ea4d55263e2c2395d8810d063575e"
 dependencies = [
  "ohos-arkui-sys",
+]
+
+[[package]]
+name = "ohos_enum_macro"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0ee769776099c824423d1686e21b5fd13b464d374d60f7cc25c48c1c836ede1"
+dependencies = [
+ "convert_case",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn",
 ]
 
 [[package]]
