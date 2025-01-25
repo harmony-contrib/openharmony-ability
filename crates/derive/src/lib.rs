@@ -9,6 +9,9 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let arg = &ast.sig.inputs;
 
     let f = quote::quote! {
+        // Auto import avoid add napi_ohos as project dependence
+        use openharmony_ability::napi as napi_ohos;
+
         fn #fn_name(#arg) #block
 
         pub static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
