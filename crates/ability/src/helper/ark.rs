@@ -6,12 +6,12 @@ use napi_ohos::{bindgen_prelude::Function, threadsafe_function::ThreadsafeFuncti
 // Generates a JavaScript object that can be passed from ArkTS
 #[napi(object)]
 pub struct ArkTSHelper<'a> {
-    pub exit: Function<'a, u32, ()>,
+    pub exit: Function<'a, i32, ()>,
 }
 
 // Inner helper struct
 pub struct ArkHelper {
-    pub exit: Arc<ThreadsafeFunction<u32, ()>>,
+    pub exit: Arc<ThreadsafeFunction<i32, ()>>,
 }
 
 impl ArkHelper {
