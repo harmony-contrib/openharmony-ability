@@ -116,6 +116,10 @@ impl OpenHarmonyAppInner {
     pub fn scale(&self) -> f32 {
         self.helper.scale()
     }
+
+    pub fn exit(&self, code: i32) {
+        self.helper.exit(code);
+    }
 }
 
 #[derive(Clone)]
@@ -213,8 +217,15 @@ impl OpenHarmonyApp {
     pub fn native_window(&self) -> Option<RawWindow> {
         self.inner.read().unwrap().native_window()
     }
+
+    /// Get current app scale
     pub fn scale(&self) -> f32 {
         self.inner.read().unwrap().scale()
+    }
+
+    /// Exit current app with code
+    pub fn exit(&self, code: i32) {
+        self.inner.read().unwrap().exit(code);
     }
 
     pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, mut event_handle: F) {

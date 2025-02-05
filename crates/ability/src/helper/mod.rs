@@ -35,7 +35,7 @@ impl Helper {
     }
 
     /// exit current app
-    pub fn exit(&self, code: u32) -> i32 {
+    pub fn exit(&self, code: i32) -> i32 {
         if let Some(ark) = self.ark.as_ref() {
             let ret = ark
                 .exit
