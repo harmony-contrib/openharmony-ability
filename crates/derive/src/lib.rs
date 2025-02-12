@@ -9,44 +9,35 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let arg = &ast.sig.inputs;
 
     let f = quote::quote! {
-        // Auto import avoid add napi_ohos as project dependence
-        use openharmony_ability::napi as napi_ohos;
-
         fn #fn_name(#arg) #block
 
-        pub static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
-            std::sync::LazyLock::new(|| openharmony_ability::OpenHarmonyApp::new());
-
+        static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
+        std::sync::LazyLock::new(|| openharmony_ability::OpenHarmonyApp::new());
+    
         thread_local! {
             pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
         }
-
-        #[openharmony_ability::napi_derive::js_function(1)]
-        pub fn init(
-            ctx: openharmony_ability::napi::CallContext,
-        ) -> openharmony_ability::napi::Result<openharmony_ability::ApplicationLifecycle> {
+        
+        #[openharmony_ability::napi_derive::napi]
+        pub fn init<'a>(
+            env: &'a openharmony_ability::napi::Env,
+            helper: openharmony_ability::ArkTSHelper,
+        ) -> openharmony_ability::napi::Result<openharmony_ability::ApplicationLifecycle<'a>> {
+            let lifecycle_handle =
+                openharmony_ability::create_lifecycle_handle(env, helper, (*APP).clone())?;
             #fn_name((*APP).clone());
-            let lifecycle_handle = openharmony_ability::create_lifecycle_handle(ctx, (*APP).clone())?;
             Ok(lifecycle_handle)
         }
-
-        #[openharmony_ability::napi_derive::js_function(2)]
-        pub fn render(
-            ctx: openharmony_ability::napi::CallContext,
-        ) -> openharmony_ability::napi::Result<openharmony_ability::Render> {
-            let (root, ret) = openharmony_ability::render(ctx, (*APP).clone())?;
+        
+        #[openharmony_ability::napi_derive::napi]
+        pub fn render<'a>(
+            env: &'a openharmony_ability::napi::Env,
+            slot: openharmony_ability::arkui::ArkUIHandle,
+            callback: openharmony_ability::napi::bindgen_prelude::Function<'a, (), ()>,
+        ) -> openharmony_ability::napi::Result<openharmony_ability::Render<'a>> {
+            let (root, ret) = openharmony_ability::render(env, slot, callback, (*APP).clone())?;
             ROOT_NODE.replace(Some(root));
             Ok(ret)
-        }
-
-        #[openharmony_ability::napi_derive::module_exports]
-        fn module_export_init(
-            mut exports: openharmony_ability::napi::JsObject,
-            _env: openharmony_ability::napi::Env,
-        ) -> openharmony_ability::napi::Result<()> {
-            exports.create_named_method("init", init)?;
-            exports.create_named_method("render", render)?;
-            Ok(())
         }
     };
 

@@ -1,6 +1,6 @@
 use napi_derive_ohos::napi;
 use napi_ohos::{
-    bindgen_prelude::Function, threadsafe_function::ThreadsafeFunctionCallMode, CallContext, Error,
+    bindgen_prelude::Function, threadsafe_function::ThreadsafeFunctionCallMode, Env, Error,
     JsObject, Result,
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
@@ -14,10 +14,12 @@ pub struct Render<'a> {
 }
 
 /// create lifecycle object and return to arkts
-pub fn render(ctx: CallContext, app: OpenHarmonyApp) -> Result<(RootNode, Render)> {
-    let slot = ctx.get::<ArkUIHandle>(0)?;
-    let callback = ctx.get::<Function<(), ()>>(1)?;
-
+pub fn render<'a>(
+    env: &'a Env,
+    slot: ArkUIHandle,
+    callback: Function<'a, (), ()>,
+    app: OpenHarmonyApp,
+) -> Result<(RootNode, Render<'a>)> {
     let tsfn = callback.build_threadsafe_function().build()?;
 
     let mut root = RootNode::new(slot);
@@ -92,21 +94,19 @@ pub fn render(ctx: CallContext, app: OpenHarmonyApp) -> Result<(RootNode, Render
         .map_err(|e| Error::from_reason(e.reason))?;
 
     let on_frame_app = app.clone();
-    let on_frame = ctx
-        .env
-        .create_function_from_closure("on_frame", move |ctx| {
-            let info = ctx.first_arg::<JsObject>()?;
-            let time = info.get_named_property::<i64>("timestamp")?;
-            let target_time = info.get_named_property::<i64>("targetTimestamp")?;
+    let on_frame = env.create_function_from_closure("on_frame", move |ctx| {
+        let info = ctx.first_arg::<JsObject>()?;
+        let time = info.get_named_property::<i64>("timestamp")?;
+        let target_time = info.get_named_property::<i64>("targetTimestamp")?;
 
-            if let Some(ref mut h) = *on_frame_app.event_loop.borrow_mut() {
-                h(Event::WindowRedraw(IntervalInfo {
-                    time_stamp: time,
-                    target_time_stamp: target_time,
-                }))
-            }
-            Ok(())
-        })?;
+        if let Some(ref mut h) = *on_frame_app.event_loop.borrow_mut() {
+            h(Event::WindowRedraw(IntervalInfo {
+                time_stamp: time,
+                target_time_stamp: target_time,
+            }))
+        }
+        Ok(())
+    })?;
 
     Ok((root, Render { on_frame }))
 }

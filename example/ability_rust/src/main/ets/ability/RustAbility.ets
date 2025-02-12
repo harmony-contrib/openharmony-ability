@@ -4,19 +4,20 @@ import * as Entry from '../components/MainPage'
 import { exit } from "../helper";
 import { ApplicationLifecycle, ArkHelper, Module } from './type'
 
-const storage: LocalStorage = new LocalStorage();
 
 export const STATE_KEY = 'ohos.rs.ability.application.state';
 
 export class RustAbility extends UIAbility {
   public moduleName: string = "";
+  public defaultPage: boolean = true;
   private nativeModule: Module | null = null;
   private lifecycle: ApplicationLifecycle | null = null;
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     const isRestore: boolean = want.parameters?.['ohos.ability.params.abilityRecoveryRestart'] as boolean ?? false;
     const state = isRestore ? want.parameters?.[STATE_KEY] as string ?? '' : '';
-    storage.setAndLink("moduleName", this.moduleName);
+
+    AppStorage.setOrCreate("moduleName", this.moduleName);
 
     const packageName = `lib${this.moduleName}.so`;
     const module: ESObject = await import(packageName);
@@ -35,7 +36,9 @@ export class RustAbility extends UIAbility {
       this.lifecycle?.windowStageEventCallback.onWindowStageEvent(event);
     })
 
-    await windowStage.loadContentByName(Entry.RouteName, storage);
+    if (this.defaultPage) {
+      await windowStage.loadContentByName(Entry.RouteName);
+    }
   }
 
   onMemoryLevel(level: AbilityConstant.MemoryLevel): void {

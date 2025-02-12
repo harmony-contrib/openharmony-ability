@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Env, Result};
+use napi_ohos::{bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Result};
 
 // Generates a JavaScript object that can be passed from ArkTS
 #[napi(object)]
