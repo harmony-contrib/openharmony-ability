@@ -1,28 +1,30 @@
-import { init } from 'libexample.so';
-import { AbilityLifecycleCallback, common, EnvironmentCallback } from '@kit.AbilityKit';
-import { NodeContent } from '@kit.ArkUI';
+import { DefaultXComponent } from "@ohos-rs/ability"
+import { ItemRestriction, SegmentButton, SegmentButtonOptions, SegmentButtonTextItem } from '@kit.ArkUI';
+import { changeRender } from "libwgpu_in_app.so"
 
 @Entry
 @Component
 struct Index {
-  private rootSlot = new NodeContent();
-  private uiContext = getContext(this) as common.UIAbilityContext;
+  @State tabOptions: SegmentButtonOptions = SegmentButtonOptions.capsule({
+    buttons: [{ text: 'boids' },
+      { text: 'MSAA line' },
+      { text: 'cube' },
+      { text: "water" },
+      { text: "shadow" }] as ItemRestriction<SegmentButtonTextItem>,
+    backgroundBlurStyle: BlurStyle.BACKGROUND_THICK,
+  })
+  @State @Watch("handleChange") tabSelectedIndexes: number[] = [0]
 
-  aboutToAppear(): void {
-    const lifecycle = init(this.rootSlot);
-
-    const applicationContext = this.uiContext.getApplicationContext();
-
-    applicationContext.on("abilityLifecycle",
-      {
-      } as ESObject as AbilityLifecycleCallback)
-    applicationContext.on("environment", lifecycle.environmentCallback as ESObject as EnvironmentCallback)
+  handleChange() {
+    console.log(`changeIndex: ${this.tabSelectedIndexes}`)
+    changeRender(this.tabSelectedIndexes[0])
   }
 
   build() {
     Row() {
       Column() {
-        ContentSlot(this.rootSlot)
+        SegmentButton({ options: this.tabOptions, selectedIndexes: $tabSelectedIndexes })
+        DefaultXComponent()
       }
       .width('100%')
     }

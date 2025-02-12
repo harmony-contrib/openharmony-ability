@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, CallContext, JsObject, Result};
+use napi_ohos::{bindgen_prelude::Function, Env, JsObject, Result};
 
 use crate::{
     ArkHelper, ArkTSHelper, ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader, SaveSaver, Size,
@@ -34,13 +34,12 @@ pub struct ApplicationLifecycle<'a> {
 }
 
 /// create lifecycle object and return to arkts
-pub fn create_lifecycle_handle(
-    ctx: CallContext,
+pub fn create_lifecycle_handle<'a>(
+    env: &'a Env,
+    helper: ArkTSHelper,
     app: OpenHarmonyApp,
-) -> Result<ApplicationLifecycle> {
-    let ark_helper = ctx.get::<ArkTSHelper>(0)?;
-    let env = ctx.env;
-
+) -> Result<ApplicationLifecycle<'a>> {
+    let ark_helper = helper;
     let helper = ArkHelper::from_ark_ts_helper(ark_helper)?;
 
     app.inner.write().unwrap().helper.ark = Some(helper);
@@ -59,11 +58,13 @@ pub fn create_lifecycle_handle(
         .callee_handled::<true>()
         .build()?;
 
-    let mut guard = (&*WAKER)
-        .write()
-        .map_err(|_| napi_ohos::Error::from_reason("Failed to write WAKER"))?;
+    {
+        let mut guard = (&*WAKER)
+            .write()
+            .map_err(|_| napi_ohos::Error::from_reason("Failed to write WAKER"))?;
 
-    guard.replace(Arc::new(tsfn));
+        guard.replace(Arc::new(tsfn));
+    }
 
     let on_memory_level_app = app.clone();
     let on_memory_level: Function<'_, i32, ()> =

@@ -1,40 +1,14 @@
-import { common } from '@kit.AbilityKit';
-import { NodeContent } from '@kit.ArkUI';
-import { displaySync } from '@kit.ArkGraphics2D';
-import { Render } from '../ability/type';
+import {DefaultXComponent} from "./DefaultXComponent"
 
 export const RouteName = 'RustAbility';
 
-@Entry({routeName: RouteName, storage: LocalStorage.getShared()})
+@Entry({routeName: RouteName})
 @Component
 struct Index {
-  private rootSlot = new NodeContent();
-  private uiContext = getContext(this) as common.UIAbilityContext;
-  private render: Render | null = null;
-  private displaySyncInstance = displaySync.create();
-  private nativeModule: ESObject;
-
-  @LocalStorageLink("moduleName") name: string = "";
-
-  async aboutToAppear(): Promise<void> {
-    const moduleName = `lib${this.name}.so`;
-    const module: ESObject = await import(moduleName);
-    this.nativeModule = module.default;
-    this.render = module.default.render(this.rootSlot, () => {
-      // make sure redraw after surface is created
-      this.displaySyncInstance.on("frame", this.render!.onFrame);
-      this.displaySyncInstance.start();
-    });
-  }
-
-  aboutToDisappear(): void {
-    this.displaySyncInstance.off("frame", this.render!.onFrame);
-  }
-
   build() {
     Row() {
       Column() {
-        ContentSlot(this.rootSlot)
+        DefaultXComponent()
       }
       .width('100%')
     }
