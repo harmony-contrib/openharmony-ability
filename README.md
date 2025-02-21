@@ -19,15 +19,15 @@ We provide some packages or crates to help you develop OpenHarmony application w
 
 We need a entry-point to start the application, and we use ArkTS to manage the application's lifecycle.
 
-- @ohos-rs/ability  
+- [@ohos-rs/ability](./package/README.md)  
   All of ability need to extend `RustAbility` and all lifecycle need to call `super.xx` to make sure the ability can work normally.
 
 ### Rust
 
-- openharmony-ability   
+- [openharmony-ability](./crates/ability/README.md)   
   Basic crate to manage the application's lifecycle.
 
-- openharmony-ability-derive   
+- [openharmony-ability-derive](./crates/derive/README.md)   
   Macro to generate the ability's implementation.
 
 ## Usage
