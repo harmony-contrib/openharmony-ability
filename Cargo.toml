@@ -19,3 +19,4 @@ ohos-arkui-binding = { version = "0.0.1" }
 ohos-xcomponent-binding = { version = "0.0.3" }
 ohos-ime-binding = { version = "0.0.1" }
 ohos-display-binding = { version = "0.0.1" }
+ohos-display-soloist-binding = { version = "0.1"}

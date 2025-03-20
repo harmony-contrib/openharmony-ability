@@ -18,7 +18,7 @@ pub struct EnvironmentCallback<'a> {
 pub struct WindowStageEventCallback<'a> {
     pub on_window_stage_create: Function<'a, (), ()>,
     pub on_window_stage_destroy: Function<'a, (), ()>,
-    pub on_ability_create: Function<'a, (), ()>,
+    pub on_ability_create: Function<'a, String, ()>,
     pub on_ability_destroy: Function<'a, (), ()>,
     pub on_ability_save_state: Function<'a, (), ()>,
     pub on_ability_restore_state: Function<'a, (), ()>,

@@ -20,9 +20,11 @@ fn openharmony_app(app: OpenHarmonyApp) {
                 hilog_info!(format!("ohos-rs macro input:").as_str());
             }
         },
-        Event::WindowRedraw(_) => {}
+        Event::WindowRedraw(_) => {
+            hilog_info!("ohos-rs macro window_redraw");
+        }
         _ => {
-            hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()).as_str());
+            hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()));
         }
     });
 }

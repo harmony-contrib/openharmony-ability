@@ -33,15 +33,11 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 Ok(lifecycle_handle)
             }
 
-            #[openharmony_ability::napi_derive::napi]
-            pub fn render<'a>(
-                env: &'a openharmony_ability::napi::Env,
-                slot: openharmony_ability::arkui::ArkUIHandle,
-                callback: openharmony_ability::napi::bindgen_prelude::Function<'a, (), ()>,
-            ) -> openharmony_ability::napi::Result<openharmony_ability::Render<'a>> {
-                let (root, ret) = openharmony_ability::render(env, slot, callback, (*APP).clone())?;
+            #[openharmony_ability::napi_derive::napi(ts_args_type = "slot: NodeContent")]
+            pub fn render(slot: openharmony_ability::arkui::ArkUIHandle) -> openharmony_ability::napi::Result<()> {
+                let root = openharmony_ability::render(slot, (*APP).clone())?;
                 ROOT_NODE.replace(Some(root));
-                Ok(ret)
+                Ok(())
             }
         }
     };
