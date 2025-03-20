@@ -1,6 +1,5 @@
 import { common } from '@kit.AbilityKit';
 import { NodeContent } from '@kit.ArkUI';
-import { displaySync } from '@kit.ArkGraphics2D';
 
 export const RouteName = 'RustAbility';
 
@@ -8,7 +7,6 @@ export const RouteName = 'RustAbility';
 export struct DefaultXComponent {
   private rootSlot = new NodeContent();
   private uiContext = getContext(this) as common.UIAbilityContext;
-  private displaySyncInstance = displaySync.create();
   private nativeModule: ESObject;
 
   @StorageProp("moduleName") name: string = "";
