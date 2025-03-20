@@ -1,7 +1,6 @@
 import { common } from '@kit.AbilityKit';
 import { NodeContent } from '@kit.ArkUI';
 import { displaySync } from '@kit.ArkGraphics2D';
-import { Module } from '../ability/type';
 
 export const RouteName = 'RustAbility';
 
