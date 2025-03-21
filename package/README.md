@@ -4,6 +4,14 @@ This package provides a set of components and APIs for building OpenHarmony acti
 
 For OpenHarmony/HarmonyNext development, our application entry must be a ArkTS file and we need to forward some lifecycle event to rust code.
 
+## Usage
+
+### Install
+
+```bash
+ohpm install @ohos-rs/ability
+```
+
 ## API and Components
 
 ### RustAbility
@@ -14,10 +22,10 @@ If you want to use rust development OpenHarmony/HarmonyNext application, you mus
 
 ```ts
 // ets/entryability/EntryAbility.ets
-import { RustAbility } from '@ohos-rs/ability';
+import { RustAbility } from "@ohos-rs/ability";
 
 export default class MyAbility extends RustAbility {
-  public moduleName: string = "hello"
+  public moduleName: string = "hello";
 
   onCreate() {
     super.onCreate();
@@ -41,10 +49,10 @@ And if you want to add some custom logic, you can use it with the following code
 
 ```ts
 // ets/entryability/EntryAbility.ets
-import { RustAbility } from '@ohos-rs/ability'
-import Want from '@ohos.app.ability.Want'
-import { AbilityConstant } from '@kit.AbilityKit';
-import window from '@ohos.window';
+import { RustAbility } from "@ohos-rs/ability";
+import Want from "@ohos.app.ability.Want";
+import { AbilityConstant } from "@kit.AbilityKit";
+import window from "@ohos.window";
 
 export default class EntryAbility extends RustAbility {
   public moduleName: string = "example";
@@ -52,7 +60,10 @@ export default class EntryAbility extends RustAbility {
   // Must mark it as false to prevent the default page from loading
   public defaultPage: boolean = false;
 
-  async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
+  async onCreate(
+    want: Want,
+    launchParam: AbilityConstant.LaunchParam
+  ): Promise<void> {
     super.onCreate(want, launchParam);
   }
 
@@ -60,7 +71,7 @@ export default class EntryAbility extends RustAbility {
     // Must call super method to forward the event to rust code
     super.onWindowStageCreate(windowStage);
     // Jump to your custom page
-    await windowStage.loadContent('pages/Index');
+    await windowStage.loadContent("pages/Index");
   }
 }
 ```
