@@ -1,27 +1,15 @@
-use napi_derive_ohos::napi;
-use napi_ohos::{
-    bindgen_prelude::Function, threadsafe_function::ThreadsafeFunctionCallMode, Env, Error,
-    JsObject, Result,
-};
-use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
-use ohos_ime_binding::IME;
+use std::sync::LazyLock;
 
 use crate::{Event, InputEvent, IntervalInfo, OpenHarmonyApp, TextInputEventData};
+use napi_ohos::{Error, Result};
+use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
+use ohos_display_soloist_binding::DisplaySoloist;
+use ohos_ime_binding::IME;
 
-#[napi(object)]
-pub struct Render<'a> {
-    pub on_frame: Function<'a, (), ()>,
-}
+static DISPLAY_SOLOIST: LazyLock<DisplaySoloist> = LazyLock::new(|| DisplaySoloist::new(false));
 
 /// create lifecycle object and return to arkts
-pub fn render<'a>(
-    env: &'a Env,
-    slot: ArkUIHandle,
-    callback: Function<'a, (), ()>,
-    app: OpenHarmonyApp,
-) -> Result<(RootNode, Render<'a>)> {
-    let tsfn = callback.build_threadsafe_function().build()?;
-
+pub fn render(slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootNode> {
     let mut root = RootNode::new(slot);
     let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason))?;
 
@@ -30,6 +18,7 @@ pub fn render<'a>(
     let xc = xcomponent.clone();
 
     let on_surface_created_app = app.clone();
+    let on_frame_app = app.clone();
     xcomponent.on_surface_created(move |_, _| {
         {
             let raw_window = xc.native_window();
@@ -46,7 +35,16 @@ pub fn render<'a>(
             });
             on_surface_created_app.ime.replace(Some(ime));
         }
-        tsfn.call((), ThreadsafeFunctionCallMode::NonBlocking);
+
+        DISPLAY_SOLOIST.on_frame(|ts, tts| {
+            if let Some(ref mut h) = *on_frame_app.event_loop.borrow_mut() {
+                h(Event::WindowRedraw(IntervalInfo {
+                    time_stamp: ts,
+                    target_time_stamp: tts,
+                }))
+            }
+        });
+
         if let Some(ref mut h) = *on_surface_created_app.event_loop.borrow_mut() {
             h(Event::SurfaceCreate)
         }
@@ -93,20 +91,5 @@ pub fn render<'a>(
     root.mount(xcomponent_native)
         .map_err(|e| Error::from_reason(e.reason))?;
 
-    let on_frame_app = app.clone();
-    let on_frame = env.create_function_from_closure("on_frame", move |ctx| {
-        let info = ctx.first_arg::<JsObject>()?;
-        let time = info.get_named_property::<i64>("timestamp")?;
-        let target_time = info.get_named_property::<i64>("targetTimestamp")?;
-
-        if let Some(ref mut h) = *on_frame_app.event_loop.borrow_mut() {
-            h(Event::WindowRedraw(IntervalInfo {
-                time_stamp: time,
-                target_time_stamp: target_time,
-            }))
-        }
-        Ok(())
-    })?;
-
-    Ok((root, Render { on_frame }))
+    Ok(root)
 }

@@ -26,10 +26,6 @@ export interface Module {
   render: (slot: NodeContent) => void
 }
 
-export interface Render {
-  onFrame: () => void
-}
-
 export interface ArkHelper {
   exit: (code: number) => void
 }

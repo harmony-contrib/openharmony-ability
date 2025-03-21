@@ -1,4 +1,7 @@
+# 0.1.0
+- Use `native soloist` to replace `onFrame` callback.
 
+---
 # 0.0.2
 - Allow use custom page or route
 - Move default xcomponent to a single component
