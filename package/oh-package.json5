@@ -4,7 +4,8 @@
   name: "@ohos-rs/ability",
   description: "Adaptor for OpenHarmony/HarmonyNext Application with Rust",
   main: "index.ets",
-  version: "0.0.2",
+  version: "0.1.0",
+  homepage: "https://github.com/harmony-contrib/openharmony-ability",
   repository: "https://github.com/harmony-contrib/openharmony-ability.git",
   dependencies: {},
   keywords: [
