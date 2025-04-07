@@ -13,7 +13,7 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
         mod openharmony_ability_mod {
             use openharmony_ability::napi as napi_ohos;
-            use crate::*;
+            use super::*;
 
             static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
             std::sync::LazyLock::new(|| openharmony_ability::OpenHarmonyApp::new());
