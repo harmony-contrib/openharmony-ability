@@ -4,6 +4,12 @@ This package provides a set of components and APIs for building OpenHarmony acti
 
 For OpenHarmony/HarmonyNext development, our application entry must be a ArkTS file and we need to forward some lifecycle event to rust code.
 
+## Install
+
+```
+ohpm install @ohos-rs/ability
+```
+
 ## API and Components
 
 ### RustAbility
