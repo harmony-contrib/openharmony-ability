@@ -12,16 +12,16 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
         pub(crate) fn #fn_name(#arg) #block
 
         mod openharmony_ability_mod {
-            use openharmony_ability::napi as napi_ohos;
             use super::*;
-
+            use openharmony_ability::napi as napi_ohos;
+        
             static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
-            std::sync::LazyLock::new(|| openharmony_ability::OpenHarmonyApp::new());
-
+                std::sync::LazyLock::new(|| openharmony_ability::OpenHarmonyApp::new());
+        
             thread_local! {
                 pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
             }
-
+        
             #[openharmony_ability::napi_derive::napi]
             pub fn init<'a>(
                 env: &'a openharmony_ability::napi::Env,
@@ -32,16 +32,14 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 #fn_name((*APP).clone());
                 Ok(lifecycle_handle)
             }
-
+        
             #[openharmony_ability::napi_derive::napi]
-            pub fn render<'a>(
-                env: &'a openharmony_ability::napi::Env,
+            pub fn render(
                 slot: openharmony_ability::arkui::ArkUIHandle,
-                callback: openharmony_ability::napi::bindgen_prelude::Function<'a, (), ()>,
-            ) -> openharmony_ability::napi::Result<openharmony_ability::Render<'a>> {
-                let (root, ret) = openharmony_ability::render(env, slot, callback, (*APP).clone())?;
+            ) -> openharmony_ability::napi::Result<()> {
+                let root = openharmony_ability::render(slot, (*APP).clone())?;
                 ROOT_NODE.replace(Some(root));
-                Ok(ret)
+                Ok(())
             }
         }
     };

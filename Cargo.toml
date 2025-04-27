@@ -3,8 +3,8 @@ members = ["crates/*", "example"]
 resolver = "2"
 
 [workspace.dependencies]
-openharmony-ability-derive = { version = "0.1.1", path = "crates/derive" }
-openharmony-ability = { version = "0.1.1", path = "crates/ability" }
+openharmony-ability-derive = { version = "0.1.2", path = "crates/derive" }
+openharmony-ability = { version = "0.1.2", path = "crates/ability" }
 
 napi-sys-ohos = { version = "1.0", features = ["napi8"] }
 napi-ohos = { version = "1.0" }
@@ -15,7 +15,7 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { version = "0.0.1" }
-ohos-xcomponent-binding = { version = "0.0.3" }
+ohos-arkui-binding = { version = "0.0.4" }
+ohos-xcomponent-binding = { version = "0.0.6" }
 ohos-ime-binding = { version = "0.0.1" }
 ohos-display-binding = { version = "0.0.1" }
