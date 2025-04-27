@@ -1,3 +1,8 @@
+# 0.1.2
+- Use XComponent's `on_frame` to replace `onFrame` callback.
+
+
+---
 # 0.1.1
 - Revert: Use `native soloist` to replace `onFrame` callback.
 
