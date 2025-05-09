@@ -35,9 +35,10 @@ pub fn ability(_attr: TokenStream, item: TokenStream) -> TokenStream {
         
             #[openharmony_ability::napi_derive::napi]
             pub fn render(
+                env: &openharmony_ability::napi::Env,
                 slot: openharmony_ability::arkui::ArkUIHandle,
             ) -> openharmony_ability::napi::Result<()> {
-                let root = openharmony_ability::render(slot, (*APP).clone())?;
+                let root = openharmony_ability::render(env, slot, (*APP).clone())?;
                 ROOT_NODE.replace(Some(root));
                 Ok(())
             }

@@ -1,11 +1,11 @@
-use napi_ohos::{Error, Result};
+use napi_ohos::{bindgen_prelude::Function, Env, Error, Result};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
 use crate::{Event, InputEvent, IntervalInfo, OpenHarmonyApp, TextInputEventData};
 
 /// create lifecycle object and return to arkts
-pub fn render(slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootNode> {
+pub fn render(env: &Env, slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootNode> {
     let mut root = RootNode::new(slot);
     let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason))?;
 
@@ -14,22 +14,45 @@ pub fn render(slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootNode> {
     let xc = xcomponent.clone();
 
     let on_surface_created_app = app.clone();
+    let insert_text_app = app.clone();
     let redraw_app = app.clone();
+
+    // Build a TSFN that can send insert text callback to main thread
+    let on_insert_text_app = app.clone();
+    let insert_text_callback: Function<String, ()> =
+        env.create_function_from_closure("ime_insert_callback", move |ctx| {
+            let s = ctx.first_arg::<String>().unwrap();
+            if let Some(ref mut h) = *on_insert_text_app.event_loop.borrow_mut() {
+                h(Event::Input(InputEvent::TextInputEvent(
+                    TextInputEventData { text: s },
+                )))
+            }
+            Ok(())
+        })?;
+
+    let insert_text_callback_tsfn = insert_text_callback
+        .build_threadsafe_function()
+        .callee_handled::<false>()
+        .build()?;
+
     xcomponent.on_surface_created(move |_, _| {
         {
             let raw_window = xc.native_window();
             on_surface_created_app.inner.write().unwrap().raw_window = raw_window;
             // We need to create IME instance when app is foucsed
             let ime = IME::new(Default::default());
-            let insert_text_app = on_surface_created_app.clone();
-            ime.insert_text(move |s| {
-                if let Some(ref mut h) = *insert_text_app.event_loop.borrow_mut() {
-                    h(Event::Input(InputEvent::TextInputEvent(
-                        TextInputEventData { text: s },
-                    )))
-                }
+
+            *on_surface_created_app.ime.borrow_mut() = Some(ime);
+        }
+
+        if let Some(b_ime) = insert_text_app.ime.borrow().as_ref() {
+            b_ime.insert_text(|s| {
+                // run in other thread
+                insert_text_callback_tsfn.call(
+                    s,
+                    napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
+                );
             });
-            on_surface_created_app.ime.replace(Some(ime));
         }
 
         {
@@ -63,6 +86,14 @@ pub fn render(slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootNode> {
     xcomponent.on_touch_event(move |_, _, data| {
         if let Some(ref mut h) = *on_touch_event_app.event_loop.borrow_mut() {
             h(Event::Input(InputEvent::TouchEvent(data)))
+        }
+        Ok(())
+    });
+
+    let on_key_event_app = app.clone();
+    let _ = xcomponent.on_key_event(move |_, _, data| {
+        if let Some(ref mut h) = *on_key_event_app.event_loop.borrow_mut() {
+            h(Event::Input(InputEvent::KeyEvent(data)));
         }
         Ok(())
     });
