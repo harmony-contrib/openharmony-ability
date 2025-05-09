@@ -4,15 +4,16 @@ import { AbilityConstant } from '@kit.AbilityKit';
 import window from '@ohos.window';
 
 export default class EntryAbility extends RustAbility {
-  public moduleName: string = "example"
+  public moduleName: string = "hello_openharmony"
   public defaultPage: boolean = true;
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     super.onCreate(want, launchParam);
   }
 
-  // async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-  //   super.onWindowStageCreate(windowStage);
-  //   await windowStage.loadContent('pages/Index');
-  // }
+  async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
+    const window = windowStage.getMainWindowSync();
+    await window.setWindowLayoutFullScreen(true);
+    super.onWindowStageCreate(windowStage);
+  }
 }
