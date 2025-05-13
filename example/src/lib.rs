@@ -13,7 +13,7 @@ pub fn handle_change() -> napi_ohos::Result<()> {
 fn openharmony_app(app: OpenHarmonyApp) {
     app.run_loop(|types| match types {
         Event::Input(k) => match k {
-            InputEvent::TextInputEvent(s) => {
+            InputEvent::ImeEvent(s) => {
                 hilog_info!(format!("ohos-rs macro input_text: {:?}", s).as_str());
             }
             _ => {
