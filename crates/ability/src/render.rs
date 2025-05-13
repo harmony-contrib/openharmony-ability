@@ -1,8 +1,9 @@
-use napi_ohos::{bindgen_prelude::Function, Env, Error, Result};
+use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
+use napi_ohos::{Env, Error, Result};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
-use crate::{Event, InputEvent, IntervalInfo, OpenHarmonyApp, TextInputEventData};
+use crate::{input, Event, InputEvent, IntervalInfo, OpenHarmonyApp};
 
 /// create lifecycle object and return to arkts
 pub fn render(env: &Env, slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootNode> {
@@ -17,23 +18,8 @@ pub fn render(env: &Env, slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootN
     let insert_text_app = app.clone();
     let redraw_app = app.clone();
 
-    // Build a TSFN that can send insert text callback to main thread
-    let on_insert_text_app = app.clone();
-    let insert_text_callback: Function<String, ()> =
-        env.create_function_from_closure("ime_insert_callback", move |ctx| {
-            let s = ctx.first_arg::<String>().unwrap();
-            if let Some(ref mut h) = *on_insert_text_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::TextInputEvent(
-                    TextInputEventData { text: s },
-                )))
-            }
-            Ok(())
-        })?;
-
-    let insert_text_callback_tsfn = insert_text_callback
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()?;
+    let (insert_text_callback_tsfn, on_ime_hide_callback_tsfn, on_backspace_callback_tsfn) =
+        input::ime_ts_fn(env, app.clone())?;
 
     xcomponent.on_surface_created(move |_, _| {
         {
@@ -46,12 +32,15 @@ pub fn render(env: &Env, slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootN
         }
 
         if let Some(b_ime) = insert_text_app.ime.borrow().as_ref() {
+            // // run in other thread
             b_ime.insert_text(|s| {
-                // run in other thread
-                insert_text_callback_tsfn.call(
-                    s,
-                    napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
-                );
+                insert_text_callback_tsfn.call(s, NonBlocking);
+            });
+            b_ime.on_status_change(|s| {
+                on_ime_hide_callback_tsfn.call(s.into(), NonBlocking);
+            });
+            b_ime.on_backspace(|len| {
+                on_backspace_callback_tsfn.call(len, NonBlocking);
             });
         }
 
