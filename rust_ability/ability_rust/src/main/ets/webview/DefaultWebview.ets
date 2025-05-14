@@ -1,0 +1,62 @@
+import { UIContext } from '@ohos.arkui.UIContext';
+import web_webview from '@ohos.web.webview'
+import { NodeController, BuilderNode, FrameNode } from '@ohos.arkui.node';
+import { randomString } from '../helper';
+
+export interface WebviewStyle {
+  x?: number | string;
+  y?: number | string;
+}
+
+export interface WebviewInitData {
+  webTag?: string;
+  url: string;
+  style?: WebviewStyle;
+  controller?: WebviewController;
+}
+
+interface WebviewNodeData extends WebviewInitData {
+  controller: WebviewController;
+}
+
+@Builder
+function WebBuilder(data: WebviewNodeData) {
+  Web({ src: data.url, controller: data.controller })
+    .width("100%")
+    .height("100%")
+    .position({
+      x: data.style?.x || 0,
+      y: data.style?.y || 0
+    })
+}
+
+const webViewWrap = wrapBuilder<Data[]>(WebBuilder);
+
+export class RustWebviewNodeController extends NodeController {
+  private rootNode: FrameNode | null = null;
+  private webviewList: Array<BuilderNode<Data[]>> = [];
+  private uiContext: UIContext | null = null;
+
+  constructor(uiContext: UIContext) {
+    super();
+    this.uiContext = uiContext;
+  }
+
+  makeNode(uiContext: UIContext): FrameNode {
+    this.rootNode = new FrameNode(uiContext);
+    return this.rootNode
+  }
+
+  addWebview(data: WebviewInitData) {
+    const webTag: string = data?.webTag || randomString();
+
+    const node: BuilderNode<Data[]> = new BuilderNode(this.uiContext!);
+    node.build(webViewWrap,
+      { url: data.url, controller: data?.controller || new web_webview.WebviewController(webTag), style: data?.style });
+    this.webviewList.push(node);
+
+    this.rootNode?.appendChild(node.getFrameNode());
+    return webTag;
+  }
+}
+

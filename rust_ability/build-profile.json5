@@ -1,5 +1,6 @@
 {
   "app": {
+    "signingConfigs": [],
     "products": [
       {
         "name": "default",
@@ -16,13 +17,11 @@
     ],
     "buildModeSet": [
       {
-        "name": "debug"
+        "name": "debug",
       },
       {
         "name": "release"
       }
-    ],
-    "signingConfigs": [
     ]
   },
   "modules": [
@@ -40,7 +39,7 @@
     },
     {
       "name": "ability_rust",
-      "srcPath": "../rust_ability/ability_rust",
+      "srcPath": "./ability_rust",
     }
   ]
 }
