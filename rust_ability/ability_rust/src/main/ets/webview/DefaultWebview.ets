@@ -30,11 +30,11 @@ function WebBuilder(data: WebviewNodeData) {
     })
 }
 
-const webViewWrap = wrapBuilder<Data[]>(WebBuilder);
+const webViewWrap = wrapBuilder<WebviewNodeData[]>(WebBuilder);
 
 export class RustWebviewNodeController extends NodeController {
   private rootNode: FrameNode | null = null;
-  private webviewList: Array<BuilderNode<Data[]>> = [];
+  private webviewList: Array<BuilderNode<WebviewNodeData[]>> = [];
   private uiContext: UIContext | null = null;
 
   constructor(uiContext: UIContext) {
@@ -50,7 +50,7 @@ export class RustWebviewNodeController extends NodeController {
   addWebview(data: WebviewInitData) {
     const webTag: string = data?.webTag || randomString();
 
-    const node: BuilderNode<Data[]> = new BuilderNode(this.uiContext!);
+    const node: BuilderNode<WebviewNodeData[]> = new BuilderNode(this.uiContext!);
     node.build(webViewWrap,
       { url: data.url, controller: data?.controller || new web_webview.WebviewController(webTag), style: data?.style });
     this.webviewList.push(node);
