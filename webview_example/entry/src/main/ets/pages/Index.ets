@@ -1,5 +1,6 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { RustWebviewNodeController, WebviewInitData } from '@ohos-rs/ability';
+import {init} from "libark_web.so"
 
 const DOMAIN = 0x0000;
 
@@ -14,19 +15,12 @@ struct Index {
       Column() {
         Row() {
           Button("add baidu webview").onClick(() => {
-            const data: WebviewInitData = { url: 'https://www.baidu.com' };
-            this.webviewController.addWebview(data)
+            init(() => {
+              const data: WebviewInitData = { url: 'https://www.baidu.com' };
+              return this.webviewController.addWebview(data)
+            })
           })
 
-          Button("add bing webview").onClick(() => {
-            const data: WebviewInitData = {
-              url: 'https://www.bing.com', style: {
-                x: 100,
-                y: 100
-              }
-            };
-            this.webviewController.addWebview(data)
-          })
         }
 
         NodeContainer(this.webviewController)

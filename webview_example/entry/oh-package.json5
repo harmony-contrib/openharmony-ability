@@ -7,6 +7,7 @@
   "license": "",
   "dependencies": {
     "libentry.so": "file:./src/main/cpp/types/libentry",
-    "@ohos-rs/ability": "file:../../rust_ability/ability_rust"
+    "@ohos-rs/ability": "file:../../rust_ability/ability_rust",
+    "libark_web.so": "file:./src/main/cpp/types/libark_web"
   }
 }
