@@ -7,8 +7,6 @@
   "license": "",
   "dependencies": {
     "libentry.so": "file:./src/main/cpp/types/libentry",
-    "libexample.so": "file:./src/main/cpp/types/libexample",
-    "libwgpu_in_app.so": "file:./src/main/cpp/types/libwgpu_in_app",
     "@ohos-rs/ability": "file:../../rust_ability/ability_rust"
   }
 }
