@@ -1,6 +1,9 @@
+# 0.1.5-beta.0
+- Add Webview render mode.
+
+---
 # 0.1.2
 - Use XComponent's `on_frame` to replace `onFrame` callback.
-
 
 ---
 # 0.1.1
