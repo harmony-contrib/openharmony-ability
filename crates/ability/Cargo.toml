@@ -1,17 +1,27 @@
 [package]
 name = "openharmony-ability"
-version = "0.1.4"
+version = "0.1.5-beta.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Binding Rust application on Harmony with Ability"
 
+[features]
+default = []
+webview = ["dep:ohos-display-soloist-binding"]
+
 [dependencies]
+# for napi binding
 napi-ohos = { workspace = true, default-features = false, features = [
   "napi8",
   "async",
 ] }
 napi-derive-ohos = { workspace = true }
+
+# for xcomponent native render
 ohos-arkui-binding = { workspace = true, features = ["napi"] }
 ohos-xcomponent-binding = { workspace = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
+
+# for webview feature
+ohos-display-soloist-binding = { workspace = true, optional = true }

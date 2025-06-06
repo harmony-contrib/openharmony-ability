@@ -10,6 +10,8 @@ use std::{
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
+#[cfg(feature = "webview")]
+use crate::WebViewStyle;
 use crate::{helper::Helper, Configuration, Event, OpenHarmonyWaker, Rect, WAKER};
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -226,6 +228,29 @@ impl OpenHarmonyApp {
     /// Exit current app with code
     pub fn exit(&self, code: i32) {
         self.inner.read().unwrap().exit(code);
+    }
+
+    #[cfg(feature = "webview")]
+    pub fn create_webview<T>(&self, url: String, style: Option<WebViewStyle>, callback: T)
+    where
+        T: Fn(String) + 'static,
+    {
+        let helper = self.inner.read().unwrap().helper.clone();
+
+        if let Some(helper) = helper.ark {
+            use crate::WebViewInitData;
+
+            helper.create_webview.call_with_return_value(
+                Ok(WebViewInitData { url, style }),
+                napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
+                move |result, _env| {
+                    if let Ok(result) = result {
+                        callback(result);
+                    }
+                    Ok(())
+                },
+            );
+        }
     }
 
     pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, mut event_handle: F) {
