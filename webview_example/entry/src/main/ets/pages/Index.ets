@@ -1,6 +1,6 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { RustWebviewNodeController, WebviewInitData } from '@ohos-rs/ability';
-import {init} from "libark_web.so"
+import { DefaultWebViewComponent } from '@ohos-rs/ability';
+import { handleChange } from "libexample.so"
 
 const DOMAIN = 0x0000;
 
@@ -8,24 +8,16 @@ const DOMAIN = 0x0000;
 @Component
 struct Index {
   @State message: string = 'Hello World';
-  private webviewController = new RustWebviewNodeController(this.getUIContext());
 
   build() {
     Row() {
       Column() {
         Row() {
           Button("add baidu webview").onClick(() => {
-            init(() => {
-              const data: WebviewInitData = { url: 'https://www.baidu.com' };
-              return this.webviewController.addWebview(data)
-            })
+            handleChange();
           })
-
         }
-
-        NodeContainer(this.webviewController)
-          .height("100%")
-          .width("100%")
+        DefaultWebViewComponent()
       }
       .width('100%')
     }

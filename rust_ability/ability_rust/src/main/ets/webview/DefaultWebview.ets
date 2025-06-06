@@ -2,6 +2,9 @@ import { UIContext } from '@ohos.arkui.UIContext';
 import web_webview from '@ohos.web.webview'
 import { NodeController, BuilderNode, FrameNode } from '@ohos.arkui.node';
 import { randomString } from '../helper';
+import { common } from '@kit.AbilityKit';
+import { ArkHelper, WebViewComponentEventCallback, WebViewInitData as NativeWebViewInitData } from '../ability/type';
+import { exit } from "../helper";
 
 export interface WebviewStyle {
   x?: number | string;
@@ -57,6 +60,51 @@ export class RustWebviewNodeController extends NodeController {
 
     this.rootNode?.appendChild(node.getFrameNode());
     return webTag;
+  }
+}
+
+
+@Component
+export struct DefaultWebViewComponent {
+  private uiContext = getContext(this) as common.UIAbilityContext;
+  private nativeModule: ESObject;
+  private webviewController = new RustWebviewNodeController(this.getUIContext());
+  @StorageProp("moduleName") name: string = "";
+  private lifecycleCallback: WebViewComponentEventCallback | null = null;
+
+  async aboutToAppear(): Promise<void> {
+    const moduleName = `lib${this.name}.so`;
+    const module: ESObject = await import(moduleName);
+    this.nativeModule = module.default;
+
+    const helper: ArkHelper = {
+      exit,
+      createWebview: (err, data: NativeWebViewInitData) => {
+        const init: WebviewInitData = { url: data.url, style: data.style as WebviewStyle } as WebviewInitData;
+        const id = this.webviewController.addWebview(init)
+        return id
+      }
+    }
+    const ret: WebViewComponentEventCallback = module.default.webviewRender(helper);
+    this.lifecycleCallback = ret;
+
+    ret.onComponentCreated();
+  }
+
+  aboutToDisappear(): void {
+    this.lifecycleCallback?.onComponentDestroyed?.();
+  }
+
+  build() {
+    Row() {
+      Column() {
+        NodeContainer(this.webviewController)
+          .height("100%")
+          .width("100%")
+      }
+      .width('100%')
+    }
+    .height('100%')
   }
 }
 

@@ -2,9 +2,7 @@ import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit
 import window from "@ohos.window";
 import * as Entry from '../components/MainPage'
 import * as Webview from '../webview/DefaultPage'
-import { exit } from "../helper";
-import { ApplicationLifecycle, ArkHelper, Module } from './type'
-
+import { ApplicationLifecycle, Module } from './type'
 
 export const STATE_KEY = 'ohos.rs.ability.application.state';
 
@@ -36,10 +34,7 @@ export class RustAbility extends UIAbility {
     const packageName = `lib${this.moduleName}.so`;
     const module: ESObject = await import(packageName);
     this.nativeModule = module.default;
-    const helper: ArkHelper = {
-      exit
-    }
-    this.lifecycle = this.nativeModule!.init(helper);
+    this.lifecycle = this.nativeModule!.init();
     this.lifecycle?.windowStageEventCallback.onAbilityCreate(state);
   }
 

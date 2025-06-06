@@ -1,4 +1,5 @@
 import { NodeContent } from "@kit.ArkUI"
+import { BusinessError } from "@kit.BasicServicesKit"
 
 export interface ApplicationLifecycle {
   environmentCallback: EnvironmentCallback
@@ -21,11 +22,31 @@ export interface WindowStageEventCallback {
   onWindowRectChange: (arg: object) => void
 }
 
+export interface WebViewComponentEventCallback {
+  onComponentCreated: () => void
+  onComponentDestroyed: () => void
+}
+
+export interface WebViewInitData {
+  url: string
+  style?: WebViewStyle
+}
+
+export interface WebViewStyle {
+  x?: number | string
+  y?: number | string
+}
+
 export interface Module {
-  init: (helper: ArkHelper) => ApplicationLifecycle,
-  render: (slot: NodeContent) => void
+  init: () => ApplicationLifecycle,
+  // XComponent mode
+  render: (helper: ArkHelper, slot: NodeContent) => void
+
+  // Webview mode
+  webviewRender: (helper: ArkHelper) => WebViewComponentEventCallback
 }
 
 export interface ArkHelper {
   exit: (code: number) => void
+  createWebview: (err: BusinessError | null, data: WebViewInitData) => string
 }

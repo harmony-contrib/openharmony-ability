@@ -3,10 +3,22 @@ use napi_ohos::{Env, Error, Result};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
-use crate::{input, Event, InputEvent, IntervalInfo, OpenHarmonyApp};
+use crate::{
+    helper::ArkHelper, input, ArkTSHelper, Event, InputEvent, IntervalInfo, OpenHarmonyApp,
+};
 
 /// create lifecycle object and return to arkts
-pub fn render(env: &Env, slot: ArkUIHandle, app: OpenHarmonyApp) -> Result<RootNode> {
+pub fn render(
+    env: &Env,
+    helper: ArkTSHelper,
+    slot: ArkUIHandle,
+    app: OpenHarmonyApp,
+) -> Result<RootNode> {
+    let ark_helper = helper;
+    let helper = ArkHelper::from_ark_ts_helper(ark_helper)?;
+
+    app.inner.write().unwrap().helper.ark = Some(helper);
+
     let mut root = RootNode::new(slot);
     let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason))?;
 

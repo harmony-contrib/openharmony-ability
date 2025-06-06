@@ -35,10 +35,12 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
     let render = if has_webview {
         quote::quote! {
             #[openharmony_ability::napi_derive::napi]
-            pub fn webview_render(
-                env: &openharmony_ability::napi::Env,
-            ) -> openharmony_ability::napi::Result<()> {
-                Ok(())
+            pub fn webview_render<'a>(
+                env: &'a openharmony_ability::napi::Env,
+                helper: openharmony_ability::ArkTSHelper,
+            ) -> openharmony_ability::napi::Result<openharmony_ability::WebViewComponentEventCallback<'a>> {
+                let callback = openharmony_ability::render(env, helper, (*APP).clone())?;
+                Ok(callback)
             }
         }
     } else {
@@ -46,9 +48,10 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[openharmony_ability::napi_derive::napi]
             pub fn render(
                 env: &openharmony_ability::napi::Env,
+                helper: openharmony_ability::ArkTSHelper,
                 slot: openharmony_ability::arkui::ArkUIHandle,
             ) -> openharmony_ability::napi::Result<()> {
-                let root = openharmony_ability::render(env, slot, (*APP).clone())?;
+                let root = openharmony_ability::render(env, helper, slot, (*APP).clone())?;
                 ROOT_NODE.replace(Some(root));
                 Ok(())
             }
@@ -72,10 +75,8 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[openharmony_ability::napi_derive::napi]
             pub fn init<'a>(
                 env: &'a openharmony_ability::napi::Env,
-                helper: openharmony_ability::ArkTSHelper,
             ) -> openharmony_ability::napi::Result<openharmony_ability::ApplicationLifecycle<'a>> {
-                let lifecycle_handle =
-                    openharmony_ability::create_lifecycle_handle(env, helper, (*APP).clone())?;
+                let lifecycle_handle = openharmony_ability::create_lifecycle_handle(env, (*APP).clone())?;
                 #fn_name((*APP).clone());
                 Ok(lifecycle_handle)
             }
