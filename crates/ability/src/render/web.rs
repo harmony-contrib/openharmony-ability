@@ -1,7 +1,10 @@
 use std::sync::LazyLock;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::{FnArgs, Function}, Either, Env, Result};
+use napi_ohos::{
+    bindgen_prelude::{FnArgs, Function},
+    Env, Result,
+};
 use ohos_display_soloist_binding::DisplaySoloist;
 
 use crate::{helper::ArkHelper, ArkTSHelper, Event, IntervalInfo, OpenHarmonyApp};
@@ -17,18 +20,6 @@ pub struct WebViewComponentEventCallback<'a> {
     pub on_component_destroyed: Function<'a, (), ()>,
 }
 
-#[napi(object)]
-pub struct WebViewStyle {
-    pub x: Option<Either<f64, String>>,
-    pub y: Option<Either<f64, String>>,
-}
-
-#[napi(object)]
-pub struct WebViewInitData {
-    pub url: String,
-    pub style: Option<WebViewStyle>,
-}
-
 pub fn render<'a>(
     env: &'a Env,
     helper: ArkTSHelper,
@@ -40,8 +31,8 @@ pub fn render<'a>(
     app.inner.write().unwrap().helper.ark = Some(helper);
 
     let on_frame_app = app.clone();
-    let on_frame_callback: Function<'_, FnArgs<(i64, i64)>, ()> =
-        env.create_function_from_closure("webviewFrameCallback", move |ctx| {
+    let on_frame_callback: Function<'_, FnArgs<(i64, i64)>, ()> = env
+        .create_function_from_closure("webviewFrameCallback", move |ctx| {
             // first arg is error, second is time, third is time_stamp
             // we need to ignore the error
             let time = ctx.get::<i64>(1)?;

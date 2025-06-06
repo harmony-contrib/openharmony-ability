@@ -1,9 +1,21 @@
 use std::sync::Arc;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Result};
+use napi_ohos::{
+    bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Either, Result,
+};
 
-use crate::WebViewInitData;
+#[napi(object)]
+pub struct WebViewStyle {
+    pub x: Option<Either<f64, String>>,
+    pub y: Option<Either<f64, String>>,
+}
+
+#[napi(object)]
+pub struct WebViewInitData {
+    pub url: String,
+    pub style: Option<WebViewStyle>,
+}
 
 // Generates a JavaScript object that can be passed from ArkTS
 #[napi(object)]
