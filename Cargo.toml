@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "example"]
+members = ["crates/*", "rust_example/*"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -22,4 +22,4 @@ ohos-display-binding = { version = "0.0.1" }
 ohos-display-soloist-binding = { version = "0.1" }
 
 
-papaya = {version = "0.2"}
+papaya = { version = "0.2" }

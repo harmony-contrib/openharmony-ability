@@ -35,6 +35,11 @@ function WebBuilder(data: WebviewNodeData) {
 
 const webViewWrap = wrapBuilder<WebviewNodeData[]>(WebBuilder);
 
+interface AddWebviewMethod {
+  webTag: string
+  controller: WebviewController
+}
+
 export class RustWebviewNodeController extends NodeController {
   private rootNode: FrameNode | null = null;
   private webviewList: Array<BuilderNode<WebviewNodeData[]>> = [];
@@ -50,16 +55,20 @@ export class RustWebviewNodeController extends NodeController {
     return this.rootNode
   }
 
-  addWebview(data: WebviewInitData) {
+  addWebview(data: WebviewInitData): AddWebviewMethod {
     const webTag: string = data?.webTag || randomString();
+    const controller = data?.controller || new web_webview.WebviewController(webTag);
 
     const node: BuilderNode<WebviewNodeData[]> = new BuilderNode(this.uiContext!);
     node.build(webViewWrap,
-      { url: data.url, controller: data?.controller || new web_webview.WebviewController(webTag), style: data?.style });
+      { url: data.url, controller, style: data?.style });
     this.webviewList.push(node);
 
     this.rootNode?.appendChild(node.getFrameNode());
-    return webTag;
+    return {
+      webTag,
+      controller
+    };
   }
 }
 
@@ -79,10 +88,15 @@ export struct DefaultWebViewComponent {
 
     const helper: ArkHelper = {
       exit,
-      createWebview: (err, data: NativeWebViewInitData) => {
-        const init: WebviewInitData = { url: data.url, style: data.style as WebviewStyle } as WebviewInitData;
-        const id = this.webviewController.addWebview(init)
-        return id
+      createWebview: (data: NativeWebViewInitData) => {
+        const init: WebviewInitData =
+          { webTag: data?.id, url: data?.url || '', style: data.style as WebviewStyle } as WebviewInitData;
+        const ret = this.webviewController.addWebview(init)
+        // Return controller and use controller to control webview behavior
+        return ret.controller
+      },
+      hello: () => {
+        console.log('hello')
       }
     }
     const ret: WebViewComponentEventCallback = module.default.webviewRender(helper);

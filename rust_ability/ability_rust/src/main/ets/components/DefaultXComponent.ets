@@ -19,7 +19,8 @@ export struct DefaultXComponent {
 
     const helper: ArkHelper = {
       exit,
-      createWebview: () => ''
+      createWebview: () => '',
+      hello: () => {}
     }
 
     module.default.render(helper, this.rootSlot);

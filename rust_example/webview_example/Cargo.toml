@@ -1,0 +1,23 @@
+[package]
+name = "webview_example"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi-ohos = { version = "1.0" }
+napi-derive-ohos = { version = "1.0" }
+
+openharmony-ability = { workspace = true, features = ["webview"] }
+openharmony-ability-derive = { workspace = true }
+ohos-hilog-binding = { version = "*" }
+
+[build-dependencies]
+napi-build-ohos = { workspace = true }
+
+[profile.release]
+lto = true

@@ -7,12 +7,13 @@ use std::{
     },
 };
 
+use napi_ohos::{Error, Result};
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
-#[cfg(feature = "webview")]
-use crate::WebViewStyle;
-use crate::{helper::Helper, Configuration, Event, OpenHarmonyWaker, Rect, WAKER};
+use crate::{
+    helper::Helper, Configuration, Event, OpenHarmonyWaker, Rect, WebViewInitData, Webview, WAKER,
+};
 
 static ID: AtomicI64 = AtomicI64::new(0);
 
@@ -122,6 +123,45 @@ impl OpenHarmonyAppInner {
     pub fn exit(&self, code: i32) {
         self.helper.exit(code);
     }
+
+    #[cfg(feature = "webview")]
+    pub fn create_webview(&self, url: &str) -> Result<Webview> {
+        if let Some(ark) = self.helper.ark.borrow_mut().as_ref() {
+            let webview = ark.create_webview.call(WebViewInitData {
+                url: Some(url.to_string()),
+                id: None,
+                style: None,
+            })?;
+            return Ok(Webview::new(webview));
+        }
+        Err(Error::from_reason("Failed to create webview"))
+    }
+
+    #[cfg(feature = "webview")]
+    pub fn create_webview_with_id(&self, url: &str, id: &str) -> Result<Webview> {
+        if let Some(ark) = self.helper.ark.borrow_mut().as_ref() {
+            ark.hello.call(()).map_err(|e| {
+                e
+            })?;
+
+            let webview = ark.create_webview.call(WebViewInitData {
+                url: Some(url.to_string()),
+                id: Some(id.to_string()),
+                style: None,
+            })?;
+            return Ok(Webview::new(webview));
+        }
+        Err(Error::from_reason("Failed to create webview"))
+    }
+
+    #[cfg(feature = "webview")]
+    pub fn create_webview_with_option(&self, data: WebViewInitData) -> Result<Webview> {
+        if let Some(ark) = self.helper.ark.borrow_mut().as_ref() {
+            let webview = ark.create_webview.call(data)?;
+            return Ok(Webview::new(webview));
+        }
+        Err(Error::from_reason("Failed to create webview"))
+    }
 }
 
 #[derive(Clone)]
@@ -180,6 +220,10 @@ impl OpenHarmonyApp {
         }
     }
 
+    pub fn app_inner(&self) -> OpenHarmonyAppInner {
+        self.inner.read().unwrap().clone()
+    }
+
     pub fn save(&self, state: Vec<u8>) {
         self.inner.write().unwrap().save(state);
     }
@@ -228,29 +272,6 @@ impl OpenHarmonyApp {
     /// Exit current app with code
     pub fn exit(&self, code: i32) {
         self.inner.read().unwrap().exit(code);
-    }
-
-    #[cfg(feature = "webview")]
-    pub fn create_webview<T>(&self, url: String, style: Option<WebViewStyle>, callback: T)
-    where
-        T: Fn(String) + 'static,
-    {
-        let helper = self.inner.read().unwrap().helper.clone();
-
-        if let Some(helper) = helper.ark {
-            use crate::WebViewInitData;
-
-            helper.create_webview.call_with_return_value(
-                Ok(WebViewInitData { url, style }),
-                napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
-                move |result, _env| {
-                    if let Ok(result) = result {
-                        callback(result);
-                    }
-                    Ok(())
-                },
-            );
-        }
     }
 
     pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, mut event_handle: F) {
