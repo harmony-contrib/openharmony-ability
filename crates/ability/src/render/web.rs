@@ -3,11 +3,11 @@ use std::sync::LazyLock;
 use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::{FnArgs, Function},
-    Env, Result,
+    Env, JsObject, Ref, Result,
 };
 use ohos_display_soloist_binding::DisplaySoloist;
 
-use crate::{ArkTSHelper, Event, IntervalInfo, OpenHarmonyApp};
+use crate::{set_helper, set_main_thread_env, Event, IntervalInfo, OpenHarmonyApp};
 
 static DISPLAY_SOLOIST: LazyLock<DisplaySoloist> = LazyLock::new(|| {
     let display_soloist = DisplaySoloist::new(true);
@@ -22,12 +22,12 @@ pub struct WebViewComponentEventCallback<'a> {
 
 pub fn render<'a>(
     env: &'a Env,
-    helper: ArkTSHelper<'a>,
+    helper: JsObject,
     app: OpenHarmonyApp,
 ) -> Result<WebViewComponentEventCallback<'a>> {
-    let h = unsafe { std::mem::transmute::<ArkTSHelper<'a>, ArkTSHelper<'static>>(helper) };
-    app.inner.write().unwrap().helper.ark.replace(Some(h));
-
+    let h = Ref::new(env, &helper)?;
+    set_helper(h);
+    set_main_thread_env(env.clone());
 
     let on_frame_app = app.clone();
     let on_frame_callback: Function<'_, FnArgs<(i64, i64)>, ()> = env

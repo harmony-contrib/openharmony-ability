@@ -10,6 +10,7 @@ mod memory;
 mod render;
 mod stage;
 mod waker;
+mod error;
 
 pub use app::*;
 pub use area::*;
@@ -23,6 +24,7 @@ pub use memory::*;
 pub use render::*;
 pub use stage::*;
 pub use waker::*;
+pub use error::*;
 
 // re-export arkui and avoid the need to import it in the lib.rs
 pub use napi_derive_ohos as napi_derive;

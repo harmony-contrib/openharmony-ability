@@ -78,6 +78,17 @@ export struct DefaultWebViewComponent {
   private uiContext = getContext(this) as common.UIAbilityContext;
   private nativeModule: ESObject;
   private webviewController = new RustWebviewNodeController(this.getUIContext());
+  // keep ref avoid release
+  private helper: ArkHelper = {
+    exit,
+    createWebview: (data: NativeWebViewInitData) => {
+      const init: WebviewInitData =
+        { webTag: data?.id, url: data?.url || '', style: data.style as WebviewStyle } as WebviewInitData;
+      const ret = this.webviewController.addWebview(init)
+      // Return controller and use controller to control webview behavior
+      return ret.controller
+    },
+  }
   @StorageProp("moduleName") name: string = "";
   private lifecycleCallback: WebViewComponentEventCallback | null = null;
 
@@ -86,20 +97,7 @@ export struct DefaultWebViewComponent {
     const module: ESObject = await import(moduleName);
     this.nativeModule = module.default;
 
-    const helper: ArkHelper = {
-      exit,
-      createWebview: (data: NativeWebViewInitData) => {
-        const init: WebviewInitData =
-          { webTag: data?.id, url: data?.url || '', style: data.style as WebviewStyle } as WebviewInitData;
-        const ret = this.webviewController.addWebview(init)
-        // Return controller and use controller to control webview behavior
-        return ret.controller
-      },
-      hello: () => {
-        console.log('hello')
-      }
-    }
-    const ret: WebViewComponentEventCallback = module.default.webviewRender(helper);
+    const ret: WebViewComponentEventCallback = module.default.webviewRender(this.helper);
     this.lifecycleCallback = ret;
 
     ret.onComponentCreated();

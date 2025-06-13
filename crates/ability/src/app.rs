@@ -7,12 +7,14 @@ use std::{
     },
 };
 
-use napi_ohos::{Error, Result};
+use napi_ohos::{bindgen_prelude::Function, Error, Result};
+use ohos_display_binding::default_display_scaled_density;
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
-    helper::Helper, Configuration, Event, OpenHarmonyWaker, Rect, WebViewInitData, Webview, WAKER,
+    get_helper, get_main_thread_env, AbilityError, Configuration, Event, OpenHarmonyWaker, Rect,
+    WebViewInitData, Webview, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -27,7 +29,6 @@ pub struct OpenHarmonyAppInner {
     save_state: bool,
     frame_rate: u32,
     id: i64,
-    pub(crate) helper: Helper,
     pub(crate) configuration: Configuration,
     pub(crate) rect: Rect,
 }
@@ -75,7 +76,6 @@ impl OpenHarmonyAppInner {
             save_state: false,
             frame_rate: 60,
             id,
-            helper: Helper::new(),
             configuration: Default::default(),
             rect: Default::default(),
         }
@@ -117,48 +117,101 @@ impl OpenHarmonyAppInner {
     }
 
     pub fn scale(&self) -> f32 {
-        self.helper.scale()
+        default_display_scaled_density()
     }
 
-    pub fn exit(&self, code: i32) {
-        self.helper.exit(code);
+    pub fn exit(&self, code: i32) -> Result<()> {
+        let ret = unsafe { get_helper() };
+        if let Some(h) = ret.borrow().as_ref() {
+            // Try to get main thread env
+            if let Some(env) = get_main_thread_env().borrow().as_ref() {
+                let ret = h.get_value(&env)?;
+                let exit_func = ret.get_named_property::<Function<'_, i32, ()>>("exit")?;
+                exit_func.call(code)?;
+            } else {
+                return Err(Error::from_reason(
+                    AbilityError::OnlyRunWithMainThread("exit".to_string()).to_string(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     #[cfg(feature = "webview")]
     pub fn create_webview(&self, url: &str) -> Result<Webview> {
-        if let Some(ark) = self.helper.ark.borrow_mut().as_ref() {
-            let webview = ark.create_webview.call(WebViewInitData {
-                url: Some(url.to_string()),
-                id: None,
-                style: None,
-            })?;
-            return Ok(Webview::new(webview));
-        }
-        Err(Error::from_reason("Failed to create webview"))
-    }
+        let ret = unsafe { get_helper() };
+        if let Some(h) = ret.borrow().as_ref() {
+            use napi_ohos::JsObject;
 
-    #[cfg(feature = "webview")]
-    pub fn create_webview_with_id(&self, url: &str, id: &str) -> Result<Webview> {
-        if let Some(ark) = self.helper.ark.borrow_mut().as_ref() {
-            ark.hello.call(()).map_err(|e| {
-                e
-            })?;
+            if let Some(env) = get_main_thread_env().borrow().as_ref() {
+                let ret = h.get_value(&env)?;
+                let create_webview_func = ret
+                    .get_named_property::<Function<'_, WebViewInitData, JsObject>>(
+                        "createWebview",
+                    )?;
+                let webview = create_webview_func.call(WebViewInitData {
+                    url: Some(url.to_string()),
+                    id: None,
+                    style: None,
+                })?;
+                return Ok(Webview::new(webview));
+            }
 
-            let webview = ark.create_webview.call(WebViewInitData {
-                url: Some(url.to_string()),
-                id: Some(id.to_string()),
-                style: None,
-            })?;
-            return Ok(Webview::new(webview));
+            return Err(Error::from_reason(
+                AbilityError::OnlyRunWithMainThread("createWebview".to_string()).to_string(),
+            ));
         }
-        Err(Error::from_reason("Failed to create webview"))
+        Err(Error::from_reason(
+            AbilityError::OnlyRunWithMainThread("createWebview".to_string()).to_string(),
+        ))
     }
 
     #[cfg(feature = "webview")]
     pub fn create_webview_with_option(&self, data: WebViewInitData) -> Result<Webview> {
-        if let Some(ark) = self.helper.ark.borrow_mut().as_ref() {
-            let webview = ark.create_webview.call(data)?;
-            return Ok(Webview::new(webview));
+        let ret = unsafe { get_helper() };
+        if let Some(h) = ret.borrow().as_ref() {
+            use napi_ohos::JsObject;
+
+            if let Some(env) = get_main_thread_env().borrow().as_ref() {
+                let ret = h.get_value(&env)?;
+                let create_webview_func = ret
+                    .get_named_property::<Function<'_, WebViewInitData, JsObject>>(
+                        "createWebview",
+                    )?;
+                let webview = create_webview_func.call(data)?;
+                return Ok(Webview::new(webview));
+            }
+
+            return Err(Error::from_reason(
+                AbilityError::OnlyRunWithMainThread("createWebview".to_string()).to_string(),
+            ));
+        }
+        Err(Error::from_reason(
+            AbilityError::OnlyRunWithMainThread("createWebview".to_string()).to_string(),
+        ))
+    }
+
+    #[cfg(feature = "webview")]
+    pub fn create_webview_with_id(&self, url: &str, id: &str) -> Result<Webview> {
+        let ret = unsafe { get_helper() };
+        if let Some(h) = ret.borrow().as_ref() {
+            use napi_ohos::JsObject;
+
+            if let Some(env) = get_main_thread_env().borrow().as_ref() {
+                let ret = h.get_value(&env)?;
+                let create_webview_func = ret
+                    .get_named_property::<Function<'_, WebViewInitData, JsObject>>(
+                        "createWebview",
+                    )?;
+                let webview = create_webview_func.call(WebViewInitData {
+                    url: Some(url.to_string()),
+                    id: Some(id.to_string()),
+                    style: None,
+                })?;
+                return Ok(Webview::new(webview));
+            }
+
+            return Err(Error::from_reason("Failed to create webview"));
         }
         Err(Error::from_reason("Failed to create webview"))
     }
@@ -271,7 +324,7 @@ impl OpenHarmonyApp {
 
     /// Exit current app with code
     pub fn exit(&self, code: i32) {
-        self.inner.read().unwrap().exit(code);
+        self.inner.read().unwrap().exit(code).unwrap();
     }
 
     pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, mut event_handle: F) {

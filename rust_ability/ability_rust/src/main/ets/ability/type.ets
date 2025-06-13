@@ -50,5 +50,4 @@ export interface Module {
 export interface ArkHelper {
   exit: (code: number) => void
   createWebview: (data: WebViewInitData) => Object
-  hello: () => void
 }

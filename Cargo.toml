@@ -6,20 +6,20 @@ resolver = "2"
 openharmony-ability-derive = { version = "0.1.5-beta.0", path = "crates/derive" }
 openharmony-ability = { version = "0.1.5-beta.0", path = "crates/ability" }
 
-napi-sys-ohos = { version = "1.0", features = ["napi8"] }
-napi-ohos = { version = "1.0" }
-napi-derive-ohos = { version = "1.0" }
-napi-build-ohos = { version = "1.0" }
+napi-sys-ohos = { path = "../ohos-rs/crates/sys", features = ["napi8"] }
+napi-ohos = { path = "../ohos-rs/crates/napi"}
+napi-derive-ohos = { path = "../ohos-rs/crates/macro" }
+napi-build-ohos = { path = "../ohos-rs/crates/build" }
 
 syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { version = "0.0.4" }
-ohos-xcomponent-binding = { version = "0.0.6" }
-ohos-ime-binding = { version = "0.1" }
-ohos-display-binding = { version = "0.0.1" }
-ohos-display-soloist-binding = { version = "0.1" }
+ohos-arkui-binding = { path ="../ohos-native-bindings/crates/arkui" }
+ohos-xcomponent-binding = { path ="../ohos-native-bindings/crates/xcomponent" }
+ohos-ime-binding = { path ="../ohos-native-bindings/crates/ime" }
+ohos-display-binding = { path ="../ohos-native-bindings/crates/display" }
+ohos-display-soloist-binding = { path ="../ohos-native-bindings/crates/native_display_soloist" }
 
 
 papaya = { version = "0.2" }
