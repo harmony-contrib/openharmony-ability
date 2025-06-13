@@ -1,23 +1,22 @@
 use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
-use napi_ohos::{Env, Error, Result};
+use napi_ohos::{Env, Error, JsObject, Ref, Result};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
 use crate::{
-    helper::ArkHelper, input, ArkTSHelper, Event, InputEvent, IntervalInfo, OpenHarmonyApp,
+    input, set_helper, set_main_thread_env, Event, InputEvent, IntervalInfo, OpenHarmonyApp,
 };
 
 /// create lifecycle object and return to arkts
-pub fn render(
-    env: &Env,
-    helper: ArkTSHelper,
+pub fn render<'a>(
+    env: &'a Env,
+    helper: JsObject,
     slot: ArkUIHandle,
     app: OpenHarmonyApp,
 ) -> Result<RootNode> {
-    let ark_helper = helper;
-    let helper = ArkHelper::from_ark_ts_helper(ark_helper)?;
-
-    app.inner.write().unwrap().helper.ark = Some(helper);
+    let h = Ref::new(env, &helper)?;
+    set_helper(h);
+    set_main_thread_env(env.clone());
 
     let mut root = RootNode::new(slot);
     let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason))?;

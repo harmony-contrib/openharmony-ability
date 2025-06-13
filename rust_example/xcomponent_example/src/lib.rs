@@ -13,13 +13,10 @@ pub fn handle_change() -> napi_ohos::Result<()> {
     let guard = INNER_APP.read().unwrap();
     let app = guard.as_ref().unwrap();
 
-    app.create_webview("https://www.baidu.com".to_string(), None, |id| {
-        hilog_info!(format!("ohos-rs macro create_webview: {:?}", id).as_str());
-    });
     Ok(())
 }
 
-#[ability(webview)]
+#[ability]
 fn openharmony_app(app: OpenHarmonyApp) {
     INNER_APP.write().unwrap().replace(app.clone());
 

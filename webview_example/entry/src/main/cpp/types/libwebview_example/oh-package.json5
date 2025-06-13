@@ -1,5 +1,5 @@
 {
-  "name": "libexample.so",
+  "name": "libwebview_example.so",
   "types": "./Index.d.ts",
   "version": "1.0.0",
   "description": "Please describe the basic information."
