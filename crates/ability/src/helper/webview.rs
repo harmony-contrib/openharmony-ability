@@ -122,3 +122,32 @@ impl Webview {
         Ok(())
     }
 }
+
+#[cfg(feature = "webview")]
+pub fn create_webview_with_id(url: &str, id: &str) -> Result<Webview> {
+    let ret = unsafe {
+        use crate::get_helper;
+        get_helper()
+    };
+    if let Some(h) = ret.borrow().as_ref() {
+        use napi_ohos::JsObject;
+
+        use crate::get_main_thread_env;
+
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let ret = h.get_value(&env)?;
+            let create_webview_func =
+                ret.get_named_property::<Function<'_, WebViewInitData, JsObject>>("createWebview")?;
+            let webview = create_webview_func.call(WebViewInitData {
+                url: Some(url.to_string()),
+                id: Some(id.to_string()),
+                style: None,
+            })?;
+            let web = Webview::new(String::from(id), webview)?;
+            return Ok(web);
+        }
+
+        return Err(Error::from_reason("Failed to create webview"));
+    }
+    Err(Error::from_reason("Failed to create webview"))
+}

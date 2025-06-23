@@ -14,7 +14,7 @@ use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
     get_helper, get_main_thread_env, AbilityError, Configuration, Event, OpenHarmonyWaker, Rect,
-    WebViewInitData, Webview, WAKER,
+    WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -136,32 +136,6 @@ impl OpenHarmonyAppInner {
         }
         Ok(())
     }
-
-    #[cfg(feature = "webview")]
-    pub fn create_webview_with_id(&self, url: &str, id: &str) -> Result<Webview> {
-        let ret = unsafe { get_helper() };
-        if let Some(h) = ret.borrow().as_ref() {
-            use napi_ohos::JsObject;
-
-            if let Some(env) = get_main_thread_env().borrow().as_ref() {
-                let ret = h.get_value(&env)?;
-                let create_webview_func = ret
-                    .get_named_property::<Function<'_, WebViewInitData, JsObject>>(
-                        "createWebview",
-                    )?;
-                let webview = create_webview_func.call(WebViewInitData {
-                    url: Some(url.to_string()),
-                    id: Some(id.to_string()),
-                    style: None,
-                })?;
-                let web = Webview::new(String::from(id), webview)?;
-                return Ok(web);
-            }
-
-            return Err(Error::from_reason("Failed to create webview"));
-        }
-        Err(Error::from_reason("Failed to create webview"))
-    }
 }
 
 #[derive(Clone)]
@@ -218,10 +192,6 @@ impl OpenHarmonyApp {
             ime: Arc::new(RefCell::new(None)),
             is_keyboard_show: Arc::new(Mutex::new(false)),
         }
-    }
-
-    pub fn app_inner(&self) -> OpenHarmonyAppInner {
-        self.inner.read().unwrap().clone()
     }
 
     pub fn save(&self, state: Vec<u8>) {
