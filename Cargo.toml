@@ -20,6 +20,7 @@ ohos-xcomponent-binding = { path ="../ohos-native-bindings/crates/xcomponent" }
 ohos-ime-binding = { path ="../ohos-native-bindings/crates/ime" }
 ohos-display-binding = { path ="../ohos-native-bindings/crates/display" }
 ohos-display-soloist-binding = { path ="../ohos-native-bindings/crates/native_display_soloist" }
+ohos-web-binding = { path ="../ohos-native-bindings/crates/web" }
 
 
 papaya = { version = "0.2" }

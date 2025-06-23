@@ -138,60 +138,6 @@ impl OpenHarmonyAppInner {
     }
 
     #[cfg(feature = "webview")]
-    pub fn create_webview(&self, url: &str) -> Result<Webview> {
-        let ret = unsafe { get_helper() };
-        if let Some(h) = ret.borrow().as_ref() {
-            use napi_ohos::JsObject;
-
-            if let Some(env) = get_main_thread_env().borrow().as_ref() {
-                let ret = h.get_value(&env)?;
-                let create_webview_func = ret
-                    .get_named_property::<Function<'_, WebViewInitData, JsObject>>(
-                        "createWebview",
-                    )?;
-                let webview = create_webview_func.call(WebViewInitData {
-                    url: Some(url.to_string()),
-                    id: None,
-                    style: None,
-                })?;
-                return Ok(Webview::new(webview));
-            }
-
-            return Err(Error::from_reason(
-                AbilityError::OnlyRunWithMainThread("createWebview".to_string()).to_string(),
-            ));
-        }
-        Err(Error::from_reason(
-            AbilityError::OnlyRunWithMainThread("createWebview".to_string()).to_string(),
-        ))
-    }
-
-    #[cfg(feature = "webview")]
-    pub fn create_webview_with_option(&self, data: WebViewInitData) -> Result<Webview> {
-        let ret = unsafe { get_helper() };
-        if let Some(h) = ret.borrow().as_ref() {
-            use napi_ohos::JsObject;
-
-            if let Some(env) = get_main_thread_env().borrow().as_ref() {
-                let ret = h.get_value(&env)?;
-                let create_webview_func = ret
-                    .get_named_property::<Function<'_, WebViewInitData, JsObject>>(
-                        "createWebview",
-                    )?;
-                let webview = create_webview_func.call(data)?;
-                return Ok(Webview::new(webview));
-            }
-
-            return Err(Error::from_reason(
-                AbilityError::OnlyRunWithMainThread("createWebview".to_string()).to_string(),
-            ));
-        }
-        Err(Error::from_reason(
-            AbilityError::OnlyRunWithMainThread("createWebview".to_string()).to_string(),
-        ))
-    }
-
-    #[cfg(feature = "webview")]
     pub fn create_webview_with_id(&self, url: &str, id: &str) -> Result<Webview> {
         let ret = unsafe { get_helper() };
         if let Some(h) = ret.borrow().as_ref() {
@@ -208,7 +154,8 @@ impl OpenHarmonyAppInner {
                     id: Some(id.to_string()),
                     style: None,
                 })?;
-                return Ok(Webview::new(webview));
+                let web = Webview::new(String::from(id), webview)?;
+                return Ok(web);
             }
 
             return Err(Error::from_reason("Failed to create webview"));

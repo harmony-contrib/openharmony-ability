@@ -49,4 +49,5 @@ export declare function handleChange(): void
 export declare function init(): ApplicationLifecycle
 
 export declare function webviewRender(helper: ArkTSHelper): WebViewComponentEventCallback
-
+export declare function setBackgroundColor(color: string): void
+export declare function setVisible(visible: boolean): void

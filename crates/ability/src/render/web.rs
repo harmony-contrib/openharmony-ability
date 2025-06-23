@@ -26,6 +26,7 @@ pub fn render<'a>(
     app: OpenHarmonyApp,
 ) -> Result<WebViewComponentEventCallback<'a>> {
     let h = Ref::new(env, &helper)?;
+
     set_helper(h);
     set_main_thread_env(env.clone());
 
