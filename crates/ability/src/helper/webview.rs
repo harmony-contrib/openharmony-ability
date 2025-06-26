@@ -1,9 +1,11 @@
 use napi_derive_ohos::napi;
 use napi_ohos::{
-    bindgen_prelude::{Function, Object},
-    Either, Error, Result,
+    bindgen_prelude::{FnArgs, Function, Object},
+    Either, Error, JsString, Result,
 };
 use ohos_web_binding::Web;
+
+use crate::get_main_thread_env;
 
 #[napi(object)]
 pub struct WebViewStyle {
@@ -91,12 +93,32 @@ impl Webview {
     pub fn evaluate_script_with_callback(
         &self,
         js: &str,
-        callback: Option<Box<dyn Fn(String) + Send + Sync + 'static>>,
+        callback: Option<Box<dyn Fn(String) + Send + 'static>>,
     ) -> Result<()> {
-        self.web_view_native
-            .evaluate_js(String::from(js), callback)
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-        Ok(())
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let evaluate_js_js_function = self.inner.get_named_property::<Function<
+                '_,
+                FnArgs<(String, Function<'_, String, ()>)>,
+                (),
+            >>("runJavaScript")?;
+
+            let cb = env.create_function_from_closure("evaluate_js_callback", move |ctx| {
+                let ret = ctx.try_get::<JsString>(1)?;
+                let ret = match ret {
+                    Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                    Either::B(_ret) => String::from("undefined"),
+                };
+                if let Some(cb) = callback.as_ref() {
+                    cb(ret);
+                }
+                Ok(())
+            })?;
+
+            evaluate_js_js_function.call((js.to_string(), cb).into())?;
+            Ok(())
+        } else {
+            Err(Error::from_reason("Failed to get main thread env"))
+        }
     }
 
     pub fn cookies_with_url(&self, url: &str) -> Result<String> {
