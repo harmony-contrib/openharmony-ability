@@ -4,8 +4,8 @@ import { AbilityConstant } from '@kit.AbilityKit';
 import window from '@ohos.window';
 
 export default class EntryAbility extends RustAbility {
-  public moduleName: string = "example"
-  public defaultPage: boolean = false;
+  public moduleName: string = "wry_example"
+  public defaultPage: boolean = true;
   public mode: 'xcomponent' | 'webview' = 'webview'
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
@@ -17,6 +17,6 @@ export default class EntryAbility extends RustAbility {
     await window.setWindowLayoutFullScreen(false);
     super.onWindowStageCreate(windowStage);
 
-    await windowStage.loadContent("pages/Index")
+    // await windowStage.loadContent("pages/Index")
   }
 }

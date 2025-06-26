@@ -7,7 +7,7 @@ description = "Binding Rust application on Harmony with Ability"
 
 [features]
 default = []
-webview = ["dep:ohos-display-soloist-binding"]
+webview = ["dep:ohos-display-soloist-binding", "dep:ohos-web-binding"]
 
 [dependencies]
 # for napi binding
@@ -25,3 +25,4 @@ ohos-display-binding = { workspace = true }
 
 # for webview feature
 ohos-display-soloist-binding = { workspace = true, optional = true }
+ohos-web-binding = { workspace = true, optional = true }

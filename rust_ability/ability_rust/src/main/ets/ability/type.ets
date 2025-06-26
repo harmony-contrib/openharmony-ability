@@ -28,7 +28,8 @@ export interface WebViewComponentEventCallback {
 }
 
 export interface WebViewInitData {
-  url: string
+  url?: string
+  id?: string
   style?: WebViewStyle
 }
 
@@ -48,5 +49,5 @@ export interface Module {
 
 export interface ArkHelper {
   exit: (code: number) => void
-  createWebview: (err: BusinessError | null, data: WebViewInitData) => string
+  createWebview: (data: WebViewInitData) => Object
 }

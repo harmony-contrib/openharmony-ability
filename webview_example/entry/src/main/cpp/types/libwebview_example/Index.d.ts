@@ -8,7 +8,7 @@ export interface ApplicationLifecycle {
 
 export interface ArkTSHelper {
   exit: (arg: number) => void
-  createWebview: (arg: WebViewInitData) => string
+  createWebview: (arg: WebViewInitData) => Object
 }
 
 export interface EnvironmentCallback {
@@ -22,7 +22,8 @@ export interface WebViewComponentEventCallback {
 }
 
 export interface WebViewInitData {
-  url: string
+  url?: string
+  id?: string
   style?: WebViewStyle
 }
 
@@ -48,4 +49,5 @@ export declare function handleChange(): void
 export declare function init(): ApplicationLifecycle
 
 export declare function webviewRender(helper: ArkTSHelper): WebViewComponentEventCallback
-
+export declare function setBackgroundColor(color: string): void
+export declare function setVisible(visible: boolean): void

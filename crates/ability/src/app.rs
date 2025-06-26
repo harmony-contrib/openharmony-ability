@@ -7,12 +7,15 @@ use std::{
     },
 };
 
+use napi_ohos::{bindgen_prelude::Function, Error, Result};
+use ohos_display_binding::default_display_scaled_density;
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
-#[cfg(feature = "webview")]
-use crate::WebViewStyle;
-use crate::{helper::Helper, Configuration, Event, OpenHarmonyWaker, Rect, WAKER};
+use crate::{
+    get_helper, get_main_thread_env, AbilityError, Configuration, Event, OpenHarmonyWaker, Rect,
+    WAKER,
+};
 
 static ID: AtomicI64 = AtomicI64::new(0);
 
@@ -26,7 +29,6 @@ pub struct OpenHarmonyAppInner {
     save_state: bool,
     frame_rate: u32,
     id: i64,
-    pub(crate) helper: Helper,
     pub(crate) configuration: Configuration,
     pub(crate) rect: Rect,
 }
@@ -74,7 +76,6 @@ impl OpenHarmonyAppInner {
             save_state: false,
             frame_rate: 60,
             id,
-            helper: Helper::new(),
             configuration: Default::default(),
             rect: Default::default(),
         }
@@ -116,11 +117,24 @@ impl OpenHarmonyAppInner {
     }
 
     pub fn scale(&self) -> f32 {
-        self.helper.scale()
+        default_display_scaled_density()
     }
 
-    pub fn exit(&self, code: i32) {
-        self.helper.exit(code);
+    pub fn exit(&self, code: i32) -> Result<()> {
+        let ret = unsafe { get_helper() };
+        if let Some(h) = ret.borrow().as_ref() {
+            // Try to get main thread env
+            if let Some(env) = get_main_thread_env().borrow().as_ref() {
+                let ret = h.get_value(&env)?;
+                let exit_func = ret.get_named_property::<Function<'_, i32, ()>>("exit")?;
+                exit_func.call(code)?;
+            } else {
+                return Err(Error::from_reason(
+                    AbilityError::OnlyRunWithMainThread("exit".to_string()).to_string(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -227,30 +241,7 @@ impl OpenHarmonyApp {
 
     /// Exit current app with code
     pub fn exit(&self, code: i32) {
-        self.inner.read().unwrap().exit(code);
-    }
-
-    #[cfg(feature = "webview")]
-    pub fn create_webview<T>(&self, url: String, style: Option<WebViewStyle>, callback: T)
-    where
-        T: Fn(String) + 'static,
-    {
-        let helper = self.inner.read().unwrap().helper.clone();
-
-        if let Some(helper) = helper.ark {
-            use crate::WebViewInitData;
-
-            helper.create_webview.call_with_return_value(
-                Ok(WebViewInitData { url, style }),
-                napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
-                move |result, _env| {
-                    if let Ok(result) = result {
-                        callback(result);
-                    }
-                    Ok(())
-                },
-            );
-        }
+        self.inner.read().unwrap().exit(code).unwrap();
     }
 
     pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, mut event_handle: F) {

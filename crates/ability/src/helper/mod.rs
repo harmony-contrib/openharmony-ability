@@ -1,51 +1,35 @@
-use napi_ohos::{threadsafe_function::ThreadsafeFunctionCallMode, Status};
-use ohos_display_binding::default_display_scaled_density;
+use std::{cell::RefCell, rc::Rc};
 
-mod ark;
+use napi_ohos::{Env, JsObject, Ref};
+
+mod webview;
 mod window_info;
 
-pub use ark::*;
+pub use webview::*;
 
-pub(crate) struct Helper {
-    #[allow(dead_code)]
-    pub(crate) ark: Option<ArkHelper>,
+thread_local! {
+    static HELPER: Rc<RefCell<Option<Ref<JsObject>>>> = Rc::new(RefCell::new(None));
+
+    static MAIN_THREAD_ENV: Rc<RefCell<Option<Env>>> = Rc::new(RefCell::new(None));
 }
 
-impl Clone for Helper {
-    fn clone(&self) -> Self {
-        Helper {
-            ark: self.ark.clone(),
-        }
-    }
+/// 设置 HELPER 的值
+pub fn set_helper(helper: Ref<JsObject>) {
+    HELPER.with(|h| {
+        *h.borrow_mut() = Some(helper);
+    });
 }
 
-impl Default for Helper {
-    fn default() -> Self {
-        Helper { ark: None }
-    }
+pub unsafe fn get_helper() -> Rc<RefCell<Option<Ref<JsObject>>>> {
+    HELPER.with(|h| Rc::clone(h))
 }
 
-impl Helper {
-    pub fn new() -> Self {
-        Helper { ark: None }
-    }
+pub fn set_main_thread_env(env: Env) {
+    MAIN_THREAD_ENV.with(|e| {
+        *e.borrow_mut() = Some(env);
+    });
+}
 
-    pub fn scale(&self) -> f32 {
-        default_display_scaled_density()
-    }
-
-    /// exit current app
-    pub fn exit(&self, code: i32) -> i32 {
-        if let Some(ark) = self.ark.as_ref() {
-            let ret = ark
-                .exit
-                .call(Ok(code), ThreadsafeFunctionCallMode::NonBlocking);
-            match ret {
-                Status::Ok => 0,
-                _ => -1,
-            }
-        } else {
-            -1
-        }
-    }
+pub fn get_main_thread_env() -> Rc<RefCell<Option<Env>>> {
+    MAIN_THREAD_ENV.with(|e| Rc::clone(e))
 }
