@@ -31,6 +31,14 @@ export interface WebViewInitData {
   url?: string
   id?: string
   style?: WebViewStyle
+  javascriptEnable?: boolean
+  devtools?: boolean
+  transparent?: boolean
+  autoplay?: boolean
+  userAgent?: string
+  initializationScripts?: string
+  headers?: Record<string,string>
+  html?: string
 }
 
 export interface WebViewStyle {

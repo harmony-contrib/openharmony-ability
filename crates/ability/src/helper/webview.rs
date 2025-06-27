@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::{FnArgs, Function, Object},
@@ -8,6 +10,7 @@ use ohos_web_binding::Web;
 use crate::get_main_thread_env;
 
 #[napi(object)]
+#[derive(Debug, Clone)]
 pub struct WebViewStyle {
     pub x: Option<Either<f64, String>>,
     pub y: Option<Either<f64, String>>,
@@ -18,6 +21,26 @@ pub struct WebViewInitData {
     pub url: Option<String>,
     pub id: Option<String>,
     pub style: Option<WebViewStyle>,
+    pub javascript_enabled: Option<bool>,
+    pub devtools: Option<bool>,
+    pub user_agent: Option<String>,
+    pub autoplay: Option<bool>,
+    pub initialization_scripts: Option<String>,
+    pub headers: Option<HashMap<String, String>>,
+    pub html: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebViewData {
+    pub url: Option<String>,
+    pub style: Option<WebViewStyle>,
+    pub javascript_enabled: Option<bool>,
+    pub devtools: Option<bool>,
+    pub user_agent: Option<String>,
+    pub autoplay: Option<bool>,
+    pub initialization_scripts: Option<String>,
+    pub headers: Option<HashMap<String, String>>,
+    pub html: Option<String>,
 }
 
 pub struct Webview {
@@ -146,6 +169,42 @@ impl Webview {
 }
 
 #[cfg(feature = "webview")]
+pub fn create_webview(id: &str, init_data: WebViewData) -> Result<Webview> {
+    let ret = unsafe {
+        use crate::get_helper;
+        get_helper()
+    };
+    if let Some(h) = ret.borrow().as_ref() {
+        use napi_ohos::JsObject;
+
+        use crate::get_main_thread_env;
+
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let ret = h.get_value(&env)?;
+            let create_webview_func =
+                ret.get_named_property::<Function<'_, WebViewInitData, JsObject>>("createWebview")?;
+            let webview = create_webview_func.call(WebViewInitData {
+                url: init_data.url,
+                id: Some(id.to_string()),
+                style: init_data.style,
+                javascript_enabled: init_data.javascript_enabled,
+                devtools: init_data.devtools,
+                user_agent: init_data.user_agent,
+                autoplay: init_data.autoplay,
+                initialization_scripts: init_data.initialization_scripts,
+                headers: init_data.headers,
+                html: init_data.html,
+            })?;
+            let web = Webview::new(String::from(id), webview)?;
+            return Ok(web);
+        }
+
+        return Err(Error::from_reason("Failed to create webview"));
+    }
+    Err(Error::from_reason("Failed to create webview"))
+}
+
+#[cfg(feature = "webview")]
 pub fn create_webview_with_id(url: &str, id: &str) -> Result<Webview> {
     let ret = unsafe {
         use crate::get_helper;
@@ -164,6 +223,13 @@ pub fn create_webview_with_id(url: &str, id: &str) -> Result<Webview> {
                 url: Some(url.to_string()),
                 id: Some(id.to_string()),
                 style: None,
+                javascript_enabled: None,
+                devtools: None,
+                user_agent: None,
+                autoplay: None,
+                initialization_scripts: None,
+                headers: None,
+                html: None,
             })?;
             let web = Webview::new(String::from(id), webview)?;
             return Ok(web);
