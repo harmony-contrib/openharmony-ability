@@ -10,13 +10,16 @@ use ohos_web_binding::Web;
 use crate::get_main_thread_env;
 
 #[napi(object)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct WebViewStyle {
     pub x: Option<Either<f64, String>>,
     pub y: Option<Either<f64, String>>,
+    pub visible: Option<bool>,
+    pub background_color: Option<String>,
 }
 
 #[napi(object)]
+#[derive(Debug, Clone, Default)]
 pub struct WebViewInitData {
     pub url: Option<String>,
     pub id: Option<String>,
@@ -28,9 +31,10 @@ pub struct WebViewInitData {
     pub initialization_scripts: Option<String>,
     pub headers: Option<HashMap<String, String>>,
     pub html: Option<String>,
+    pub transparent: Option<bool>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct WebViewData {
     pub url: Option<String>,
     pub style: Option<WebViewStyle>,
@@ -41,6 +45,7 @@ pub struct WebViewData {
     pub initialization_scripts: Option<String>,
     pub headers: Option<HashMap<String, String>>,
     pub html: Option<String>,
+    pub transparent: Option<bool>,
 }
 
 pub struct Webview {
@@ -194,6 +199,7 @@ pub fn create_webview(id: &str, init_data: WebViewData) -> Result<Webview> {
                 initialization_scripts: init_data.initialization_scripts,
                 headers: init_data.headers,
                 html: init_data.html,
+                transparent: init_data.transparent,
             })?;
             let web = Webview::new(String::from(id), webview)?;
             return Ok(web);
@@ -230,6 +236,7 @@ pub fn create_webview_with_id(url: &str, id: &str) -> Result<Webview> {
                 initialization_scripts: None,
                 headers: None,
                 html: None,
+                transparent: None,
             })?;
             let web = Webview::new(String::from(id), webview)?;
             return Ok(web);
