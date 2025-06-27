@@ -6,11 +6,12 @@ import { common } from '@kit.AbilityKit';
 import { ArkHelper, WebViewComponentEventCallback, WebViewInitData as NativeWebViewInitData } from '../ability/type';
 import { exit } from "../helper";
 import { getCookies } from './Utils';
+import { WebHeader } from '@kit.ArkUI';
 
 export interface WebviewStyle {
   x?: number | string;
   y?: number | string;
-  backgroundColor?: string;
+  backgroundColor?: string | Color;
   visible?: string;
 }
 
@@ -19,6 +20,13 @@ export interface WebviewInitData {
   url: string;
   style?: WebviewStyle;
   controller?: WebviewController;
+  javascriptEnable?: boolean
+  devtools?: boolean
+  autoplay?: boolean
+  userAgent?: string
+  initializationScripts?: ScriptItem[]
+  headers?: Record<string, string>
+  html?: string
 }
 
 interface WebviewNodeData extends WebviewInitData {
@@ -36,6 +44,9 @@ function WebBuilder(data: WebviewNodeData) {
     })
     .backgroundColor(data?.style?.backgroundColor)
     .visibility(data?.style?.visible === 'hidden' ? Visibility.Hidden : Visibility.Visible)
+    .javaScriptAccess(data?.javascriptEnable)
+    .mediaPlayGestureAccess((typeof data?.autoplay === 'boolean' && data.autoplay === true) ? false : true)
+    .javaScriptOnDocumentStart(data?.initializationScripts)
 }
 
 const webViewWrap = wrapBuilder<WebviewNodeData[]>(WebBuilder);
@@ -56,7 +67,7 @@ export class RustWebviewNodeController extends NodeController {
   }
 
   makeNode(uiContext: UIContext): FrameNode {
-    if(this.rootNode === null) {
+    if (this.rootNode === null) {
       this.rootNode = new FrameNode(uiContext);
     }
     return this.rootNode
@@ -70,7 +81,7 @@ export class RustWebviewNodeController extends NodeController {
       data.controller = new web_webview.WebviewController(data.webTag) as WebviewController
     }
 
-    if(this.rootNode === null) {
+    if (this.rootNode === null) {
       this.rootNode = new FrameNode(this.uiContext!)
     }
 
@@ -106,11 +117,37 @@ export struct DefaultWebViewComponent {
   private helper: ArkHelper = {
     exit,
     createWebview: (data: NativeWebViewInitData) => {
+      // url set to empty string avoid double load.
       const init: WebviewInitData =
-        { webTag: data?.id, url: data?.url || '', style: (data.style || {}) as WebviewStyle } as WebviewInitData;
+        {
+          webTag: data?.id,
+          url: '',
+          style: (data.style || {}) as WebviewStyle,
+          javascriptEnable: data?.javascriptEnable || true,
+          userAgent: data?.userAgent,
+          devtools: data?.devtools,
+          autoplay: data?.autoplay
+        } as WebviewInitData;
+
+      // transparent only be set when backgroundColor is null.
+      if (data?.transparent && !init.style?.backgroundColor) {
+        init.style!.backgroundColor = Color.Transparent;
+      }
       const ret = this.webviewController.addWebview(init)
 
       const ctrl = ret.controller;
+
+      // load url or html string
+      if (data?.url) {
+        const header: WebHeader[] =
+          Object.keys((data?.headers || {}) as Record<string, string>).reduce((t: WebHeader[], i) => {
+            t.push({ headerKey: i, headerValue: data.headers![i] } as WebHeader);
+            return t
+          }, [])
+        ctrl.loadUrl(data.url, header)
+      } else {
+        ctrl.loadData(data!.html, 'text/html', 'UTF-8')
+      }
 
       // set getCookies method
       ctrl.getCookies = getCookies;
