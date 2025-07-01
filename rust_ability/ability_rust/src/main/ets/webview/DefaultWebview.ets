@@ -117,6 +117,12 @@ export struct DefaultWebViewComponent {
   private helper: ArkHelper = {
     exit,
     createWebview: (data: NativeWebViewInitData) => {
+      const initScripts: ScriptItem[] = (data?.initializationScripts || []).map(i => {
+        return {
+          script: i,
+          scriptRules: ['*']
+        } as ScriptItem
+      })
       // url set to empty string avoid double load.
       const init: WebviewInitData =
         {
@@ -126,7 +132,8 @@ export struct DefaultWebViewComponent {
           javascriptEnable: data?.javascriptEnable || true,
           userAgent: data?.userAgent,
           devtools: data?.devtools,
-          autoplay: data?.autoplay
+          autoplay: data?.autoplay,
+          initializationScripts: initScripts
         } as WebviewInitData;
 
       // transparent only be set when backgroundColor is null.
