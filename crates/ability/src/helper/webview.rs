@@ -28,12 +28,13 @@ pub struct WebViewInitData {
     pub devtools: Option<bool>,
     pub user_agent: Option<String>,
     pub autoplay: Option<bool>,
-    pub initialization_scripts: Option<String>,
+    pub initialization_scripts: Option<Vec<String>>,
     pub headers: Option<HashMap<String, String>>,
     pub html: Option<String>,
     pub transparent: Option<bool>,
 }
 
+#[cfg(feature = "webview")]
 #[derive(Debug, Clone, Default)]
 pub struct WebViewData {
     pub url: Option<String>,
@@ -42,8 +43,8 @@ pub struct WebViewData {
     pub devtools: Option<bool>,
     pub user_agent: Option<String>,
     pub autoplay: Option<bool>,
-    pub initialization_scripts: Option<String>,
-    pub headers: Option<HashMap<String, String>>,
+    pub initialization_scripts: Option<Vec<String>>,
+    pub headers: Option<http::HeaderMap>,
     pub html: Option<String>,
     pub transparent: Option<bool>,
 }
@@ -179,6 +180,15 @@ pub fn create_webview(id: &str, init_data: WebViewData) -> Result<Webview> {
         use crate::get_helper;
         get_helper()
     };
+
+    // convert http::HeaderMap to HashMap<String, String>
+    let headers: Option<HashMap<String, String>> = init_data.headers.map(|headers| {
+        headers
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_str().unwrap().to_string()))
+            .collect()
+    });
+
     if let Some(h) = ret.borrow().as_ref() {
         use napi_ohos::JsObject;
 
@@ -197,7 +207,7 @@ pub fn create_webview(id: &str, init_data: WebViewData) -> Result<Webview> {
                 user_agent: init_data.user_agent,
                 autoplay: init_data.autoplay,
                 initialization_scripts: init_data.initialization_scripts,
-                headers: init_data.headers,
+                headers: headers,
                 html: init_data.html,
                 transparent: init_data.transparent,
             })?;

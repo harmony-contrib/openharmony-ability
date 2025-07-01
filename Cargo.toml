@@ -24,3 +24,4 @@ ohos-web-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git"
 
 
 papaya = { version = "0.2" }
+http = {version = "1.1"}

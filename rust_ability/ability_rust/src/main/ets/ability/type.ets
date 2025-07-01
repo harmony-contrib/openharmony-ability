@@ -36,7 +36,7 @@ export interface WebViewInitData {
   transparent?: boolean
   autoplay?: boolean
   userAgent?: string
-  initializationScripts?: string
+  initializationScripts?: string[]
   headers?: Record<string,string>
   html?: string
 }
