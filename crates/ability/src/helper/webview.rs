@@ -172,6 +172,14 @@ impl Webview {
         set_visible_js_function.call(visible)?;
         Ok(())
     }
+
+    pub fn clear_all_browsing_data(&self) -> Result<()> {
+        let clear_all_browsing_data_js_function = self
+            .inner
+            .get_named_property::<Function<'_, (), ()>>("clearAllBrowsingData")?;
+        clear_all_browsing_data_js_function.call(())?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "webview")]

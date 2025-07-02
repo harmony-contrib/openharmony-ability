@@ -106,6 +106,7 @@ declare class WebviewController extends web_webview.WebviewController {
   getCookies: (url: string) => string
   setBackgroundColor: (color: string) => void
   setVisible: (visible: boolean) => void
+  clearAllBrowsingData: () => void
 }
 
 @Component
@@ -168,6 +169,14 @@ export struct DefaultWebViewComponent {
         init.style!.visible = visible ? 'visible' : 'hidden';
         const node = this.webviewController.getWebviewNode(ret.webTag);
         node?.update(init)
+      }
+
+      // clear browsing data
+      ctrl.clearAllBrowsingData = () => {
+        web_webview.WebStorage.deleteAllData(true);
+        web_webview.WebDataBase.deleteHttpAuthCredentials();
+        ctrl.removeCache(true);
+        ctrl.clearHistory();
       }
       // Return controller and use controller to control webview behavior
       return ctrl
