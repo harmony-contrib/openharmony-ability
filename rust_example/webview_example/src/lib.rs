@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, Env, JsObject, Ref};
+use napi_ohos::{bindgen_prelude::Function, Env, Error, JsObject, Ref};
 use ohos_hilog_binding::hilog_info;
-use openharmony_ability::{create_webview_with_id, Event, InputEvent, OpenHarmonyApp};
+use openharmony_ability::{native_web, Event, InputEvent, OpenHarmonyApp, WebViewBuilder};
 use openharmony_ability_derive::ability;
 
 thread_local! {
@@ -13,7 +13,39 @@ thread_local! {
 // test add more napi method
 #[napi]
 pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
-    let webview = create_webview_with_id("https://www.baidu.com", "1")?;
+    let web_tag = String::from("webview_example");
+    let native = native_web::Web::new(web_tag.clone())
+        .map_err(|_| Error::from_reason("Create native web failed"))?;
+
+    native
+        .on_controller_attach(|| {
+            hilog_info!(format!("ohos-rs macro on_controller_attach").as_str());
+
+            native
+                .register_js_api("test", "test", |_, _| {
+                    hilog_info!(format!("ohos-rs macro register_js_api").as_str());
+                })
+                .unwrap();
+        })
+        .map_err(|_| Error::from_reason("on_controller_attach failed"))?;
+
+    native
+        .on_page_begin(|| {
+            hilog_info!(format!("ohos-rs macro on_page_begin").as_str());
+        })
+        .map_err(|_| Error::from_reason("on_page_begin failed"))?;
+
+    native
+        .on_page_end(|| {
+            hilog_info!(format!("ohos-rs macro on_page_end").as_str());
+        })
+        .map_err(|_| Error::from_reason("on_page_end failed"))?;
+
+    let webview = WebViewBuilder::new()
+        .id(web_tag.clone())
+        .url("https://www.baidu.com".to_string())
+        .native(native)
+        .build()?;
 
     let rr = Ref::new(env, &webview.inner)?;
 
