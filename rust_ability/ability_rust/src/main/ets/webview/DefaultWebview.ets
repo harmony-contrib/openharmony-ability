@@ -35,7 +35,8 @@ interface WebviewNodeData extends WebviewInitData {
 
 @Builder
 function WebBuilder(data: WebviewNodeData) {
-  Web({ src: data.url, controller: data.controller as web_webview.WebviewController })
+  // init with empty url and reload with loadUrl or loadData with onControllerAttach
+  Web({ src: '', controller: data.controller as web_webview.WebviewController })
     .width("100%")
     .height("100%")
     .position({
@@ -47,6 +48,20 @@ function WebBuilder(data: WebviewNodeData) {
     .javaScriptAccess(data?.javascriptEnable)
     .mediaPlayGestureAccess((typeof data?.autoplay === 'boolean' && data.autoplay === true) ? false : true)
     .javaScriptOnDocumentStart(data?.initializationScripts)
+    .onControllerAttached(() => {
+      const ctrl = data.controller;
+      // load url or html string
+      if (data?.url) {
+        const header: WebHeader[] =
+          Object.keys((data?.headers || {}) as Record<string, string>).reduce((t: WebHeader[], i) => {
+            t.push({ headerKey: i, headerValue: data.headers![i] } as WebHeader);
+            return t
+          }, [])
+        ctrl.loadUrl(data.url, header)
+      } else {
+        ctrl.loadData(data!.html, 'text/html', 'UTF-8')
+      }
+    })
 }
 
 const webViewWrap = wrapBuilder<WebviewNodeData[]>(WebBuilder);
@@ -128,7 +143,9 @@ export struct DefaultWebViewComponent {
       const init: WebviewInitData =
         {
           webTag: data?.id,
-          url: '',
+          url: data?.url,
+          html: data?.html,
+          headers: data?.headers,
           style: (data.style || {}) as WebviewStyle,
           javascriptEnable: data?.javascriptEnable || true,
           userAgent: data?.userAgent,
@@ -144,18 +161,6 @@ export struct DefaultWebViewComponent {
       const ret = this.webviewController.addWebview(init)
 
       const ctrl = ret.controller;
-
-      // load url or html string
-      if (data?.url) {
-        const header: WebHeader[] =
-          Object.keys((data?.headers || {}) as Record<string, string>).reduce((t: WebHeader[], i) => {
-            t.push({ headerKey: i, headerValue: data.headers![i] } as WebHeader);
-            return t
-          }, [])
-        ctrl.loadUrl(data.url, header)
-      } else {
-        ctrl.loadData(data!.html, 'text/html', 'UTF-8')
-      }
 
       // set getCookies method
       ctrl.getCookies = getCookies;

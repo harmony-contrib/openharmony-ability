@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use napi_derive_ohos::napi;
 use napi_ohos::{
@@ -34,10 +34,11 @@ pub struct WebViewInitData {
     pub transparent: Option<bool>,
 }
 
+#[derive(Clone)]
 pub struct Webview {
     tag: String,
-    pub inner: Object,
-    web_view_native: Web,
+    pub inner: Rc<Object>,
+    web_view_native: Rc<Web>,
 }
 
 impl Webview {
@@ -45,26 +46,14 @@ impl Webview {
         let native_instance =
             Web::new(tag.clone()).map_err(|e| Error::from_reason(e.to_string()))?;
         Ok(Self {
-            inner,
-            web_view_native: native_instance,
+            inner: Rc::new(inner),
+            web_view_native: Rc::new(native_instance),
             tag,
         })
     }
 
-    pub fn init_with_native(tag: String, inner: Object, native: Option<Web>) -> Result<Self> {
-        let native_instance = match native {
-            Some(web) => web,
-            None => Web::new(tag.clone()).map_err(|e| Error::from_reason(e.to_string()))?,
-        };
-        Ok(Self {
-            inner,
-            web_view_native: native_instance,
-            tag,
-        })
-    }
-
-    pub fn native(&self) -> &Web {
-        &self.web_view_native
+    pub fn inner(&self) -> Rc<Object> {
+        self.inner.clone()
     }
 
     pub fn tag(&self) -> String {
@@ -189,6 +178,57 @@ impl Webview {
         callback: F,
     ) -> Result<()>
     where
+        F: FnMut(String, Vec<String>),
+    {
+        self.web_view_native
+            .register_js_api(obj_name, method_name, callback)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn on_controller_attach<F>(&self, callback: F) -> Result<()>
+    where
+        F: FnMut(),
+    {
+        self.web_view_native
+            .on_controller_attach(callback)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn on_page_begin<F>(&self, callback: F) -> Result<()>
+    where
+        F: FnMut(),
+    {
+        self.web_view_native
+            .on_page_begin(callback)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn on_page_end<F>(&self, callback: F) -> Result<()>
+    where
+        F: FnMut(),
+    {
+        self.web_view_native
+            .on_page_end(callback)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn on_destroy<F>(&self, callback: F) -> Result<()>
+    where
+        F: FnMut(),
+    {
+        self.web_view_native
+            .on_destroy(callback)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn register_js_api<S, F>(&self, obj_name: S, method_name: S, callback: F) -> Result<()>
+    where
+        S: Into<String>,
         F: FnMut(String, Vec<String>),
     {
         self.web_view_native
