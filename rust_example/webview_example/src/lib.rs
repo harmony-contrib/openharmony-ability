@@ -10,44 +10,36 @@ thread_local! {
     static WEBVIEW_ID: RefCell<Option<Ref<JsObject>>> = RefCell::new(None);
 }
 
+const INDEX: &str = include_str!("index.html");
+
 // test add more napi method
 #[napi]
 pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
     let web_tag = String::from("webview_example");
-    let native = native_web::Web::new(web_tag.clone())
-        .map_err(|_| Error::from_reason("Create native web failed"))?;
-
-    native
-        .on_controller_attach(|| {
-            hilog_info!(format!("ohos-rs macro on_controller_attach").as_str());
-
-            native
-                .register_js_api("test", "test", |_, _| {
-                    hilog_info!(format!("ohos-rs macro register_js_api").as_str());
-                })
-                .unwrap();
-        })
-        .map_err(|_| Error::from_reason("on_controller_attach failed"))?;
-
-    native
-        .on_page_begin(|| {
-            hilog_info!(format!("ohos-rs macro on_page_begin").as_str());
-        })
-        .map_err(|_| Error::from_reason("on_page_begin failed"))?;
-
-    native
-        .on_page_end(|| {
-            hilog_info!(format!("ohos-rs macro on_page_end").as_str());
-        })
-        .map_err(|_| Error::from_reason("on_page_end failed"))?;
 
     let webview = WebViewBuilder::new()
         .id(web_tag.clone())
-        .url("https://www.baidu.com".to_string())
-        .native(native)
+        .html(INDEX)
         .build()?;
 
-    let rr = Ref::new(env, &webview.inner)?;
+    let w = webview.clone();
+
+    webview.on_controller_attach(move || {
+        hilog_info!(format!("ohos-rs macro on_controller_attach").as_str());
+        w.register_js_api("test", "test", |_, _| {
+            hilog_info!(format!("ohos-rs macro register_js_api").as_str());
+        });
+    });
+
+    webview.on_page_begin(|| {
+        hilog_info!(format!("ohos-rs macro on_page_begin").as_str());
+    });
+
+    webview.on_page_end(|| {
+        hilog_info!(format!("ohos-rs macro on_page_end").as_str());
+    });
+
+    let rr = Ref::new(env, &*webview.inner())?;
 
     WEBVIEW_ID.with(|w| {
         w.replace(Some(rr));
@@ -97,7 +89,7 @@ fn openharmony_app(app: OpenHarmonyApp) {
             }
         },
         Event::WindowRedraw(_) => {
-            hilog_info!(format!("ohos-rs macro window_redraw").as_str());
+            // hilog_info!(format!("ohos-rs macro window_redraw").as_str());
         }
         _ => {
             hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()).as_str());

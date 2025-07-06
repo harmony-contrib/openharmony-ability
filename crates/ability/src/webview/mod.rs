@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use napi_ohos::{bindgen_prelude::Function, Error, Result};
-use ohos_web_binding::Web;
 
 use crate::helper::{WebViewInitData, WebViewStyle, Webview};
 
@@ -19,7 +18,6 @@ pub struct WebViewBuilder {
     pub html: Option<String>,
     pub transparent: Option<bool>,
 
-    native_web: Option<Web>,
     id: Option<String>,
 }
 
@@ -110,13 +108,6 @@ impl WebViewBuilder {
         }
     }
 
-    pub fn native(self, native: Web) -> WebViewBuilder {
-        WebViewBuilder {
-            native_web: Some(native),
-            ..self
-        }
-    }
-
     pub fn build(self) -> Result<Webview> {
         let id = self
             .id
@@ -151,7 +142,7 @@ impl WebViewBuilder {
                     html: self.html,
                     transparent: self.transparent,
                 })?;
-                let web = Webview::init_with_native(id.clone(), webview, self.native_web)?;
+                let web = Webview::new(id.clone(), webview)?;
                 return Ok(web);
             }
 
