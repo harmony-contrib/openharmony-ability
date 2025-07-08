@@ -4,7 +4,7 @@ import { NodeController, BuilderNode, FrameNode } from '@ohos.arkui.node';
 import { randomString } from '../helper';
 import { common } from '@kit.AbilityKit';
 import { ArkHelper, WebViewComponentEventCallback, WebViewInitData as NativeWebViewInitData } from '../ability/type';
-import { exit } from "../helper";
+import { exit, objectAssign } from "../helper";
 import { getCookies } from './Utils';
 import { WebHeader } from '@kit.ArkUI';
 
@@ -59,7 +59,7 @@ function WebBuilder(data: WebviewNodeData) {
           }, [])
         ctrl.loadUrl(data.url, header)
       } else {
-        ctrl.loadData(data!.html, 'text/html', 'UTF-8')
+        ctrl.loadData(data!.html, 'text/html', 'UTF-8', ' ', ' ')
       }
     })
 }
@@ -147,7 +147,7 @@ export struct DefaultWebViewComponent {
           html: data?.html,
           headers: data?.headers,
           style: (data.style || {}) as WebviewStyle,
-          javascriptEnable: data?.javascriptEnable || true,
+          javascriptEnable: data?.javascriptEnable ?? true,
           userAgent: data?.userAgent,
           devtools: data?.devtools,
           autoplay: data?.autoplay,
@@ -183,8 +183,11 @@ export struct DefaultWebViewComponent {
         ctrl.removeCache(true);
         ctrl.clearHistory();
       }
+      const controllers = {} as Record<string, ESObject>;
+      // Must convert to object, native controller is External<Object> and get field directly.
+      const newController: WebviewController = objectAssign(controllers, ctrl) as ESObject;
       // Return controller and use controller to control webview behavior
-      return ctrl
+      return newController as WebviewController;
     },
   }
   @StorageProp("moduleName") name: string = "";
