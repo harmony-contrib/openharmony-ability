@@ -37,16 +37,16 @@ pub struct WebViewInitData {
 #[derive(Clone)]
 pub struct Webview {
     tag: String,
-    pub inner: Rc<Object>,
+    inner: Rc<Object>,
     web_view_native: Rc<Web>,
 }
 
 impl Webview {
-    pub fn new(tag: String, inner: Object) -> Result<Self> {
+    pub fn new(tag: String, inner: Rc<Object>) -> Result<Self> {
         let native_instance =
             Web::new(tag.clone()).map_err(|e| Error::from_reason(e.to_string()))?;
         Ok(Self {
-            inner: Rc::new(inner),
+            inner,
             web_view_native: Rc::new(native_instance),
             tag,
         })
@@ -171,21 +171,6 @@ impl Webview {
         Ok(())
     }
 
-    pub fn register_js_callback<F>(
-        &self,
-        obj_name: &str,
-        method_name: &str,
-        callback: F,
-    ) -> Result<()>
-    where
-        F: FnMut(String, Vec<String>),
-    {
-        self.web_view_native
-            .register_js_api(obj_name, method_name, callback)
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-        Ok(())
-    }
-
     pub fn on_controller_attach<F>(&self, callback: F) -> Result<()>
     where
         F: FnMut(),
@@ -222,17 +207,6 @@ impl Webview {
     {
         self.web_view_native
             .on_destroy(callback)
-            .map_err(|e| Error::from_reason(e.to_string()))?;
-        Ok(())
-    }
-
-    pub fn register_js_api<S, F>(&self, obj_name: S, method_name: S, callback: F) -> Result<()>
-    where
-        S: Into<String>,
-        F: FnMut(String, Vec<String>),
-    {
-        self.web_view_native
-            .register_js_api(obj_name, method_name, callback)
             .map_err(|e| Error::from_reason(e.to_string()))?;
         Ok(())
     }

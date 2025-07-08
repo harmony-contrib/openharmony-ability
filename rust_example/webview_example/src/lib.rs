@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, Env, Error, JsObject, Ref};
+use napi_ohos::{bindgen_prelude::Function, Env, JsObject, Ref};
 use ohos_hilog_binding::hilog_info;
-use openharmony_ability::{native_web, Event, InputEvent, OpenHarmonyApp, WebViewBuilder};
+use openharmony_ability::{Event, InputEvent, OpenHarmonyApp, WebViewBuilder};
 use openharmony_ability_derive::ability;
 
 thread_local! {
@@ -24,18 +24,18 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
 
     let w = webview.clone();
 
-    webview.on_controller_attach(move || {
+    let _ = webview.on_controller_attach(move || {
         hilog_info!(format!("ohos-rs macro on_controller_attach").as_str());
-        w.register_js_api("test", "test", |_, _| {
+        let _ = w.register_js_api("test", "test", |_, _| {
             hilog_info!(format!("ohos-rs macro register_js_api").as_str());
         });
     });
 
-    webview.on_page_begin(|| {
+    let _ = webview.on_page_begin(|| {
         hilog_info!(format!("ohos-rs macro on_page_begin").as_str());
     });
 
-    webview.on_page_end(|| {
+    let _ = webview.on_page_end(|| {
         hilog_info!(format!("ohos-rs macro on_page_end").as_str());
     });
 

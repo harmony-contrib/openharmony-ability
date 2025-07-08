@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
-use napi_ohos::{bindgen_prelude::Function, Error, Result};
+use napi_ohos::{
+    bindgen_prelude::{Function, Object},
+    Error, Result,
+};
 
 use crate::helper::{WebViewInitData, WebViewStyle, Webview};
 
@@ -119,14 +122,12 @@ impl WebViewBuilder {
         };
 
         if let Some(h) = ret.borrow().as_ref() {
-            use napi_ohos::JsObject;
-
             use crate::get_main_thread_env;
 
             if let Some(env) = get_main_thread_env().borrow().as_ref() {
                 let ret = h.get_value(&env)?;
                 let create_webview_func = ret
-                    .get_named_property::<Function<'_, WebViewInitData, JsObject>>(
+                    .get_named_property::<Function<'_, WebViewInitData, Rc<Object>>>(
                         "createWebview",
                     )?;
                 let webview = create_webview_func.call(WebViewInitData {
@@ -142,6 +143,7 @@ impl WebViewBuilder {
                     html: self.html,
                     transparent: self.transparent,
                 })?;
+
                 let web = Webview::new(id.clone(), webview)?;
                 return Ok(web);
             }
