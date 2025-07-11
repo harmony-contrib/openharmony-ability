@@ -4,8 +4,8 @@ import { NodeController, BuilderNode, FrameNode } from '@ohos.arkui.node';
 import { randomString } from '../helper';
 import { common } from '@kit.AbilityKit';
 import { ArkHelper, WebViewComponentEventCallback, WebViewInitData as NativeWebViewInitData } from '../ability/type';
-import { exit, objectAssign } from "../helper";
-import { getCookies } from './Utils';
+import { exit } from "../helper";
+import { getCookies, JsHelper } from './Utils';
 import { WebHeader } from '@kit.ArkUI';
 
 export interface WebviewStyle {
@@ -68,17 +68,67 @@ const webViewWrap = wrapBuilder<WebviewNodeData[]>(WebBuilder);
 
 interface AddWebviewMethod {
   webTag: string
-  controller: WebviewController
+  controller: JsHelper
 }
 
 export class RustWebviewNodeController extends NodeController {
   private rootNode: FrameNode | null = null;
   private webviewList: Map<string, BuilderNode<WebviewNodeData[]>> = new Map();
+  private webviewData: Map<string, JsHelper> = new Map();
   private uiContext: UIContext | null = null;
 
   constructor(uiContext: UIContext) {
     super();
     this.uiContext = uiContext;
+  }
+
+  private buildData(controller: WebviewController) {
+    const getUrl = () => {
+      return controller.getUrl()
+    }
+    const getCookiesHelper = (url: string) => {
+      return getCookies(url) as string;
+    }
+    const loadUrl = (url: string) => {
+      controller.loadUrl(url)
+    }
+    const zoom = (scale: number) => {
+      controller.zoom(scale)
+    }
+
+    const refresh = () => {
+      controller.refresh();
+    }
+
+    const requestFocus = () => {
+      controller.requestFocus();
+    }
+
+    // clear browsing data
+    const clearAllBrowsingData = () => {
+      web_webview.WebStorage.deleteAllData(true);
+      web_webview.WebDataBase.deleteHttpAuthCredentials();
+      controller.removeCache(true);
+      controller.clearHistory();
+    }
+
+    const runJavaScript = (code: string, cb: (result?: string) => void) => {
+      controller.runJavaScript(code).then(ret => {
+        cb(ret)
+      })
+    }
+
+    const data: JsHelper = {
+      getUrl,
+      getCookies: getCookiesHelper,
+      loadUrl,
+      zoom,
+      refresh,
+      requestFocus,
+      clearAllBrowsingData,
+      runJavaScript,
+    } as JsHelper
+    return data;
   }
 
   makeNode(uiContext: UIContext): FrameNode {
@@ -104,10 +154,13 @@ export class RustWebviewNodeController extends NodeController {
     node.build(webViewWrap, data);
     this.webviewList.set(data.webTag, node);
 
+    const controller = this.buildData(data.controller);
+    this.webviewData.set(data.webTag, controller);
+
     this.rootNode?.appendChild(node.getFrameNode());
     return {
       webTag: data.webTag,
-      controller: data.controller
+      controller
     };
   }
 
@@ -160,34 +213,20 @@ export struct DefaultWebViewComponent {
       }
       const ret = this.webviewController.addWebview(init)
 
-      const ctrl = ret.controller;
-
-      // set getCookies method
-      ctrl.getCookies = getCookies;
-      ctrl.setBackgroundColor = (color: string) => {
+      ret.controller.setBackgroundColor = (color: string) => {
         init.style!.backgroundColor = color;
         const node = this.webviewController.getWebviewNode(ret.webTag);
         node?.update(init)
       }
 
-      ctrl.setVisible = (visible: boolean) => {
+      ret.controller.setVisible = (visible: boolean) => {
         init.style!.visible = visible ? 'visible' : 'hidden';
         const node = this.webviewController.getWebviewNode(ret.webTag);
         node?.update(init)
       }
 
-      // clear browsing data
-      ctrl.clearAllBrowsingData = () => {
-        web_webview.WebStorage.deleteAllData(true);
-        web_webview.WebDataBase.deleteHttpAuthCredentials();
-        ctrl.removeCache(true);
-        ctrl.clearHistory();
-      }
-      const controllers = {} as Record<string, ESObject>;
-      // Must convert to object, native controller is External<Object> and get field directly.
-      const newController: WebviewController = objectAssign(controllers, ctrl) as ESObject;
       // Return controller and use controller to control webview behavior
-      return newController as WebviewController;
+      return ret.controller;
     },
   }
   @StorageProp("moduleName") name: string = "";

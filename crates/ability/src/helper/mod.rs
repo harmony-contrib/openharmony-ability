@@ -2,9 +2,11 @@ use std::{cell::RefCell, rc::Rc};
 
 use napi_ohos::{Env, JsObject, Ref};
 
+#[cfg(feature = "webview")]
 mod webview;
 mod window_info;
 
+#[cfg(feature = "webview")]
 pub use webview::*;
 
 thread_local! {

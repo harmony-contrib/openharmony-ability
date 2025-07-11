@@ -2,7 +2,7 @@ use std::{collections::HashMap, rc::Rc};
 
 use napi_ohos::{
     bindgen_prelude::{Function, Object},
-    Error, Result,
+    Error, Ref, Result,
 };
 
 use crate::helper::{WebViewInitData, WebViewStyle, Webview};
@@ -144,7 +144,9 @@ impl WebViewBuilder {
                     transparent: self.transparent,
                 })?;
 
-                let web = Webview::new(id.clone(), webview)?;
+                let webview_ref = Ref::new(env, &*webview)?;
+
+                let web = Webview::new(id.clone(), webview_ref)?;
                 return Ok(web);
             }
 
