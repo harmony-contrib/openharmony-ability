@@ -1,13 +1,18 @@
 use std::cell::RefCell;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, Env, JsObject, Ref};
+use napi_ohos::{
+    bindgen_prelude::{Function, Object},
+    Env,
+};
 use ohos_hilog_binding::hilog_info;
-use openharmony_ability::{Event, InputEvent, OpenHarmonyApp, WebViewBuilder};
+use openharmony_ability::{
+    native_web::WebProxyBuilder, Event, InputEvent, OpenHarmonyApp, WebViewBuilder,
+};
 use openharmony_ability_derive::ability;
 
 thread_local! {
-    static WEBVIEW_ID: RefCell<Option<Ref<JsObject>>> = RefCell::new(None);
+    static WEBVIEW_ID: RefCell<Option<Object>> = RefCell::new(None);
 }
 
 const INDEX: &str = include_str!("index.html");
@@ -22,13 +27,14 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
         .html(INDEX)
         .build()?;
 
-    let w = webview.clone();
-
     let _ = webview.on_controller_attach(move || {
         hilog_info!(format!("ohos-rs macro on_controller_attach").as_str());
-        let _ = w.register_js_api("test", "test", |_, _| {
-            hilog_info!(format!("ohos-rs macro register_js_api").as_str());
-        });
+        let _ = WebProxyBuilder::new(web_tag.clone(), "test".to_string())
+            .add_method("test", |_web_tag: String, args: Vec<String>| {
+                hilog_info!(format!("ohos-rs macro test: {:?}", args).as_str());
+            })
+            .build()
+            .unwrap();
     });
 
     let _ = webview.on_page_begin(|| {
@@ -39,10 +45,9 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
         hilog_info!(format!("ohos-rs macro on_page_end").as_str());
     });
 
-    let rr = Ref::new(env, &*webview.inner())?;
-
     WEBVIEW_ID.with(|w| {
-        w.replace(Some(rr));
+        let inner = webview.inner().unwrap();
+        w.replace(Some(inner));
     });
     Ok(())
 }
@@ -51,13 +56,10 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
 pub fn set_background_color(env: &Env, color: String) -> napi_ohos::Result<()> {
     WEBVIEW_ID.with(|w| {
         if let Some(webview) = w.borrow().as_ref() {
-            let c = webview.get_value(env).unwrap();
-            let set_background_color_js_function = c
+            let set_background_color_js_function = webview
                 .get_named_property::<Function<'_, String, ()>>("setBackgroundColor")
                 .unwrap();
-            set_background_color_js_function
-                .call(color.to_string())
-                .unwrap();
+            set_background_color_js_function.call(color).unwrap();
         }
     });
     Ok(())
@@ -67,8 +69,7 @@ pub fn set_background_color(env: &Env, color: String) -> napi_ohos::Result<()> {
 pub fn set_visible(env: &Env, visible: bool) -> napi_ohos::Result<()> {
     WEBVIEW_ID.with(|w| {
         if let Some(webview) = w.borrow().as_ref() {
-            let c = webview.get_value(env).unwrap();
-            let set_visible_js_function = c
+            let set_visible_js_function = webview
                 .get_named_property::<Function<'_, bool, ()>>("setVisible")
                 .unwrap();
             set_visible_js_function.call(visible).unwrap();
