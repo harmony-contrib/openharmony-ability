@@ -1,5 +1,6 @@
 import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit";
 import window from "@ohos.window";
+import webview from '@ohos.web.webview';
 import * as Entry from '../components/MainPage'
 import * as Webview from '../webview/DefaultPage'
 import { ApplicationLifecycle, Module } from './type'
@@ -34,6 +35,8 @@ export class RustAbility extends UIAbility {
     const packageName = `lib${this.moduleName}.so`;
     const module: ESObject = await import(packageName);
     this.nativeModule = module.default;
+    this.nativeModule!.registerCustomProtocol();
+    webview.WebviewController.initializeWebEngine();
     this.lifecycle = this.nativeModule!.init();
     this.lifecycle?.windowStageEventCallback.onAbilityCreate(state);
   }

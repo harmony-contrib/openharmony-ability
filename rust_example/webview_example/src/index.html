@@ -2,32 +2,50 @@
 <!-- runJS.html -->
 <!DOCTYPE html>
 <html lang="en-gb">
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>run javascript demo</title>
-</head>
-<body>
-<h1>run JavaScript Ext demo</h1>
-<p id="webDemo"></p>
-<br>
-<button type="button" style="height:30px;width:200px" onclick="testNdkProxyObjMethod1()">test test ! </button>
-<br>
-<br>
+  </head>
+  <body>
+    <h1>run JavaScript Ext demo</h1>
+    <p id="webDemo"></p>
+    <br />
+    <button
+      type="button"
+      style="height: 30px; width: 200px"
+      onclick="testNdkProxyObjMethod1()"
+    >
+      test test !
+    </button>
+    <br />
+    <br />
+    <script src="wry://test"></script>
+    <a href="wry://www.example.com/test.html">intercept test!</a>
+  </body>
 
-
-</body>
-<script type="text/javascript">
-function testNdkProxyObjMethod1() {
+  <script type="text/javascript">
+    function testNdkProxyObjMethod1() {
       if (window.test == undefined) {
-            document.getElementById("webDemo").innerHTML = "test undefined"
-            return "objName undefined"
+        document.getElementById("webDemo").innerHTML = "test undefined";
+        return "objName undefined";
       }
       if (window.test.test == undefined) {
-            document.getElementById("webDemo").innerHTML = "test test undefined"
-            return "objName  test undefined"
+        document.getElementById("webDemo").innerHTML = "test test undefined";
+        return "objName  test undefined";
       }
-      let retStr = window.test.test("hello", "world", [1.2, -3.4, 123.456], ["Saab", "Volvo", "BMW", undefined], 1.23456, 123789, true, false, 0,  undefined);
-      console.log("test and test is ok, " + retStr + ", type:" + typeof(retStr));
-}
-</script>
+      let retStr = window.test.test(
+        "hello",
+        "world",
+        [1.2, -3.4, 123.456],
+        ["Saab", "Volvo", "BMW", undefined],
+        1.23456,
+        123789,
+        true,
+        false,
+        0,
+        undefined
+      );
+      console.log("test and test is ok, " + retStr + ", type:" + typeof retStr);
+    }
+  </script>
 </html>

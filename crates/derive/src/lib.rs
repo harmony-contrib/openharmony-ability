@@ -64,12 +64,24 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
         mod openharmony_ability_mod {
             use super::*;
             use openharmony_ability::napi as napi_ohos;
+            use openharmony_ability::native_web;
 
             static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
                 std::sync::LazyLock::new(|| openharmony_ability::OpenHarmonyApp::new());
 
             thread_local! {
                 pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
+            }
+
+            #[openharmony_ability::napi_derive::napi]
+            pub fn register_custom_protocol<'a>(
+                env: &'a openharmony_ability::napi::Env,
+            ) -> openharmony_ability::napi::Result<()> {
+                native_web::CustomProtocol::add_protocol("wry");
+
+                native_web::CustomProtocol::register();
+
+                Ok(())
             }
 
             #[openharmony_ability::napi_derive::napi]

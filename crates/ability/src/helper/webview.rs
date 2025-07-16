@@ -1,11 +1,12 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, rc::Rc};
 
+use http::{Request, Response};
 use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::{FnArgs, Function, Object},
     Either, Error, JsString, Ref, Result,
 };
-use ohos_web_binding::Web;
+use ohos_web_binding::{CustomProtocolHandler, Web};
 
 use crate::get_main_thread_env;
 
@@ -258,6 +259,59 @@ impl Webview {
         self.web_view_native
             .on_destroy(callback)
             .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn custom_protocol<S, F>(&self, protocol: S, callback: F) -> Result<()>
+    where
+        S: Into<String>,
+        F: Fn(&str, Request<Vec<u8>>, bool) -> Option<Response<Cow<'static, [u8]>>>,
+    {
+        let handle = CustomProtocolHandler::new();
+
+        handle.on_request_start(|req, req_handle| {
+            let url: String = req.url().into();
+            let request_body = req.http_body_stream();
+
+            match request_body {
+                Some(body) => {
+                    let request_body_size = body.size();
+
+                    body.read(request_body_size as usize, |buf| {
+                        let response = callback(&url, Request::new(buf), req.is_main_frame());
+                        if let Some(response) = response {
+                            // req_handle.respond(response);
+                            let body = response.body();
+                            let body_slice = match body {
+                                Cow::Borrowed(slice) => slice,
+                                Cow::Owned(vec) => vec.as_slice(),
+                            };
+                            req_handle.receive_data(body_slice);
+                            req_handle.finish();
+                        }
+                    });
+                }
+                None => {
+                    let response = callback(&url, Request::new(vec![]), req.is_main_frame());
+                    if let Some(response) = response {
+                        let body = response.body();
+                        let body_slice = match body {
+                            Cow::Borrowed(slice) => slice,
+                            Cow::Owned(vec) => vec.as_slice(),
+                        };
+                        req_handle.receive_data(body_slice);
+                        req_handle.finish();
+                    }
+                }
+            }
+
+            true
+        });
+
+        self.web_view_native
+            .custom_protocol(protocol, handle)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
         Ok(())
     }
 }

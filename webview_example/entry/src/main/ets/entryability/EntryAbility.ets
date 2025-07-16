@@ -4,7 +4,7 @@ import { AbilityConstant } from '@kit.AbilityKit';
 import window from '@ohos.window';
 
 export default class EntryAbility extends RustAbility {
-  public moduleName: string = "basic_ipc_example"
+  public moduleName: string = "custom_protocol"
   public defaultPage: boolean = false;
   public mode: 'xcomponent' | 'webview' = 'webview'
 

@@ -53,6 +53,7 @@ export interface Module {
 
   // Webview mode
   webviewRender: (helper: ArkHelper) => WebViewComponentEventCallback
+  registerCustomProtocol: () => void;
 }
 
 export interface ArkHelper {
