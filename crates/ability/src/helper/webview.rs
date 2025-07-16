@@ -6,7 +6,7 @@ use napi_ohos::{
     bindgen_prelude::{FnArgs, Function, Object},
     Either, Error, JsString, Ref, Result,
 };
-use ohos_web_binding::{CustomProtocolHandler, Web};
+use ohos_web_binding::{ArkWebResponse, CustomProtocolHandler, Web};
 
 use crate::get_main_thread_env;
 
@@ -272,6 +272,7 @@ impl Webview {
         handle.on_request_start(|req, req_handle| {
             let url: String = req.url().into();
             let request_body = req.http_body_stream();
+            let origin_headers = req.headers();
 
             match request_body {
                 Some(body) => {
@@ -280,12 +281,28 @@ impl Webview {
                     body.read(request_body_size as usize, |buf| {
                         let response = callback(&url, Request::new(buf), req.is_main_frame());
                         if let Some(response) = response {
-                            // req_handle.respond(response);
+                            let header = response.headers();
                             let body = response.body();
+                            let status = response.status();
                             let body_slice = match body {
                                 Cow::Borrowed(slice) => slice,
                                 Cow::Owned(vec) => vec.as_slice(),
                             };
+
+                            let resp = ArkWebResponse::new();
+
+                            // keep origin headers
+                            origin_headers.iter().for_each(|(k, v)| {
+                                resp.set_header(k, v, true);
+                            });
+
+                            header.iter().for_each(|(k, v)| {
+                                resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
+                            });
+
+                            resp.set_status(status.as_u16() as _);
+
+                            req_handle.receive_response(resp);
                             req_handle.receive_data(body_slice);
                             req_handle.finish();
                         }
@@ -294,11 +311,27 @@ impl Webview {
                 None => {
                     let response = callback(&url, Request::new(vec![]), req.is_main_frame());
                     if let Some(response) = response {
+                        let header = response.headers();
+                        let status = response.status();
                         let body = response.body();
                         let body_slice = match body {
                             Cow::Borrowed(slice) => slice,
                             Cow::Owned(vec) => vec.as_slice(),
                         };
+
+                        let resp = ArkWebResponse::new();
+
+                        // keep origin headers
+                        origin_headers.iter().for_each(|(k, v)| {
+                            resp.set_header(k, v, true);
+                        });
+
+                        header.iter().for_each(|(k, v)| {
+                            resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
+                        });
+                        resp.set_status(status.as_u16() as _);
+
+                        req_handle.receive_response(resp);
                         req_handle.receive_data(body_slice);
                         req_handle.finish();
                     }
