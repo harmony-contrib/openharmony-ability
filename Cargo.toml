@@ -20,7 +20,6 @@ ohos-xcomponent-binding = { version = "0.0.6" }
 ohos-ime-binding = { version = "0.1" }
 ohos-display-binding = { version = "0.0.1" }
 ohos-display-soloist-binding = { version = "0.1" }
-# ohos-web-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git" }
-ohos-web-binding = { path = "../ohos-native-bindings/crates/web" }
+ohos-web-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git" }
 
-http = {version = "1.1"}
+http = { version = "1.1" }

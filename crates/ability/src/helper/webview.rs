@@ -272,7 +272,6 @@ impl Webview {
         handle.on_request_start(|req, req_handle| {
             let url: String = req.url().into();
             let request_body = req.http_body_stream();
-            let origin_headers = req.headers();
 
             match request_body {
                 Some(body) => {
@@ -290,11 +289,6 @@ impl Webview {
                             };
 
                             let resp = ArkWebResponse::new();
-
-                            // keep origin headers
-                            origin_headers.iter().for_each(|(k, v)| {
-                                resp.set_header(k, v, true);
-                            });
 
                             header.iter().for_each(|(k, v)| {
                                 resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
@@ -320,11 +314,6 @@ impl Webview {
                         };
 
                         let resp = ArkWebResponse::new();
-
-                        // keep origin headers
-                        origin_headers.iter().for_each(|(k, v)| {
-                            resp.set_header(k, v, true);
-                        });
 
                         header.iter().for_each(|(k, v)| {
                             resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
