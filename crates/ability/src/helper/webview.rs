@@ -269,6 +269,8 @@ impl Webview {
     {
         let handle = CustomProtocolHandler::new();
 
+        let cbs = Box::leak(Box::new(callback));
+
         handle.on_request_start(|req, req_handle| {
             let url: String = req.url().into();
             let request_body = req.http_body_stream();
@@ -278,7 +280,7 @@ impl Webview {
                     let request_body_size = body.size();
 
                     body.read(request_body_size as usize, |buf| {
-                        let response = callback(&url, Request::new(buf), req.is_main_frame());
+                        let response = cbs(&url, Request::new(buf), req.is_main_frame());
                         if let Some(response) = response {
                             let header = response.headers();
                             let body = response.body();
@@ -303,7 +305,7 @@ impl Webview {
                     });
                 }
                 None => {
-                    let response = callback(&url, Request::new(vec![]), req.is_main_frame());
+                    let response = cbs(&url, Request::new(vec![]), req.is_main_frame());
                     if let Some(response) = response {
                         let header = response.headers();
                         let status = response.status();

@@ -88,7 +88,7 @@ pub fn set_visible(env: &Env, visible: bool) -> napi_ohos::Result<()> {
     Ok(())
 }
 
-#[ability(webview)]
+#[ability(webview, protocol = "wry,custom,other")]
 fn openharmony_app(app: OpenHarmonyApp) {
     app.run_loop(|types| match types {
         Event::Input(k) => match k {

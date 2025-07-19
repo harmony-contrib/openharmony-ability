@@ -85,7 +85,7 @@ impl WebViewBuilder {
         }
     }
 
-    pub fn headers(self, headers: &http::HeaderMap) -> WebViewBuilder {
+    pub fn headers(self, headers: http::HeaderMap) -> WebViewBuilder {
         let convert_header: HashMap<String, String> = headers
             .iter()
             .map(|(key, value)| (key.to_string(), value.to_str().unwrap().to_string()))
