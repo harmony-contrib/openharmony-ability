@@ -1,5 +1,6 @@
 import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit";
 import window from "@ohos.window";
+import webview from '@ohos.web.webview';
 import * as Entry from '../components/MainPage'
 import * as Webview from '../webview/DefaultPage'
 import { ApplicationLifecycle, Module } from './type'
@@ -38,6 +39,11 @@ export class RustAbility extends UIAbility {
     // You can define it by yourself or use ability to define.
     if (typeof this.nativeModule?.registerCustomProtocol === 'function') {
       this.nativeModule!.registerCustomProtocol();
+    }
+
+    // Must call it when custom protocol is enabled.
+    if (this.mode === 'webview') {
+      webview.WebviewController.initializeWebEngine();
     }
 
     this.lifecycle = this.nativeModule!.init();
