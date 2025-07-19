@@ -7,7 +7,8 @@ use napi_ohos::{
 };
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{
-    native_web::WebProxyBuilder, Event, InputEvent, OpenHarmonyApp, WebViewBuilder,
+    native_web::{WebProxyBuilder},
+    Event, InputEvent, OpenHarmonyApp, WebViewBuilder,
 };
 use openharmony_ability_derive::ability;
 
@@ -26,6 +27,15 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
         .id(web_tag.clone())
         .html(INDEX)
         .build()?;
+
+    webview
+        .custom_protocol("wry", |url, req, is_main_frame| {
+            hilog_info!(format!("ohos-rs macro custom_protocol: {:?}", url).as_str());
+            hilog_info!(format!("ohos-rs macro custom_protocol: {:?}", req).as_str());
+            hilog_info!(format!("ohos-rs macro custom_protocol: {:?}", is_main_frame).as_str());
+            None
+        })
+        .map_err(|_| napi_ohos::Error::from_reason("custom_protocol error".to_string()))?;
 
     let _ = webview.on_controller_attach(move || {
         hilog_info!(format!("ohos-rs macro on_controller_attach").as_str());
@@ -78,7 +88,7 @@ pub fn set_visible(env: &Env, visible: bool) -> napi_ohos::Result<()> {
     Ok(())
 }
 
-#[ability(webview)]
+#[ability(webview, protocol = "wry,custom,other")]
 fn openharmony_app(app: OpenHarmonyApp) {
     app.run_loop(|types| match types {
         Event::Input(k) => match k {

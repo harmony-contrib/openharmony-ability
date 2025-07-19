@@ -34,6 +34,12 @@ export class RustAbility extends UIAbility {
     const packageName = `lib${this.moduleName}.so`;
     const module: ESObject = await import(packageName);
     this.nativeModule = module.default;
+    // Register custom protocol as first
+    // You can define it by yourself or use ability to define.
+    if (typeof this.nativeModule?.registerCustomProtocol === 'function') {
+      this.nativeModule!.registerCustomProtocol();
+    }
+
     this.lifecycle = this.nativeModule!.init();
     this.lifecycle?.windowStageEventCallback.onAbilityCreate(state);
   }

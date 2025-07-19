@@ -1,11 +1,12 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, rc::Rc};
 
+use http::{Request, Response};
 use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::{FnArgs, Function, Object},
     Either, Error, JsString, Ref, Result,
 };
-use ohos_web_binding::Web;
+use ohos_web_binding::{ArkWebResponse, CustomProtocolHandler, Web};
 
 use crate::get_main_thread_env;
 
@@ -258,6 +259,83 @@ impl Webview {
         self.web_view_native
             .on_destroy(callback)
             .map_err(|e| Error::from_reason(e.to_string()))?;
+        Ok(())
+    }
+
+    pub fn custom_protocol<S, F>(&self, protocol: S, callback: F) -> Result<()>
+    where
+        S: Into<String>,
+        F: Fn(&str, Request<Vec<u8>>, bool) -> Option<Response<Cow<'static, [u8]>>>,
+    {
+        let handle = CustomProtocolHandler::new();
+
+        let cbs = Box::leak(Box::new(callback));
+
+        handle.on_request_start(|req, req_handle| {
+            let url: String = req.url().into();
+            let request_body = req.http_body_stream();
+
+            match request_body {
+                Some(body) => {
+                    let request_body_size = body.size();
+
+                    body.read(request_body_size as usize, |buf| {
+                        let response = cbs(&url, Request::new(buf), req.is_main_frame());
+                        if let Some(response) = response {
+                            let header = response.headers();
+                            let body = response.body();
+                            let status = response.status();
+                            let body_slice = match body {
+                                Cow::Borrowed(slice) => slice,
+                                Cow::Owned(vec) => vec.as_slice(),
+                            };
+
+                            let resp = ArkWebResponse::new();
+
+                            header.iter().for_each(|(k, v)| {
+                                resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
+                            });
+
+                            resp.set_status(status.as_u16() as _);
+
+                            req_handle.receive_response(resp);
+                            req_handle.receive_data(body_slice);
+                            req_handle.finish();
+                        }
+                    });
+                }
+                None => {
+                    let response = cbs(&url, Request::new(vec![]), req.is_main_frame());
+                    if let Some(response) = response {
+                        let header = response.headers();
+                        let status = response.status();
+                        let body = response.body();
+                        let body_slice = match body {
+                            Cow::Borrowed(slice) => slice,
+                            Cow::Owned(vec) => vec.as_slice(),
+                        };
+
+                        let resp = ArkWebResponse::new();
+
+                        header.iter().for_each(|(k, v)| {
+                            resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
+                        });
+                        resp.set_status(status.as_u16() as _);
+
+                        req_handle.receive_response(resp);
+                        req_handle.receive_data(body_slice);
+                        req_handle.finish();
+                    }
+                }
+            }
+
+            true
+        });
+
+        self.web_view_native
+            .custom_protocol(protocol, handle)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
         Ok(())
     }
 }

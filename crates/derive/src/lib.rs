@@ -1,24 +1,13 @@
+use darling::FromMeta;
 use proc_macro::TokenStream;
-use syn::{parse::Parse, parse::ParseStream, parse_macro_input, ItemFn};
+use syn::ItemFn;
 
+#[derive(FromMeta, Default, Debug)]
 struct AbilityArgs {
+    #[darling(default)]
     webview: bool,
-}
-
-impl Parse for AbilityArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut webview = false;
-        while !input.is_empty() {
-            let ident: syn::Ident = input.parse()?;
-            if ident == "webview" {
-                webview = true;
-            }
-            if !input.is_empty() {
-                input.parse::<syn::Token![,]>()?;
-            }
-        }
-        Ok(AbilityArgs { webview })
-    }
+    #[darling(default)]
+    protocol: Option<String>,
 }
 
 #[proc_macro_attribute]
@@ -28,11 +17,41 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
     let block = &ast.block;
     let arg = &ast.sig.inputs;
 
-    // Parse attribute arguments
-    let args = parse_macro_input!(attr as AbilityArgs);
-    let has_webview = args.webview;
+    let args = if attr.is_empty() {
+        AbilityArgs::default()
+    } else {
+        match darling::ast::NestedMeta::parse_meta_list(proc_macro2::TokenStream::from(attr)) {
+            Ok(list) => {
+                match AbilityArgs::from_list(&list) {
+                    Ok(args) => args,
+                    Err(e) => {
+                        return TokenStream::from(e.write_errors());
+                    }
+                }
+            }
+            Err(e) => {
+                return TokenStream::from(e.to_compile_error());
+            }
+        }
+    };
 
-    let render = if has_webview {
+    let protocol_registrations = args
+        .protocol
+        .as_ref()
+        .map(|protocols| {
+            protocols
+                .split(",")
+                .map(|protocol| {
+                    let protocol_lit = syn::LitStr::new(protocol, proc_macro2::Span::call_site());
+                    quote::quote! {
+                        openharmony_ability::native_web::CustomProtocol::add_protocol(#protocol_lit);
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let render = if args.webview {
         quote::quote! {
             #[openharmony_ability::napi_derive::napi]
             pub fn webview_render<'a>(
@@ -58,6 +77,24 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    // Register custom protocol if protocol is specified and webview is enabled
+    let protocol_registrations_apply = if args.protocol.is_some() && args.webview {
+        quote::quote! {
+            #[openharmony_ability::napi_derive::napi]
+            pub fn register_custom_protocol<'a>(
+                env: &'a openharmony_ability::napi::Env,
+            ) -> openharmony_ability::napi::Result<()> {
+                #(#protocol_registrations)*
+
+                openharmony_ability::native_web::CustomProtocol::register();
+
+                Ok(())
+            }
+        }
+    } else {
+        quote::quote! {}
+    };
+
     let f = quote::quote! {
         pub(crate) fn #fn_name(#arg) #block
 
@@ -71,6 +108,8 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             thread_local! {
                 pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
             }
+
+            #protocol_registrations_apply
 
             #[openharmony_ability::napi_derive::napi]
             pub fn init<'a>(
