@@ -27,6 +27,11 @@ export interface WebViewComponentEventCallback {
   onComponentDestroyed: () => void
 }
 
+export interface OnDownloadStartResult {
+  allow?: boolean
+  tempPath?: string
+}
+
 export interface WebViewInitData {
   url?: string
   id?: string
@@ -39,6 +44,11 @@ export interface WebViewInitData {
   initializationScripts?: string[]
   headers?: Record<string,string>
   html?: string
+  onDragAndDrop?: (event: string) => void
+  onDownloadStart?: (url: string, tempPath: string | undefined) => OnDownloadStartResult
+  onDownloadEnd?: (url: string, tempPath: string | undefined, success: boolean) => void
+  onNavigationRequest?: (url: string) => boolean
+  onTitleChange?: (title: string) => void
 }
 
 export interface WebViewStyle {
