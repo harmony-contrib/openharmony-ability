@@ -3,7 +3,12 @@ import web_webview from '@ohos.web.webview'
 import { NodeController, BuilderNode, FrameNode } from '@ohos.arkui.node';
 import { randomString } from '../helper';
 import { common } from '@kit.AbilityKit';
-import { ArkHelper, WebViewComponentEventCallback, WebViewInitData as NativeWebViewInitData } from '../ability/type';
+import {
+  ArkHelper,
+  OnDownloadStartResult,
+  WebViewComponentEventCallback,
+  WebViewInitData as NativeWebViewInitData
+} from '../ability/type';
 import { exit } from "../helper";
 import { getCookies, JsHelper } from './Utils';
 import { WebHeader } from '@kit.ArkUI';
@@ -27,6 +32,11 @@ export interface WebviewInitData {
   initializationScripts?: ScriptItem[]
   headers?: Record<string, string>
   html?: string
+  onDragAndDrop?: (event: string) => void
+  onDownloadStart?: (url: string, tempPath: string | undefined) => OnDownloadStartResult
+  onDownloadEnd?: (url: string, tempPath: string | undefined, success: boolean) => void
+  onNavigationRequest?: (url: string) => boolean
+  onTitleChange?: (title: string) => void
 }
 
 interface WebviewNodeData extends WebviewInitData {
@@ -60,6 +70,19 @@ function WebBuilder(data: WebviewNodeData) {
         ctrl.loadUrl(data.url, header)
       } else {
         ctrl.loadData(data!.html, 'text/html', 'UTF-8', ' ', ' ')
+      }
+    })
+    .onLoadIntercept((event) => {
+      if (typeof data?.onNavigationRequest === 'function') {
+        const url = event.data.getRequestUrl();
+        const ret = data.onNavigationRequest(url);
+        return ret;
+      }
+      return false
+    })
+    .onTitleReceive(e => {
+      if (typeof data?.onTitleChange === 'function') {
+        data.onTitleChange(e.title)
       }
     })
 }
@@ -155,6 +178,38 @@ export class RustWebviewNodeController extends NodeController {
     this.webviewList.set(data.webTag, node);
 
     const controller = this.buildData(data.controller);
+    // intercept download task
+    if (typeof data?.onDownloadStart === 'function' || typeof data?.onDownloadEnd === 'function') {
+      const download = new web_webview.WebDownloadDelegate();
+
+      if (typeof data?.onDownloadStart === 'function') {
+        download.onBeforeDownload(e => {
+          const url = e.getUrl();
+          const tempPath = e.getFullPath();
+          const ret = data.onDownloadStart!(url, tempPath);
+
+          if (ret.allow) {
+            e.start(ret.tempPath || tempPath)
+          } else {
+            e.cancel();
+          }
+        })
+      }
+
+      if (typeof data?.onDownloadEnd === 'function') {
+        download.onDownloadFinish(e => {
+          const url = e.getUrl();
+          const tempPath = e.getFullPath()
+          data.onDownloadEnd!(url, tempPath, true);
+        })
+        download.onDownloadFailed(e => {
+          const url = e.getUrl();
+          data.onDownloadEnd!(url, undefined, false);
+        })
+      }
+
+      data.controller.setDownloadDelegate(download);
+    }
     this.webviewData.set(data.webTag, controller);
 
     this.rootNode?.appendChild(node.getFrameNode());
@@ -204,7 +259,12 @@ export struct DefaultWebViewComponent {
           userAgent: data?.userAgent,
           devtools: data?.devtools,
           autoplay: data?.autoplay,
-          initializationScripts: initScripts
+          initializationScripts: initScripts,
+          onDragAndDrop: data?.onDragAndDrop,
+          onDownloadStart: data?.onDownloadStart,
+          onDownloadEnd: data?.onDownloadEnd,
+          onNavigationRequest: data?.onNavigationRequest,
+          onTitleChange: data?.onTitleChange
         } as WebviewInitData;
 
       // transparent only be set when backgroundColor is null.

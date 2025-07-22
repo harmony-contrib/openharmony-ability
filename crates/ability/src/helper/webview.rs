@@ -21,6 +21,13 @@ pub struct WebViewStyle {
 
 #[napi(object)]
 #[derive(Default)]
+pub struct DownloadStartResult {
+    pub allow: bool,
+    pub temp_path: Option<String>,
+}
+
+#[napi(object)]
+#[derive(Default)]
 pub struct WebViewInitData<'a> {
     pub url: Option<String>,
     pub id: Option<String>,
@@ -35,9 +42,10 @@ pub struct WebViewInitData<'a> {
     pub transparent: Option<bool>,
 
     pub on_drag_and_drop: Option<Function<'a, String, ()>>,
-    pub on_download_start: Option<Function<'a, String, ()>>,
-    pub on_download_end: Option<Function<'a, String, ()>>,
+    pub on_download_start: Option<Function<'a, (String, String), DownloadStartResult>>,
+    pub on_download_end: Option<Function<'a, (String, Option<String>, bool), ()>>,
     pub on_navigation_request: Option<Function<'a, String, bool>>,
+    pub on_title_change: Option<Function<'a, String, ()>>,
 }
 
 #[derive(Clone)]

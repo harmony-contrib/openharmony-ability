@@ -1,13 +1,12 @@
-use std::cell::RefCell;
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, path::PathBuf, rc::Rc};
 
 use napi_ohos::{
     bindgen_prelude::{Function, Object},
     Error, Ref, Result,
 };
-use napi_ohos::{Either, JsString};
+use napi_ohos::{Either, JsBoolean, JsString};
 
-use crate::helper::{WebViewInitData, WebViewStyle, Webview};
+use crate::helper::{DownloadStartResult, WebViewInitData, WebViewStyle, Webview};
 
 mod drag;
 
@@ -26,10 +25,12 @@ pub struct WebViewBuilder {
     pub transparent: Option<bool>,
 
     id: Option<String>,
+    #[cfg(feature = "drag_and_drop")]
     on_drag_and_drop: Option<Box<dyn Fn(String) -> ()>>,
-    on_download_start: Option<Box<dyn Fn(String) -> ()>>,
-    on_download_end: Option<Box<dyn Fn(String) -> ()>>,
+    on_download_start: Option<Box<dyn Fn(String, &mut PathBuf) -> bool>>,
+    on_download_end: Option<Box<dyn Fn(String, Option<PathBuf>, bool) -> ()>>,
     on_navigation_request: Option<Box<dyn Fn(String) -> bool>>,
+    on_title_change: Option<Box<dyn Fn(String) -> ()>>,
 }
 
 impl WebViewBuilder {
@@ -119,6 +120,7 @@ impl WebViewBuilder {
         }
     }
 
+    #[cfg(feature = "drag_and_drop")]
     pub fn on_drag_and_drop<F: Fn(String) -> ()>(self, on_drag_and_drop: F) -> WebViewBuilder {
         let static_handler = unsafe {
             std::mem::transmute::<Box<dyn Fn(String) -> ()>, Box<dyn Fn(String) -> () + 'static>>(
@@ -131,11 +133,17 @@ impl WebViewBuilder {
         }
     }
 
-    pub fn on_download_start<F: Fn(String) -> ()>(self, on_download_start: F) -> WebViewBuilder {
+    pub fn on_download_start<F: Fn(String, &mut PathBuf) -> bool>(
+        self,
+        on_download_start: F,
+    ) -> WebViewBuilder {
         let static_handler = unsafe {
-            std::mem::transmute::<Box<dyn Fn(String) -> ()>, Box<dyn Fn(String) -> () + 'static>>(
-                Box::new(move |event| on_download_start(event)),
-            )
+            std::mem::transmute::<
+                Box<dyn Fn(String, &mut PathBuf) -> bool>,
+                Box<dyn Fn(String, &mut PathBuf) -> bool + 'static>,
+            >(Box::new(move |url, temp_path| {
+                on_download_start(url, temp_path)
+            }))
         };
         WebViewBuilder {
             on_download_start: Some(static_handler),
@@ -143,11 +151,17 @@ impl WebViewBuilder {
         }
     }
 
-    pub fn on_download_end<F: Fn(String) -> ()>(self, on_download_end: F) -> WebViewBuilder {
+    pub fn on_download_end<F: Fn(String, Option<PathBuf>, bool) -> ()>(
+        self,
+        on_download_end: F,
+    ) -> WebViewBuilder {
         let static_handler = unsafe {
-            std::mem::transmute::<Box<dyn Fn(String) -> ()>, Box<dyn Fn(String) -> () + 'static>>(
-                Box::new(move |event| on_download_end(event)),
-            )
+            std::mem::transmute::<
+                Box<dyn Fn(String, Option<PathBuf>, bool) -> ()>,
+                Box<dyn Fn(String, Option<PathBuf>, bool) -> () + 'static>,
+            >(Box::new(move |url, temp_path, success| {
+                on_download_end(url, temp_path, success)
+            }))
         };
         WebViewBuilder {
             on_download_end: Some(static_handler),
@@ -166,6 +180,18 @@ impl WebViewBuilder {
         };
         WebViewBuilder {
             on_navigation_request: Some(static_handler),
+            ..self
+        }
+    }
+
+    pub fn on_title_change<F: Fn(String) -> ()>(self, on_title_change: F) -> WebViewBuilder {
+        let static_handler = unsafe {
+            std::mem::transmute::<Box<dyn Fn(String) -> ()>, Box<dyn Fn(String) -> () + 'static>>(
+                Box::new(move |event| on_title_change(event)),
+            )
+        };
+        WebViewBuilder {
+            on_title_change: Some(static_handler),
             ..self
         }
     }
@@ -190,6 +216,7 @@ impl WebViewBuilder {
                         "createWebview",
                     )?;
 
+                #[cfg(feature = "drag_and_drop")]
                 let on_drag_and_drop = self.on_drag_and_drop.and_then(|handler| {
                     env.create_function_from_closure("on_drag_and_drop", move |ctx| {
                         let ret = ctx.try_get::<JsString>(1)?;
@@ -205,25 +232,47 @@ impl WebViewBuilder {
 
                 let on_download_start = self.on_download_start.and_then(|handler| {
                     env.create_function_from_closure("on_download_start", move |ctx| {
-                        let ret = ctx.try_get::<JsString>(1)?;
-                        let ret = match ret {
+                        let origin_url = ctx.try_get::<JsString>(1)?;
+                        let temp_path = ctx.try_get::<JsString>(2)?;
+                        let origin_url_str = match origin_url {
                             Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
                             Either::B(_ret) => String::new(),
                         };
-                        handler(ret);
-                        Ok(())
+                        let temp_path_str = match temp_path {
+                            Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                            Either::B(_ret) => String::new(),
+                        };
+                        let mut temp_path = PathBuf::from(temp_path_str);
+                        let ret = handler(origin_url_str, &mut temp_path);
+                        Ok(DownloadStartResult {
+                            allow: ret,
+                            temp_path: Some(temp_path.to_string_lossy().to_string()),
+                        }
+                        .into())
                     })
                     .ok()
                 });
 
                 let on_download_end = self.on_download_end.and_then(|handler| {
                     env.create_function_from_closure("on_download_end", move |ctx| {
-                        let ret = ctx.try_get::<JsString>(1)?;
-                        let ret = match ret {
+                        let origin_url = ctx.try_get::<JsString>(1)?;
+                        let temp_path = ctx.try_get::<JsString>(2)?;
+                        let success = ctx.try_get::<JsBoolean>(3)?;
+                        let origin_url_str = match origin_url {
                             Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
                             Either::B(_ret) => String::new(),
                         };
-                        handler(ret);
+                        let temp_path_str = match temp_path {
+                            Either::A(ret) => {
+                                Some(PathBuf::from(ret.into_utf8()?.as_str()?.to_string()))
+                            }
+                            Either::B(_ret) => None,
+                        };
+                        let success_bool = match success {
+                            Either::A(ret) => ret.get_value().unwrap_or(false),
+                            Either::B(_ret) => false,
+                        };
+                        handler(origin_url_str, temp_path_str, success_bool);
                         Ok(())
                     })
                     .ok()
@@ -242,6 +291,19 @@ impl WebViewBuilder {
                     .ok()
                 });
 
+                let on_title_change = self.on_title_change.and_then(|handler| {
+                    env.create_function_from_closure("on_title_change", move |ctx| {
+                        let ret = ctx.try_get::<JsString>(1)?;
+                        let ret = match ret {
+                            Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                            Either::B(_ret) => String::new(),
+                        };
+                        handler(ret);
+                        Ok(())
+                    })
+                    .ok()
+                });
+
                 let webview = create_webview_func.call(WebViewInitData {
                     url: self.url,
                     id: Some(id.clone()),
@@ -254,10 +316,15 @@ impl WebViewBuilder {
                     headers: self.headers,
                     html: self.html,
                     transparent: self.transparent,
+                    #[cfg(feature = "drag_and_drop")]
                     on_drag_and_drop,
+
+                    #[cfg(not(feature = "drag_and_drop"))]
+                    on_drag_and_drop: None,
                     on_download_start,
                     on_download_end,
                     on_navigation_request,
+                    on_title_change,
                 })?;
 
                 let webview_ref = Ref::new(env, &*webview)?;
