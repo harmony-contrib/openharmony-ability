@@ -20,8 +20,8 @@ pub struct WebViewStyle {
 }
 
 #[napi(object)]
-#[derive(Debug, Clone, Default)]
-pub struct WebViewInitData {
+#[derive(Default)]
+pub struct WebViewInitData<'a> {
     pub url: Option<String>,
     pub id: Option<String>,
     pub style: Option<WebViewStyle>,
@@ -33,6 +33,11 @@ pub struct WebViewInitData {
     pub headers: Option<HashMap<String, String>>,
     pub html: Option<String>,
     pub transparent: Option<bool>,
+
+    pub on_drag_and_drop: Option<Function<'a, String, ()>>,
+    pub on_download_start: Option<Function<'a, String, ()>>,
+    pub on_download_end: Option<Function<'a, String, ()>>,
+    pub on_navigation_request: Option<Function<'a, String, bool>>,
 }
 
 #[derive(Clone)]
