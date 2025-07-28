@@ -37,6 +37,16 @@ Here are some notes and tips:
 
 2. `moduleName` is the name of your native module name which file name is `lib${moduleName}.so`. **You must define it in your project**.
 
+### Mode
+
+Now we support two different mode to render, the default value is `xcomponent`. You can set `mode` with the following enum:
+
+- xcomponent
+  Use `XComponent` to render everything with `OpenGL` or `Vulkan`.
+- webview
+  Use `ArkWeb` to render everything.
+
+
 ### DefaultXComponent
 
 When using rust to develop OpenHarmony/HarmonyNext application, we use `XComponent` to render the UI by default. And `DefaultXComponent` loads the native module and forward the lifecycle event to rust code by default.
