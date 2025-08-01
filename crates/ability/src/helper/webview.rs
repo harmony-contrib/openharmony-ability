@@ -3,8 +3,8 @@ use std::{borrow::Cow, collections::HashMap, rc::Rc};
 use http::{Request, Response};
 use napi_derive_ohos::napi;
 use napi_ohos::{
-    bindgen_prelude::{FnArgs, Function, Object},
-    Either, Error, JsString, Ref, Result,
+    bindgen_prelude::{FnArgs, Function, JsObjectValue, ObjectRef},
+    Either, Error, Result,
 };
 use ohos_web_binding::{ArkWebResponse, CustomProtocolHandler, Web};
 
@@ -51,12 +51,12 @@ pub struct WebViewInitData<'a> {
 #[derive(Clone)]
 pub struct Webview {
     tag: String,
-    inner: Rc<Ref<Object>>,
+    inner: Rc<ObjectRef>,
     web_view_native: Rc<Web>,
 }
 
 impl Webview {
-    pub fn new(tag: String, inner: Ref<Object>) -> Result<Self> {
+    pub fn new(tag: String, inner: ObjectRef) -> Result<Self> {
         let native_instance = Web::new(tag.clone());
         Ok(Self {
             inner: Rc::new(inner),
@@ -65,13 +65,8 @@ impl Webview {
         })
     }
 
-    pub fn inner(&self) -> Result<Object> {
-        if let Some(env) = get_main_thread_env().borrow().as_ref() {
-            let inner = self.inner.get_value(&env)?;
-            Ok(inner)
-        } else {
-            Err(Error::from_reason("Failed to get main thread env"))
-        }
+    pub fn inner(&self) -> Rc<ObjectRef> {
+        self.inner.clone()
     }
 
     pub fn tag(&self) -> String {
@@ -166,9 +161,9 @@ impl Webview {
                 )?;
 
             let cb = env.create_function_from_closure("evaluate_js_callback", move |ctx| {
-                let ret = ctx.try_get::<JsString>(1)?;
+                let ret = ctx.try_get::<String>(1)?;
                 let ret = match ret {
-                    Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                    Either::A(s) => s,
                     Either::B(_ret) => String::from("undefined"),
                 };
                 if let Some(cb) = callback.as_ref() {

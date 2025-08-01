@@ -2,8 +2,8 @@ use std::sync::LazyLock;
 
 use napi_derive_ohos::napi;
 use napi_ohos::{
-    bindgen_prelude::{FnArgs, Function},
-    Env, JsObject, Ref, Result,
+    bindgen_prelude::{FnArgs, Function, ObjectRef},
+    Env, Result,
 };
 use ohos_display_soloist_binding::DisplaySoloist;
 
@@ -22,12 +22,11 @@ pub struct WebViewComponentEventCallback<'a> {
 
 pub fn render<'a>(
     env: &'a Env,
-    helper: JsObject,
+    helper: ObjectRef,
     app: OpenHarmonyApp,
 ) -> Result<WebViewComponentEventCallback<'a>> {
-    let h = Ref::new(env, &helper)?;
 
-    set_helper(h);
+    set_helper(helper);
     set_main_thread_env(env.clone());
 
     let on_frame_app = app.clone();

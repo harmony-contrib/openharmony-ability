@@ -1,4 +1,6 @@
-use napi_ohos::{bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Env, Result};
+use napi_ohos::{
+    bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Env, Result, Status,
+};
 use ohos_ime_binding::KeyboardStatus;
 
 use crate::{Event, OpenHarmonyApp};
@@ -9,9 +11,9 @@ pub fn ime_ts_fn(
     env: &Env,
     app: OpenHarmonyApp,
 ) -> Result<(
-    ThreadsafeFunction<String, (), String, false>,
-    ThreadsafeFunction<u32, (), u32, false>,
-    ThreadsafeFunction<i32, (), i32, false>,
+    ThreadsafeFunction<String, (), String, Status, false>,
+    ThreadsafeFunction<u32, (), u32, Status, false>,
+    ThreadsafeFunction<i32, (), i32, Status, false>,
 )> {
     // insert event
     let on_insert_text_app = app.clone();

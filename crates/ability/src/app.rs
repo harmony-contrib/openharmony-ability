@@ -7,7 +7,10 @@ use std::{
     },
 };
 
-use napi_ohos::{bindgen_prelude::Function, Error, Result};
+use napi_ohos::{
+    bindgen_prelude::{Function, JsObjectValue},
+    Error, Result,
+};
 use ohos_display_binding::default_display_scaled_density;
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;

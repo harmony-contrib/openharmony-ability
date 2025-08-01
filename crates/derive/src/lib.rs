@@ -56,7 +56,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[openharmony_ability::napi_derive::napi]
             pub fn webview_render<'a>(
                 env: &'a openharmony_ability::napi::Env,
-                helper: openharmony_ability::napi::JsObject,
+                helper: openharmony_ability::napi::bindgen_prelude::ObjectRef,
             ) -> openharmony_ability::napi::Result<openharmony_ability::WebViewComponentEventCallback<'a>> {
                 let callback = openharmony_ability::render(env, helper, (*APP).clone())?;
                 Ok(callback)
@@ -67,7 +67,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[openharmony_ability::napi_derive::napi]
             pub fn render<'a>(
                 env: &'a openharmony_ability::napi::Env,
-                helper: openharmony_ability::napi::JsObject,
+                helper: openharmony_ability::napi::bindgen_prelude::ObjectRef,
                 slot: openharmony_ability::arkui::ArkUIHandle,
             ) -> openharmony_ability::napi::Result<()> {
                 let root = openharmony_ability::render(env, helper, slot, (*APP).clone())?;
