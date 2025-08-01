@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use napi_ohos::{Env, JsObject, Ref};
+use napi_ohos::{Env, bindgen_prelude::ObjectRef};
 
 #[cfg(feature = "webview")]
 mod webview;
@@ -10,19 +10,19 @@ mod window_info;
 pub use webview::*;
 
 thread_local! {
-    static HELPER: Rc<RefCell<Option<Ref<JsObject>>>> = Rc::new(RefCell::new(None));
+    static HELPER: Rc<RefCell<Option<ObjectRef>>> = Rc::new(RefCell::new(None));
 
     static MAIN_THREAD_ENV: Rc<RefCell<Option<Env>>> = Rc::new(RefCell::new(None));
 }
 
 /// 设置 HELPER 的值
-pub fn set_helper(helper: Ref<JsObject>) {
+pub fn set_helper(helper: ObjectRef) {
     HELPER.with(|h| {
         *h.borrow_mut() = Some(helper);
     });
 }
 
-pub unsafe fn get_helper() -> Rc<RefCell<Option<Ref<JsObject>>>> {
+pub unsafe fn get_helper() -> Rc<RefCell<Option<ObjectRef>>> {
     HELPER.with(|h| Rc::clone(h))
 }
 

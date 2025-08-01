@@ -1,10 +1,10 @@
-use std::{collections::HashMap, path::PathBuf, rc::Rc};
+use std::{collections::HashMap, path::PathBuf};
 
 use napi_ohos::{
-    bindgen_prelude::{Function, Object},
-    Error, Ref, Result,
+    bindgen_prelude::{Function, JsObjectValue, ObjectRef},
+    Error, Result,
 };
-use napi_ohos::{Either, JsBoolean, JsString};
+use napi_ohos::{Either};
 
 use crate::helper::{DownloadStartResult, WebViewInitData, WebViewStyle, Webview};
 
@@ -212,16 +212,16 @@ impl WebViewBuilder {
             if let Some(env) = get_main_thread_env().borrow().as_ref() {
                 let ret = h.get_value(&env)?;
                 let create_webview_func = ret
-                    .get_named_property::<Function<'_, WebViewInitData, Rc<Object>>>(
+                    .get_named_property::<Function<'_, WebViewInitData, ObjectRef>>(
                         "createWebview",
                     )?;
 
                 #[cfg(feature = "drag_and_drop")]
                 let on_drag_and_drop = self.on_drag_and_drop.and_then(|handler| {
                     env.create_function_from_closure("on_drag_and_drop", move |ctx| {
-                        let ret = ctx.try_get::<JsString>(1)?;
+                        let ret = ctx.try_get::<String>(1)?;
                         let ret = match ret {
-                            Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                            Either::A(s) => s,
                             Either::B(_ret) => String::new(),
                         };
                         handler(ret);
@@ -232,14 +232,14 @@ impl WebViewBuilder {
 
                 let on_download_start = self.on_download_start.and_then(|handler| {
                     env.create_function_from_closure("on_download_start", move |ctx| {
-                        let origin_url = ctx.try_get::<JsString>(1)?;
-                        let temp_path = ctx.try_get::<JsString>(2)?;
+                        let origin_url = ctx.try_get::<String>(1)?;
+                        let temp_path = ctx.try_get::<String>(2)?;
                         let origin_url_str = match origin_url {
-                            Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                            Either::A(s) => s,
                             Either::B(_ret) => String::new(),
                         };
                         let temp_path_str = match temp_path {
-                            Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                            Either::A(s) => s,
                             Either::B(_ret) => String::new(),
                         };
                         let mut temp_path = PathBuf::from(temp_path_str);
@@ -255,21 +255,19 @@ impl WebViewBuilder {
 
                 let on_download_end = self.on_download_end.and_then(|handler| {
                     env.create_function_from_closure("on_download_end", move |ctx| {
-                        let origin_url = ctx.try_get::<JsString>(1)?;
-                        let temp_path = ctx.try_get::<JsString>(2)?;
-                        let success = ctx.try_get::<JsBoolean>(3)?;
+                        let origin_url = ctx.try_get::<String>(1)?;
+                        let temp_path = ctx.try_get::<String>(2)?;
+                        let success = ctx.try_get::<bool>(3)?;
                         let origin_url_str = match origin_url {
-                            Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                            Either::A(s) => s,
                             Either::B(_ret) => String::new(),
                         };
                         let temp_path_str = match temp_path {
-                            Either::A(ret) => {
-                                Some(PathBuf::from(ret.into_utf8()?.as_str()?.to_string()))
-                            }
+                            Either::A(s) => Some(PathBuf::from(s)),
                             Either::B(_ret) => None,
                         };
                         let success_bool = match success {
-                            Either::A(ret) => ret.get_value().unwrap_or(false),
+                            Either::A(ret) => ret,
                             Either::B(_ret) => false,
                         };
                         handler(origin_url_str, temp_path_str, success_bool);
@@ -280,9 +278,9 @@ impl WebViewBuilder {
 
                 let on_navigation_request = self.on_navigation_request.and_then(|handler| {
                     env.create_function_from_closure("on_navigation_request", move |ctx| {
-                        let ret = ctx.try_get::<JsString>(1)?;
+                        let ret = ctx.try_get::<String>(1)?;
                         let ret = match ret {
-                            Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                            Either::A(s) => s,
                             Either::B(_ret) => String::new(),
                         };
                         let ret = handler(ret);
@@ -293,9 +291,9 @@ impl WebViewBuilder {
 
                 let on_title_change = self.on_title_change.and_then(|handler| {
                     env.create_function_from_closure("on_title_change", move |ctx| {
-                        let ret = ctx.try_get::<JsString>(1)?;
+                        let ret = ctx.try_get::<String>(1)?;
                         let ret = match ret {
-                            Either::A(ret) => ret.into_utf8()?.as_str()?.to_string(),
+                            Either::A(s) => s,
                             Either::B(_ret) => String::new(),
                         };
                         handler(ret);
@@ -327,9 +325,7 @@ impl WebViewBuilder {
                     on_title_change,
                 })?;
 
-                let webview_ref = Ref::new(env, &*webview)?;
-
-                let web = Webview::new(id.clone(), webview_ref)?;
+                let web = Webview::new(id.clone(), webview)?;
                 return Ok(web);
             }
 

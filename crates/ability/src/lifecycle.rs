@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Function, Env, JsObject, Result};
+use napi_ohos::{
+    bindgen_prelude::{Function, Object, JsObjectValue},
+    Env, Result,
+};
 
 use crate::{
     ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
@@ -22,8 +25,8 @@ pub struct WindowStageEventCallback<'a> {
     pub on_ability_save_state: Function<'a, (), ()>,
     pub on_ability_restore_state: Function<'a, (), ()>,
     pub on_window_stage_event: Function<'a, i32, ()>,
-    pub on_window_size_change: Function<'a, JsObject, ()>,
-    pub on_window_rect_change: Function<'a, JsObject, ()>,
+    pub on_window_size_change: Function<'a, Object<'a>, ()>,
+    pub on_window_rect_change: Function<'a, Object<'a>, ()>,
 }
 
 #[napi(object)]
@@ -71,7 +74,7 @@ pub fn create_lifecycle_handle<'a>(
     let configuration_updated_app = app.clone();
     let on_configuration_updated =
         env.create_function_from_closure("configuration_updated", move |ctx| {
-            let configuration = ctx.first_arg::<JsObject>()?;
+            let configuration = ctx.first_arg::<Object>()?;
             let language = configuration.get_named_property::<String>("language")?;
             let color_mode = configuration.get_named_property::<i32>("colorMode")?;
             let direction = configuration.get_named_property::<i32>("direction")?;
@@ -132,7 +135,7 @@ pub fn create_lifecycle_handle<'a>(
 
     let window_resize_app = app.clone();
     let window_resize = env.create_function_from_closure("window_resize", move |ctx| {
-        let size = ctx.first_arg::<JsObject>()?;
+        let size = ctx.first_arg::<Object>()?;
         let width = size.get_named_property::<i32>("width")?;
         let height = size.get_named_property::<i32>("height")?;
 
@@ -145,9 +148,9 @@ pub fn create_lifecycle_handle<'a>(
     let window_rect_app = app.clone();
     let window_rect_change =
         env.create_function_from_closure("window_rect_change", move |ctx| {
-            let options = ctx.first_arg::<JsObject>()?;
+            let options = ctx.first_arg::<Object>()?;
             let reason = options.get_named_property::<i32>("reason")?;
-            let rect = options.get_named_property::<JsObject>("rect")?;
+            let rect = options.get_named_property::<Object>("rect")?;
             let top = rect.get_named_property::<i32>("top")?;
             let left = rect.get_named_property::<i32>("left")?;
             let width = rect.get_named_property::<i32>("width")?;

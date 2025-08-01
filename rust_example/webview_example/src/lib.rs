@@ -2,18 +2,17 @@ use std::cell::RefCell;
 
 use napi_derive_ohos::napi;
 use napi_ohos::{
-    bindgen_prelude::{Function, Object},
+    bindgen_prelude::{Function, JsObjectValue, Object},
     Env,
 };
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{
-    native_web::{WebProxyBuilder},
-    Event, InputEvent, OpenHarmonyApp, WebViewBuilder,
+    native_web::WebProxyBuilder, Event, InputEvent, OpenHarmonyApp, WebViewBuilder,
 };
 use openharmony_ability_derive::ability;
 
 thread_local! {
-    static WEBVIEW_ID: RefCell<Option<Object>> = RefCell::new(None);
+    static WEBVIEW_ID: RefCell<Option<Object<'static>>> = RefCell::new(None);
 }
 
 const INDEX: &str = include_str!("index.html");
@@ -55,10 +54,12 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
         hilog_info!(format!("ohos-rs macro on_page_end").as_str());
     });
 
+    let ret = unsafe { std::mem::transmute(webview.inner().get_value(env)?) };
+
     WEBVIEW_ID.with(|w| {
-        let inner = webview.inner().unwrap();
-        w.replace(Some(inner));
+        w.replace(Some(ret));
     });
+
     Ok(())
 }
 
