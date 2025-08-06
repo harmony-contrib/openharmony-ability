@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, rc::Rc};
 
-use http::{Request, Response};
+use http::{HeaderName, HeaderValue, Request, Response};
 use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::{FnArgs, Function, JsObjectValue, ObjectRef},
@@ -276,11 +276,13 @@ impl Webview {
         F: Fn(&str, Request<Vec<u8>>, bool) -> Option<Response<Cow<'static, [u8]>>>,
     {
         let handle = CustomProtocolHandler::new();
-
         let cbs = Box::leak(Box::new(callback));
 
         handle.on_request_start(|req, req_handle| {
             let url: String = req.url().into();
+            let header = req.headers();
+            let mut iter = header.iter();
+
             let request_body = req.http_body_stream();
 
             match request_body {
@@ -288,7 +290,21 @@ impl Webview {
                     let request_body_size = body.size();
 
                     body.read(request_body_size as usize, |buf| {
-                        let response = cbs(&url, Request::new(buf), req.is_main_frame());
+                        let mut request_builder = Request::builder()
+                            .method(req.method().as_str())
+                            .uri(url.clone());
+                        while let Some((key, value)) = iter.next() {
+                            if let (Ok(header), Ok(value)) = (
+                                HeaderName::from_bytes(key.as_bytes()),
+                                HeaderValue::from_bytes(value.as_bytes()),
+                            ) {
+                                request_builder = request_builder.header(header, value);
+                            }
+                        }
+                        let request = request_builder
+                            .body(buf)
+                            .expect("Create http:Request failed");
+                        let response = cbs(&url, request, req.is_main_frame());
                         if let Some(response) = response {
                             let header = response.headers();
                             let body = response.body();
@@ -313,7 +329,21 @@ impl Webview {
                     });
                 }
                 None => {
-                    let response = cbs(&url, Request::new(vec![]), req.is_main_frame());
+                    let mut request_builder = Request::builder()
+                        .method(req.method().as_str())
+                        .uri(url.clone());
+                    while let Some((key, value)) = iter.next() {
+                        if let (Ok(header), Ok(value)) = (
+                            HeaderName::from_bytes(key.as_bytes()),
+                            HeaderValue::from_bytes(value.as_bytes()),
+                        ) {
+                            request_builder = request_builder.header(header, value);
+                        }
+                    }
+                    let request = request_builder
+                        .body(vec![])
+                        .expect("Create http:Request failed");
+                    let response = cbs(&url, request, req.is_main_frame());
                     if let Some(response) = response {
                         let header = response.headers();
                         let status = response.status();
