@@ -7,4 +7,4 @@ rm -rf $SCRIPT_DIR/../dist
 
 cp -rf $SCRIPT_DIR/../rust_ability/ability_rust/src/main/ets/ $SCRIPT_DIR/../package/src/main/ets
 
-pushd $SCRIPT_DIR/../ && ohrs artifact
+pushd $SCRIPT_DIR/../ && ohrs artifact --skip-libs
