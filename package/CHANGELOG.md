@@ -1,3 +1,7 @@
+# 0.2.0
+- Support webview render mode.
+
+---
 # 0.1.5-beta.0
 - Add Webview render mode.
 
