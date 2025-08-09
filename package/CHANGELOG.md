@@ -1,3 +1,8 @@
+# 0.2.1
+- Allow load page with html string.
+- Allow load url with custom headers.
+
+---
 # 0.2.0
 - Support webview render mode.
 

@@ -112,9 +112,20 @@ export class RustWebviewNodeController extends NodeController {
     const getCookiesHelper = (url: string) => {
       return getCookies(url) as string;
     }
-    const loadUrl = (url: string) => {
-      controller.loadUrl(url)
+    const loadUrl = (url: string, header?: Record<string, string>) => {
+      const headers = Object.keys((header || {}) as Record<string, string>).reduce((t, i) => {
+        if (!!header![i]) {
+          t.push({ headerKey: i, headerValue: header![i] })
+        }
+        return t;
+      }, [] as Array<WebHeader>)
+      controller.loadUrl(url, headers);
     }
+
+    const loadHtml = (html: string) => {
+      controller.loadData(html, 'text/html', 'UTF-8', ' ', ' ');
+    }
+
     const zoom = (scale: number) => {
       controller.zoom(scale)
     }
@@ -145,6 +156,7 @@ export class RustWebviewNodeController extends NodeController {
       getUrl,
       getCookies: getCookiesHelper,
       loadUrl,
+      loadHtml,
       zoom,
       refresh,
       requestFocus,

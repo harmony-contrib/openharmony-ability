@@ -89,12 +89,48 @@ impl Webview {
     /// Load a url in the webview
     pub fn load_url(&self, url: &str) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
-            let load_url_js_function = self
+            let load_url_js_function = self.inner.get_value(&env)?.get_named_property::<Function<
+                '_,
+                FnArgs<(String, Option<HashMap<String, String>>)>,
+                (),
+            >>("loadUrl")?;
+
+            load_url_js_function.call((url.to_string(), None).into())?;
+            Ok(())
+        } else {
+            Err(Error::from_reason("Failed to get main thread env"))
+        }
+    }
+
+    /// Load a url with headers in the webview
+    pub fn load_url_with_headers(&self, url: &str, headers: http::HeaderMap) -> Result<()> {
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let load_url_with_headers_js_function = self
                 .inner
                 .get_value(&env)?
-                .get_named_property::<Function<'_, String, ()>>("loadUrl")?;
+                .get_named_property::<Function<'_, FnArgs<(String, HashMap<String, String>)>, ()>>(
+                    "loadUrl",
+                )?;
 
-            load_url_js_function.call(url.to_string())?;
+            let headers = headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
+                .collect();
+            load_url_with_headers_js_function.call((url.to_string(), headers).into())?;
+            Ok(())
+        } else {
+            Err(Error::from_reason("Failed to get main thread env"))
+        }
+    }
+
+    /// Load html in the webview
+    pub fn load_html(&self, html: &str) -> Result<()> {
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let load_html_js_function = self
+                .inner
+                .get_value(&env)?
+                .get_named_property::<Function<'_, String, ()>>("loadHtml")?;
+            load_html_js_function.call(html.to_string())?;
             Ok(())
         } else {
             Err(Error::from_reason("Failed to get main thread env"))
