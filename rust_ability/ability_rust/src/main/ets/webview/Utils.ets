@@ -7,7 +7,8 @@ export const getCookies = (url: string): string => {
 export interface JsHelper {
   getCookies: (url: string) => string
   getUrl: () => string
-  loadUrl: (url: string) => void
+  loadUrl: (url: string, header?: Record<string, string>) => void
+  loadHtml: (html: string) => void
   zoom: (scale: number) => void
   refresh: () => void
   requestFocus: () => void
