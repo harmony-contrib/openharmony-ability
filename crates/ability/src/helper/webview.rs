@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::HashMap, rc::Rc};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
 use http::{HeaderName, HeaderValue, Request, Response};
 use napi_derive_ohos::napi;
@@ -311,21 +316,38 @@ impl Webview {
         S: Into<String>,
         F: Fn(&str, Request<Vec<u8>>, bool) -> Option<Response<Cow<'static, [u8]>>>,
     {
+        self.custom_protocol_async(protocol, move |url, request, is_main_frame, responder| {
+            let response = callback(url, request, is_main_frame);
+            if let Some(response) = response {
+                responder.respond(response);
+            }
+        })
+    }
+
+    pub fn custom_protocol_async<S, F>(&self, protocol: S, callback: F) -> Result<()>
+    where
+        S: Into<String>,
+        F: Fn(&str, Request<Vec<u8>>, bool, CustomProtocolResponder),
+    {
         let handle = CustomProtocolHandler::new();
         let cbs = Box::leak(Box::new(callback));
+        let cbs = Arc::new(Mutex::new(cbs));
 
-        handle.on_request_start(|req, req_handle| {
+        handle.on_request_start(move |req, req_handle| {
             let url: String = req.url().into();
             let header = req.headers();
             let mut iter = header.iter();
 
             let request_body = req.http_body_stream();
 
+            let mut req_handle = Some(req_handle);
+
             match request_body {
                 Some(body) => {
                     let request_body_size = body.size();
 
-                    body.read(request_body_size as usize, |buf| {
+                    let cbs = cbs.clone();
+                    body.read(request_body_size as usize, move |buf| {
                         let mut request_builder = Request::builder()
                             .method(req.method().as_str())
                             .uri(url.clone());
@@ -340,28 +362,38 @@ impl Webview {
                         let request = request_builder
                             .body(buf)
                             .expect("Create http:Request failed");
-                        let response = cbs(&url, request, req.is_main_frame());
-                        if let Some(response) = response {
-                            let header = response.headers();
-                            let body = response.body();
-                            let status = response.status();
-                            let body_slice = match body {
-                                Cow::Borrowed(slice) => slice,
-                                Cow::Owned(vec) => vec.as_slice(),
-                            };
 
-                            let resp = ArkWebResponse::new();
+                        let cbs = cbs.clone();
+                        let req_handle = req_handle.take().unwrap();
+                        let responder = CustomProtocolResponder {
+                            responder: Box::new(move |response| {
+                                let header = response.headers();
+                                let body = response.body();
+                                let status = response.status();
+                                let body_slice = match body {
+                                    Cow::Borrowed(slice) => slice,
+                                    Cow::Owned(vec) => vec.as_slice(),
+                                };
 
-                            header.iter().for_each(|(k, v)| {
-                                resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
-                            });
+                                let resp = ArkWebResponse::new();
 
-                            resp.set_status(status.as_u16() as _);
+                                header.iter().for_each(|(k, v)| {
+                                    resp.set_header(
+                                        k.as_str(),
+                                        v.to_str().unwrap_or_default(),
+                                        true,
+                                    );
+                                });
 
-                            req_handle.receive_response(resp);
-                            req_handle.receive_data(body_slice);
-                            req_handle.finish();
-                        }
+                                resp.set_status(status.as_u16() as _);
+
+                                req_handle.receive_response(resp);
+                                req_handle.receive_data(body_slice);
+                                req_handle.finish()
+                            }),
+                        };
+
+                        cbs.lock().unwrap()(&url, request, req.is_main_frame(), responder);
                     });
                 }
                 None => {
@@ -379,27 +411,31 @@ impl Webview {
                     let request = request_builder
                         .body(vec![])
                         .expect("Create http:Request failed");
-                    let response = cbs(&url, request, req.is_main_frame());
-                    if let Some(response) = response {
-                        let header = response.headers();
-                        let status = response.status();
-                        let body = response.body();
-                        let body_slice = match body {
-                            Cow::Borrowed(slice) => slice,
-                            Cow::Owned(vec) => vec.as_slice(),
-                        };
 
-                        let resp = ArkWebResponse::new();
+                    let responder = CustomProtocolResponder {
+                        responder: Box::new(move |response| {
+                            let header = response.headers();
+                            let status = response.status();
+                            let body = response.body();
+                            let body_slice = match body {
+                                Cow::Borrowed(slice) => slice,
+                                Cow::Owned(vec) => vec.as_slice(),
+                            };
 
-                        header.iter().for_each(|(k, v)| {
-                            resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
-                        });
-                        resp.set_status(status.as_u16() as _);
+                            let resp = ArkWebResponse::new();
 
-                        req_handle.receive_response(resp);
-                        req_handle.receive_data(body_slice);
-                        req_handle.finish();
-                    }
+                            header.iter().for_each(|(k, v)| {
+                                resp.set_header(k.as_str(), v.to_str().unwrap_or_default(), true);
+                            });
+                            resp.set_status(status.as_u16() as _);
+
+                            let req_handle = req_handle.take().unwrap();
+                            req_handle.receive_response(resp);
+                            req_handle.receive_data(body_slice);
+                            req_handle.finish();
+                        }),
+                    };
+                    cbs.lock().unwrap()(&url, request, req.is_main_frame(), responder);
                 }
             }
 
@@ -411,5 +447,19 @@ impl Webview {
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
         Ok(())
+    }
+}
+
+pub struct CustomProtocolResponder {
+    pub(crate) responder: Box<dyn FnOnce(Response<Cow<'static, [u8]>>)>,
+}
+
+unsafe impl Send for CustomProtocolResponder {}
+
+impl CustomProtocolResponder {
+    /// Resolves the request with the given response.
+    pub fn respond<T: Into<Cow<'static, [u8]>>>(self, response: Response<T>) {
+        let (parts, body) = response.into_parts();
+        (self.responder)(Response::from_parts(parts, body.into()))
     }
 }
