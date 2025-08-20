@@ -1,3 +1,7 @@
+# 0.2.2
+- Fix: allow enable devtools
+
+---
 # 0.2.1
 - Allow load page with html string.
 - Allow load url with custom headers.

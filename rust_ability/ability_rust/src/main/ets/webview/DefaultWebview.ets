@@ -185,6 +185,9 @@ export class RustWebviewNodeController extends NodeController {
       this.rootNode = new FrameNode(this.uiContext!)
     }
 
+    // Enabled devtools
+    data?.devtools && web_webview.WebviewController.setWebDebuggingAccess(true);
+
     const node: BuilderNode<WebviewNodeData[]> = new BuilderNode(this.uiContext!);
     node.build(webViewWrap, data);
     this.webviewList.set(data.webTag, node);
