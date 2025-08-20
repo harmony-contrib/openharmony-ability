@@ -59,9 +59,6 @@ function WebBuilder(data: WebviewNodeData) {
     .mediaPlayGestureAccess((typeof data?.autoplay === 'boolean' && data.autoplay === true) ? false : true)
     .javaScriptOnDocumentStart(data?.initializationScripts)
     .onControllerAttached(() => {
-      // Enabled devtools
-      data?.devtools && web_webview.WebviewController.setWebDebuggingAccess(true);
-      
       const ctrl = data.controller;
       // load url or html string
       if (data?.url) {
@@ -187,6 +184,9 @@ export class RustWebviewNodeController extends NodeController {
     if (this.rootNode === null) {
       this.rootNode = new FrameNode(this.uiContext!)
     }
+
+    // Enabled devtools
+    data?.devtools && web_webview.WebviewController.setWebDebuggingAccess(true);
 
     const node: BuilderNode<WebviewNodeData[]> = new BuilderNode(this.uiContext!);
     node.build(webViewWrap, data);
