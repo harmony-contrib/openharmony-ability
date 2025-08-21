@@ -21,14 +21,12 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
         AbilityArgs::default()
     } else {
         match darling::ast::NestedMeta::parse_meta_list(proc_macro2::TokenStream::from(attr)) {
-            Ok(list) => {
-                match AbilityArgs::from_list(&list) {
-                    Ok(args) => args,
-                    Err(e) => {
-                        return TokenStream::from(e.write_errors());
-                    }
+            Ok(list) => match AbilityArgs::from_list(&list) {
+                Ok(args) => args,
+                Err(e) => {
+                    return TokenStream::from(e.write_errors());
                 }
-            }
+            },
             Err(e) => {
                 return TokenStream::from(e.to_compile_error());
             }
@@ -44,7 +42,13 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .map(|protocol| {
                     let protocol_lit = syn::LitStr::new(protocol, proc_macro2::Span::call_site());
                     quote::quote! {
-                        openharmony_ability::native_web::CustomProtocol::add_protocol(#protocol_lit);
+                        openharmony_ability::native_web::CustomProtocol::add_protocol_with_option(#protocol_lit, 
+                            openharmony_ability::native_web::CustomProtocolOption::Standard | 
+                            openharmony_ability::native_web::CustomProtocolOption::CorsEnabled | 
+                            openharmony_ability::native_web::CustomProtocolOption::CspBypassing |
+                            openharmony_ability::native_web::CustomProtocolOption::FetchEnabled |
+                            openharmony_ability::native_web::CustomProtocolOption::CodeCacheEnabled
+                        );
                     }
                 })
                 .collect::<Vec<_>>()
