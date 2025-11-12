@@ -18,7 +18,8 @@ pub fn render<'a>(
     set_main_thread_env(env.clone());
 
     let mut root = RootNode::new(slot);
-    let xcomponent_native = XComponent::new().map_err(|e| Error::from_reason(e.reason.to_string()))?;
+    let xcomponent_native =
+        XComponent::new().map_err(|e| Error::from_reason(e.reason.to_string()))?;
 
     let xcomponent = xcomponent_native.native_xcomponent();
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use napi_derive_ohos::napi;
 use napi_ohos::{
-    bindgen_prelude::{Function, Object, JsObjectValue},
+    bindgen_prelude::{Function, JsObjectValue, Object},
     Env, Result,
 };
 

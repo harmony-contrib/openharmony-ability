@@ -2,7 +2,6 @@ import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit
 import window from "@ohos.window";
 import webview from '@ohos.web.webview';
 import * as Entry from '../components/MainPage'
-import * as Webview from '../webview/DefaultPage'
 import { ApplicationLifecycle, Module } from './type'
 
 export const STATE_KEY = 'ohos.rs.ability.application.state';
@@ -20,8 +19,15 @@ export class RustAbility extends UIAbility {
   /**
    * Current page mode,support xcomponent and webview
    * @default xcomponent
+   * @deprecated don't use it. Since 0.3, we can render xcomponent and webview in mixed mode.
    */
   public mode: 'xcomponent' | 'webview' = 'xcomponent';
+
+  /**
+   * Load dynamic library mode.
+   *
+   */
+  public loadMode: 'async' | 'sync' = 'async'
 
   private nativeModule: Module | null = null;
   private lifecycle: ApplicationLifecycle | null = null;
@@ -42,9 +48,7 @@ export class RustAbility extends UIAbility {
     }
 
     // Must call it when custom protocol is enabled.
-    if (this.mode === 'webview') {
-      webview.WebviewController.initializeWebEngine();
-    }
+    webview.WebviewController.initializeWebEngine();
 
     this.lifecycle = this.nativeModule!.init();
     this.lifecycle?.windowStageEventCallback.onAbilityCreate(state);
@@ -58,7 +62,7 @@ export class RustAbility extends UIAbility {
     })
 
     if (this.defaultPage) {
-      await windowStage.loadContentByName(this.mode === 'xcomponent' ? Entry.RouteName : Webview.RouteName);
+      await windowStage.loadContentByName(Entry.RouteName);
     }
   }
 

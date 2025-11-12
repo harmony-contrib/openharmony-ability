@@ -1,8 +1,8 @@
-import {DefaultXComponent} from "./DefaultXComponent"
+import { DefaultXComponent } from "./DefaultXComponent"
 
 export const RouteName = 'RustAbility';
 
-@Entry({routeName: RouteName})
+@Entry({ routeName: RouteName })
 @Component
 struct Index {
   build() {

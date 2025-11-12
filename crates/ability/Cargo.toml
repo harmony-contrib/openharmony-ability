@@ -9,7 +9,6 @@ description = "Binding Rust application on Harmony with Ability"
 default = []
 drag_and_drop = []
 webview = [
-  "dep:ohos-display-soloist-binding",
   "dep:ohos-web-binding",
   "dep:http",
 ]
@@ -29,6 +28,5 @@ ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 
 # for webview feature
-ohos-display-soloist-binding = { workspace = true, optional = true }
 ohos-web-binding = { workspace = true, optional = true }
 http = { workspace = true, optional = true }

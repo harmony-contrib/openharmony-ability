@@ -1,8 +1,5 @@
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { DefaultWebViewComponent } from '@ohos-rs/ability';
+import { DefaultXComponent } from '@ohos-rs/ability';
 import { handleChange, setBackgroundColor, setVisible } from "libwebview_example.so"
-
-const DOMAIN = 0x0000;
 
 @Entry
 @Component
@@ -25,7 +22,7 @@ struct Index {
             this.visible = !this.visible;
           })
         }
-        DefaultWebViewComponent()
+        DefaultXComponent()
       }
       .width('100%')
     }

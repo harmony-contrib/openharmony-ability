@@ -42,9 +42,9 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .map(|protocol| {
                     let protocol_lit = syn::LitStr::new(protocol, proc_macro2::Span::call_site());
                     quote::quote! {
-                        openharmony_ability::native_web::CustomProtocol::add_protocol_with_option(#protocol_lit, 
-                            openharmony_ability::native_web::CustomProtocolOption::Standard | 
-                            openharmony_ability::native_web::CustomProtocolOption::CorsEnabled | 
+                        openharmony_ability::native_web::CustomProtocol::add_protocol_with_option(#protocol_lit,
+                            openharmony_ability::native_web::CustomProtocolOption::Standard |
+                            openharmony_ability::native_web::CustomProtocolOption::CorsEnabled |
                             openharmony_ability::native_web::CustomProtocolOption::CspBypassing |
                             openharmony_ability::native_web::CustomProtocolOption::FetchEnabled |
                             openharmony_ability::native_web::CustomProtocolOption::CodeCacheEnabled
@@ -55,29 +55,16 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .unwrap_or_default();
 
-    let render = if args.webview {
-        quote::quote! {
-            #[openharmony_ability::napi_derive::napi]
-            pub fn webview_render<'a>(
-                env: &'a openharmony_ability::napi::Env,
-                helper: openharmony_ability::napi::bindgen_prelude::ObjectRef,
-            ) -> openharmony_ability::napi::Result<openharmony_ability::WebViewComponentEventCallback<'a>> {
-                let callback = openharmony_ability::render(env, helper, (*APP).clone())?;
-                Ok(callback)
-            }
-        }
-    } else {
-        quote::quote! {
-            #[openharmony_ability::napi_derive::napi]
-            pub fn render<'a>(
-                env: &'a openharmony_ability::napi::Env,
-                helper: openharmony_ability::napi::bindgen_prelude::ObjectRef,
-                slot: openharmony_ability::arkui::ArkUIHandle,
-            ) -> openharmony_ability::napi::Result<()> {
-                let root = openharmony_ability::render(env, helper, slot, (*APP).clone())?;
-                ROOT_NODE.replace(Some(root));
-                Ok(())
-            }
+    let render = quote::quote! {
+        #[openharmony_ability::napi_derive::napi]
+        pub fn render<'a>(
+            env: &'a openharmony_ability::napi::Env,
+            helper: openharmony_ability::napi::bindgen_prelude::ObjectRef,
+            slot: openharmony_ability::arkui::ArkUIHandle,
+        ) -> openharmony_ability::napi::Result<()> {
+            let root = openharmony_ability::render(env, helper, slot, (*APP).clone())?;
+            ROOT_NODE.replace(Some(root));
+            Ok(())
         }
     };
 
@@ -104,7 +91,6 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         mod openharmony_ability_mod {
             use super::*;
-            use openharmony_ability::napi as napi_ohos;
 
             static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
                 std::sync::LazyLock::new(|| openharmony_ability::OpenHarmonyApp::new());
