@@ -9,10 +9,10 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi-ohos = { workspace = true}
+napi-ohos = { workspace = true }
 napi-derive-ohos = { workspace = true }
 
-openharmony-ability = { workspace = true}
+openharmony-ability = { workspace = true }
 openharmony-ability-derive = { workspace = true }
 ohos-hilog-binding = { version = "*" }
 

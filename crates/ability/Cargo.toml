@@ -8,17 +8,11 @@ description = "Binding Rust application on Harmony with Ability"
 [features]
 default = []
 drag_and_drop = []
-webview = [
-  "dep:ohos-web-binding",
-  "dep:http",
-]
+webview = ["dep:ohos-web-binding", "dep:http"]
 
 [dependencies]
 # for napi binding
-napi-ohos = { workspace = true, default-features = false, features = [
-  "napi8",
-  "async",
-] }
+napi-ohos = { workspace = true, default-features = false, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
 
 # for xcomponent native render

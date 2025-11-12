@@ -24,10 +24,10 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
 
 ### Rust
 
-- [openharmony-ability](./crates/ability/README.md)   
+- [openharmony-ability](./crates/ability/README.md)  
   Basic crate to manage the application's lifecycle.
 
-- [openharmony-ability-derive](./crates/derive/README.md)   
+- [openharmony-ability-derive](./crates/derive/README.md)  
   Macro to generate the ability's implementation.
 
 ## Usage
@@ -39,6 +39,14 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
 
    cargo add openharmony-ability
    cargo add openharmony-ability-derive
+   ```
+
+   If you have already a rust project, you can add the dependencies into your project. And you need to add the following dependencies into your project which is used to generate some codes to bridge ArkTS.
+
+   ```bash
+   cargo add napi-ohos
+   cargo add napi-derive-ohos
+   cargo add napi-build
    ```
 
 2. Add the follow code to `lib.rs`.
@@ -93,3 +101,8 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
 ## Example
 
 See example with [example](./example/src/lib.rs)
+
+
+## License
+
+[MIT](./LICENSE)

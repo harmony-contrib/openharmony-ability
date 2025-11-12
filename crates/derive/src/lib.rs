@@ -56,12 +56,12 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
         .unwrap_or_default();
 
     let render = quote::quote! {
-        #[openharmony_ability::napi_derive::napi]
+        #[napi_derive_ohos::napi]
         pub fn render<'a>(
-            env: &'a openharmony_ability::napi::Env,
-            helper: openharmony_ability::napi::bindgen_prelude::ObjectRef,
+            env: &'a napi_ohos::Env,
+            helper: napi_ohos::bindgen_prelude::ObjectRef,
             slot: openharmony_ability::arkui::ArkUIHandle,
-        ) -> openharmony_ability::napi::Result<()> {
+        ) -> napi_ohos::Result<()> {
             let root = openharmony_ability::render(env, helper, slot, (*APP).clone())?;
             ROOT_NODE.replace(Some(root));
             Ok(())
@@ -71,10 +71,10 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Register custom protocol if protocol is specified and webview is enabled
     let protocol_registrations_apply = if args.protocol.is_some() && args.webview {
         quote::quote! {
-            #[openharmony_ability::napi_derive::napi]
+            #[napi_derive_ohos::napi]
             pub fn register_custom_protocol<'a>(
-                env: &'a openharmony_ability::napi::Env,
-            ) -> openharmony_ability::napi::Result<()> {
+                env: &'a napi_ohos::Env,
+            ) -> napi_ohos::Result<()> {
                 #(#protocol_registrations)*
 
                 openharmony_ability::native_web::CustomProtocol::register();
@@ -101,10 +101,10 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             #protocol_registrations_apply
 
-            #[openharmony_ability::napi_derive::napi]
+            #[napi_derive_ohos::napi]
             pub fn init<'a>(
-                env: &'a openharmony_ability::napi::Env,
-            ) -> openharmony_ability::napi::Result<openharmony_ability::ApplicationLifecycle<'a>> {
+                env: &'a napi_ohos::Env,
+            ) -> napi_ohos::Result<openharmony_ability::ApplicationLifecycle<'a>> {
                 let lifecycle_handle = openharmony_ability::create_lifecycle_handle(env, (*APP).clone())?;
                 #fn_name((*APP).clone());
                 Ok(lifecycle_handle)
