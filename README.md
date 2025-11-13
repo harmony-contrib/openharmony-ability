@@ -41,7 +41,7 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
    cargo add openharmony-ability-derive
    ```
 
-   If you have already a rust project, you can add the dependencies into your project. And you need to add the following dependencies into your project which is used to generate some codes to bridge ArkTS.
+   If you already have a rust project, you can add the dependencies into your project. And you need to add the following dependencies into your project which is used to generate some codes to bridge ArkTS.
 
    ```bash
    cargo add napi-ohos
@@ -101,7 +101,6 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
 ## Example
 
 See example with [example](./example/src/lib.rs)
-
 
 ## License
 

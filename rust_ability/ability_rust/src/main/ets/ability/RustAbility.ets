@@ -22,13 +22,11 @@ export class RustAbility extends UIAbility {
    * @deprecated don't use it. Since 0.3, we can render xcomponent and webview in mixed mode.
    */
   public mode: 'xcomponent' | 'webview' = 'xcomponent';
-
   /**
    * Load dynamic library mode.
    *
    */
   public loadMode: 'async' | 'sync' = 'async'
-
   private nativeModule: Module | null = null;
   private lifecycle: ApplicationLifecycle | null = null;
 
@@ -37,9 +35,16 @@ export class RustAbility extends UIAbility {
     const state = isRestore ? want.parameters?.[STATE_KEY] as string ?? '' : '';
 
     AppStorage.setOrCreate("moduleName", this.moduleName);
+    AppStorage.setOrCreate("loadMode", this.loadMode);
 
     const packageName = `lib${this.moduleName}.so`;
-    const module: ESObject = await import(packageName);
+    let module: ESObject;
+    if (this.loadMode === 'async') {
+      module = await import(packageName);
+    } else {
+      module = loadNativeModule(packageName);
+    }
+
     this.nativeModule = module.default;
     // Register custom protocol as first
     // You can define it by yourself or use ability to define.
