@@ -46,7 +46,7 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
    ```bash
    cargo add napi-ohos
    cargo add napi-derive-ohos
-   cargo add napi-build
+   cargo add napi-build-ohos
    ```
 
 2. Add the follow code to `lib.rs`.
