@@ -4,5 +4,4 @@ export {
   RustWebviewNodeController,
   WebviewStyle,
   WebviewInitData,
-  DefaultWebViewComponent
 } from './src/main/ets/webview/DefaultWebview'

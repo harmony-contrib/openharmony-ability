@@ -1,10 +1,10 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use napi_ohos::Either;
 use napi_ohos::{
     bindgen_prelude::{Function, JsObjectValue, ObjectRef},
     Error, Result,
 };
-use napi_ohos::{Either};
 
 use crate::helper::{DownloadStartResult, WebViewInitData, WebViewStyle, Webview};
 

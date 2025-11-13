@@ -6,7 +6,6 @@ import window from '@ohos.window';
 export default class EntryAbility extends RustAbility {
   public moduleName: string = "webview_example"
   public defaultPage: boolean = false;
-  public mode: 'xcomponent' | 'webview' = 'webview'
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     super.onCreate(want, launchParam);

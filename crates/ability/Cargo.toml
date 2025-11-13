@@ -8,18 +8,11 @@ description = "Binding Rust application on Harmony with Ability"
 [features]
 default = []
 drag_and_drop = []
-webview = [
-  "dep:ohos-display-soloist-binding",
-  "dep:ohos-web-binding",
-  "dep:http",
-]
+webview = ["dep:ohos-web-binding", "dep:http"]
 
 [dependencies]
 # for napi binding
-napi-ohos = { workspace = true, default-features = false, features = [
-  "napi8",
-  "async",
-] }
+napi-ohos = { workspace = true, default-features = false, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
 
 # for xcomponent native render
@@ -29,6 +22,5 @@ ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 
 # for webview feature
-ohos-display-soloist-binding = { workspace = true, optional = true }
 ohos-web-binding = { workspace = true, optional = true }
 http = { workspace = true, optional = true }

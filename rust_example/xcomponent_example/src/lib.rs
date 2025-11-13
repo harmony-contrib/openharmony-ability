@@ -1,20 +1,11 @@
 use std::sync::{LazyLock, RwLock};
 
-use napi_derive_ohos::napi;
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{Event, InputEvent, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
 
+#[allow(dead_code)]
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
-
-// test add more napi method
-#[napi]
-pub fn handle_change() -> napi_ohos::Result<()> {
-    let guard = INNER_APP.read().unwrap();
-    let app = guard.as_ref().unwrap();
-
-    Ok(())
-}
 
 #[ability]
 fn openharmony_app(app: OpenHarmonyApp) {

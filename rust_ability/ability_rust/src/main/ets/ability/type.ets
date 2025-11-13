@@ -1,5 +1,4 @@
 import { NodeContent } from "@kit.ArkUI"
-import { BusinessError } from "@kit.BasicServicesKit"
 
 export interface ApplicationLifecycle {
   environmentCallback: EnvironmentCallback
@@ -61,8 +60,6 @@ export interface Module {
   // XComponent mode
   render: (helper: ArkHelper, slot: NodeContent) => void
 
-  // Webview mode
-  webviewRender: (helper: ArkHelper) => WebViewComponentEventCallback
   registerCustomProtocol: () => void;
 }
 

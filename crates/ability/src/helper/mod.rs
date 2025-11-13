@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use napi_ohos::{Env, bindgen_prelude::ObjectRef};
+use napi_ohos::{bindgen_prelude::ObjectRef, Env};
 
 #[cfg(feature = "webview")]
 mod webview;
