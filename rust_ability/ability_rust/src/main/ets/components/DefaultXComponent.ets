@@ -61,19 +61,25 @@ export struct DefaultXComponent {
       return ret.controller;
     },
   }
-
   @StorageProp("moduleName") name: string = "";
+  @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
 
   async aboutToAppear(): Promise<void> {
     const moduleName = `lib${this.name}.so`;
-    const module: ESObject = await import(moduleName);
+    let module: ESObject;
+    if (this.loadMode === "async") {
+      module = await import(moduleName);
+    } else {
+      module = loadNativeModule(moduleName);
+    }
+
     this.nativeModule = module.default;
 
     module.default.render(this.helper, this.rootSlot);
   }
 
   build() {
-    Stack(){
+    Stack() {
       ContentSlot(this.rootSlot)
       Row() {
         Column() {
