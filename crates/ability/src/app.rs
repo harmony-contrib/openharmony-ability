@@ -11,6 +11,7 @@ use napi_ohos::{
     bindgen_prelude::{Function, JsObjectValue},
     Error, Result,
 };
+use ohos_arkui_binding::XComponent;
 use ohos_display_binding::default_display_scaled_density;
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
@@ -27,6 +28,7 @@ pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
 #[derive(Clone)]
 pub struct OpenHarmonyAppInner {
     pub(crate) raw_window: Option<RawWindow>,
+    pub(crate) xcomponent: Option<XComponent>,
 
     state: Vec<u8>,
     save_state: bool,
@@ -75,6 +77,7 @@ impl OpenHarmonyAppInner {
         let id = ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         OpenHarmonyAppInner {
             raw_window: None,
+            xcomponent: None,
             state: vec![],
             save_state: false,
             frame_rate: 60,
@@ -98,10 +101,6 @@ impl OpenHarmonyAppInner {
         self.state = state;
     }
 
-    pub fn set_frame_rate(&mut self, frame_rate: u32) {
-        self.frame_rate = frame_rate;
-    }
-
     pub fn create_waker(&self) -> OpenHarmonyWaker {
         let guard = (&*WAKER).read().expect("Failed to read WAKER");
         OpenHarmonyWaker::new((*guard).clone())
@@ -109,6 +108,15 @@ impl OpenHarmonyAppInner {
 
     pub fn config(&self) -> Configuration {
         self.configuration.clone()
+    }
+
+    pub fn set_frame_rate(&self, min: i32, max: i32, expected: i32) {
+        if let Some(xcomponent) = self.xcomponent.as_ref() {
+            xcomponent
+                .native_xcomponent()
+                .set_frame_rate(min, max, expected)
+                .expect("Failed to set frame rate");
+        }
     }
 
     pub fn content_rect(&self) -> Rect {
@@ -200,12 +208,18 @@ impl OpenHarmonyApp {
     pub fn save(&self, state: Vec<u8>) {
         self.inner.write().unwrap().save(state);
     }
+
     pub fn load(&self) -> Option<Vec<u8>> {
         self.inner.read().unwrap().load()
     }
-    pub fn set_frame_rate(&self, frame_rate: u32) {
-        self.inner.write().unwrap().set_frame_rate(frame_rate);
+
+    pub fn set_frame_rate(&self, min: i32, max: i32, expected: i32) {
+        self.inner
+            .read()
+            .unwrap()
+            .set_frame_rate(min, max, expected);
     }
+
     pub fn show_keyboard(&self) {
         let _guard = self
             .is_keyboard_show

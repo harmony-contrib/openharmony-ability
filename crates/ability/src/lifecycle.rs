@@ -133,6 +133,7 @@ pub fn create_lifecycle_handle<'a>(
             Ok(())
         })?;
 
+    // TODO: we may can remove it
     let window_resize_app = app.clone();
     let window_resize = env.create_function_from_closure("window_resize", move |ctx| {
         let size = ctx.first_arg::<Object>()?;
@@ -145,6 +146,7 @@ pub fn create_lifecycle_handle<'a>(
         Ok(())
     })?;
 
+    // TODO: we may can remove it
     let window_rect_app = app.clone();
     let window_rect_change =
         env.create_function_from_closure("window_rect_change", move |ctx| {

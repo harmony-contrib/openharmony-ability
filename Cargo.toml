@@ -16,8 +16,8 @@ quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 darling = { version = "0.21" }
 
-ohos-arkui-binding = { version = "0.0.5" }
-ohos-xcomponent-binding = { version = "0.1" }
+ohos-arkui-binding = { version = "0.1" }
+ohos-xcomponent-binding = { version = "0.2" }
 ohos-ime-binding = { version = "0.1" }
 ohos-display-binding = { version = "0.0.1" }
 ohos-web-binding = { version = "0.1"}

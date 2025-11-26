@@ -4,7 +4,8 @@ use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
 use crate::{
-    input, set_helper, set_main_thread_env, Event, InputEvent, IntervalInfo, OpenHarmonyApp,
+    input, set_helper, set_main_thread_env, Event, InputEvent, IntervalInfo, OpenHarmonyApp, Rect,
+    Size,
 };
 
 /// create lifecycle object and return to arkts
@@ -21,6 +22,11 @@ pub fn render<'a>(
     let xcomponent_native =
         XComponent::new().map_err(|e| Error::from_reason(e.reason.to_string()))?;
 
+    {
+        let mut inner = app.inner.write().unwrap();
+        inner.xcomponent = Some(xcomponent_native.clone());
+    }
+
     let xcomponent = xcomponent_native.native_xcomponent();
 
     let xc = xcomponent.clone();
@@ -32,7 +38,17 @@ pub fn render<'a>(
     let (insert_text_callback_tsfn, on_ime_hide_callback_tsfn, on_backspace_callback_tsfn) =
         input::ime_ts_fn(env, app.clone())?;
 
-    xcomponent.on_surface_created(move |_, _| {
+    xcomponent.on_surface_created(move |xc_raw, win| {
+        {
+            let size = xc_raw.size(win).unwrap();
+            let offset = xc_raw.offset(win).unwrap();
+            on_surface_created_app.inner.write().unwrap().rect = Rect {
+                top: offset.y as _,
+                left: offset.x as _,
+                width: size.width as _,
+                height: size.height as _,
+            };
+        }
         {
             let raw_window = xc.native_window();
             on_surface_created_app.inner.write().unwrap().raw_window = raw_window;
@@ -78,6 +94,27 @@ pub fn render<'a>(
     xcomponent.on_surface_destroyed(move |_, _| {
         if let Some(ref mut h) = *on_surface_destroyed_app.event_loop.borrow_mut() {
             h(Event::SurfaceDestroy)
+        }
+        Ok(())
+    });
+
+    let on_surface_changed_app = app.clone();
+    xcomponent.on_surface_changed(move |xc, win| {
+        if let Some(ref mut h) = *on_surface_changed_app.event_loop.borrow_mut() {
+            let size = xc.size(win).unwrap();
+            let offset = xc.offset(win).unwrap();
+            {
+                on_surface_changed_app.inner.write().unwrap().rect = Rect {
+                    top: offset.y as _,
+                    left: offset.x as _,
+                    width: size.width as _,
+                    height: size.height as _,
+                };
+            }
+            h(Event::WindowResize(Size {
+                width: size.width as _,
+                height: size.height as _,
+            }))
         }
         Ok(())
     });
