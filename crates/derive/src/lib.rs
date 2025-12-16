@@ -1,13 +1,74 @@
-use darling::FromMeta;
 use proc_macro::TokenStream;
-use syn::ItemFn;
+use syn::parse::Parse;
+use syn::punctuated::Punctuated;
+use syn::Token;
+use syn::{ItemFn, Meta, MetaNameValue};
 
-#[derive(FromMeta, Default, Debug)]
+#[derive(Default, Debug)]
 struct AbilityArgs {
-    #[darling(default)]
     webview: bool,
-    #[darling(default)]
     protocol: Option<String>,
+}
+
+struct MetaList {
+    metas: Punctuated<Meta, Token![,]>,
+}
+
+impl Parse for MetaList {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        Ok(MetaList {
+            metas: input.parse_terminated(Meta::parse, Token![,])?,
+        })
+    }
+}
+
+fn parse_ability_args(attr: TokenStream) -> syn::Result<AbilityArgs> {
+    let mut args = AbilityArgs::default();
+
+    if attr.is_empty() {
+        return Ok(args);
+    }
+
+    // Parse attribute arguments as a list of Meta items
+    // Convert proc_macro::TokenStream to proc_macro2::TokenStream for parsing
+    let attr_stream = proc_macro2::TokenStream::from(attr);
+    let meta_list = syn::parse2::<MetaList>(attr_stream)?;
+
+    // Iterate over the meta items
+    for meta in meta_list.metas {
+        match meta {
+            Meta::Path(path) => {
+                // Handle named flags like `webview`
+                if path.is_ident("webview") {
+                    args.webview = true;
+                }
+            }
+            Meta::NameValue(MetaNameValue { path, value, .. }) => {
+                // Handle key-value pairs like `protocol = "value"`
+                if path.is_ident("protocol") {
+                    // Parse the value as an expression and extract string literal
+                    if let syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(lit_str),
+                        ..
+                    }) = value
+                    {
+                        args.protocol = Some(lit_str.value());
+                    } else {
+                        return Err(syn::Error::new_spanned(
+                            value,
+                            "protocol must be a string literal",
+                        ));
+                    }
+                }
+            }
+            Meta::List(_) => {
+                // Handle nested list-style attributes if needed
+                // For now, we'll skip them
+            }
+        }
+    }
+
+    Ok(args)
 }
 
 #[proc_macro_attribute]
@@ -17,19 +78,10 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
     let block = &ast.block;
     let arg = &ast.sig.inputs;
 
-    let args = if attr.is_empty() {
-        AbilityArgs::default()
-    } else {
-        match darling::ast::NestedMeta::parse_meta_list(proc_macro2::TokenStream::from(attr)) {
-            Ok(list) => match AbilityArgs::from_list(&list) {
-                Ok(args) => args,
-                Err(e) => {
-                    return TokenStream::from(e.write_errors());
-                }
-            },
-            Err(e) => {
-                return TokenStream::from(e.to_compile_error());
-            }
+    let args = match parse_ability_args(attr) {
+        Ok(args) => args,
+        Err(e) => {
+            return TokenStream::from(e.to_compile_error());
         }
     };
 
