@@ -32,7 +32,6 @@ pub struct OpenHarmonyAppInner {
 
     state: Vec<u8>,
     save_state: bool,
-    frame_rate: u32,
     id: i64,
     pub(crate) configuration: Configuration,
     pub(crate) rect: Rect,
@@ -80,7 +79,6 @@ impl OpenHarmonyAppInner {
             xcomponent: None,
             state: vec![],
             save_state: false,
-            frame_rate: 60,
             id,
             configuration: Default::default(),
             rect: Default::default(),
