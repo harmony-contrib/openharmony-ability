@@ -9,8 +9,6 @@ description = "Binding Rust application macro on Harmony with Ability"
 proc-macro = true
 
 [dependencies]
-syn = { workspace = true }
+syn = { workspace = true, features = ["full"] }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
-
-darling = { workspace = true }
