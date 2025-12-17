@@ -53,7 +53,7 @@ impl std::hash::Hash for OpenHarmonyAppInner {
 
 impl PartialOrd for OpenHarmonyAppInner {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.id.cmp(&other.id))
+        Some(self.cmp(other))
     }
 }
 
@@ -68,6 +68,12 @@ impl Debug for OpenHarmonyAppInner {
         f.debug_struct("OpenHarmonyApp")
             .field("id", &self.id)
             .finish()
+    }
+}
+
+impl Default for OpenHarmonyAppInner {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -100,7 +106,7 @@ impl OpenHarmonyAppInner {
     }
 
     pub fn create_waker(&self) -> OpenHarmonyWaker {
-        let guard = (&*WAKER).read().expect("Failed to read WAKER");
+        let guard = (*WAKER).read().expect("Failed to read WAKER");
         OpenHarmonyWaker::new((*guard).clone())
     }
 
@@ -118,11 +124,11 @@ impl OpenHarmonyAppInner {
     }
 
     pub fn content_rect(&self) -> Rect {
-        self.rect.clone()
+        self.rect
     }
 
     pub fn native_window(&self) -> Option<RawWindow> {
-        self.raw_window.clone()
+        self.raw_window
     }
 
     pub fn scale(&self) -> f32 {
@@ -134,7 +140,7 @@ impl OpenHarmonyAppInner {
         if let Some(h) = ret.borrow().as_ref() {
             // Try to get main thread env
             if let Some(env) = get_main_thread_env().borrow().as_ref() {
-                let ret = h.get_value(&env)?;
+                let ret = h.get_value(env)?;
                 let exit_func = ret.get_named_property::<Function<'_, i32, ()>>("exit")?;
                 exit_func.call(code)?;
             } else {
@@ -147,10 +153,12 @@ impl OpenHarmonyAppInner {
     }
 }
 
+type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>;
+
 #[derive(Clone)]
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
-    pub(crate) event_loop: Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>,
+    pub(crate) event_loop: EventLoop,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
     is_keyboard_show: Arc<Mutex<bool>>,
 }
@@ -179,9 +187,7 @@ impl std::hash::Hash for OpenHarmonyApp {
 
 impl PartialOrd for OpenHarmonyApp {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        let self_id = self.inner.read().unwrap().id;
-        let other_id = other.inner.read().unwrap().id;
-        Some(self_id.cmp(&other_id))
+        Some(self.cmp(other))
     }
 }
 
@@ -196,8 +202,11 @@ impl Ord for OpenHarmonyApp {
 impl OpenHarmonyApp {
     pub fn new() -> Self {
         Self {
+            #[allow(clippy::arc_with_non_send_sync)]
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
+            #[allow(clippy::arc_with_non_send_sync)]
             event_loop: Arc::new(RefCell::new(None)),
+            #[allow(clippy::arc_with_non_send_sync)]
             ime: Arc::new(RefCell::new(None)),
             is_keyboard_show: Arc::new(Mutex::new(false)),
         }
@@ -259,7 +268,7 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().exit(code).unwrap();
     }
 
-    pub fn run_loop<'a, F: FnMut(Event) -> () + 'a>(&self, mut event_handle: F) {
+    pub fn run_loop<'a, F: FnMut(Event) + 'a>(&self, mut event_handle: F) {
         if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
             return;
         }
@@ -278,6 +287,13 @@ impl OpenHarmonyApp {
     }
 }
 
+impl Default for OpenHarmonyApp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// TODO: Can we remove this?
 unsafe impl Send for OpenHarmonyApp {}
 unsafe impl Sync for OpenHarmonyApp {}
 

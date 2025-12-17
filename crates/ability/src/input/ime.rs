@@ -7,14 +7,13 @@ use crate::{Event, OpenHarmonyApp};
 
 use super::{ImeEvent, InputEvent, TextInputEventData};
 
-pub fn ime_ts_fn(
-    env: &Env,
-    app: OpenHarmonyApp,
-) -> Result<(
+type ImeCallback = (
     ThreadsafeFunction<String, (), String, Status, false>,
     ThreadsafeFunction<u32, (), u32, Status, false>,
     ThreadsafeFunction<i32, (), i32, Status, false>,
-)> {
+);
+
+pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp) -> Result<ImeCallback> {
     // insert event
     let on_insert_text_app = app.clone();
     let insert_text_callback: Function<String, ()> =

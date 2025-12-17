@@ -10,6 +10,9 @@ use crate::helper::{DownloadStartResult, WebViewInitData, WebViewStyle, Webview}
 
 mod drag;
 
+type OnDownloadStart = Box<dyn Fn(String, &mut PathBuf) -> bool>;
+type OnDownloadEnd = Box<dyn Fn(String, Option<PathBuf>, bool)>;
+
 #[cfg(feature = "webview")]
 #[derive(Default)]
 pub struct WebViewBuilder {
@@ -26,11 +29,11 @@ pub struct WebViewBuilder {
 
     id: Option<String>,
     #[cfg(feature = "drag_and_drop")]
-    on_drag_and_drop: Option<Box<dyn Fn(String) -> ()>>,
-    on_download_start: Option<Box<dyn Fn(String, &mut PathBuf) -> bool>>,
-    on_download_end: Option<Box<dyn Fn(String, Option<PathBuf>, bool) -> ()>>,
+    on_drag_and_drop: Option<Box<dyn Fn(String)>>,
+    on_download_start: Option<OnDownloadStart>,
+    on_download_end: Option<OnDownloadEnd>,
     on_navigation_request: Option<Box<dyn Fn(String) -> bool>>,
-    on_title_change: Option<Box<dyn Fn(String) -> ()>>,
+    on_title_change: Option<Box<dyn Fn(String)>>,
 }
 
 impl WebViewBuilder {
@@ -121,11 +124,11 @@ impl WebViewBuilder {
     }
 
     #[cfg(feature = "drag_and_drop")]
-    pub fn on_drag_and_drop<F: Fn(String) -> ()>(self, on_drag_and_drop: F) -> WebViewBuilder {
+    pub fn on_drag_and_drop<F: Fn(String)>(self, on_drag_and_drop: F) -> WebViewBuilder {
         let static_handler = unsafe {
-            std::mem::transmute::<Box<dyn Fn(String) -> ()>, Box<dyn Fn(String) -> () + 'static>>(
-                Box::new(move |event| on_drag_and_drop(event)),
-            )
+            std::mem::transmute::<Box<dyn Fn(String)>, Box<dyn Fn(String) + 'static>>(Box::new(
+                on_drag_and_drop,
+            ))
         };
         WebViewBuilder {
             on_drag_and_drop: Some(static_handler),
@@ -141,9 +144,7 @@ impl WebViewBuilder {
             std::mem::transmute::<
                 Box<dyn Fn(String, &mut PathBuf) -> bool>,
                 Box<dyn Fn(String, &mut PathBuf) -> bool + 'static>,
-            >(Box::new(move |url, temp_path| {
-                on_download_start(url, temp_path)
-            }))
+            >(Box::new(on_download_start))
         };
         WebViewBuilder {
             on_download_start: Some(static_handler),
@@ -151,17 +152,15 @@ impl WebViewBuilder {
         }
     }
 
-    pub fn on_download_end<F: Fn(String, Option<PathBuf>, bool) -> ()>(
+    pub fn on_download_end<F: Fn(String, Option<PathBuf>, bool)>(
         self,
         on_download_end: F,
     ) -> WebViewBuilder {
         let static_handler = unsafe {
             std::mem::transmute::<
-                Box<dyn Fn(String, Option<PathBuf>, bool) -> ()>,
-                Box<dyn Fn(String, Option<PathBuf>, bool) -> () + 'static>,
-            >(Box::new(move |url, temp_path, success| {
-                on_download_end(url, temp_path, success)
-            }))
+                Box<dyn Fn(String, Option<PathBuf>, bool)>,
+                Box<dyn Fn(String, Option<PathBuf>, bool) + 'static>,
+            >(Box::new(on_download_end))
         };
         WebViewBuilder {
             on_download_end: Some(static_handler),
@@ -175,7 +174,7 @@ impl WebViewBuilder {
     ) -> WebViewBuilder {
         let static_handler = unsafe {
             std::mem::transmute::<Box<dyn Fn(String) -> bool>, Box<dyn Fn(String) -> bool + 'static>>(
-                Box::new(move |event| on_navigation_request(event)),
+                Box::new(on_navigation_request),
             )
         };
         WebViewBuilder {
@@ -184,11 +183,11 @@ impl WebViewBuilder {
         }
     }
 
-    pub fn on_title_change<F: Fn(String) -> ()>(self, on_title_change: F) -> WebViewBuilder {
+    pub fn on_title_change<F: Fn(String)>(self, on_title_change: F) -> WebViewBuilder {
         let static_handler = unsafe {
-            std::mem::transmute::<Box<dyn Fn(String) -> ()>, Box<dyn Fn(String) -> () + 'static>>(
-                Box::new(move |event| on_title_change(event)),
-            )
+            std::mem::transmute::<Box<dyn Fn(String)>, Box<dyn Fn(String) + 'static>>(Box::new(
+                on_title_change,
+            ))
         };
         WebViewBuilder {
             on_title_change: Some(static_handler),
@@ -210,7 +209,7 @@ impl WebViewBuilder {
             use crate::get_main_thread_env;
 
             if let Some(env) = get_main_thread_env().borrow().as_ref() {
-                let ret = h.get_value(&env)?;
+                let ret = h.get_value(env)?;
                 let create_webview_func = ret
                     .get_named_property::<Function<'_, WebViewInitData, ObjectRef>>(
                         "createWebview",
@@ -247,8 +246,7 @@ impl WebViewBuilder {
                         Ok(DownloadStartResult {
                             allow: ret,
                             temp_path: Some(temp_path.to_string_lossy().to_string()),
-                        }
-                        .into())
+                        })
                     })
                     .ok()
                 });
@@ -284,7 +282,7 @@ impl WebViewBuilder {
                             Either::B(_ret) => String::new(),
                         };
                         let ret = handler(ret);
-                        Ok(ret.into())
+                        Ok(ret)
                     })
                     .ok()
                 });

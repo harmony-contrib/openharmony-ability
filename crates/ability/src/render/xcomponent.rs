@@ -9,14 +9,14 @@ use crate::{
 };
 
 /// create lifecycle object and return to arkts
-pub fn render<'a>(
-    env: &'a Env,
+pub fn render(
+    env: &Env,
     helper: ObjectRef,
     slot: ArkUIHandle,
     app: OpenHarmonyApp,
 ) -> Result<RootNode> {
     set_helper(helper);
-    set_main_thread_env(env.clone());
+    set_main_thread_env(*env);
 
     let mut root = RootNode::new(slot);
     let xcomponent_native =

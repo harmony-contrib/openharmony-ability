@@ -31,6 +31,9 @@ pub struct DownloadStartResult {
     pub temp_path: Option<String>,
 }
 
+type OnDownloadStart<'a> = Option<Function<'a, (String, String), DownloadStartResult>>;
+type OnDownloadEnd<'a> = Option<Function<'a, (String, Option<String>, bool), ()>>;
+
 #[napi(object)]
 #[derive(Default)]
 pub struct WebViewInitData<'a> {
@@ -47,8 +50,8 @@ pub struct WebViewInitData<'a> {
     pub transparent: Option<bool>,
 
     pub on_drag_and_drop: Option<Function<'a, String, ()>>,
-    pub on_download_start: Option<Function<'a, (String, String), DownloadStartResult>>,
-    pub on_download_end: Option<Function<'a, (String, Option<String>, bool), ()>>,
+    pub on_download_start: OnDownloadStart<'a>,
+    pub on_download_end: OnDownloadEnd<'a>,
     pub on_navigation_request: Option<Function<'a, String, bool>>,
     pub on_title_change: Option<Function<'a, String, ()>>,
 }
@@ -83,7 +86,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let url_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, (), String>>("getUrl")?;
             url_js_function.call(())
         } else {
@@ -94,7 +97,7 @@ impl Webview {
     /// Load a url in the webview
     pub fn load_url(&self, url: &str) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
-            let load_url_js_function = self.inner.get_value(&env)?.get_named_property::<Function<
+            let load_url_js_function = self.inner.get_value(env)?.get_named_property::<Function<
                 '_,
                 FnArgs<(String, Option<HashMap<String, String>>)>,
                 (),
@@ -112,7 +115,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let load_url_with_headers_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, FnArgs<(String, HashMap<String, String>)>, ()>>(
                     "loadUrl",
                 )?;
@@ -133,7 +136,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let load_html_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, String, ()>>("loadHtml")?;
             load_html_js_function.call(html.to_string())?;
             Ok(())
@@ -147,7 +150,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let set_zoom_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, f64, ()>>("zoom")?;
             set_zoom_js_function.call(zoom)?;
             Ok(())
@@ -161,7 +164,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let reload_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, (), ()>>("refresh")?;
             reload_js_function.call(())?;
             Ok(())
@@ -175,7 +178,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let focus_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, (), ()>>("requestFocus")?;
             focus_js_function.call(())?;
             Ok(())
@@ -196,7 +199,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let evaluate_js_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, FnArgs<(String, Function<'_, String, ()>)>, ()>>(
                     "runJavaScript",
                 )?;
@@ -224,7 +227,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let cookies_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, String, String>>("getCookies")?;
             cookies_js_function.call(url.to_string())
         } else {
@@ -236,7 +239,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let set_background_color_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, String, ()>>("setBackgroundColor")?;
             set_background_color_js_function.call(color.to_string())?;
             Ok(())
@@ -249,7 +252,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let set_visible_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, bool, ()>>("setVisible")?;
             set_visible_js_function.call(visible)?;
             Ok(())
@@ -262,7 +265,7 @@ impl Webview {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let clear_all_browsing_data_js_function = self
                 .inner
-                .get_value(&env)?
+                .get_value(env)?
                 .get_named_property::<Function<'_, (), ()>>("clearAllBrowsingData")?;
             clear_all_browsing_data_js_function.call(())?;
             Ok(())
@@ -334,7 +337,7 @@ impl Webview {
         let cbs = Arc::new(Mutex::new(cbs));
 
         handle.on_request_start(move |req, req_handle| {
-            let url: String = req.url().into();
+            let url: String = req.url();
             let header = req.headers();
             let mut iter = header.iter();
 
@@ -351,7 +354,7 @@ impl Webview {
                         let mut request_builder = Request::builder()
                             .method(req.method().as_str())
                             .uri(url.clone());
-                        while let Some((key, value)) = iter.next() {
+                        for (key, value) in iter.by_ref() {
                             if let (Ok(header), Ok(value)) = (
                                 HeaderName::from_bytes(key.as_bytes()),
                                 HeaderValue::from_bytes(value.as_bytes()),
@@ -400,7 +403,7 @@ impl Webview {
                     let mut request_builder = Request::builder()
                         .method(req.method().as_str())
                         .uri(url.clone());
-                    while let Some((key, value)) = iter.next() {
+                    for (key, value) in iter {
                         if let (Ok(header), Ok(value)) = (
                             HeaderName::from_bytes(key.as_bytes()),
                             HeaderValue::from_bytes(value.as_bytes()),
@@ -450,8 +453,10 @@ impl Webview {
     }
 }
 
+type Responder = Box<dyn FnOnce(Response<Cow<'static, [u8]>>)>;
+
 pub struct CustomProtocolResponder {
-    pub(crate) responder: Box<dyn FnOnce(Response<Cow<'static, [u8]>>)>,
+    pub(crate) responder: Responder,
 }
 
 unsafe impl Send for CustomProtocolResponder {}
