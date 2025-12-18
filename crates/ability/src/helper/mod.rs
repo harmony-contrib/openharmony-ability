@@ -22,8 +22,9 @@ pub fn set_helper(helper: ObjectRef) {
     });
 }
 
+/// # Safety
 pub unsafe fn get_helper() -> Rc<RefCell<Option<ObjectRef>>> {
-    HELPER.with(|h| Rc::clone(h))
+    HELPER.with(Rc::clone)
 }
 
 pub fn set_main_thread_env(env: Env) {
@@ -33,5 +34,5 @@ pub fn set_main_thread_env(env: Env) {
 }
 
 pub fn get_main_thread_env() -> Rc<RefCell<Option<Env>>> {
-    MAIN_THREAD_ENV.with(|e| Rc::clone(e))
+    MAIN_THREAD_ENV.with(Rc::clone)
 }

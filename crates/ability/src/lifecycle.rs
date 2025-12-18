@@ -55,7 +55,7 @@ pub fn create_lifecycle_handle<'a>(
         .build()?;
 
     {
-        let mut guard = (&*WAKER)
+        let mut guard = (*WAKER)
             .write()
             .map_err(|_| napi_ohos::Error::from_reason("Failed to write WAKER"))?;
 
@@ -165,8 +165,6 @@ pub fn create_lifecycle_handle<'a>(
                 height,
             };
             window_rect_app.inner.write().unwrap().rect = rect;
-
-            let rect = rect.clone();
 
             if let Some(ref mut h) = *window_rect_app.event_loop.borrow_mut() {
                 h(Event::ContentRectChange(ContentRect {

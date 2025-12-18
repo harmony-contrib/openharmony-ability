@@ -2,8 +2,9 @@ use std::sync::{Arc, LazyLock, RwLock};
 
 use napi_ohos::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 
-pub(crate) static WAKER: LazyLock<RwLock<Option<Arc<ThreadsafeFunction<(), ()>>>>> =
-    LazyLock::new(|| RwLock::new(None));
+type WakerType = LazyLock<RwLock<Option<Arc<ThreadsafeFunction<(), ()>>>>>;
+
+pub(crate) static WAKER: WakerType = LazyLock::new(|| RwLock::new(None));
 
 pub struct OpenHarmonyWaker {
     waker: Option<Arc<ThreadsafeFunction<(), ()>>>,
