@@ -1,9 +1,9 @@
-import process from "@ohos.process"
+import process from "@ohos.process";
 
 /**
  * exit current application
  */
 export const exit = (code: number) => {
   const pro = new process.ProcessManager();
-  pro.exit(code)
-}
+  pro.exit(code);
+};

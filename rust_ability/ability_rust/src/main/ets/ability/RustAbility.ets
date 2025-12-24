@@ -1,10 +1,10 @@
 import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit";
 import window from "@ohos.window";
-import webview from '@ohos.web.webview';
-import * as Entry from '../components/MainPage'
-import { ApplicationLifecycle, Module } from './type'
+import webview from "@ohos.web.webview";
+import * as Entry from "../components/MainPage";
+import { ApplicationLifecycle, Module } from "./type";
 
-export const STATE_KEY = 'ohos.rs.ability.application.state';
+export const STATE_KEY = "ohos.rs.ability.application.state";
 
 export class RustAbility extends UIAbility {
   /**
@@ -21,25 +21,26 @@ export class RustAbility extends UIAbility {
    * @default xcomponent
    * @deprecated don't use it. Since 0.3, we can render xcomponent and webview in mixed mode.
    */
-  public mode: 'xcomponent' | 'webview' = 'xcomponent';
+  public mode: "xcomponent" | "webview" = "xcomponent";
   /**
    * Load dynamic library mode.
    *
    */
-  public loadMode: 'async' | 'sync' = 'async'
+  public loadMode: "async" | "sync" = "async";
   private nativeModule: Module | null = null;
   private lifecycle: ApplicationLifecycle | null = null;
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
-    const isRestore: boolean = want.parameters?.['ohos.ability.params.abilityRecoveryRestart'] as boolean ?? false;
-    const state = isRestore ? want.parameters?.[STATE_KEY] as string ?? '' : '';
+    const isRestore: boolean =
+      (want.parameters?.["ohos.ability.params.abilityRecoveryRestart"] as boolean) ?? false;
+    const state = isRestore ? ((want.parameters?.[STATE_KEY] as string) ?? "") : "";
 
     AppStorage.setOrCreate("moduleName", this.moduleName);
     AppStorage.setOrCreate("loadMode", this.loadMode);
 
     const packageName = `lib${this.moduleName}.so`;
     let module: ESObject;
-    if (this.loadMode === 'async') {
+    if (this.loadMode === "async") {
       module = await import(packageName);
     } else {
       module = loadNativeModule(packageName);
@@ -48,7 +49,7 @@ export class RustAbility extends UIAbility {
     this.nativeModule = module.default;
     // Register custom protocol as first
     // You can define it by yourself or use ability to define.
-    if (typeof this.nativeModule?.registerCustomProtocol === 'function') {
+    if (typeof this.nativeModule?.registerCustomProtocol === "function") {
       this.nativeModule!.registerCustomProtocol();
     }
 
@@ -62,9 +63,9 @@ export class RustAbility extends UIAbility {
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
     this.lifecycle?.windowStageEventCallback.onWindowStageCreate();
 
-    windowStage.on('windowStageEvent', (event: window.WindowStageEventType) => {
+    windowStage.on("windowStageEvent", (event: window.WindowStageEventType) => {
       this.lifecycle?.windowStageEventCallback.onWindowStageEvent(event);
-    })
+    });
 
     if (this.defaultPage) {
       await windowStage.loadContentByName(Entry.RouteName);
@@ -83,7 +84,10 @@ export class RustAbility extends UIAbility {
     this.lifecycle?.environmentCallback.onConfigurationUpdated(newConfig);
   }
 
-  onSaveState(reason: AbilityConstant.StateType, wantParam: Record<string, Object>): AbilityConstant.OnSaveResult {
+  onSaveState(
+    reason: AbilityConstant.StateType,
+    wantParam: Record<string, Object>,
+  ): AbilityConstant.OnSaveResult {
     const ret = this.lifecycle?.windowStageEventCallback.onAbilitySaveState();
     wantParam[STATE_KEY] = ret as string;
     return AbilityConstant.OnSaveResult.RECOVERY_AGREE;
