@@ -31,8 +31,16 @@ jobs:
           components: "clippy"
           target: "aarch64-unknown-linux-ohos,armv7-unknown-linux-ohos,x86_64-unknown-linux-ohos"
 
+      - name: Install oxk
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: oxk
+          git: https://github.com/ohos-rs/oxc-ark.git
+          commit: b0bfcc0473c501070e5108910a8283d738cb01f2
+
       - name: Check
         run: |
+          oxk format "**/*.{ets,js,ts}"
           cargo fmt --check
           cargo clippy --workspace --exclude webview_example --exclude xcomponent_example --target aarch64-unknown-linux-ohos --all-targets --all-features -- -D warnings
           cargo clippy --workspace --exclude webview_example --exclude xcomponent_example --target armv7-unknown-linux-ohos --all-targets --all-features -- -D warnings

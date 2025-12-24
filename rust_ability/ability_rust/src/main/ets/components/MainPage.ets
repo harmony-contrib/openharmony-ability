@@ -1,6 +1,6 @@
-import { DefaultXComponent } from "./DefaultXComponent"
+import { DefaultXComponent } from "./DefaultXComponent";
 
-export const RouteName = 'RustAbility';
+export const RouteName = "RustAbility";
 
 @Entry({ routeName: RouteName })
 @Component
@@ -9,9 +9,7 @@ struct Index {
     Row() {
       Column() {
         DefaultXComponent()
-      }
-      .width('100%')
-    }
-    .height('100%')
+      }.width("100%")
+    }.height("100%");
   }
 }
