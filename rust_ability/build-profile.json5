@@ -17,7 +17,7 @@
     ],
     "buildModeSet": [
       {
-        "name": "debug",
+        "name": "debug"
       },
       {
         "name": "release"
@@ -39,7 +39,7 @@
     },
     {
       "name": "ability_rust",
-      "srcPath": "./ability_rust",
+      "srcPath": "./ability_rust"
     }
   ]
 }
