@@ -36,11 +36,11 @@ jobs:
         with:
           crate: oxk
           git: https://github.com/ohos-rs/oxc-ark.git
-          commit: b0bfcc0473c501070e5108910a8283d738cb01f2
+          commit: 5d9c63dfc2c5f6aa3c2b46fdd2ccddc9fa508a59
 
       - name: Check
         run: |
-          oxk format "**/*.{ets,js,ts}"
+          oxk format "**/*.{ets,js,ts,json5}"
           cargo fmt --check
           cargo clippy --workspace --exclude webview_example --exclude xcomponent_example --target aarch64-unknown-linux-ohos --all-targets --all-features -- -D warnings
           cargo clippy --workspace --exclude webview_example --exclude xcomponent_example --target armv7-unknown-linux-ohos --all-targets --all-features -- -D warnings

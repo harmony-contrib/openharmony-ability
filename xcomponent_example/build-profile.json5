@@ -22,8 +22,7 @@
         "name": "release"
       }
     ],
-    "signingConfigs": [
-    ]
+    "signingConfigs": []
   },
   "modules": [
     {
@@ -40,7 +39,7 @@
     },
     {
       "name": "ability_rust",
-      "srcPath": "../rust_ability/ability_rust",
+      "srcPath": "../rust_ability/ability_rust"
     }
   ]
 }
