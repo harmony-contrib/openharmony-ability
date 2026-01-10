@@ -1,6 +1,7 @@
 import { NodeContent } from "@kit.ArkUI";
 import { ArkHelper, WebViewInitData as NativeWebViewInitData } from "../ability/type";
 import { exit } from "../helper";
+import { Loadable } from "../helper/loadable";
 import {
   RustWebviewNodeController,
   WebviewStyle,
@@ -68,16 +69,8 @@ export struct DefaultXComponent {
 
   async aboutToAppear(): Promise<void> {
     const moduleName = `lib${this.name}.so`;
-    let module: ESObject;
-    if (this.loadMode === "async") {
-      module = await import(moduleName);
-    } else {
-      module = loadNativeModule(moduleName);
-    }
-
-    this.nativeModule = module.default;
-
-    module.default.render(this.helper, this.rootSlot);
+    this.nativeModule = await Loadable.load(moduleName);
+    this.nativeModule.render(this.helper, this.rootSlot);
   }
 
   build() {

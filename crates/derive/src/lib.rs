@@ -112,7 +112,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
         pub fn render<'a>(
             env: &'a napi_ohos::Env,
             helper: napi_ohos::bindgen_prelude::ObjectRef,
-            slot: openharmony_ability::arkui::ArkUIHandle,
+            #[napi(ts_arg_type = "NodeContent")] slot: openharmony_ability::arkui::ArkUIHandle,
         ) -> napi_ohos::Result<()> {
             let root = openharmony_ability::render(env, helper, slot, (*APP).clone())?;
             ROOT_NODE.replace(Some(root));

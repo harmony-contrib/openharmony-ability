@@ -2,13 +2,7 @@ import { UIContext } from "@ohos.arkui.UIContext";
 import web_webview from "@ohos.web.webview";
 import { NodeController, BuilderNode, FrameNode } from "@ohos.arkui.node";
 import { randomString } from "../helper";
-import { common } from "@kit.AbilityKit";
-import {
-  ArkHelper,
-  OnDownloadStartResult,
-  WebViewComponentEventCallback,
-  WebViewInitData as NativeWebViewInitData,
-} from "../ability/type";
+import { OnDownloadStartResult } from "../ability/type";
 import { exit } from "../helper";
 import { getCookies, JsHelper } from "./Utils";
 import { WebHeader } from "@kit.ArkUI";
