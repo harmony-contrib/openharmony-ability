@@ -3,6 +3,7 @@ import window from "@ohos.window";
 import webview from "@ohos.web.webview";
 import * as Entry from "../components/MainPage";
 import { ApplicationLifecycle, Module } from "./type";
+import { Loadable } from "../helper/loadable";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";
 
@@ -39,14 +40,7 @@ export class RustAbility extends UIAbility {
     AppStorage.setOrCreate("loadMode", this.loadMode);
 
     const packageName = `lib${this.moduleName}.so`;
-    let module: ESObject;
-    if (this.loadMode === "async") {
-      module = await import(packageName);
-    } else {
-      module = loadNativeModule(packageName);
-    }
-
-    this.nativeModule = module.default;
+    this.nativeModule = await Loadable.load(packageName);
     // Register custom protocol as first
     // You can define it by yourself or use ability to define.
     if (typeof this.nativeModule?.registerCustomProtocol === "function") {
