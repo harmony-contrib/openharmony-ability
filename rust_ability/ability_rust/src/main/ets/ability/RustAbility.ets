@@ -40,7 +40,7 @@ export class RustAbility extends UIAbility {
     AppStorage.setOrCreate("loadMode", this.loadMode);
 
     const packageName = `lib${this.moduleName}.so`;
-    this.nativeModule = await Loadable.load(packageName);
+    this.nativeModule = await Loadable.load(packageName, this.loadMode);
     // Register custom protocol as first
     // You can define it by yourself or use ability to define.
     if (typeof this.nativeModule?.registerCustomProtocol === "function") {
