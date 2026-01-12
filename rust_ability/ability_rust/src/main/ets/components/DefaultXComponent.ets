@@ -69,7 +69,7 @@ export struct DefaultXComponent {
 
   async aboutToAppear(): Promise<void> {
     const moduleName = `lib${this.name}.so`;
-    this.nativeModule = await Loadable.load(moduleName);
+    this.nativeModule = await Loadable.load(moduleName, this.loadMode);
     this.nativeModule.render(this.helper, this.rootSlot);
   }
 
