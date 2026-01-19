@@ -18,8 +18,10 @@ export class Loadable {
       typeof currentMod?.default?.init === "function"
     ) {
       Loadable.mod = currentMod.default;
+      return Loadable.mod;
     } else if (typeof currentMod?.render === "function" && typeof currentMod?.init === "function") {
       Loadable.mod = currentMod;
+      return Loadable.mod;
     }
     throw new Error(`${libName} is not a valid dynamic library`);
   }
