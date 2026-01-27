@@ -1,3 +1,13 @@
+# 0.4.0-beta.1
+- Fix gesture for XComponent
+
+---
+# 0.4.0-beta.0
+- Support non-full mode render.
+- Add `oxc-ark` to format code. 
+
+---
+
 # 0.3.0
 
 - Allow render xcomponent and webview at the same time.
