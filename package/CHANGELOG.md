@@ -1,3 +1,7 @@
+# 0.4.0-beta.1
+- Fix gesture for XComponent
+
+---
 # 0.4.0-beta.0
 - Support non-full mode render.
 - Add `oxc-ark` to format code. 
