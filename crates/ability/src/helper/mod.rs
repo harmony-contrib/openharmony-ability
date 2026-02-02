@@ -5,9 +5,11 @@ use napi_ohos::{bindgen_prelude::ObjectRef, Env};
 #[cfg(feature = "webview")]
 mod webview;
 mod window_info;
+mod permission;
 
 #[cfg(feature = "webview")]
 pub use webview::*;
+pub use permission::*;
 
 thread_local! {
     static HELPER: Rc<RefCell<Option<ObjectRef>>> = Rc::new(RefCell::new(None));
