@@ -30,9 +30,15 @@ pub struct WindowStageEventCallback<'a> {
 }
 
 #[napi(object)]
+pub struct KeyboardCallback<'a> {
+    pub on_keyboard_height_change: Function<'a, i32, ()>,
+}
+
+#[napi(object)]
 pub struct ApplicationLifecycle<'a> {
     pub environment_callback: EnvironmentCallback<'a>,
     pub window_stage_event_callback: WindowStageEventCallback<'a>,
+    pub keyboard_event_callback: KeyboardCallback<'a>,
 }
 
 /// create lifecycle object and return to arkts
@@ -237,6 +243,16 @@ pub fn create_lifecycle_handle<'a>(
             Ok(())
         })?;
 
+    let keyboard_event_callback_app = app.clone();
+    let keyboard_event_callback =
+        env.create_function_from_closure("keyboard_event_callback", move |ctx| {
+            let event_type = ctx.first_arg::<i32>()?;
+            if let Some(ref mut h) = *keyboard_event_callback_app.event_loop.borrow_mut() {
+                h(Event::KeyboardEvent(event_type))
+            }
+            Ok(())
+        })?;
+
     Ok(ApplicationLifecycle {
         environment_callback: EnvironmentCallback {
             on_configuration_updated,
@@ -252,6 +268,9 @@ pub fn create_lifecycle_handle<'a>(
             on_window_rect_change: window_rect_change,
             on_window_size_change: window_resize,
             on_window_stage_event: window_stage_event,
+        },
+        keyboard_event_callback: KeyboardCallback {
+            on_keyboard_height_change: keyboard_event_callback,
         },
     })
 }

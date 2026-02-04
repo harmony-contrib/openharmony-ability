@@ -61,6 +61,11 @@ export class RustAbility extends UIAbility {
       this.lifecycle?.windowStageEventCallback.onWindowStageEvent(event);
     });
 
+    let win = await windowStage.getMainWindow();
+    win.on("keyboardHeightChange", (height) => {
+      this.lifecycle?.keyboardEventCallback.onKeyboardHeightChange(height);
+    });
+
     if (this.defaultPage) {
       await windowStage.loadContentByName(Entry.RouteName);
     }
