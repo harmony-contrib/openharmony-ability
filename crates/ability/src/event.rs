@@ -78,6 +78,11 @@ pub enum Event<'a> {
     /// IME
     Input(InputEvent),
 
+    /// keyboard event
+    /// alias onKeyboardHeightChange
+    /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references/arkts-apis-window-window#onkeyboardheightchange7
+    KeyboardEvent(i32),
+
     UserEvent,
 }
 
@@ -104,6 +109,7 @@ impl<'a> Event<'a> {
             Event::SurfaceDestroy => "SurfaceDestroy",
             Event::Input(_) => "Input",
             Event::UserEvent => "UserEvent",
+            Event::KeyboardEvent(_) => "KeyboardEvent",
         }
     }
 }
