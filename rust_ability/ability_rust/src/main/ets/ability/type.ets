@@ -3,11 +3,16 @@ import { NodeContent } from "@kit.ArkUI";
 export interface ApplicationLifecycle {
   environmentCallback: EnvironmentCallback;
   windowStageEventCallback: WindowStageEventCallback;
+  keyboardEventCallback: KeyboardCallback;
 }
 
 export interface EnvironmentCallback {
   onConfigurationUpdated: (arg: object) => void;
   onMemoryLevel: (arg: number) => void;
+}
+
+export interface KeyboardCallback {
+  onKeyboardHeightChange: (height: number) => void;
 }
 
 export interface WindowStageEventCallback {
