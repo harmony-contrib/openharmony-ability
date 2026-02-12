@@ -4,8 +4,8 @@ use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
 use crate::{
-    input, set_helper, set_main_thread_env, Event, InputEvent, IntervalInfo, OpenHarmonyApp, Rect,
-    Size, create_permission_request_tsfn,
+    create_permission_request_tsfn, input, set_helper, set_main_thread_env, Event, InputEvent,
+    IntervalInfo, OpenHarmonyApp, Rect, Size,
 };
 
 /// create lifecycle object and return to arkts
@@ -17,7 +17,7 @@ pub fn render(
 ) -> Result<RootNode> {
     set_helper(helper);
     set_main_thread_env(*env);
-    
+
     // Initialize permission request threadsafe function
     let _ = create_permission_request_tsfn(env);
 

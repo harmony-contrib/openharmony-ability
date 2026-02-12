@@ -1,14 +1,18 @@
 use std::{
+    cell::Cell,
     cell::RefCell,
     fmt::Debug,
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicI64},
         Arc, Mutex, RwLock,
     },
 };
 
+use futures_channel::oneshot;
 use napi_ohos::{
-    bindgen_prelude::{Function, JsObjectValue},
+    bindgen_prelude::{CallbackContext, Function, JsObjectValue, Unknown},
+    threadsafe_function::ThreadsafeFunctionCallMode,
     Error, Result,
 };
 use ohos_arkui_binding::XComponent;
@@ -17,8 +21,9 @@ use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
-    get_helper, get_main_thread_env, AbilityError, Configuration, Event, OpenHarmonyWaker, Rect,
-    WAKER,
+    get_helper, get_main_thread_env, get_permission_request_tsfn, unknown_to_permission_promise,
+    AbilityError, Configuration, Event, OpenHarmonyWaker, PermissionRequest, PermissionRequestCode,
+    PermissionRequestOutput, Rect, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -266,6 +271,85 @@ impl OpenHarmonyApp {
     /// Exit current app with code
     pub fn exit(&self, code: i32) {
         self.inner.read().unwrap().exit(code).unwrap();
+    }
+
+    /// Request one or more runtime permissions through ArkTS helper.
+    /// Returns each requested permission and the corresponding request result code.
+    /// ! Don't call this function from main thread with block_on.
+    pub async fn request_permission<P>(&self, permission: P) -> Result<Vec<PermissionRequestCode>>
+    where
+        P: Into<PermissionRequest>,
+    {
+        let request = permission.into();
+        let requested_permissions = request.permissions();
+        let input = request.into_input();
+
+        let permission_tsfn = get_permission_request_tsfn().ok_or_else(|| {
+            Error::from_reason("requestPermission threadsafe function is not initialized")
+        })?;
+
+        let (tx, rx) = oneshot::channel::<Result<PermissionRequestOutput>>();
+        let status = permission_tsfn.call_with_return_value(
+            input,
+            ThreadsafeFunctionCallMode::NonBlocking,
+            move |result, _| {
+                match result {
+                    Ok(value) => {
+                        let tx_cell = Rc::new(Cell::new(Some(tx)));
+                        let tx_in_catch = tx_cell.clone();
+                        let promise = unknown_to_permission_promise(value)?;
+                        promise
+                            .then(move |ctx| {
+                                if let Some(sender) = tx_cell.replace(None) {
+                                    let _ = sender.send(Ok(ctx.value));
+                                }
+                                Ok(())
+                            })?
+                            .catch(move |ctx: CallbackContext<Unknown>| {
+                                if let Some(sender) = tx_in_catch.replace(None) {
+                                    let _ = sender.send(Err(ctx.value.into()));
+                                }
+                                Ok(())
+                            })?;
+                    }
+                    Err(err) => {
+                        let _ = tx.send(Err(err));
+                    }
+                }
+
+                Ok(())
+            },
+        );
+
+        if status != napi_ohos::Status::Ok {
+            return Err(Error::from_reason(format!(
+                "call requestPermission failed with status: {:?}",
+                status
+            )));
+        }
+
+        let output = rx
+            .await
+            .map_err(|_| Error::from_reason("requestPermission callback receiver dropped"))??;
+
+        let codes = match output {
+            napi_ohos::Either::A(code) => vec![code],
+            napi_ohos::Either::B(codes) => codes,
+        };
+
+        if requested_permissions.len() != codes.len() {
+            return Err(Error::from_reason(format!(
+                "requestPermission result length mismatch: requested {}, got {}",
+                requested_permissions.len(),
+                codes.len()
+            )));
+        }
+
+        Ok(requested_permissions
+            .into_iter()
+            .zip(codes.into_iter())
+            .map(|(permission, code)| PermissionRequestCode { permission, code })
+            .collect())
     }
 
     pub fn run_loop<'a, F: FnMut(Event) + 'a>(&self, mut event_handle: F) {

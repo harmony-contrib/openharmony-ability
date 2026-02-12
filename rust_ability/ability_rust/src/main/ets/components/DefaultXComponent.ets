@@ -3,7 +3,7 @@ import { ArkHelper, WebViewInitData as NativeWebViewInitData } from "../ability/
 import { exit } from "../helper";
 import { Loadable } from "../helper/loadable";
 import { requestPermission } from "../helper/permission";
-import common from '@ohos.app.ability.common';
+import common from "@ohos.app.ability.common";
 import {
   RustWebviewNodeController,
   WebviewStyle,
@@ -18,9 +18,9 @@ export struct DefaultXComponent {
   private nativeModule: ESObject;
   private helper: ArkHelper = {
     exit,
-    requestPermission: async (permission: string): Promise<boolean> => {
-      const context = this.getContext() as common.UIAbilityContext;
-      return await requestPermission(context, permission, this.nativeModule);
+    requestPermission: async (permission: string | string[]): Promise<number | number[]> => {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      return await requestPermission(context, permission);
     },
     createWebview: (data: NativeWebViewInitData) => {
       const initScripts: ScriptItem[] = (data?.initializationScripts || []).map((i) => {

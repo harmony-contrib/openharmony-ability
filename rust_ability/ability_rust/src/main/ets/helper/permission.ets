@@ -1,99 +1,54 @@
 /*
- * Permission request helper for OpenHarmony
- * This module provides permission request functionality that can be called from native code
+ * Permission request helper for OpenHarmony.
+ * Returns Promise<number | number[]> for single/multiple permission requests.
  */
 
-import abilityAccessCtrl, { Permissions } from '@ohos.abilityAccessCtrl';
-import common from '@ohos.app.ability.common';
-import hilog from '@ohos.hilog';
+import abilityAccessCtrl, { Permissions } from "@ohos.abilityAccessCtrl";
+import common from "@ohos.app.ability.common";
+import hilog from "@ohos.hilog";
 
-const TAG = 'PermissionHelper';
-const APPROVAL: number = 0;
+const TAG = "PermissionHelper";
+const REQUEST_FAILED: number = -1;
 
-// Permission mapping
-const PermissionsMap: Map<string, Permissions> = new Map();
-PermissionsMap.set('ohos.permission.WRITE_MEDIA', 'ohos.permission.WRITE_MEDIA');
-PermissionsMap.set('ohos.permission.MICROPHONE', 'ohos.permission.MICROPHONE');
-PermissionsMap.set('ohos.permission.CAMERA', 'ohos.permission.CAMERA');
-PermissionsMap.set('ohos.permission.READ_MEDIA', 'ohos.permission.READ_MEDIA');
-PermissionsMap.set('ohos.permission.INTERNET', 'ohos.permission.INTERNET');
-PermissionsMap.set('ohos.permission.LOCATION', 'ohos.permission.LOCATION');
-PermissionsMap.set('ohos.permission.ACCESS_FINE_LOCATION', 'ohos.permission.ACCESS_FINE_LOCATION');
-PermissionsMap.set('ohos.permission.ACCESS_COARSE_LOCATION', 'ohos.permission.ACCESS_COARSE_LOCATION');
+function normalizePermission(permission: string | string[]): string[] {
+  return Array.isArray(permission) ? permission : [permission];
+}
 
 /**
- * Request permission from user
- * This is an async function that should be called from native code via threadsafe function
- * 
- * @param context - UIAbilityContext for requesting permission
- * @param permission - Permission string (e.g., 'ohos.permission.MICROPHONE')
- * @param nativeModule - Native module that exports permissionResult function
- * @returns Promise<boolean> - true if granted, false if denied
+ * Request permission(s) and return auth result code(s).
+ * Single input -> single code; array input -> code array with same order.
  */
 export async function requestPermission(
   context: common.UIAbilityContext,
-  permission: string,
-  nativeModule: ESObject | null
-): Promise<boolean> {
+  permission: string | string[],
+): Promise<number | number[]> {
+  const isArrayInput = Array.isArray(permission);
+
   if (!context) {
-    hilog.error(0x0000, TAG, 'requestPermission: context is null');
-    if (nativeModule && typeof nativeModule.permissionResult === 'function') {
-      nativeModule.permissionResult(false);
-    }
-    return false;
+    hilog.error(0x0000, TAG, "requestPermission: context is null");
+    return isArrayInput ? [] : REQUEST_FAILED;
   }
 
-  if (!permission) {
-    hilog.error(0x0000, TAG, 'requestPermission: permission is null');
-    if (nativeModule && typeof nativeModule.permissionResult === 'function') {
-      nativeModule.permissionResult(false);
-    }
-    return false;
+  const permissionList = normalizePermission(permission).filter((item: string) => !!item);
+  if (permissionList.length === 0) {
+    hilog.error(0x0000, TAG, "requestPermission: permission is empty");
+    return isArrayInput ? [] : REQUEST_FAILED;
   }
 
-  const permissionValue = PermissionsMap.get(permission);
-  if (!permissionValue) {
-    hilog.warn(0x0000, TAG, `requestPermission: Unknown permission ${permission}, assuming granted`);
-    if (nativeModule && typeof nativeModule.permissionResult === 'function') {
-      nativeModule.permissionResult(true);
-    }
-    return true;
-  }
-
-  const permissionsList: Array<Permissions> = [permissionValue];
-
-  hilog.info(0x0000, TAG, `requestPermission: Requesting permission ${permission}`);
+  const requestPermissions: Array<Permissions> = permissionList as Array<Permissions>;
+  const resultCodes: Array<number> = new Array(permissionList.length).fill(REQUEST_FAILED);
 
   try {
-    // Create AtManager instance
     const atManager = abilityAccessCtrl.createAtManager();
+    const result = await atManager.requestPermissionsFromUser(context, requestPermissions);
+    const authResults: Array<number> = result.authResults || [];
 
-    // Request permission asynchronously
-    const result = await atManager.requestPermissionsFromUser(context, permissionsList);
-    const grantStatus: Array<number> = result.authResults;
-
-    // Check if permission is granted
-    let granted = false;
-    for (let i = 0; i < grantStatus.length; i++) {
-      if (grantStatus[i] === APPROVAL) {
-        granted = true;
-        break;
-      }
+    for (let i = 0; i < resultCodes.length; i++) {
+      resultCodes[i] = authResults[i] ?? REQUEST_FAILED;
     }
-
-    hilog.info(0x0000, TAG, `requestPermission: Permission ${permission} ${granted ? 'granted' : 'denied'}`);
-
-    // Notify native code of the result
-    if (nativeModule && typeof nativeModule.permissionResult === 'function') {
-      nativeModule.permissionResult(granted);
-    }
-
-    return granted;
   } catch (err) {
-    hilog.error(0x0000, TAG, `requestPermission: Failed to request permission ${permission}, error: ${JSON.stringify(err)}`);
-    if (nativeModule && typeof nativeModule.permissionResult === 'function') {
-      nativeModule.permissionResult(false);
-    }
-    return false;
+    hilog.error(0x0000, TAG, `requestPermission: failed, error: ${JSON.stringify(err)}`);
   }
+
+  return isArrayInput ? resultCodes : resultCodes[0];
 }
