@@ -71,4 +71,5 @@ export interface Module {
 export interface ArkHelper {
   exit: (code: number) => void;
   createWebview: (data: WebViewInitData) => Object;
+  requestPermission: (permission: string | string[]) => Promise<number | number[]>;
 }

@@ -11,6 +11,9 @@ drag_and_drop = []
 webview = ["dep:ohos-web-binding", "dep:http"]
 
 [dependencies]
+# common dependencies
+futures-channel = "0.3"
+
 # for napi binding
 napi-ohos = { workspace = true, default-features = false, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
