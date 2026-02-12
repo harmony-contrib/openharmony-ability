@@ -1,3 +1,7 @@
+# 0.4.0-beta.2
+- Support requestPermission method
+
+---
 # 0.4.0-beta.1
 - Fix gesture for XComponent
 
