@@ -11,6 +11,7 @@ type ImeCallback = (
     ThreadsafeFunction<String, (), String, Status, false>,
     ThreadsafeFunction<u32, (), u32, Status, false>,
     ThreadsafeFunction<i32, (), i32, Status, false>,
+    ThreadsafeFunction<i32, (), i32, Status, false>,
 );
 
 pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp) -> Result<ImeCallback> {
@@ -67,9 +68,27 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp) -> Result<ImeCallback> {
         .callee_handled::<false>()
         .build()?;
 
+    let on_ime_enter_app = app.clone();
+    let on_ime_enter_callback: Function<i32, ()> =
+        env.create_function_from_closure("on_ime_enter_callback", move |ctx| {
+            let value = ctx.first_arg::<i32>().unwrap();
+            if let Some(ref mut h) = *on_ime_enter_app.event_loop.borrow_mut() {
+                h(Event::Input(InputEvent::ImeEvent(ImeEvent::EnterEvent(
+                    value,
+                ))))
+            }
+            Ok(())
+        })?;
+
+    let on_ime_enter_callback_tsfn = on_ime_enter_callback
+        .build_threadsafe_function()
+        .callee_handled::<false>()
+        .build()?;
+
     Ok((
         insert_text_callback_tsfn,
         on_ime_hide_callback_tsfn,
         on_backspace_callback_tsfn,
+        on_ime_enter_callback_tsfn,
     ))
 }

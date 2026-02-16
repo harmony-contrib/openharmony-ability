@@ -30,6 +30,7 @@ pub enum ImeEvent {
     TextInputEvent(TextInputEventData),
     BackspaceEvent(i32),
     ImeStatusEvent(KeyboardStatus),
+    EnterEvent(i32),
 }
 
 impl Debug for ImeEvent {
@@ -38,6 +39,7 @@ impl Debug for ImeEvent {
             ImeEvent::TextInputEvent(data) => write!(f, "TextInputEvent: {:?}", data),
             ImeEvent::BackspaceEvent(len) => write!(f, "BackspaceEvent: delete length is {}", len),
             ImeEvent::ImeStatusEvent(status) => write!(f, "ImeStatusEvent: {:?}", status),
+            ImeEvent::EnterEvent(key) => write!(f, "EnterEvent: {:?}", key),
         }
     }
 }
