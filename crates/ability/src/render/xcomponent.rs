@@ -38,8 +38,12 @@ pub fn render(
     let insert_text_app = app.clone();
     let redraw_app = app.clone();
 
-    let (insert_text_callback_tsfn, on_ime_hide_callback_tsfn, on_backspace_callback_tsfn, on_ime_enter_callback_tsfn) =
-        input::ime_ts_fn(env, app.clone())?;
+    let (
+        insert_text_callback_tsfn,
+        on_ime_hide_callback_tsfn,
+        on_backspace_callback_tsfn,
+        on_ime_enter_callback_tsfn,
+    ) = input::ime_ts_fn(env, app.clone())?;
 
     xcomponent.on_surface_created(move |xc_raw, win| {
         {
