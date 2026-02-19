@@ -20,6 +20,7 @@ pub struct EnvironmentCallback<'a> {
 pub struct WindowStageEventCallback<'a> {
     pub on_window_stage_create: Function<'a, (), ()>,
     pub on_window_stage_destroy: Function<'a, (), ()>,
+    pub on_back_press_intercept: Function<'a, (), bool>,
     pub on_ability_create: Function<'a, (), ()>,
     pub on_ability_destroy: Function<'a, (), ()>,
     pub on_ability_save_state: Function<'a, (), ()>,
@@ -199,6 +200,18 @@ pub fn create_lifecycle_handle<'a>(
             Ok(())
         })?;
 
+    let on_back_press_intercept_app = app.clone();
+    let on_back_press_intercept =
+        env.create_function_from_closure("on_back_press_intercept", move |_ctx| {
+            let intercept = on_back_press_intercept_app
+                .back_press_interceptor
+                .borrow_mut()
+                .as_mut()
+                .map(|h| h())
+                .unwrap_or(true);
+            Ok(intercept)
+        })?;
+
     let on_ability_create_app = app.clone();
     let on_ability_create = env.create_function_from_closure("on_ability_create", move |_ctx| {
         if let Some(ref mut h) = *on_ability_create_app.event_loop.borrow_mut() {
@@ -261,6 +274,7 @@ pub fn create_lifecycle_handle<'a>(
         window_stage_event_callback: WindowStageEventCallback {
             on_window_stage_create,
             on_window_stage_destroy,
+            on_back_press_intercept,
             on_ability_create,
             on_ability_destroy,
             on_ability_save_state,
