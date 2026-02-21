@@ -375,12 +375,12 @@ impl OpenHarmonyApp {
     }
 
     /// Register back press interceptor. Return `true` to intercept back action, `false` to pass through.
-    pub fn on_back_press_intercept<'a, F: FnMut() -> bool + 'a>(&self, mut interceptor: F) {
+    pub fn on_back_press_intercept<'a, F: FnMut() -> bool + 'a>(&self, interceptor: F) {
         let static_handler = unsafe {
             std::mem::transmute::<
                 Box<dyn FnMut() -> bool + 'a>,
                 Box<dyn FnMut() -> bool + 'static + Sync + Send>,
-            >(Box::new(move || interceptor()))
+            >(Box::new(interceptor))
         };
 
         self.back_press_interceptor.replace(Some(static_handler));
