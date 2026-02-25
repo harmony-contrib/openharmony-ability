@@ -8,16 +8,8 @@ use napi_ohos::{
 
 use crate::{
     AvoidArea, AvoidAreaInfo, AvoidAreaType, ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader,
-    SaveSaver, Size, StageEventType, APP, WAKER,
+    SaveSaver, Size, StageEventType, WAKER,
 };
-
-/// Get back press interceptor result
-/// This function can be called directly from ArkTS page lifecycle (onBackPress)
-/// Returns true to intercept back press, false to pass through
-#[napi]
-pub fn on_back_press_intercept() -> bool {
-    APP.get_back_press_interceptor()
-}
 
 #[napi(object)]
 pub struct EnvironmentCallback<'a> {
