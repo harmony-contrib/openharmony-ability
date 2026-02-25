@@ -18,7 +18,6 @@ export interface KeyboardCallback {
 export interface WindowStageEventCallback {
   onWindowStageCreate: () => void;
   onWindowStageDestroy: () => void;
-  onBackPressIntercept: () => boolean;
   onAbilityCreate: (arg: string) => void;
   onAbilityDestroy: () => void;
   onAbilitySaveState: () => string;

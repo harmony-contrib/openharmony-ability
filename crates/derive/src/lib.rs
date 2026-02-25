@@ -153,6 +153,14 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             #protocol_registrations_apply
 
+            /// Get back press interceptor result
+            /// Can be called from ArkTS page lifecycle (onBackPress)
+            /// Returns true to intercept back press, false to pass through
+            #[napi_derive_ohos::napi]
+            pub fn on_back_press_intercept() -> bool {
+                (*APP).get_back_press_interceptor()
+            }
+
             #[napi_derive_ohos::napi]
             pub fn init<'a>(
                 env: &'a napi_ohos::Env,
