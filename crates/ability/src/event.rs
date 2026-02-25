@@ -1,6 +1,9 @@
 use std::fmt::{self, Debug, Formatter};
 
-use crate::{Configuration, ContentRect, InputEvent, IntervalInfo, SaveLoader, SaveSaver, Size};
+use crate::{
+    AvoidAreaInfo, Configuration, ContentRect, InputEvent, IntervalInfo, SaveLoader, SaveSaver,
+    Size,
+};
 
 #[derive(Clone)]
 pub enum Event<'a> {
@@ -22,6 +25,10 @@ pub enum Event<'a> {
     /// alias window.on("windowRectChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowrectchange12
     ContentRectChange(ContentRect),
+    /// window avoid area change event
+    /// alias window.on("avoidAreaChange")
+    /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references/arkts-apis-window-window#onavoidareachange9
+    AvoidAreaChange(AvoidAreaInfo),
 
     /// window configuration changed
     /// alias onWindowConfigurationChanged
@@ -94,6 +101,7 @@ impl<'a> Event<'a> {
             Event::WindowRedraw(_) => "WindowRedraw",
             Event::WindowResize(_) => "WindowResize",
             Event::ContentRectChange(_) => "ContentRectChange",
+            Event::AvoidAreaChange(_) => "AvoidAreaChange",
             Event::ConfigChanged(_) => "ConfigChanged",
             Event::LowMemory => "LowMemory",
             Event::Start => "Start",

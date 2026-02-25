@@ -4,6 +4,7 @@ import { exit } from "../helper";
 import { Loadable } from "../helper/loadable";
 import { requestPermission } from "../helper/permission";
 import common from "@ohos.app.ability.common";
+import window from "@ohos.window";
 import {
   RustWebviewNodeController,
   WebviewStyle,
@@ -21,6 +22,19 @@ export struct DefaultXComponent {
     requestPermission: async (permission: string | string[]): Promise<number | number[]> => {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       return await requestPermission(context, permission);
+    },
+    getWindowAvoidArea: (type: number): Object | undefined => {
+      try {
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        const win = context.windowStage.getMainWindowSync();
+        const avoidType = type as window.AvoidAreaType;
+        return {
+          type: avoidType,
+          area: win.getWindowAvoidArea(avoidType),
+        } as Object;
+      } catch (_) {
+        return undefined;
+      }
     },
     createWebview: (data: NativeWebViewInitData) => {
       const initScripts: ScriptItem[] = (data?.initializationScripts || []).map((i) => {

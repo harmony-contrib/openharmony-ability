@@ -1,7 +1,9 @@
+mod avoid;
 mod rect;
 mod rect_reason;
 mod size;
 
+pub use avoid::*;
 pub use rect::*;
 pub use rect_reason::*;
 pub use size::*;

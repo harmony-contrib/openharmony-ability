@@ -62,6 +62,15 @@ export class RustAbility extends UIAbility {
     });
 
     let win = await windowStage.getMainWindow();
+    win.on("windowSizeChange", (size: window.Size) => {
+      this.lifecycle?.windowStageEventCallback.onWindowSizeChange(size);
+    });
+    win.on("windowRectChange", (options: window.RectChangeOptions) => {
+      this.lifecycle?.windowStageEventCallback.onWindowRectChange(options);
+    });
+    win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
+      this.lifecycle?.windowStageEventCallback.onAvoidAreaChange(options);
+    });
     win.on("keyboardHeightChange", (height) => {
       this.lifecycle?.keyboardEventCallback.onKeyboardHeightChange(height);
     });
