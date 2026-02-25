@@ -1,3 +1,7 @@
+# 0.4.0-beta.4
+- Fix onBackPress trigger logic
+
+---
 # 0.4.0-beta.3
 - Add avoidArea event
 - Add onBackPress event
