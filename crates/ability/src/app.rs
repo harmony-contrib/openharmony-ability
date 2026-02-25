@@ -490,6 +490,16 @@ impl OpenHarmonyApp {
 
         self.back_press_interceptor.replace(Some(static_handler));
     }
+
+    /// Get back press interceptor result
+    /// Returns true to intercept back press, false to pass through
+    pub fn get_back_press_interceptor(&self) -> bool {
+        self.back_press_interceptor
+            .borrow_mut()
+            .as_mut()
+            .map(|h| h())
+            .unwrap_or(true)
+    }
 }
 
 impl Default for OpenHarmonyApp {

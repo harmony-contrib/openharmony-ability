@@ -39,3 +39,6 @@ pub use ohos_xcomponent_binding as xcomponent;
 
 #[cfg(feature = "webview")]
 pub use ohos_web_binding as native_web;
+
+/// Global APP instance for napi functions to access back press interceptor
+pub static APP: std::sync::LazyLock<OpenHarmonyApp> = std::sync::LazyLock::new(OpenHarmonyApp::new);
