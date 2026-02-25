@@ -13,6 +13,7 @@ use openharmony_ability_derive::ability;
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
 static PERMISSION_REQUESTED: AtomicBool = AtomicBool::new(false);
 static MAIN_THREAD_DEMO_REQUESTED: AtomicBool = AtomicBool::new(false);
+static BACK_PRESS_INTERCEPT_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[napi_derive_ohos::napi]
 pub async fn demo_request_permission_from_main_thread() -> Result<Vec<i32>> {
@@ -42,10 +43,24 @@ pub async fn demo_request_permission_from_main_thread() -> Result<Vec<i32>> {
     Ok(codes)
 }
 
+#[napi_derive_ohos::napi]
+pub fn toggle_back_press_intercept() -> bool {
+    let current = BACK_PRESS_INTERCEPT_ENABLED.load(Ordering::SeqCst);
+    let next = !current;
+    BACK_PRESS_INTERCEPT_ENABLED.store(next, Ordering::SeqCst);
+    hilog_info!(format!("back press intercept set to: {}", next).as_str());
+    next
+}
+
 #[ability]
 fn openharmony_app(app: OpenHarmonyApp) {
     INNER_APP.write().unwrap().replace(app.clone());
     let permission_app = app.clone();
+    app.on_back_press_intercept(|| {
+        let intercept = BACK_PRESS_INTERCEPT_ENABLED.load(Ordering::SeqCst);
+        hilog_info!(format!("on_back_press_intercept => {}", intercept).as_str());
+        intercept
+    });
 
     app.run_loop(move |types| match types {
         Event::SurfaceCreate => {

@@ -100,4 +100,9 @@ export class RustAbility extends UIAbility {
     wantParam[STATE_KEY] = ret as string;
     return AbilityConstant.OnSaveResult.RECOVERY_AGREE;
   }
+
+  onBackPress(): boolean {
+    const intercept = this.lifecycle?.windowStageEventCallback.onBackPressIntercept();
+    return intercept ?? true;
+  }
 }

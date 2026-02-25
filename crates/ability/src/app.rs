@@ -210,11 +210,13 @@ impl OpenHarmonyAppInner {
 }
 
 type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>;
+type BackPressInterceptor = Arc<RefCell<Option<Box<dyn FnMut() -> bool + Sync + Send>>>>;
 
 #[derive(Clone)]
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: EventLoop,
+    pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
     is_keyboard_show: Arc<Mutex<bool>>,
 }
@@ -262,6 +264,8 @@ impl OpenHarmonyApp {
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
             #[allow(clippy::arc_with_non_send_sync)]
             event_loop: Arc::new(RefCell::new(None)),
+            #[allow(clippy::arc_with_non_send_sync)]
+            back_press_interceptor: Arc::new(RefCell::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
             ime: Arc::new(RefCell::new(None)),
             is_keyboard_show: Arc::new(Mutex::new(false)),
@@ -473,6 +477,18 @@ impl OpenHarmonyApp {
 
         self.event_loop.replace(Some(static_handler));
         HAS_EVENT.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Register back press interceptor. Return `true` to intercept back action, `false` to pass through.
+    pub fn on_back_press_intercept<'a, F: FnMut() -> bool + 'a>(&self, interceptor: F) {
+        let static_handler = unsafe {
+            std::mem::transmute::<
+                Box<dyn FnMut() -> bool + 'a>,
+                Box<dyn FnMut() -> bool + 'static + Sync + Send>,
+            >(Box::new(interceptor))
+        };
+
+        self.back_press_interceptor.replace(Some(static_handler));
     }
 }
 
