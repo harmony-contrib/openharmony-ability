@@ -24,6 +24,7 @@ export interface WindowStageEventCallback {
   onWindowStageEvent: (arg: number) => void;
   onWindowSizeChange: (arg: object) => void;
   onWindowRectChange: (arg: object) => void;
+  onAvoidAreaChange: (arg: object) => void;
 }
 
 export interface WebViewComponentEventCallback {
@@ -72,4 +73,5 @@ export interface ArkHelper {
   exit: (code: number) => void;
   createWebview: (data: WebViewInitData) => Object;
   requestPermission: (permission: string | string[]) => Promise<number | number[]>;
+  getWindowAvoidArea: (type: number) => Object | undefined;
 }

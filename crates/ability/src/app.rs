@@ -1,6 +1,7 @@
 use std::{
     cell::Cell,
     cell::RefCell,
+    collections::HashMap,
     fmt::Debug,
     rc::Rc,
     sync::{
@@ -11,7 +12,7 @@ use std::{
 
 use futures_channel::oneshot;
 use napi_ohos::{
-    bindgen_prelude::{CallbackContext, Function, JsObjectValue, Unknown},
+    bindgen_prelude::{CallbackContext, Function, JsObjectValue, Object, Unknown},
     threadsafe_function::ThreadsafeFunctionCallMode,
     Error, Result,
 };
@@ -22,13 +23,47 @@ use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
     get_helper, get_main_thread_env, get_permission_request_tsfn, unknown_to_permission_promise,
-    AbilityError, Configuration, Event, OpenHarmonyWaker, PermissionRequest, PermissionRequestCode,
-    PermissionRequestOutput, Rect, WAKER,
+    AbilityError, AvoidArea, AvoidAreaType, Configuration, Event, OpenHarmonyWaker,
+    PermissionRequest, PermissionRequestCode, PermissionRequestOutput, Rect, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
 
 pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
+
+const DEFAULT_AVOID_AREA_TYPES: [AvoidAreaType; 5] = [
+    AvoidAreaType::System,
+    AvoidAreaType::Cutout,
+    AvoidAreaType::SystemGesture,
+    AvoidAreaType::Keyboard,
+    AvoidAreaType::NavigationIndicator,
+];
+
+fn parse_rect_from_object(rect: Object<'_>) -> Option<Rect> {
+    let top = rect.get_named_property::<i32>("top").ok()?;
+    let left = rect.get_named_property::<i32>("left").ok()?;
+    let width = rect.get_named_property::<i32>("width").ok()?;
+    let height = rect.get_named_property::<i32>("height").ok()?;
+    Some(Rect {
+        top,
+        left,
+        width,
+        height,
+    })
+}
+
+fn parse_avoid_area_options(options: Object<'_>) -> Option<(AvoidAreaType, AvoidArea)> {
+    let area_type = AvoidAreaType::from(options.get_named_property::<i32>("type").ok()?);
+    let area = options.get_named_property::<Object>("area").ok()?;
+    let avoid_area = AvoidArea {
+        visible: area.get_named_property::<bool>("visible").ok()?,
+        left_rect: parse_rect_from_object(area.get_named_property::<Object>("leftRect").ok()?)?,
+        top_rect: parse_rect_from_object(area.get_named_property::<Object>("topRect").ok()?)?,
+        right_rect: parse_rect_from_object(area.get_named_property::<Object>("rightRect").ok()?)?,
+        bottom_rect: parse_rect_from_object(area.get_named_property::<Object>("bottomRect").ok()?)?,
+    };
+    Some((area_type, avoid_area))
+}
 
 #[derive(Clone)]
 pub struct OpenHarmonyAppInner {
@@ -40,6 +75,8 @@ pub struct OpenHarmonyAppInner {
     id: i64,
     pub(crate) configuration: Configuration,
     pub(crate) rect: Rect,
+    pub(crate) window_rect: Rect,
+    pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
 }
 
 impl PartialEq for OpenHarmonyAppInner {
@@ -93,6 +130,8 @@ impl OpenHarmonyAppInner {
             id,
             configuration: Default::default(),
             rect: Default::default(),
+            window_rect: Default::default(),
+            avoid_areas: HashMap::new(),
         }
     }
 
@@ -130,6 +169,18 @@ impl OpenHarmonyAppInner {
 
     pub fn content_rect(&self) -> Rect {
         self.rect
+    }
+
+    pub fn window_rect(&self) -> Rect {
+        self.window_rect
+    }
+
+    pub fn avoid_area(&self, area_type: AvoidAreaType) -> Option<AvoidArea> {
+        self.avoid_areas.get(&area_type).copied()
+    }
+
+    pub fn avoid_areas(&self) -> HashMap<AvoidAreaType, AvoidArea> {
+        self.avoid_areas.clone()
     }
 
     pub fn native_window(&self) -> Option<RawWindow> {
@@ -258,6 +309,60 @@ impl OpenHarmonyApp {
     }
     pub fn content_rect(&self) -> Rect {
         self.inner.read().unwrap().content_rect()
+    }
+
+    pub fn window_rect(&self) -> Rect {
+        self.inner.read().unwrap().window_rect()
+    }
+
+    fn fetch_avoid_area_from_helper(
+        &self,
+        area_type: AvoidAreaType,
+    ) -> Option<(AvoidAreaType, AvoidArea)> {
+        let helper = unsafe { get_helper() };
+        let helper_borrow = helper.borrow();
+        let helper_ref = helper_borrow.as_ref()?;
+        let env = get_main_thread_env();
+        let env_borrow = env.borrow();
+        let env_ref = env_borrow.as_ref()?;
+        let helper_object = helper_ref.get_value(env_ref).ok()?;
+        let get_window_avoid_area = helper_object
+            .get_named_property::<Function<'_, i32, Object<'_>>>("getWindowAvoidArea")
+            .ok()?;
+        let options = get_window_avoid_area.call(i32::from(area_type)).ok()?;
+        parse_avoid_area_options(options)
+    }
+
+    fn ensure_avoid_area_cached(&self, area_type: AvoidAreaType) {
+        if self.inner.read().unwrap().avoid_area(area_type).is_some() {
+            return;
+        }
+        if let Some((fetched_type, area)) = self.fetch_avoid_area_from_helper(area_type) {
+            self.inner
+                .write()
+                .unwrap()
+                .avoid_areas
+                .insert(fetched_type, area);
+        }
+    }
+
+    fn ensure_avoid_areas_cached(&self) {
+        if !self.inner.read().unwrap().avoid_areas.is_empty() {
+            return;
+        }
+        for area_type in DEFAULT_AVOID_AREA_TYPES {
+            self.ensure_avoid_area_cached(area_type);
+        }
+    }
+
+    pub fn avoid_area(&self, area_type: AvoidAreaType) -> Option<AvoidArea> {
+        self.ensure_avoid_area_cached(area_type);
+        self.inner.read().unwrap().avoid_area(area_type)
+    }
+
+    pub fn avoid_areas(&self) -> HashMap<AvoidAreaType, AvoidArea> {
+        self.ensure_avoid_areas_cached();
+        self.inner.read().unwrap().avoid_areas()
     }
     pub fn native_window(&self) -> Option<RawWindow> {
         self.inner.read().unwrap().native_window()

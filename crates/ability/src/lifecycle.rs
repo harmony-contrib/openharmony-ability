@@ -7,7 +7,8 @@ use napi_ohos::{
 };
 
 use crate::{
-    ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
+    AvoidArea, AvoidAreaInfo, AvoidAreaType, ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader,
+    SaveSaver, Size, StageEventType, WAKER,
 };
 
 #[napi(object)]
@@ -27,6 +28,7 @@ pub struct WindowStageEventCallback<'a> {
     pub on_window_stage_event: Function<'a, i32, ()>,
     pub on_window_size_change: Function<'a, Object<'a>, ()>,
     pub on_window_rect_change: Function<'a, Object<'a>, ()>,
+    pub on_avoid_area_change: Function<'a, Object<'a>, ()>,
 }
 
 #[napi(object)]
@@ -39,6 +41,19 @@ pub struct ApplicationLifecycle<'a> {
     pub environment_callback: EnvironmentCallback<'a>,
     pub window_stage_event_callback: WindowStageEventCallback<'a>,
     pub keyboard_event_callback: KeyboardCallback<'a>,
+}
+
+fn parse_rect(rect: Object<'_>) -> Result<Rect> {
+    let top = rect.get_named_property::<i32>("top")?;
+    let left = rect.get_named_property::<i32>("left")?;
+    let width = rect.get_named_property::<i32>("width")?;
+    let height = rect.get_named_property::<i32>("height")?;
+    Ok(Rect {
+        top,
+        left,
+        width,
+        height,
+    })
 }
 
 /// create lifecycle object and return to arkts
@@ -158,19 +173,8 @@ pub fn create_lifecycle_handle<'a>(
         env.create_function_from_closure("window_rect_change", move |ctx| {
             let options = ctx.first_arg::<Object>()?;
             let reason = options.get_named_property::<i32>("reason")?;
-            let rect = options.get_named_property::<Object>("rect")?;
-            let top = rect.get_named_property::<i32>("top")?;
-            let left = rect.get_named_property::<i32>("left")?;
-            let width = rect.get_named_property::<i32>("width")?;
-            let height = rect.get_named_property::<i32>("height")?;
-
-            let rect = Rect {
-                top,
-                left,
-                width,
-                height,
-            };
-            window_rect_app.inner.write().unwrap().rect = rect;
+            let rect = parse_rect(options.get_named_property::<Object>("rect")?)?;
+            window_rect_app.inner.write().unwrap().window_rect = rect;
 
             if let Some(ref mut h) = *window_rect_app.event_loop.borrow_mut() {
                 h(Event::ContentRectChange(ContentRect {
@@ -180,6 +184,34 @@ pub fn create_lifecycle_handle<'a>(
             }
             Ok(())
         })?;
+
+    let avoid_area_change_app = app.clone();
+    let avoid_area_change = env.create_function_from_closure("avoid_area_change", move |ctx| {
+        let options = ctx.first_arg::<Object>()?;
+        let area_type = AvoidAreaType::from(options.get_named_property::<i32>("type")?);
+        let area = options.get_named_property::<Object>("area")?;
+        let visible = area.get_named_property::<bool>("visible")?;
+        let avoid_area = AvoidArea {
+            visible,
+            left_rect: parse_rect(area.get_named_property::<Object>("leftRect")?)?,
+            top_rect: parse_rect(area.get_named_property::<Object>("topRect")?)?,
+            right_rect: parse_rect(area.get_named_property::<Object>("rightRect")?)?,
+            bottom_rect: parse_rect(area.get_named_property::<Object>("bottomRect")?)?,
+        };
+
+        {
+            let mut inner = avoid_area_change_app.inner.write().unwrap();
+            inner.avoid_areas.insert(area_type, avoid_area);
+        }
+
+        if let Some(ref mut h) = *avoid_area_change_app.event_loop.borrow_mut() {
+            h(Event::AvoidAreaChange(AvoidAreaInfo {
+                area_type,
+                area: avoid_area,
+            }))
+        }
+        Ok(())
+    })?;
 
     let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
@@ -267,6 +299,7 @@ pub fn create_lifecycle_handle<'a>(
             on_ability_restore_state,
             on_window_rect_change: window_rect_change,
             on_window_size_change: window_resize,
+            on_avoid_area_change: avoid_area_change,
             on_window_stage_event: window_stage_event,
         },
         keyboard_event_callback: KeyboardCallback {
