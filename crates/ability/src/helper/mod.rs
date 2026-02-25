@@ -15,23 +15,6 @@ thread_local! {
     static HELPER: Rc<RefCell<Option<ObjectRef>>> = Rc::new(RefCell::new(None));
 
     static MAIN_THREAD_ENV: Rc<RefCell<Option<Env>>> = Rc::new(RefCell::new(None));
-
-    // Store the back press interceptor callback for page-level access
-    static BACK_PRESS_INTERCEPTOR: Rc<RefCell<Option<Box<dyn FnMut() -> bool + Send + Sync>>>> =
-        Rc::new(RefCell::new(None));
-}
-
-/// Set the back press interceptor callback
-pub fn set_back_press_interceptor(interceptor: Box<dyn FnMut() -> bool + Send + Sync>) {
-    BACK_PRESS_INTERCEPTOR.with(|h| {
-        *h.borrow_mut() = Some(interceptor);
-    });
-}
-
-/// Get the back press interceptor result
-/// Returns true to intercept back press, false to pass through
-pub fn get_back_press_interceptor() -> bool {
-    BACK_PRESS_INTERCEPTOR.with(|h| h.borrow_mut().as_mut().map(|f| f()).unwrap_or(true))
 }
 
 /// 设置 HELPER 的值
