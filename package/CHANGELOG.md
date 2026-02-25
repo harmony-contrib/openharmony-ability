@@ -1,3 +1,8 @@
+# 0.4.0-beta.3
+- Add avoidArea event
+- Add onBackPress event
+
+---
 # 0.4.0-beta.2
 - Support requestPermission method
 
