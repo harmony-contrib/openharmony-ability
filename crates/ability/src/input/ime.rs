@@ -38,9 +38,15 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp) -> Result<ImeCallback> {
     let on_ime_hide_callback: Function<u32, ()> =
         env.create_function_from_closure("ime_hide_callback", move |ctx| {
             let value = ctx.first_arg::<u32>().unwrap();
+
+            let status = KeyboardStatus::from(value);
+            if matches!(status, KeyboardStatus::Hide) {
+                // Keep native IME lifecycle aligned with hide callbacks.
+                on_ime_hide_app.hide_keyboard();
+            }
             if let Some(ref mut h) = *on_ime_hide_app.event_loop.borrow_mut() {
                 h(Event::Input(InputEvent::ImeEvent(
-                    ImeEvent::ImeStatusEvent(KeyboardStatus::from(value)),
+                    ImeEvent::ImeStatusEvent(status),
                 )))
             }
             Ok(())
