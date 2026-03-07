@@ -17,7 +17,6 @@ thread_local! {
 
 const INDEX: &str = include_str!("index.html");
 
-// test add more napi method
 #[napi]
 pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
     let web_tag = String::from("webview_example");
@@ -37,7 +36,7 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
         .map_err(|_| napi_ohos::Error::from_reason("custom_protocol error".to_string()))?;
 
     let _ = webview.on_controller_attach(move || {
-        hilog_info!(format!("ohos-rs macro on_controller_attach").as_str());
+        hilog_info!("ohos-rs macro on_controller_attach");
         let _ = WebProxyBuilder::new(web_tag.clone(), "test".to_string())
             .add_method("test", |_web_tag: String, args: Vec<String>| {
                 hilog_info!(format!("ohos-rs macro test: {:?}", args).as_str());
@@ -47,11 +46,11 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
     });
 
     let _ = webview.on_page_begin(|| {
-        hilog_info!(format!("ohos-rs macro on_page_begin").as_str());
+        hilog_info!("ohos-rs macro on_page_begin");
     });
 
     let _ = webview.on_page_end(|| {
-        hilog_info!(format!("ohos-rs macro on_page_end").as_str());
+        hilog_info!("ohos-rs macro on_page_end");
     });
 
     let ret = unsafe { std::mem::transmute(webview.inner().get_value(env)?) };
@@ -91,18 +90,25 @@ pub fn set_visible(env: &Env, visible: bool) -> napi_ohos::Result<()> {
 
 #[ability(webview, protocol = "wry,custom,other")]
 fn openharmony_app(app: OpenHarmonyApp) {
+    hilog_info!(format!(
+        "init context => module={:?}, base={:?}, pref={:?}, locales={:?}",
+        app.module_name(),
+        app.base_path(),
+        app.pref_path(),
+        app.preferred_locales()
+    )
+    .as_str());
+
     app.run_loop(|types| match types {
         Event::Input(k) => match k {
             InputEvent::ImeEvent(s) => {
                 hilog_info!(format!("ohos-rs macro input_text: {:?}", s).as_str());
             }
             _ => {
-                hilog_info!(format!("ohos-rs macro input:").as_str());
+                hilog_info!("ohos-rs macro input:");
             }
         },
-        Event::WindowRedraw(_) => {
-            // hilog_info!(format!("ohos-rs macro window_redraw").as_str());
-        }
+        Event::WindowRedraw(_) => {}
         _ => {
             hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()).as_str());
         }

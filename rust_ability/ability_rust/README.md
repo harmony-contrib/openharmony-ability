@@ -84,7 +84,7 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
    }
    ```
 
-5. Change the `moduleName` to your rust project name. For example, we need to change it with `hello` in this project.
+5. Set `moduleName` to the bare module name, for example `hello`. The framework will load `libhello.so` internally. You can also pass `string[]` when one ability needs to initialize multiple native modules.
 
 6. Build your rust project and copy the dynamic library to (Open-)Harmony(Next) project.
 

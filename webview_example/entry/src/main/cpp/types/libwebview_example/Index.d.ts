@@ -6,6 +6,13 @@ export interface ApplicationLifecycle {
   windowStageEventCallback: WindowStageEventCallback;
 }
 
+export interface AbilityInitContext {
+  basePath?: string;
+  prefPath?: string;
+  preferredLocales?: string;
+  moduleName?: string;
+}
+
 export interface ArkTSHelper {
   exit: (arg: number) => void;
   createWebview: (arg: WebViewInitData) => Object;
@@ -46,7 +53,7 @@ export interface WindowStageEventCallback {
 
 export declare function handleChange(): void;
 
-export declare function init(): ApplicationLifecycle;
+export declare function init(context?: AbilityInitContext): ApplicationLifecycle;
 
 export declare function webviewRender(helper: ArkTSHelper): WebViewComponentEventCallback;
 export declare function setBackgroundColor(color: string): void;

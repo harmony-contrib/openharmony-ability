@@ -1,6 +1,8 @@
 import { DefaultXComponent } from "@ohos-rs/ability";
 import { handleChange, setBackgroundColor, setVisible } from "libwebview_example.so";
 
+const MODULE_NAME = "webview_example";
+
 @Entry
 @Component
 struct Index {
@@ -25,7 +27,7 @@ struct Index {
               this.visible = !this.visible;
             })
         }
-        DefaultXComponent()
+        DefaultXComponent({ moduleName: MODULE_NAME })
       }.width("100%")
     }.height("100%");
   }

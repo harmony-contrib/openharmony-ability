@@ -6,16 +6,22 @@ export const RouteName = "RustAbility";
 @Entry({ routeName: RouteName })
 @Component
 struct Index {
-  @StorageProp("moduleName") name: string = "";
+  @StorageProp("moduleName") moduleNames: string | string[] = "";
+  @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
   private nativeModule: ESObject = null;
+  @State private primaryModuleName: string = "";
 
   async aboutToAppear(): Promise<void> {
-    const moduleName = `lib${this.name}.so`;
-    this.nativeModule = await Loadable.load(moduleName, "async");
+    const moduleName = Loadable.resolvePrimaryModuleName(this.moduleNames);
+    if (!moduleName) {
+      throw new Error("dynamic moduleName is empty");
+    }
+
+    this.nativeModule = await Loadable.load(moduleName, this.loadMode);
+    this.primaryModuleName = moduleName;
   }
 
   onBackPress(): boolean {
-    // Call the back press interceptor from Rust
     if (typeof this.nativeModule?.on_back_press_intercept === "function") {
       return this.nativeModule.on_back_press_intercept();
     }
@@ -25,7 +31,9 @@ struct Index {
   build() {
     Row() {
       Column() {
-        DefaultXComponent()
+        if (this.primaryModuleName) {
+          DefaultXComponent({ moduleName: this.primaryModuleName });
+        }
       }.width("100%")
     }.height("100%");
   }

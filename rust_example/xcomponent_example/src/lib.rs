@@ -55,6 +55,15 @@ pub fn toggle_back_press_intercept() -> bool {
 #[ability]
 fn openharmony_app(app: OpenHarmonyApp) {
     INNER_APP.write().unwrap().replace(app.clone());
+    hilog_info!(format!(
+        "init context => module={:?}, base={:?}, pref={:?}, locales={:?}",
+        app.module_name(),
+        app.base_path(),
+        app.pref_path(),
+        app.preferred_locales()
+    )
+    .as_str());
+
     let permission_app = app.clone();
     app.on_back_press_intercept(|| {
         let intercept = BACK_PRESS_INTERCEPT_ENABLED.load(Ordering::SeqCst);
@@ -94,11 +103,11 @@ fn openharmony_app(app: OpenHarmonyApp) {
                 hilog_info!(format!("ohos-rs macro input_text: {:?}", s).as_str());
             }
             _ => {
-                hilog_info!(format!("ohos-rs macro input:").as_str());
+                hilog_info!("ohos-rs macro input:");
             }
         },
         Event::WindowRedraw(_) => {
-            hilog_info!(format!("ohos-rs macro window_redraw").as_str());
+            hilog_info!("ohos-rs macro window_redraw");
         }
         _ => {
             hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()).as_str());

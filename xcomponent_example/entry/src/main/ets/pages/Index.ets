@@ -4,6 +4,8 @@ import {
   toggleBackPressIntercept,
 } from "libxcomponent_example.so";
 
+const MODULE_NAME = "xcomponent_example";
+
 @Entry
 @Component
 struct Index {
@@ -27,7 +29,7 @@ struct Index {
         Button(this.interceptEnabled ? "back intercept: ON" : "back intercept: OFF")
           .onClick(() => this.handleToggleBackIntercept())
         Text("Swipe back to test intercept behavior.")
-        DefaultXComponent()
+        DefaultXComponent({ moduleName: MODULE_NAME })
       }.width("100%")
     }.height("100%");
   }

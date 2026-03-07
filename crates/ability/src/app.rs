@@ -11,6 +11,7 @@ use std::{
 };
 
 use futures_channel::oneshot;
+use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::{CallbackContext, Function, JsObjectValue, Object, Unknown},
     threadsafe_function::ThreadsafeFunctionCallMode,
@@ -65,6 +66,15 @@ fn parse_avoid_area_options(options: Object<'_>) -> Option<(AvoidAreaType, Avoid
     Some((area_type, avoid_area))
 }
 
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct AbilityInitContext {
+    pub base_path: Option<String>,
+    pub pref_path: Option<String>,
+    pub preferred_locales: Option<String>,
+    pub module_name: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct OpenHarmonyAppInner {
     pub(crate) raw_window: Option<RawWindow>,
@@ -77,6 +87,7 @@ pub struct OpenHarmonyAppInner {
     pub(crate) rect: Rect,
     pub(crate) window_rect: Rect,
     pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
+    pub(crate) init_context: AbilityInitContext,
 }
 
 impl PartialEq for OpenHarmonyAppInner {
@@ -132,6 +143,7 @@ impl OpenHarmonyAppInner {
             rect: Default::default(),
             window_rect: Default::default(),
             avoid_areas: HashMap::new(),
+            init_context: AbilityInitContext::default(),
         }
     }
 
@@ -189,6 +201,14 @@ impl OpenHarmonyAppInner {
 
     pub fn scale(&self) -> f32 {
         default_display_scaled_density()
+    }
+
+    pub fn init_context(&self) -> AbilityInitContext {
+        self.init_context.clone()
+    }
+
+    pub fn set_init_context(&mut self, context: AbilityInitContext) {
+        self.init_context = context;
     }
 
     pub fn exit(&self, code: i32) -> Result<()> {
@@ -285,6 +305,31 @@ impl OpenHarmonyApp {
             .read()
             .unwrap()
             .set_frame_rate(min, max, expected);
+    }
+
+    #[doc(hidden)]
+    pub fn set_init_context(&self, context: AbilityInitContext) {
+        self.inner.write().unwrap().set_init_context(context);
+    }
+
+    pub fn init_context(&self) -> AbilityInitContext {
+        self.inner.read().unwrap().init_context()
+    }
+
+    pub fn module_name(&self) -> Option<String> {
+        self.init_context().module_name
+    }
+
+    pub fn base_path(&self) -> Option<String> {
+        self.init_context().base_path
+    }
+
+    pub fn pref_path(&self) -> Option<String> {
+        self.init_context().pref_path
+    }
+
+    pub fn preferred_locales(&self) -> Option<String> {
+        self.init_context().preferred_locales
     }
 
     pub fn show_keyboard(&self) {

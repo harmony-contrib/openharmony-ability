@@ -61,17 +61,27 @@ export interface WebViewStyle {
   y?: number | string;
 }
 
-export interface Module {
-  init: () => ApplicationLifecycle;
-  // XComponent mode
-  render: (helper: ArkHelper, slot: NodeContent) => void;
+export interface AbilityInitContext {
+  basePath?: string;
+  prefPath?: string;
+  preferredLocales?: string;
+  moduleName?: string;
+}
 
-  registerCustomProtocol: () => void;
+export interface Module {
+  init: (context?: AbilityInitContext) => ApplicationLifecycle;
+  render: (helper: ArkHelper, slot: NodeContent) => void;
+  registerCustomProtocol?: () => void;
 }
 
 export interface ArkHelper {
   exit: (code: number) => void;
   createWebview: (data: WebViewInitData) => Object;
   requestPermission: (permission: string | string[]) => Promise<number | number[]>;
-  getWindowAvoidArea: (type: number) => Object | undefined;
+  getWindowAvoidArea: (type: number) => WindowAvoidAreaInfo | undefined;
+}
+
+export interface WindowAvoidAreaInfo {
+  type: number;
+  area: Object;
 }
