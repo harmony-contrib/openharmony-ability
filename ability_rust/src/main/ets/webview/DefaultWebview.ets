@@ -109,15 +109,12 @@ export class RustWebviewNodeController extends NodeController {
       return getCookies(url) as string;
     };
     const loadUrl = (url: string, header?: Record<string, string>) => {
-      const headers = Object.keys((header || {}) as Record<string, string>).reduce(
-        (t, i) => {
-          if (!!header![i]) {
-            t.push({ headerKey: i, headerValue: header![i] });
-          }
-          return t;
-        },
-        [] as Array<WebHeader>,
-      );
+      const headers = Object.keys((header || {}) as Record<string, string>).reduce((t, i) => {
+        if (!!header![i]) {
+          t.push({ headerKey: i, headerValue: header![i] });
+        }
+        return t;
+      }, [] as Array<WebHeader>);
       controller.loadUrl(url, headers);
     };
 

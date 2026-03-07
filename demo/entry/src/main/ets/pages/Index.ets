@@ -38,7 +38,7 @@ struct Index {
       .type(this.currentDemo === index ? ButtonType.Capsule : ButtonType.Normal)
       .onClick(() => {
         this.currentDemo = index;
-      })
+      });
   }
 
   @Builder
@@ -52,7 +52,7 @@ struct Index {
       DefaultXComponent({ moduleName: MODULE_NAME })
     }
     .width("100%")
-    .height("100%")
+    .height("100%");
   }
 
   @Builder
@@ -73,7 +73,7 @@ struct Index {
       DefaultXComponent({ moduleName: MODULE_NAME })
     }
     .width("100%")
-    .height("100%")
+    .height("100%");
   }
 
   build() {
@@ -81,17 +81,16 @@ struct Index {
       Row({ space: 12 }) {
         this.DemoSwitcher("XComponent demo", 0)
         this.DemoSwitcher("WebView demo", 1)
+      }.width("100%")
+      if (this.currentDemo === 0) {
+        this.XComponentDemo();
       }
-      .width("100%")
-
-      If (this.currentDemo === 0) {
-        this.XComponentDemo()
-      } else {
-        this.WebviewDemo()
+      if (this.currentDemo !== 0) {
+        this.WebviewDemo();
       }
     }
     .width("100%")
     .height("100%")
-    .padding(16)
+    .padding(16);
   }
 }

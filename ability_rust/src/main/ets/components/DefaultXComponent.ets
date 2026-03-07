@@ -16,7 +16,6 @@ import {
 } from "../webview/DefaultWebview";
 
 export const RouteName = "RustAbility";
-
 @Component
 export struct DefaultXComponent {
   moduleName: string = "";

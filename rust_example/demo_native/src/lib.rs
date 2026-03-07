@@ -164,8 +164,9 @@ fn openharmony_app(app: OpenHarmonyApp) {
                 let app_for_permission = permission_app.clone();
                 std::thread::spawn(move || {
                     let permissions = vec!["ohos.permission.CAMERA"];
-                    let result =
-                        futures_executor::block_on(app_for_permission.request_permission(permissions));
+                    let result = futures_executor::block_on(
+                        app_for_permission.request_permission(permissions),
+                    );
                     match result {
                         Ok(results) => {
                             for item in results {
