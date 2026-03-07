@@ -29,24 +29,18 @@ fn parse_ability_args(attr: TokenStream) -> syn::Result<AbilityArgs> {
         return Ok(args);
     }
 
-    // Parse attribute arguments as a list of Meta items
-    // Convert proc_macro::TokenStream to proc_macro2::TokenStream for parsing
     let attr_stream = proc_macro2::TokenStream::from(attr);
     let meta_list = syn::parse2::<MetaList>(attr_stream)?;
 
-    // Iterate over the meta items
     for meta in meta_list.metas {
         match meta {
             Meta::Path(path) => {
-                // Handle named flags like `webview`
                 if path.is_ident("webview") {
                     args.webview = true;
                 }
             }
             Meta::NameValue(MetaNameValue { path, value, .. }) => {
-                // Handle key-value pairs like `protocol = "value"`
                 if path.is_ident("protocol") {
-                    // Parse the value as an expression and extract string literal
                     if let syn::Expr::Lit(syn::ExprLit {
                         lit: syn::Lit::Str(lit_str),
                         ..
@@ -61,10 +55,7 @@ fn parse_ability_args(attr: TokenStream) -> syn::Result<AbilityArgs> {
                     }
                 }
             }
-            Meta::List(_) => {
-                // Handle nested list-style attributes if needed
-                // For now, we'll skip them
-            }
+            Meta::List(_) => {}
         }
     }
 
@@ -120,7 +111,6 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    // Register custom protocol if protocol is specified and webview is enabled
     let protocol_registrations_apply = if args.protocol.is_some() && args.webview {
         quote::quote! {
             #[napi_derive_ohos::napi]
@@ -153,9 +143,6 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             #protocol_registrations_apply
 
-            /// Get back press interceptor result
-            /// Can be called from ArkTS page lifecycle (onBackPress)
-            /// Returns true to intercept back press, false to pass through
             #[napi_derive_ohos::napi]
             pub fn on_back_press_intercept() -> bool {
                 (*APP).get_back_press_interceptor()
@@ -164,7 +151,9 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[napi_derive_ohos::napi]
             pub fn init<'a>(
                 env: &'a napi_ohos::Env,
+                context: Option<openharmony_ability::AbilityInitContext>,
             ) -> napi_ohos::Result<openharmony_ability::ApplicationLifecycle<'a>> {
+                (*APP).set_init_context(context.unwrap_or_default());
                 let lifecycle_handle = openharmony_ability::create_lifecycle_handle(env, (*APP).clone())?;
                 #fn_name((*APP).clone());
                 Ok(lifecycle_handle)

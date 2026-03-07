@@ -42,6 +42,10 @@ fn openharmony_app(app: OpenHarmonyApp) {
 }
 ```
 
+### Init Context
+
+The generated `init(context)` now forwards ArkTS init data into Rust. Inside your `OpenHarmonyApp`, you can read it through `app.init_context()`, `app.module_name()`, `app.base_path()`, `app.pref_path()`, and `app.preferred_locales()`.
+
 ### webview
 
 Using `ArkWeb` to render everything.

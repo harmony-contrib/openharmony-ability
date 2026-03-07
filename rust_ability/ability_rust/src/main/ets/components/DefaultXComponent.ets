@@ -1,5 +1,9 @@
 import { NodeContent } from "@kit.ArkUI";
-import { ArkHelper, WebViewInitData as NativeWebViewInitData } from "../ability/type";
+import {
+  ArkHelper,
+  WebViewInitData as NativeWebViewInitData,
+  WindowAvoidAreaInfo,
+} from "../ability/type";
 import { exit } from "../helper";
 import { Loadable } from "../helper/loadable";
 import { requestPermission } from "../helper/permission";
@@ -12,8 +16,10 @@ import {
 } from "../webview/DefaultWebview";
 
 export const RouteName = "RustAbility";
+
 @Component
 export struct DefaultXComponent {
+  moduleName: string = "";
   private rootSlot = new NodeContent();
   private webviewController = new RustWebviewNodeController(this.getUIContext());
   private nativeModule: ESObject;
@@ -23,7 +29,7 @@ export struct DefaultXComponent {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       return await requestPermission(context, permission);
     },
-    getWindowAvoidArea: (type: number): Object | undefined => {
+    getWindowAvoidArea: (type: number): WindowAvoidAreaInfo | undefined => {
       try {
         const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
         const win = context.windowStage.getMainWindowSync();
@@ -31,7 +37,7 @@ export struct DefaultXComponent {
         return {
           type: avoidType,
           area: win.getWindowAvoidArea(avoidType),
-        } as Object;
+        } as WindowAvoidAreaInfo;
       } catch (_) {
         return undefined;
       }
@@ -43,7 +49,6 @@ export struct DefaultXComponent {
           scriptRules: ["*"],
         } as ScriptItem;
       });
-      // url set to empty string avoid double load.
       const init: WebviewInitData = {
         webTag: data?.id,
         url: data?.url,
@@ -62,7 +67,6 @@ export struct DefaultXComponent {
         onTitleChange: data?.onTitleChange,
       } as WebviewInitData;
 
-      // transparent only be set when backgroundColor is null.
       if (data?.transparent && !init.style?.backgroundColor) {
         init.style!.backgroundColor = Color.Transparent;
       }
@@ -80,15 +84,16 @@ export struct DefaultXComponent {
         node?.update(init);
       };
 
-      // Return controller and use controller to control webview behavior
       return ret.controller;
     },
   };
-  @StorageProp("moduleName") name: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
 
   async aboutToAppear(): Promise<void> {
-    const moduleName = `lib${this.name}.so`;
+    const moduleName = this.moduleName.trim();
+    if (!moduleName) {
+      throw new Error("DefaultXComponent.moduleName is required");
+    }
     this.nativeModule = await Loadable.load(moduleName, this.loadMode);
     this.nativeModule.render(this.helper, this.rootSlot);
   }

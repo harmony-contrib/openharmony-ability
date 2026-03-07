@@ -35,7 +35,7 @@ Here are some notes and tips:
 
 1. For every lifecycle callback, you must call the super method to forward the event to rust code as first and then write your own logic.
 
-2. `moduleName` is the name of your native module name which file name is `lib${moduleName}.so`. **You must define it in your project**.
+2. `moduleName` is the bare native module name, such as `hello`. The framework resolves it to `libhello.so` internally. You must define it in your project.
 
 ### loadMode
 
@@ -127,7 +127,7 @@ struct Index {
       Column() {
         SegmentButton({ options: this.tabOptions, selectedIndexes: $tabSelectedIndexes })
         // Must use the default component to render the UI
-        DefaultXComponent()
+        DefaultXComponent({ moduleName: "example" })
       }
       .width('100%')
     }

@@ -7,6 +7,13 @@ export interface ApplicationLifecycle {
   windowStageEventCallback: WindowStageEventCallback;
 }
 
+export interface AbilityInitContext {
+  basePath?: string;
+  prefPath?: string;
+  preferredLocales?: string;
+  moduleName?: string;
+}
+
 export interface EnvironmentCallback {
   onConfigurationUpdated: () => void;
   onMemoryLevel: () => void;
@@ -20,4 +27,5 @@ export interface WindowStageEventCallback {
   onAbilitySaveState: () => void;
 }
 
-export declare function init(slot: NodeContent): ApplicationLifecycle;
+export declare function init(context?: AbilityInitContext): ApplicationLifecycle;
+export declare function render(slot: NodeContent): void;
