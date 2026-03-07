@@ -15,7 +15,7 @@ webview = ["dep:ohos-web-binding", "dep:http"]
 futures-channel = "0.3"
 
 # for napi binding
-napi-ohos = { workspace = true, default-features = false, features = ["napi8"] }
+napi-ohos = { workspace = true, features = ["napi8"] }
 napi-derive-ohos = { workspace = true }
 
 # for xcomponent native render

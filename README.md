@@ -2,105 +2,84 @@
 
 > This project is in progress, and the API is not stable.
 
-`openharmony-ability` is a crate to manage OpenHarmony application's activity with rust, be similar to [android-activity](https://github.com/rust-mobile/android-activity).
+`openharmony-ability` provides Rust-side lifecycle management and ArkTS-side entry helpers for OpenHarmony applications, similar in spirit to `android-activity`.
 
 ## Architecture
 
-The architecture of OpenHarmony is similar to Node.js, where we need to manage the application's lifecycle via callbacks. Hence, there are a few key points to keep in mind.
+OpenHarmony applications are driven by callbacks, so there are two important constraints:
 
-1. Don't block the main thread as it can lead to application freezing and crashing.
-2. openharmony-ability's run_loop doesn't retain the resource and ownership, so if you create a new resource, you should leak it to prevent NULL pointer.
+1. Do not block the main thread.
+2. `run_loop` does not retain user resources for you, so resources that must outlive setup need stable ownership.
 
 ![Architecture](/fixtures/openharmony-ability.png)
 
-We provide some packages or crates to help you develop OpenHarmony application with Rust.
+## Repository Layout
 
-### ArkTS
-
-We need a entry-point to start the application, and we use ArkTS to manage the application's lifecycle.
-
-- [@ohos-rs/ability](./package/README.md)  
-  All of ability need to extend `RustAbility` and all lifecycle need to call `super.xx` to make sure the ability can work normally.
-
-### Rust
-
-- [openharmony-ability](./crates/ability/README.md)  
-  Basic crate to manage the application's lifecycle.
-
-- [openharmony-ability-derive](./crates/derive/README.md)  
-  Macro to generate the ability's implementation.
+- `crates/ability` — Rust lifecycle/runtime support
+- `crates/derive` — `#[ability]` macro
+- `ability_rust` — ArkTS package source for `@ohos-rs/ability`
+- `package` — packaged ohpm artifact source
+- `demo` — unified Harmony demo project
+- `rust_example/demo_native` — unified native demo implementation
 
 ## Usage
 
-1. use `ohrs` to init project and add `openharmony-ability` dependencies.
+1. Add Rust dependencies:
 
-   ```bash
-   ohrs init hello
+```bash
+cargo add openharmony-ability
+cargo add openharmony-ability-derive
+cargo add napi-ohos
+cargo add napi-derive-ohos
+cargo add napi-build-ohos
+```
 
-   cargo add openharmony-ability
-   cargo add openharmony-ability-derive
-   ```
+2. Implement your native entry:
 
-   If you already have a rust project, you can add the dependencies into your project. And you need to add the following dependencies into your project which is used to generate some codes to bridge ArkTS.
+```rust
+use ohos_hilog_binding::hilog_info;
+use openharmony_ability::OpenHarmonyApp;
+use openharmony_ability_derive::ability;
 
-   ```bash
-   cargo add napi-ohos
-   cargo add napi-derive-ohos
-   cargo add napi-build-ohos
-   ```
+#[ability]
+fn openharmony_app(app: OpenHarmonyApp) {
+    app.run_loop(|event| {
+        hilog_info!(format!("event: {:?}", event.as_str()).as_str());
+    });
+}
+```
 
-2. Add the follow code to `lib.rs`.
+3. Use `RustAbility` in ArkTS:
 
-   ```rust
-   use ohos_hilog_binding::hilog_info;
-   use openharmony_ability::App;
-   use openharmony_ability_derive::ability;
+```ts
+import { RustAbility } from "@ohos-rs/ability";
+import Want from "@ohos.app.ability.Want";
+import { AbilityConstant } from "@kit.AbilityKit";
 
-   #[ability]
-   fn openharmony_app(app: App) {
-       app.run_loop(|types| {
-           hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()).as_str());
-       });
-   }
-   ```
+export default class EntryAbility extends RustAbility {
+  public moduleName: string = "demo_native";
 
-   > Note: `ohos_hilog_binding` is a optional dependency and you can add or remove it.
+  async onCreate(
+    want: Want,
+    launchParam: AbilityConstant.LaunchParam
+  ): Promise<void> {
+    super.onCreate(want, launchParam);
+  }
+}
+```
 
-3. Add `@ohos-rs/ability` to your `OpenHarmony/HarmonyNext` project.
+4. Build the native module:
 
-   ```bash
-   ohpm install @ohos-rs/ability
-   ```
+```bash
+cd rust_example/demo_native
+ohrs build --arch arm64
+```
 
-4. change the `EntryAbility.ets` file to the follow code:
+## Demo
 
-   ```ts
-   import { RustAbility } from "@ohos-rs/ability";
-   import Want from "@ohos.app.ability.Want";
-   import { AbilityConstant } from "@kit.AbilityKit";
-
-   export default class EntryAbility extends RustAbility {
-     public moduleName: string = "example";
-
-     async onCreate(
-       want: Want,
-       launchParam: AbilityConstant.LaunchParam
-     ): Promise<void> {
-       // Note: you should call super.onCreate to make sure the ability can work normally.
-       super.onCreate(want, launchParam);
-     }
-   }
-   ```
-
-5. Set `moduleName` to the bare module name, for example `hello`. The framework will load `libhello.so` internally. You can also pass `string[]` when one ability needs to initialize multiple native modules.
-
-6. Build your rust project and copy the dynamic library to (Open-)Harmony(Next) project.
-
-7. Now, you can enjoy it.
-
-## Example
-
-See example with [example](./example/src/lib.rs)
+- Harmony demo project: `demo`
+- Native demo module: `rust_example/demo_native/src/lib.rs`
+- ArkTS package source: `ability_rust`
 
 ## License
 
