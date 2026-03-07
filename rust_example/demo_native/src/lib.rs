@@ -25,7 +25,8 @@ static MAIN_THREAD_DEMO_REQUESTED: AtomicBool = AtomicBool::new(false);
 static BACK_PRESS_INTERCEPT_ENABLED: AtomicBool = AtomicBool::new(true);
 
 thread_local! {
-    static WEBVIEW_ID: RefCell<Option<Object<'static>>> = const { RefCell::new(None) };
+    #[allow(clippy::missing_const_for_thread_local)]
+    static WEBVIEW_ID: RefCell<Option<Object<'static>>> = RefCell::new(None);
 }
 
 const WEB_TAG: &str = "demo_webview";
@@ -104,7 +105,9 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
         hilog_info!("ohos-rs macro on_page_end");
     });
 
-    let ret = unsafe { std::mem::transmute(webview.inner().get_value(env)?) };
+    let ret: Object<'static> = unsafe {
+        std::mem::transmute::<Object<'_>, Object<'static>>(webview.inner().get_value(env)?)
+    };
     WEBVIEW_ID.with(|w| {
         w.replace(Some(ret));
     });
