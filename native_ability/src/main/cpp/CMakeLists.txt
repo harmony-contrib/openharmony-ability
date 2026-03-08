@@ -11,5 +11,5 @@ endif()
 include_directories(${NATIVERENDER_ROOT_PATH}
                     ${NATIVERENDER_ROOT_PATH}/include)
 
-add_library(ability_rust SHARED napi_init.cpp)
-target_link_libraries(ability_rust PUBLIC libace_napi.z.so)
+add_library(native_ability SHARED napi_init.cpp)
+target_link_libraries(native_ability PUBLIC libace_napi.z.so)

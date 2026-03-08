@@ -1,6 +1,6 @@
 {
   "module": {
-    "name": "ability_rust_test",
+    "name": "native_ability_test",
     "type": "feature",
     "deviceTypes": [
       "default",

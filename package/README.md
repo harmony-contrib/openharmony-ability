@@ -1,6 +1,6 @@
 # @ohos-rs/ability
 
-`@ohos-rs/ability` provides ArkTS-side helpers for loading Rust native modules and forwarding OpenHarmony lifecycle events into Rust.
+`@ohos-rs/ability` provides ArkTS-side helpers for loading native modules and forwarding OpenHarmony lifecycle events into native code. The same `NativeAbility` entry can be reused by Rust modules and C/SDL-style native modules.
 
 ## Install
 
@@ -10,14 +10,14 @@ ohpm install @ohos-rs/ability
 
 ## API
 
-### `RustAbility`
+### `NativeAbility`
 
-`RustAbility` wraps `UIAbility` and initializes one or more Rust native modules.
+`NativeAbility` wraps `UIAbility` and initializes one or more native modules.
 
 ```ts
-import { RustAbility } from "@ohos-rs/ability";
+import { NativeAbility } from "@ohos-rs/ability";
 
-export default class EntryAbility extends RustAbility {
+export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
 
   onCreate() {
@@ -43,7 +43,7 @@ When using `sync`, add the corresponding library to `build-profile.json5` runtim
 
 ### `DefaultXComponent`
 
-`DefaultXComponent` loads the native module and binds the default Rust rendering surface.
+`DefaultXComponent` loads the native module and binds the default native rendering surface.
 
 ```ts
 import { DefaultXComponent } from "@ohos-rs/ability";
@@ -66,12 +66,12 @@ struct Index {
 ### Custom Page Example
 
 ```ts
-import { RustAbility } from "@ohos-rs/ability";
+import { NativeAbility } from "@ohos-rs/ability";
 import Want from "@ohos.app.ability.Want";
 import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
 
-export default class EntryAbility extends RustAbility {
+export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
   public defaultPage: boolean = false;
 

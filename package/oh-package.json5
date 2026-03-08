@@ -2,7 +2,7 @@
   "license": "MIT",
   "author": "richerfu",
   "name": "@ohos-rs/ability",
-  "description": "Adaptor for OpenHarmony/HarmonyNext Application with Rust",
+  "description": "Adaptor for OpenHarmony/HarmonyNext native abilities",
   "main": "index.ets",
   "version": "0.4.0-beta.4",
   "repository": "https://github.com/harmony-contrib/openharmony-ability.git",

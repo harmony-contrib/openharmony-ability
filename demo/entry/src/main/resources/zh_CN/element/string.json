@@ -2,7 +2,7 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "Rust Ability Demo 入口"
+      "value": "Native Ability Demo 入口"
     },
     {
       "name": "EntryAbility_desc",

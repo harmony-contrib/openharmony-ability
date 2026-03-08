@@ -1,7 +1,7 @@
 import { DefaultXComponent } from "./DefaultXComponent";
 import { Loadable } from "../helper/loadable";
 
-export const RouteName = "RustAbility";
+export const RouteName = "NativeAbility";
 
 @Entry({ routeName: RouteName })
 @Component

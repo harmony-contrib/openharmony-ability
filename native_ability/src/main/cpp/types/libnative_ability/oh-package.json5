@@ -1,5 +1,5 @@
 {
-  "name": "libability_rust.so",
+  "name": "libnative_ability.so",
   "types": "./Index.d.ts",
   "version": "1.0.0",
   "description": "Please describe the basic information."

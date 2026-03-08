@@ -2,7 +2,7 @@
 
 > This project is in progress, and the API is not stable.
 
-`openharmony-ability` provides Rust-side lifecycle management and ArkTS-side entry helpers for OpenHarmony applications, similar in spirit to `android-activity`.
+`openharmony-ability` provides native integration helpers for OpenHarmony applications: Rust-side lifecycle management plus ArkTS-side entry helpers that can be shared by Rust and C/SDL native modules.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ OpenHarmony applications are driven by callbacks, so there are two important con
 
 - `crates/ability` — Rust lifecycle/runtime support
 - `crates/derive` — `#[ability]` macro
-- `ability_rust` — ArkTS package source for `@ohos-rs/ability`
+- `native_ability` — ArkTS package source shared by Rust and C/SDL native modules
 - `package` — packaged ohpm artifact source
 - `demo` — unified Harmony demo project
 - `rust_example/demo_native` — unified native demo implementation
@@ -34,7 +34,7 @@ cargo add napi-derive-ohos
 cargo add napi-build-ohos
 ```
 
-2. Implement your native entry:
+2. Implement your native entry (Rust example):
 
 ```rust
 use ohos_hilog_binding::hilog_info;
@@ -49,14 +49,14 @@ fn openharmony_app(app: OpenHarmonyApp) {
 }
 ```
 
-3. Use `RustAbility` in ArkTS:
+3. Use `NativeAbility` in ArkTS:
 
 ```ts
-import { RustAbility } from "@ohos-rs/ability";
+import { NativeAbility } from "@ohos-rs/ability";
 import Want from "@ohos.app.ability.Want";
 import { AbilityConstant } from "@kit.AbilityKit";
 
-export default class EntryAbility extends RustAbility {
+export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
 
   async onCreate(
@@ -78,8 +78,8 @@ ohrs build --arch arm64
 ## Demo
 
 - Harmony demo project: `demo`
-- Native demo module: `rust_example/demo_native/src/lib.rs`
-- ArkTS package source: `ability_rust`
+- Native demo module (Rust example): `rust_example/demo_native/src/lib.rs`
+- ArkTS package source: `native_ability`
 
 ## License
 
