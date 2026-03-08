@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Rust Ability Demo 入口"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "收敛后的 Native Demo"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "demo"
+    }
+  ]
+}

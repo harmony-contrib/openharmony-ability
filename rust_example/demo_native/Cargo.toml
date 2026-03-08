@@ -1,0 +1,20 @@
+[package]
+name = "demo_native"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi-ohos = { workspace = true, features = ["tokio_rt"] }
+napi-derive-ohos = { workspace = true }
+
+openharmony-ability = { workspace = true, features = ["webview"] }
+openharmony-ability-derive = { workspace = true }
+ohos-hilog-binding = { version = "*" }
+futures-executor = "0.3"
+
+[build-dependencies]
+napi-build-ohos = { workspace = true }

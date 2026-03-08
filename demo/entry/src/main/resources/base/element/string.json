@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Rust ability demo entry"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Unified native demo"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "demo"
+    }
+  ]
+}
