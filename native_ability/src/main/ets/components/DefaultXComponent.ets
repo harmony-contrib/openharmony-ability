@@ -15,7 +15,7 @@ import {
   WebviewInitData,
 } from "../webview/DefaultWebview";
 
-export const RouteName = "RustAbility";
+export const RouteName = "NativeAbility";
 @Component
 export struct DefaultXComponent {
   moduleName: string = "";

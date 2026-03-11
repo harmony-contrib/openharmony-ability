@@ -1,6 +1,6 @@
 {
   "module": {
-    "name": "ability_rust",
+    "name": "native_ability",
     "type": "har",
     "deviceTypes": [
       "default",

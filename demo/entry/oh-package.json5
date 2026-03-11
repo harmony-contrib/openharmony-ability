@@ -9,6 +9,6 @@
     "libentry.so": "file:./src/main/cpp/types/libentry",
     "libdemo_native.so": "file:./src/main/cpp/types/libdemo_native",
     "libark_web.so": "file:./src/main/cpp/types/libark_web",
-    "@ohos-rs/ability": "file:../../ability_rust"
+    "@ohos-rs/ability": "file:../../native_ability"
   }
 }

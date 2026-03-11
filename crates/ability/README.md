@@ -2,11 +2,11 @@
 
 ## Introduce
 
-openharmony-ability is a crate for the OpenHarmony/HarmonyNext ability. It provides a way to create an OpenHarmony/HarmonyNext application with rust.
+openharmony-ability is the Rust runtime crate in this repository. It provides lifecycle and runtime helpers for OpenHarmony/HarmonyNext native applications.
 
 ## Runtime Context
 
-`RustAbility` passes the ArkTS init context into Rust during `init(context)`. In Rust, `OpenHarmonyApp` can read `moduleName`, `basePath`, `prefPath`, and `preferredLocales` via `init_context()`, `module_name()`, `base_path()`, `pref_path()`, and `preferred_locales()`.
+`NativeAbility` passes the ArkTS init context into native code during `init(context)`. In the Rust runtime, `OpenHarmonyApp` can read `moduleName`, `basePath`, `prefPath`, and `preferredLocales` via `init_context()`, `module_name()`, `base_path()`, `pref_path()`, and `preferred_locales()`.
 
 ## License
 

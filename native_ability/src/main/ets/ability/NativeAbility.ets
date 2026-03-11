@@ -8,7 +8,7 @@ import { Loadable } from "../helper/loadable";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";
 
-export class RustAbility extends UIAbility {
+export class NativeAbility extends UIAbility {
   public moduleName: string | string[] = "";
   public defaultPage: boolean = true;
   public mode: "xcomponent" | "webview" = "xcomponent";

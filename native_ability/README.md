@@ -2,7 +2,7 @@
 
 > This project is in progress, and the API is not stable.
 
-`openharmony-ability` is a crate to manage OpenHarmony application's activity with rust, be similar to [android-activity](https://github.com/rust-mobile/android-activity).
+`openharmony-ability` is the native integration layer for OpenHarmony applications. It combines Rust-side runtime crates with ArkTS-side entry helpers such as `NativeAbility`, similar in spirit to [android-activity](https://github.com/rust-mobile/android-activity).
 
 ## Architecture
 
@@ -13,16 +13,16 @@ The architecture of OpenHarmony is similar to Node.js, where we need to manage t
 
 ![Architecture](/fixtures/openharmony-ability.png)
 
-We provide some packages or crates to help you develop OpenHarmony application with Rust.
+We provide packages and crates to help you build OpenHarmony applications with native code, including Rust integrations and shared ArkTS entry helpers for C/SDL-style modules.
 
 ### ArkTS
 
 We need a entry-point to start the application, and we use ArkTS to manage the application's lifecycle.
 
 - [@ohos-rs/ability](../package/README.md)  
-  All of ability need to extend `RustAbility` and all lifecycle need to call `super.xx` to make sure the ability can work normally.
+  All of ability need to extend `NativeAbility` and all lifecycle need to call `super.xx` to make sure the ability can work normally.
 
-### Rust
+### Rust Runtime
 
 - [openharmony-ability](../crates/ability/README.md)  
   Basic crate to manage the application's lifecycle.
@@ -67,11 +67,11 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
 4. change the `EntryAbility.ets` file to the follow code:
 
    ```ts
-   import { RustAbility } from "@ohos-rs/ability";
+   import { NativeAbility } from "@ohos-rs/ability";
    import Want from "@ohos.app.ability.Want";
    import { AbilityConstant } from "@kit.AbilityKit";
 
-   export default class EntryAbility extends RustAbility {
+   export default class EntryAbility extends NativeAbility {
      public moduleName: string = "example";
 
      async onCreate(
@@ -86,7 +86,7 @@ We need a entry-point to start the application, and we use ArkTS to manage the a
 
 5. Set `moduleName` to the bare module name, for example `hello`. The framework will load `libhello.so` internally. You can also pass `string[]` when one ability needs to initialize multiple native modules.
 
-6. Build your rust project and copy the dynamic library to (Open-)Harmony(Next) project.
+6. Build your native project and copy the dynamic library to your (Open-)Harmony(Next) project. The example below uses Rust, but the ArkTS `NativeAbility` entry is also reusable for C/SDL-style native modules that expose the same contract.
 
 7. Now, you can enjoy it.
 

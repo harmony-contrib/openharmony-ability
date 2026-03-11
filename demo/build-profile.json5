@@ -38,8 +38,8 @@
       ]
     },
     {
-      "name": "ability_rust",
-      "srcPath": "../ability_rust"
+      "name": "native_ability",
+      "srcPath": "../native_ability"
     }
   ]
 }
