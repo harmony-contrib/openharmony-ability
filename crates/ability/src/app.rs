@@ -25,7 +25,8 @@ use ohos_xcomponent_binding::RawWindow;
 use crate::{
     get_helper, get_main_thread_env, get_permission_request_tsfn, unknown_to_permission_promise,
     AbilityError, AvoidArea, AvoidAreaType, Configuration, Event, OpenHarmonyWaker,
-    PermissionRequest, PermissionRequestCode, PermissionRequestOutput, Rect, WAKER,
+    PermissionRequest, PermissionRequestCode, PermissionRequestOutput, Rect, ResourceManager,
+    WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -75,6 +76,21 @@ pub struct AbilityInitContext {
     pub module_name: Option<String>,
 }
 
+impl AbilityInitContext {
+    pub fn from_object(context: Option<&Object<'_>>) -> Result<Self> {
+        let Some(context) = context else {
+            return Ok(Self::default());
+        };
+
+        Ok(Self {
+            base_path: context.get("basePath")?,
+            pref_path: context.get("prefPath")?,
+            preferred_locales: context.get("preferredLocales")?,
+            module_name: context.get("moduleName")?,
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct OpenHarmonyAppInner {
     pub(crate) raw_window: Option<RawWindow>,
@@ -88,6 +104,7 @@ pub struct OpenHarmonyAppInner {
     pub(crate) window_rect: Rect,
     pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
     pub(crate) init_context: AbilityInitContext,
+    pub(crate) resource_manager: Option<ResourceManager>,
 }
 
 impl PartialEq for OpenHarmonyAppInner {
@@ -144,6 +161,7 @@ impl OpenHarmonyAppInner {
             window_rect: Default::default(),
             avoid_areas: HashMap::new(),
             init_context: AbilityInitContext::default(),
+            resource_manager: None,
         }
     }
 
@@ -209,6 +227,14 @@ impl OpenHarmonyAppInner {
 
     pub fn set_init_context(&mut self, context: AbilityInitContext) {
         self.init_context = context;
+    }
+
+    pub fn resource_manager(&self) -> Option<ResourceManager> {
+        self.resource_manager.clone()
+    }
+
+    pub fn set_resource_manager(&mut self, resource_manager: Option<ResourceManager>) {
+        self.resource_manager = resource_manager;
     }
 
     pub fn exit(&self, code: i32) -> Result<()> {
@@ -330,6 +356,18 @@ impl OpenHarmonyApp {
 
     pub fn preferred_locales(&self) -> Option<String> {
         self.init_context().preferred_locales
+    }
+
+    pub fn resource_manager(&self) -> Option<ResourceManager> {
+        self.inner.read().unwrap().resource_manager()
+    }
+
+    #[doc(hidden)]
+    pub fn set_resource_manager(&self, resource_manager: Option<ResourceManager>) {
+        self.inner
+            .write()
+            .unwrap()
+            .set_resource_manager(resource_manager);
     }
 
     pub fn show_keyboard(&self) {

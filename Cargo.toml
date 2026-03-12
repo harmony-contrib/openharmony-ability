@@ -20,5 +20,6 @@ ohos-xcomponent-binding = { version = "0.2" }
 ohos-ime-binding = { version = "0.1" }
 ohos-web-binding = { version = "0.1" }
 ohos-display-binding = { version = "0.0.1" }
+ohos-resource-manager-binding = { version = "0.2" }
 
 http = { version = "1.1" }
