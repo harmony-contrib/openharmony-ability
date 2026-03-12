@@ -23,6 +23,7 @@ ohos-arkui-binding = { workspace = true, features = ["napi"] }
 ohos-xcomponent-binding = { workspace = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
+ohos-resource-manager-binding = { workspace = true }
 
 # for webview feature
 ohos-web-binding = { workspace = true, optional = true }

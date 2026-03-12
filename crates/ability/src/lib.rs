@@ -9,6 +9,7 @@ mod input;
 mod lifecycle;
 mod memory;
 mod render;
+mod resource;
 mod stage;
 mod waker;
 
@@ -26,6 +27,7 @@ pub use input::*;
 pub use lifecycle::*;
 pub use memory::*;
 pub use render::*;
+pub use resource::*;
 pub use stage::*;
 pub use waker::*;
 

@@ -347,6 +347,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "225be105b169f45a2bca86498988c1877568d82542c013b345d605eb915e48ae"
 
 [[package]]
+name = "ohos-resource-manager-binding"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33793d5fc06cf356b3d25aa6228785e62c9f2a0e913a2c285b1eb8efb7185b5e"
+dependencies = [
+ "napi-ohos",
+ "ohos-resource-manager-sys",
+]
+
+[[package]]
+name = "ohos-resource-manager-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97398d3f86b80279f062bd872e04be851fc9e0eb1dba4dcaabef872201517ff6"
+dependencies = [
+ "napi-sys-ohos",
+]
+
+[[package]]
 name = "ohos-web-binding"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -436,6 +455,7 @@ dependencies = [
  "ohos-arkui-binding",
  "ohos-display-binding",
  "ohos-ime-binding",
+ "ohos-resource-manager-binding",
  "ohos-web-binding",
  "ohos-xcomponent-binding",
 ]

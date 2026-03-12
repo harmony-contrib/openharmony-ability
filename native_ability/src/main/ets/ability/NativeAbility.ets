@@ -59,6 +59,7 @@ export class NativeAbility extends UIAbility {
       prefPath: context?.filesDir ?? "",
       preferredLocales: context?.config?.language ?? "",
       moduleName,
+      resourceManager: context?.resourceManager,
     };
   }
 

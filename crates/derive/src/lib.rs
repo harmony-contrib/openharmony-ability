@@ -151,9 +151,13 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[napi_derive_ohos::napi]
             pub fn init<'a>(
                 env: &'a napi_ohos::Env,
-                context: Option<openharmony_ability::AbilityInitContext>,
+                #[napi(ts_arg_type = "AbilityInitContext")]
+                context: Option<napi_ohos::bindgen_prelude::Object<'a>>,
             ) -> napi_ohos::Result<openharmony_ability::ApplicationLifecycle<'a>> {
-                (*APP).set_init_context(context.unwrap_or_default());
+                let init_context = openharmony_ability::AbilityInitContext::from_object(context.as_ref())?;
+                let resource_manager = openharmony_ability::ResourceManager::from_init_context(*env, context.as_ref())?;
+                (*APP).set_init_context(init_context);
+                (*APP).set_resource_manager(resource_manager);
                 let lifecycle_handle = openharmony_ability::create_lifecycle_handle(env, (*APP).clone())?;
                 #fn_name((*APP).clone());
                 Ok(lifecycle_handle)

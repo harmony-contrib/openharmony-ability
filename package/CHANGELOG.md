@@ -1,3 +1,7 @@
+# 0.4.0-beta.5
+- Add ResourceManager when init
+
+---
 # 0.4.0-beta.4
 - Fix onBackPress trigger logic
 

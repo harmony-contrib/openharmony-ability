@@ -1,4 +1,5 @@
 import { NodeContent } from "@kit.ArkUI";
+import resourceManager from "@ohos.resourceManager";
 
 export interface ApplicationLifecycle {
   environmentCallback: EnvironmentCallback;
@@ -66,6 +67,7 @@ export interface AbilityInitContext {
   prefPath?: string;
   preferredLocales?: string;
   moduleName?: string;
+  resourceManager?: resourceManager.ResourceManager;
 }
 
 export interface Module {
