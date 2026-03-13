@@ -23,10 +23,14 @@ use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
-    get_helper, get_main_thread_env, get_permission_request_tsfn, unknown_to_permission_promise,
-    AbilityError, AvoidArea, AvoidAreaType, Configuration, Event, OpenHarmonyWaker,
-    PermissionRequest, PermissionRequestCode, PermissionRequestOutput, Rect, ResourceManager,
-    WAKER,
+    get_helper, get_main_thread_env, get_permission_request_tsfn,
+    resource::{
+        resource_manager as global_resource_manager,
+        set_resource_manager as set_global_resource_manager,
+    },
+    unknown_to_permission_promise, AbilityError, AvoidArea, AvoidAreaType, Configuration, Event,
+    OpenHarmonyWaker, PermissionRequest, PermissionRequestCode, PermissionRequestOutput, Rect,
+    ResourceManager, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -104,7 +108,6 @@ pub struct OpenHarmonyAppInner {
     pub(crate) window_rect: Rect,
     pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
     pub(crate) init_context: AbilityInitContext,
-    pub(crate) resource_manager: Option<ResourceManager>,
 }
 
 impl PartialEq for OpenHarmonyAppInner {
@@ -161,7 +164,6 @@ impl OpenHarmonyAppInner {
             window_rect: Default::default(),
             avoid_areas: HashMap::new(),
             init_context: AbilityInitContext::default(),
-            resource_manager: None,
         }
     }
 
@@ -230,11 +232,11 @@ impl OpenHarmonyAppInner {
     }
 
     pub fn resource_manager(&self) -> Option<ResourceManager> {
-        self.resource_manager.clone()
+        global_resource_manager()
     }
 
     pub fn set_resource_manager(&mut self, resource_manager: Option<ResourceManager>) {
-        self.resource_manager = resource_manager;
+        set_global_resource_manager(resource_manager);
     }
 
     pub fn exit(&self, code: i32) -> Result<()> {
@@ -359,7 +361,7 @@ impl OpenHarmonyApp {
     }
 
     pub fn resource_manager(&self) -> Option<ResourceManager> {
-        self.inner.read().unwrap().resource_manager()
+        global_resource_manager()
     }
 
     #[doc(hidden)]

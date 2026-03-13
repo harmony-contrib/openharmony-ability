@@ -44,7 +44,7 @@ fn openharmony_app(app: OpenHarmonyApp) {
 
 ### Init Context
 
-The generated `init(context)` forwards ArkTS init data into native code. In the Rust runtime, you can read it through `app.init_context()`, `app.module_name()`, `app.base_path()`, `app.pref_path()`, and `app.preferred_locales()`. The Harmony `resourceManager` instance is initialized alongside the other init data and is available through `app.resource_manager()`.
+The generated `init(context)` forwards ArkTS init data into native code. In the Rust runtime, you can read it through `app.init_context()`, `app.module_name()`, `app.base_path()`, `app.pref_path()`, and `app.preferred_locales()`. The Harmony `resourceManager` instance is initialized alongside the other init data, stored globally, and is available through `openharmony_ability::resource_manager()` or `app.resource_manager()`.
 
 ### webview
 
