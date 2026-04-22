@@ -8,7 +8,7 @@ export interface JsWebviewStyle {
   x?: number | string;
   y?: number | string;
   backgroundColor?: string | Color;
-  visible?: boolean | string;
+  visible?: boolean;
 }
 
 export interface JsHelper {

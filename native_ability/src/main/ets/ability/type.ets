@@ -60,7 +60,7 @@ export interface WebViewInitData {
 export interface WebViewStyle {
   x?: number | string;
   y?: number | string;
-  visible?: boolean | string;
+  visible?: boolean;
   backgroundColor?: string | Color;
 }
 

@@ -1,19 +1,16 @@
 import { UIContext } from "@ohos.arkui.UIContext";
 import web_webview from "@ohos.web.webview";
 import { ComponentContent, NodeController, BuilderNode, FrameNode } from "@ohos.arkui.node";
-import hilog from "@ohos.hilog";
 import { randomString } from "../helper";
 import { OnDownloadStartResult } from "../ability/type";
 import { getCookies, JsHelper } from "./Utils";
 import { WebHeader } from "@kit.ArkUI";
 
-const TAG = "OHRSWebview";
-
 export interface WebviewStyle {
   x?: number | string;
   y?: number | string;
   backgroundColor?: string | Color;
-  visible?: boolean | string;
+  visible?: boolean;
 }
 
 export interface WebviewInitData {
@@ -40,34 +37,6 @@ interface WebviewNodeData extends WebviewInitData {
   didInitialLoad?: boolean;
 }
 
-function describeWebviewError(error: ESObject): string {
-  const message: string = Reflect.get(error, "message");
-  if (typeof message === "string" && message.length > 0) {
-    return message;
-  }
-
-  try {
-    return JSON.stringify(error);
-  } catch (_) {
-    return `${error}`;
-  }
-}
-
-function describeStyleValue(value?: number | string): string {
-  if (typeof value === "number" || typeof value === "string") {
-    return `${value}`;
-  }
-  return "undefined";
-}
-
-function describeWebviewStyle(style: WebviewStyle): string {
-  return `x=${describeStyleValue(style.x)}, y=${describeStyleValue(style.y)}, visible=${style.visible}, backgroundColor=${style.backgroundColor}`;
-}
-
-function logWebviewError(stage: string, detail: string) {
-  hilog.error(0x0000, TAG, `${stage}: ${detail}`);
-}
-
 @Builder
 function WebBuilder(data: WebviewNodeData) {
   // init with empty url and reload with loadUrl or loadData with onControllerAttach
@@ -79,11 +48,7 @@ function WebBuilder(data: WebviewNodeData) {
       y: data.style?.y ?? 0,
     })
     .backgroundColor(data?.style?.backgroundColor)
-    .visibility(
-      data?.style?.visible === false || data?.style?.visible === "hidden"
-        ? Visibility.Hidden
-        : Visibility.Visible,
-    )
+    .visibility(data?.style?.visible === false ? Visibility.Hidden : Visibility.Visible)
     .javaScriptAccess(data?.javascriptEnable)
     .mediaPlayGestureAccess(
       typeof data?.autoplay === "boolean" && data.autoplay === true ? false : true,
@@ -169,11 +134,7 @@ function EmbeddedWebBuilder(data: WebviewNodeData) {
   .width("100%")
   .height("100%")
   .clip(true)
-  .visibility(
-    data?.style?.visible === false || data?.style?.visible === "hidden"
-      ? Visibility.Hidden
-      : Visibility.Visible,
-  )
+  .visibility(data?.style?.visible === false ? Visibility.Hidden : Visibility.Visible)
   .hitTestBehavior(HitTestMode.Default);
 }
 
@@ -192,7 +153,6 @@ export interface EmbeddedWebviewHandle extends AddWebviewMethod {
 interface EmbeddedWebviewEntry {
   data: WebviewNodeData;
   content: ComponentContent<WebviewNodeData>;
-  controller: JsHelper;
 }
 
 function ensureWebviewNodeData(data: WebviewInitData): WebviewNodeData {
@@ -249,13 +209,7 @@ function setupDownloadDelegate(data: WebviewNodeData) {
     });
   }
 
-  try {
-    data.controller.setDownloadDelegate(download);
-  } catch (error) {
-    const detail = `setDownloadDelegate(${data.webTag}) failed: ${describeWebviewError(error)}`;
-    logWebviewError("webview/downloadDelegate", detail);
-    throw new Error(detail);
-  }
+  data.controller.setDownloadDelegate(download);
 }
 
 function buildJsHelper(controller: WebviewController): JsHelper {
@@ -266,88 +220,45 @@ function buildJsHelper(controller: WebviewController): JsHelper {
     return getCookies(url) as string;
   };
   const loadUrl = (url: string, header?: Record<string, string>) => {
-    try {
-      const headers = Object.keys((header || {}) as Record<string, string>).reduce(
-        (t, i) => {
-          if (!!header![i]) {
-            t.push({ headerKey: i, headerValue: header![i] });
-          }
-          return t;
-        },
-        [] as Array<WebHeader>,
-      );
-      controller.loadUrl(url, headers);
-    } catch (error) {
-      const detail = `loadUrl(${url}) failed: ${describeWebviewError(error)}`;
-      logWebviewError("loadUrl", detail);
-      throw new Error(detail);
-    }
+    const headers = Object.keys((header || {}) as Record<string, string>).reduce(
+      (t, i) => {
+        if (!!header![i]) {
+          t.push({ headerKey: i, headerValue: header![i] });
+        }
+        return t;
+      },
+      [] as Array<WebHeader>,
+    );
+    controller.loadUrl(url, headers);
   };
 
   const loadHtml = (html: string) => {
-    try {
-      controller.loadData(html, "text/html", "UTF-8", " ", " ");
-    } catch (error) {
-      const detail = `loadHtml failed: ${describeWebviewError(error)}`;
-      logWebviewError("loadHtml", detail);
-      throw new Error(detail);
-    }
+    controller.loadData(html, "text/html", "UTF-8", " ", " ");
   };
 
   const zoom = (scale: number) => {
-    try {
-      controller.zoom(scale);
-    } catch (error) {
-      const detail = `zoom(${scale}) failed: ${describeWebviewError(error)}`;
-      logWebviewError("zoom", detail);
-      throw new Error(detail);
-    }
+    controller.zoom(scale);
   };
 
   const refresh = () => {
-    try {
-      controller.refresh();
-    } catch (error) {
-      const detail = `refresh failed: ${describeWebviewError(error)}`;
-      logWebviewError("refresh", detail);
-      throw new Error(detail);
-    }
+    controller.refresh();
   };
 
   const requestFocus = () => {
-    try {
-      controller.requestFocus();
-    } catch (error) {
-      const detail = `requestFocus failed: ${describeWebviewError(error)}`;
-      logWebviewError("requestFocus", detail);
-      throw new Error(detail);
-    }
+    controller.requestFocus();
   };
 
   const clearAllBrowsingData = () => {
-    try {
-      web_webview.WebStorage.deleteAllData(true);
-      web_webview.WebDataBase.deleteHttpAuthCredentials();
-      controller.removeCache(true);
-      controller.clearHistory();
-    } catch (error) {
-      const detail = `clearAllBrowsingData failed: ${describeWebviewError(error)}`;
-      logWebviewError("clearAllBrowsingData", detail);
-      throw new Error(detail);
-    }
+    web_webview.WebStorage.deleteAllData(true);
+    web_webview.WebDataBase.deleteHttpAuthCredentials();
+    controller.removeCache(true);
+    controller.clearHistory();
   };
 
   const runJavaScript = (code: string, cb: (result?: string) => void) => {
-    controller
-      .runJavaScript(code)
-      .then((ret) => {
-        cb(ret);
-      })
-      .catch((error: ESObject) => {
-        const detail = `runJavaScript failed: ${describeWebviewError(error)}`;
-        logWebviewError("runJavaScript", detail);
-        throw new Error(detail);
-      });
+    controller.runJavaScript(code).then((ret) => {
+      cb(ret);
+    });
   };
 
   return {
@@ -382,13 +293,7 @@ export class RustWebviewNodeController extends NodeController {
     }
 
     entry.style = style;
-    try {
-      node.update(entry);
-    } catch (error) {
-      const detail = `updateWebviewStyle(${webTag}) failed: ${describeWebviewError(error)}; style={${describeWebviewStyle(style)}}`;
-      logWebviewError("overlay/update", detail);
-      throw new Error(detail);
-    }
+    node.update(entry);
   }
 
   private buildData(controller: WebviewController) {
@@ -410,26 +315,14 @@ export class RustWebviewNodeController extends NodeController {
     }
 
     const node = new BuilderNode<[WebviewNodeData]>(this.uiContext!);
-    try {
-      node.build(webViewWrap, prepared);
-    } catch (error) {
-      const detail = `addWebview(${webTag}) build failed: ${describeWebviewError(error)}`;
-      logWebviewError("overlay/build", detail);
-      throw new Error(detail);
-    }
+    node.build(webViewWrap, prepared);
 
     const controller = this.buildData(prepared.controller);
     setupDownloadDelegate(prepared);
     this.webviewEntries.set(webTag, prepared);
     this.webviewList.set(webTag, node);
 
-    try {
-      this.rootNode?.appendChild(node.getFrameNode());
-    } catch (error) {
-      const detail = `addWebview(${webTag}) append failed: ${describeWebviewError(error)}`;
-      logWebviewError("overlay/append", detail);
-      throw new Error(detail);
-    }
+    this.rootNode?.appendChild(node.getFrameNode());
 
     return {
       webTag,
@@ -446,17 +339,7 @@ export class RustWebviewNodeController extends NodeController {
     this.webviewEntries.delete(webTag);
     this.webviewList.delete(webTag);
 
-    try {
-      this.rootNode?.removeChild(node.getFrameNode());
-    } catch (error) {
-      const detail = `removeWebview(${webTag}) failed: ${describeWebviewError(error)}`;
-      logWebviewError("overlay/remove", detail);
-      throw new Error(detail);
-    }
-  }
-
-  getWebviewNode(webTag: string) {
-    return this.webviewList.get(webTag);
+    this.rootNode?.removeChild(node.getFrameNode());
   }
 }
 
@@ -479,19 +362,12 @@ export class EmbeddedWebviewManager {
       prepared,
     );
 
-    try {
-      content.update(prepared);
-    } catch (error) {
-      const detail = `createEmbeddedWebview(${webTag}) build failed: ${describeWebviewError(error)}`;
-      logWebviewError("embedded/build", detail);
-      throw new Error(detail);
-    }
+    content.update(prepared);
 
     const controller = buildJsHelper(prepared.controller);
     this.entries.set(webTag, {
       data: prepared,
       content,
-      controller,
     });
 
     return {
@@ -508,13 +384,7 @@ export class EmbeddedWebviewManager {
     }
 
     entry.data.style = style;
-    try {
-      entry.content.update(entry.data);
-    } catch (error) {
-      const detail = `updateEmbeddedWebviewStyle(${webTag}) failed: ${describeWebviewError(error)}; style={${describeWebviewStyle(style)}}`;
-      logWebviewError("embedded/update", detail);
-      throw new Error(detail);
-    }
+    entry.content.update(entry.data);
   }
 
   removeWebview(webTag: string) {
@@ -524,20 +394,13 @@ export class EmbeddedWebviewManager {
     }
 
     this.entries.delete(webTag);
-    try {
-      entry.content.dispose();
-    } catch (error) {
-      const detail = `disposeEmbeddedWebview(${webTag}) failed: ${describeWebviewError(error)}`;
-      logWebviewError("embedded/dispose", detail);
-      throw new Error(detail);
-    }
+    entry.content.dispose();
   }
 }
 
 // extend WebviewController method
 declare class WebviewController extends web_webview.WebviewController {
   getCookies: (url: string) => string;
-  setStyle: (style: WebviewStyle) => void;
   setBackgroundColor: (color: string) => void;
   setVisible: (visible: boolean) => void;
   dispose: () => void;
