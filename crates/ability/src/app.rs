@@ -541,7 +541,7 @@ impl OpenHarmonyApp {
 
         Ok(requested_permissions
             .into_iter()
-            .zip(codes.into_iter())
+            .zip(codes)
             .map(|(permission, code)| PermissionRequestCode { permission, code })
             .collect())
     }
