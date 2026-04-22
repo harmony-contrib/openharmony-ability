@@ -4,12 +4,13 @@ import {
   WebViewInitData as NativeWebViewInitData,
   WindowAvoidAreaInfo,
 } from "../ability/type";
-import { exit } from "../helper";
+import { exit, objectAssign } from "../helper";
 import { Loadable } from "../helper/loadable";
 import { requestPermission } from "../helper/permission";
 import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import {
+  EmbeddedWebviewManager,
   RustWebviewNodeController,
   WebviewStyle,
   WebviewInitData,
@@ -21,6 +22,7 @@ export struct DefaultXComponent {
   moduleName: string = "";
   private rootSlot = new NodeContent();
   private webviewController = new RustWebviewNodeController(this.getUIContext());
+  private embeddedWebviewManager = new EmbeddedWebviewManager(this.getUIContext());
   private nativeModule: ESObject;
   private helper: ArkHelper = {
     exit,
@@ -66,24 +68,81 @@ export struct DefaultXComponent {
         onTitleChange: data?.onTitleChange,
       } as WebviewInitData;
 
-      if (data?.transparent && !init.style?.backgroundColor) {
-        init.style!.backgroundColor = Color.Transparent;
+      init.style = init.style || {};
+
+      if (data?.transparent && !init.style.backgroundColor) {
+        init.style.backgroundColor = Color.Transparent;
       }
       const ret = this.webviewController.addWebview(init);
+      const applyStyle = (style: WebviewStyle) => {
+        objectAssign(init.style as Record<string, ESObject>, style);
+        this.webviewController.updateWebviewStyle(ret.webTag, init.style as WebviewStyle);
+      };
 
       ret.controller.setBackgroundColor = (color: string) => {
-        init.style!.backgroundColor = color;
-        const node = this.webviewController.getWebviewNode(ret.webTag);
-        node?.update(init);
+        applyStyle({ backgroundColor: color });
       };
 
       ret.controller.setVisible = (visible: boolean) => {
-        init.style!.visible = visible ? "visible" : "hidden";
-        const node = this.webviewController.getWebviewNode(ret.webTag);
-        node?.update(init);
+        applyStyle({ visible });
+      };
+
+      ret.controller.dispose = () => {
+        this.webviewController.removeWebview(ret.webTag);
       };
 
       return ret.controller;
+    },
+    createEmbeddedWebview: (data: NativeWebViewInitData) => {
+      const initScripts: ScriptItem[] = (data?.initializationScripts || []).map((i) => {
+        return {
+          script: i,
+          scriptRules: ["*"],
+        } as ScriptItem;
+      });
+      const init: WebviewInitData = {
+        webTag: data?.id,
+        url: data?.url,
+        html: data?.html,
+        headers: data?.headers,
+        style: (data.style || {}) as WebviewStyle,
+        javascriptEnable: data?.javascriptEnable ?? true,
+        userAgent: data?.userAgent,
+        devtools: data?.devtools,
+        autoplay: data?.autoplay,
+        initializationScripts: initScripts,
+        onDragAndDrop: data?.onDragAndDrop,
+        onDownloadStart: data?.onDownloadStart,
+        onDownloadEnd: data?.onDownloadEnd,
+        onNavigationRequest: data?.onNavigationRequest,
+        onTitleChange: data?.onTitleChange,
+      } as WebviewInitData;
+
+      init.style = init.style || {};
+
+      if (data?.transparent && !init.style.backgroundColor) {
+        init.style.backgroundColor = Color.Transparent;
+      }
+
+      const ret = this.embeddedWebviewManager.createWebview(init);
+      const applyStyle = (style: WebviewStyle) => {
+        objectAssign(init.style as Record<string, ESObject>, style);
+        this.embeddedWebviewManager.updateWebviewStyle(ret.webTag, init.style as WebviewStyle);
+      };
+
+      ret.controller.setBackgroundColor = (color: string) => {
+        applyStyle({ backgroundColor: color });
+      };
+
+      ret.controller.setVisible = (visible: boolean) => {
+        applyStyle({ visible });
+      };
+
+      ret.controller.dispose = () => {
+        this.embeddedWebviewManager.removeWebview(ret.webTag);
+      };
+
+      return ret;
     },
   };
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";

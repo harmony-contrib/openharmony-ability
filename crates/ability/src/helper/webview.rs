@@ -261,6 +261,19 @@ impl Webview {
         }
     }
 
+    pub fn dispose(&self) -> Result<()> {
+        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+            let dispose_js_function = self
+                .inner
+                .get_value(env)?
+                .get_named_property::<Function<'_, (), ()>>("dispose")?;
+            dispose_js_function.call(())?;
+            Ok(())
+        } else {
+            Err(Error::from_reason("Failed to get main thread env"))
+        }
+    }
+
     pub fn clear_all_browsing_data(&self) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let clear_all_browsing_data_js_function = self
