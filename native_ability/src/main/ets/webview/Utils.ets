@@ -4,6 +4,13 @@ export const getCookies = (url: string): string => {
   return webview.WebCookieManager.fetchCookieSync(url);
 };
 
+export interface JsWebviewStyle {
+  x?: number | string;
+  y?: number | string;
+  backgroundColor?: string | Color;
+  visible?: boolean | string;
+}
+
 export interface JsHelper {
   getCookies: (url: string) => string;
   getUrl: () => string;
@@ -15,5 +22,6 @@ export interface JsHelper {
   runJavaScript: (code: string, callback: (result?: string) => void) => void;
   setBackgroundColor: (color: string) => void;
   setVisible: (visible: boolean) => void;
+  dispose: () => void;
   clearAllBrowsingData: () => void;
 }

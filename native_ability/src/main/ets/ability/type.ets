@@ -60,6 +60,8 @@ export interface WebViewInitData {
 export interface WebViewStyle {
   x?: number | string;
   y?: number | string;
+  visible?: boolean | string;
+  backgroundColor?: string | Color;
 }
 
 export interface AbilityInitContext {
@@ -79,6 +81,7 @@ export interface Module {
 export interface ArkHelper {
   exit: (code: number) => void;
   createWebview: (data: WebViewInitData) => Object;
+  createEmbeddedWebview: (data: WebViewInitData) => Object;
   requestPermission: (permission: string | string[]) => Promise<number | number[]>;
   getWindowAvoidArea: (type: number) => WindowAvoidAreaInfo | undefined;
 }
