@@ -1,3 +1,7 @@
+# 0.4.0-beta.6
+- Support embedded webview
+
+---
 # 0.4.0-beta.5
 - Add ResourceManager when init
 
