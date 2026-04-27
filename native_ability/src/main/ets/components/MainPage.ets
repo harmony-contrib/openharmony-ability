@@ -22,6 +22,9 @@ struct Index {
   }
 
   onBackPress(): boolean {
+    if (typeof this.nativeModule?.onBackPressIntercept === "function") {
+      return this.nativeModule.onBackPressIntercept();
+    }
     if (typeof this.nativeModule?.on_back_press_intercept === "function") {
       return this.nativeModule.on_back_press_intercept();
     }
