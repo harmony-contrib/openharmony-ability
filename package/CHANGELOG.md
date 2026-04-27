@@ -1,3 +1,7 @@
+# 0.4.0-beta.7
+- Fix onBackPressIntercept ran failed.
+
+---
 # 0.4.0-beta.6
 - Support embedded webview
 
