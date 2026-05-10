@@ -130,7 +130,17 @@ pub fn render(
     });
 
     let on_touch_event_app = app.clone();
-    xcomponent.on_touch_event(move |_, _, data| {
+    xcomponent.on_touch_event(move |xc, win, mut data| {
+        if let Ok(offset) = xc.offset(win) {
+            data.x = data.screen_x - offset.x as f32;
+            data.y = data.screen_y - offset.y as f32;
+
+            for touch_point in data.touch_points.iter_mut() {
+                touch_point.x = touch_point.screen_x - offset.x as f32;
+                touch_point.y = touch_point.screen_y - offset.y as f32;
+            }
+        }
+
         if let Some(ref mut h) = *on_touch_event_app.event_loop.borrow_mut() {
             h(Event::Input(InputEvent::TouchEvent(data)))
         }
