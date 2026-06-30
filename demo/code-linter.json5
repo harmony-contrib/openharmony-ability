@@ -1,7 +1,5 @@
 {
-  "files": [
-    "**/*.ets"
-  ],
+  "files": ["**/*.ets"],
   "ignore": [
     "**/src/ohosTest/**/*",
     "**/src/test/**/*",
@@ -9,11 +7,8 @@
     "**/node_modules/**/*",
     "**/oh_modules/**/*",
     "**/build/**/*",
-    "**/.preview/**/*"
+    "**/.preview/**/*",
   ],
-  "ruleSet": [
-    "plugin:@performance/recommended",
-    "plugin:@typescript-eslint/recommended"
-  ],
-  "rules": {}
+  "ruleSet": ["plugin:@performance/recommended", "plugin:@typescript-eslint/recommended"],
+  "rules": {},
 }

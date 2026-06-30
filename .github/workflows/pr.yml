@@ -1,4 +1,4 @@
-name: PR Check
+name: Format & Lint
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  mention:
+  Lint:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
@@ -31,17 +31,20 @@ jobs:
           components: "clippy"
           target: "aarch64-unknown-linux-ohos,armv7-unknown-linux-ohos,x86_64-unknown-linux-ohos"
 
-      - name: Install oxk
-        uses: baptiste0928/cargo-install@v3
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
-          crate: oxk
-          git: https://github.com/ohos-rs/oxc-ark.git
-          commit: 5d9c63dfc2c5f6aa3c2b46fdd2ccddc9fa508a59
+          version: 10.22.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Check
-        run: |
-          oxk format "**/*.{ets,js,ts,json5}"
-          cargo fmt --check
-          cargo clippy --workspace --exclude webview_example --exclude xcomponent_example --target aarch64-unknown-linux-ohos --all-targets --all-features -- -D warnings
-          cargo clippy --workspace --exclude webview_example --exclude xcomponent_example --target armv7-unknown-linux-ohos --all-targets --all-features -- -D warnings
-          cargo clippy --workspace --exclude webview_example --exclude xcomponent_example --target x86_64-unknown-linux-ohos --all-targets --all-features -- -D warnings
+        run: pnpm check

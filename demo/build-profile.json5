@@ -9,20 +9,20 @@
         "buildOption": {
           "strictMode": {
             "caseSensitiveCheck": true,
-            "useNormalizedOHMUrl": true
-          }
-        }
-      }
+            "useNormalizedOHMUrl": true,
+          },
+        },
+      },
     ],
     "buildModeSet": [
       {
-        "name": "debug"
+        "name": "debug",
       },
       {
-        "name": "release"
-      }
+        "name": "release",
+      },
     ],
-    "signingConfigs": []
+    "signingConfigs": [],
   },
   "modules": [
     {
@@ -31,15 +31,13 @@
       "targets": [
         {
           "name": "default",
-          "applyToProducts": [
-            "default"
-          ]
-        }
-      ]
+          "applyToProducts": ["default"],
+        },
+      ],
     },
     {
       "name": "native_ability",
-      "srcPath": "../native_ability"
-    }
-  ]
+      "srcPath": "../native_ability",
+    },
+  ],
 }

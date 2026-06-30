@@ -2,12 +2,8 @@
   "module": {
     "name": "native_ability_test",
     "type": "feature",
-    "deviceTypes": [
-      "default",
-      "tablet",
-      "2in1"
-    ],
+    "deviceTypes": ["default", "tablet", "2in1"],
     "deliveryWithInstall": true,
-    "installationFree": false
-  }
+    "installationFree": false,
+  },
 }

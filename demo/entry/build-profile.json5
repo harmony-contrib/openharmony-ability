@@ -4,8 +4,8 @@
     "externalNativeOptions": {
       "path": "./src/main/cpp/CMakeLists.txt",
       "arguments": "",
-      "cppFlags": ""
-    }
+      "cppFlags": "",
+    },
   },
   "buildOptionSet": [
     {
@@ -14,26 +14,24 @@
         "obfuscation": {
           "ruleOptions": {
             "enable": false,
-            "files": [
-              "./obfuscation-rules.txt"
-            ]
-          }
-        }
+            "files": ["./obfuscation-rules.txt"],
+          },
+        },
       },
       "nativeLib": {
         "debugSymbol": {
           "strip": true,
-          "exclude": []
-        }
-      }
-    }
+          "exclude": [],
+        },
+      },
+    },
   ],
   "targets": [
     {
-      "name": "default"
+      "name": "default",
     },
     {
-      "name": "ohosTest"
-    }
-  ]
+      "name": "ohosTest",
+    },
+  ],
 }

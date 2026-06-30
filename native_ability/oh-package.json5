@@ -6,6 +6,6 @@
   "author": "richerfu",
   "license": "Apache-2.0",
   "dependencies": {
-    "libnative_ability.so": "file:./src/main/cpp/types/libnative_ability"
-  }
+    "libnative_ability.so": "file:./src/main/cpp/types/libnative_ability",
+  },
 }
