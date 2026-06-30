@@ -1,0 +1,7 @@
+#:schema https://www.schemastore.org/prek.json
+
+[[repos]]
+repo = "local"
+hooks = [
+  { id = "format-check", name = "format and verify diff", entry = "pnpm format:check", language = "system", pass_filenames = false },
+]
