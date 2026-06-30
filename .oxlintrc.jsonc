@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/@ohos-rs/oxk/configuration_schema.json",
+  "plugins": ["unicorn", "typescript", "oxc", "arkts"],
+  "rules": {
+    "arkts/system-api-version": [
+      "error",
+      {
+        "minApiVersion": 12
+      }
+    ]
+  }
+}

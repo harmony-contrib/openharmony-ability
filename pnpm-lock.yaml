@@ -12,8 +12,8 @@ importers:
         specifier: ^0.4.5
         version: 0.4.5
       '@ohos-rs/oxk':
-        specifier: ^0.7.0
-        version: 0.7.0(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
+        specifier: ^0.7.1
+        version: 0.7.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
 
 packages:
 
@@ -139,91 +139,91 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@ohos-rs/oxk-android-arm-eabi@0.7.0':
-    resolution: {integrity: sha512-xa2z/NQsuZWhqMGAy36aBdu5E8WfimWZKtg91Y11FeVXtAuhgSV+ouF6auQVvBbJib/QXh6P++mufnznnWqR+Q==}
+  '@ohos-rs/oxk-android-arm-eabi@0.7.1':
+    resolution: {integrity: sha512-3dW7EZjkP8Kj7NqX2pkaAdMO4A37l1LhyAs5cstkZ7nVVrVPrJd8QtgmmNOLZYP+T6oRGYaIu1YtaTS4dIRpRg==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [arm]
     os: [android]
 
-  '@ohos-rs/oxk-android-arm64@0.7.0':
-    resolution: {integrity: sha512-lPZCA+Yr+1yW/RtUhiLhkwAmeV5cYFxRqnmr/A8aw0dqjo1i7gkIR7n3duBNERqhBh/0UUw0cRU52GhOthmleg==}
+  '@ohos-rs/oxk-android-arm64@0.7.1':
+    resolution: {integrity: sha512-nWDo2AVxb9RxbecLxeGcUmkrWJPRok7Iua4DdmDKl4Se/3Wk+N5yA3dbikG82Q6Ip06aPm3dnXsoPxeUfZgIKA==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [arm64]
     os: [android]
 
-  '@ohos-rs/oxk-darwin-arm64@0.7.0':
-    resolution: {integrity: sha512-lb4aiXdNSDc4H4omwVSItKeSLqTCvsCO6nS1aiOyOFeeR3BqD+eoQV+AKcP3iaYr6AiYTEaXHP1rPpl8bDk2xA==}
+  '@ohos-rs/oxk-darwin-arm64@0.7.1':
+    resolution: {integrity: sha512-vhKbrZ6dMIi25blPNvoPwtARXK1S46ZIRmtrJFT7Vd4AP3uzMW6Fp21PmP24YrKPUhMLo9gbX4VL8eGVmd1Pnw==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [arm64]
     os: [darwin]
 
-  '@ohos-rs/oxk-darwin-x64@0.7.0':
-    resolution: {integrity: sha512-nhCB8sbvOLHEkn2IgtgntmiILvKFpXbZkb9fXdBvmaqWwh9ZzS34646lmS9CCZpLnl6lwG7kMFPgpI5IR1XmIw==}
+  '@ohos-rs/oxk-darwin-x64@0.7.1':
+    resolution: {integrity: sha512-ZI+nr6NNnlmmyOd3MVBVLfE979V+iZ6ydOGMl9GvNOpwwC1pmGICMCikuX7ORMXB1+KJHT3saLLDFuekCsS75Q==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [x64]
     os: [darwin]
 
-  '@ohos-rs/oxk-freebsd-x64@0.7.0':
-    resolution: {integrity: sha512-+VuU2+doQ/ZL63v+/ZAgugU/OEhsPXbVz1PQeMrpd2WJm1VETQH2DuxjlFKAyVQzKYzoucqmg9tcKi+BMcma5g==}
+  '@ohos-rs/oxk-freebsd-x64@0.7.1':
+    resolution: {integrity: sha512-QAQqTi0NWGu+UJLjunJjjmIgJmCyquukeIiR9UZLymHR4lMFVXq7kcCnQ8m41hAQrsNIfM6veW2dW5FE1Zy2jg==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [x64]
     os: [freebsd]
 
-  '@ohos-rs/oxk-linux-arm-gnueabihf@0.7.0':
-    resolution: {integrity: sha512-RKB5XEu/QNIC3pWyxHHqEiJ8f1KBI1zyjEUMqtyMDJkkhUTSIBto4c6tZ1pAY4/R1jOkSbZaK3Qquvwww1SWAw==}
+  '@ohos-rs/oxk-linux-arm-gnueabihf@0.7.1':
+    resolution: {integrity: sha512-BKDejnOm+VO7in7oMvKWGx2XmCjxfWY8EAwS7T98lBzm4473lwL6B0sa0zKusBYwBVQ/gIBbGL2C4a8GaCQ2ag==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [arm]
     os: [linux]
 
-  '@ohos-rs/oxk-linux-arm64-gnu@0.7.0':
-    resolution: {integrity: sha512-BDi0M/9sSqlW/XAmt7Rs1ztIT3LQOXBOZaRFcFFZg5xU3HMuYCGpQ+O6HCQEgtQn5v0YQTMVYRgca/uul7yQ7g==}
+  '@ohos-rs/oxk-linux-arm64-gnu@0.7.1':
+    resolution: {integrity: sha512-dCzyYvbkzDgn0eKeMKSjPGoY8JFvNDBxzvJEzAMp0KU3O9ShVZCEQ53HtjWOZ1KSZnnfKXGM0vJ3WvkpvaulLA==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [arm64]
     os: [linux]
 
-  '@ohos-rs/oxk-linux-arm64-musl@0.7.0':
-    resolution: {integrity: sha512-q/5vN5rPOqwUNC3bpvB16Ew8Lgbdmocu/JBfZ7AmpcL9mxZMSrUlyziUsxnJuTW63lfwkMcl4ghZCEFw266HeA==}
+  '@ohos-rs/oxk-linux-arm64-musl@0.7.1':
+    resolution: {integrity: sha512-R7b4ojhzpZ3EBUqb8hvIlFKVahBfDabdzTXF3Y0htQoi7AlG9OB9jk+IJF/5xzHZSFle6HZUmPuQp/gM1DfzAQ==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [arm64]
     os: [linux]
 
-  '@ohos-rs/oxk-linux-x64-gnu@0.7.0':
-    resolution: {integrity: sha512-OhtbBje9JHAqrIgmDC2/5OxHeiAJD/h58aa3QTDZhFnqZLIteMGQWykrJ4bEcSMp/samTFGVBdjsjPp7oKGl9w==}
+  '@ohos-rs/oxk-linux-x64-gnu@0.7.1':
+    resolution: {integrity: sha512-lVIeJjhqdM/B7hCgUnAQR1gTxocPhoXi2TglHMoUpti1TR1Cbm00dKA6MePmKbkWecP8+QRm73y4dEt3zQ79dw==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [x64]
     os: [linux]
 
-  '@ohos-rs/oxk-linux-x64-musl@0.7.0':
-    resolution: {integrity: sha512-BSX0MJVThPY2YDOArbXaY1T3VoXy0eb/cad0EnlNyroT4iIbO2At5MToPfxn+aTCz7E/rb/tDSUVq+ubTgA2SA==}
+  '@ohos-rs/oxk-linux-x64-musl@0.7.1':
+    resolution: {integrity: sha512-Pbay1zz8ITb7PdcgVtity8UinbH3nZW7iEzuJWKiHQsjRAQzWrvghurBOxRo2crXTKUSKUBKsmKXFE2XYGc71g==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [x64]
     os: [linux]
 
-  '@ohos-rs/oxk-wasm32-wasi@0.7.0':
-    resolution: {integrity: sha512-inS54pqDQokx3rwWvE0DZnXpghK5C65fnHYwUbOhhYHgoRUL59ElOddx1Xgua5bQHVMeJ/8keHfThI6uyvTqdA==}
+  '@ohos-rs/oxk-wasm32-wasi@0.7.1':
+    resolution: {integrity: sha512-cKrl9rqYxe2en1EpEVPOFEO7A2go+xi3cbKcck2t9dUGYwIAT+9t2iEDLdcdtioyjgD/ljTUv41athk+h3O4og==}
     engines: {node: '>=14.0.0'}
     cpu: [wasm32]
 
-  '@ohos-rs/oxk-win32-arm64-msvc@0.7.0':
-    resolution: {integrity: sha512-Q2tgG5JUuv+wjEu17/kS8pFKaXw14f8AXoyCOe+50usxPXAdIgEOKOVIgc5uPvZkILeyIhTMbHPAFNKlDWVy0A==}
+  '@ohos-rs/oxk-win32-arm64-msvc@0.7.1':
+    resolution: {integrity: sha512-nSGWi+pC6Col7ZAWL2DiSGADItNVbTx12FbxK5mw6BfhOqRu+a2vrJhWtCSSMG7S81dkrejZI2aRCizjJ/+BSA==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [arm64]
     os: [win32]
 
-  '@ohos-rs/oxk-win32-ia32-msvc@0.7.0':
-    resolution: {integrity: sha512-du0b+ZvRGeUS7DOVNmqtFS8XAiIxjg7V2kih8pWI0VDxjyD2KcUoL8DW/Dp7COzBeejKh427jFL3bqilpjqx6A==}
+  '@ohos-rs/oxk-win32-ia32-msvc@0.7.1':
+    resolution: {integrity: sha512-0siWZIgJUrV+HMGzZ+k2vZ/BP/8PNMxoPVG6J1mrpZ635drikzBxnT4c2GIYO2wVR3UnwHTOh9nnzuevSx5zUA==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [ia32]
     os: [win32]
 
-  '@ohos-rs/oxk-win32-x64-msvc@0.7.0':
-    resolution: {integrity: sha512-6aXoE94fV57+zRaOkV4t65Cq3Njiw51gxUv7gHepFmxsWZHaO2eRfc4Gxl6GBqn9VZhDJICB4SMhCJ/ubwLlzQ==}
+  '@ohos-rs/oxk-win32-x64-msvc@0.7.1':
+    resolution: {integrity: sha512-g17eeZUfK8tM3ASwGdCKRIqfdEKfo0mObfrCkW+oH0PT3+hvDdVtwmUXBUUpixvW78DiAPJynaLD5P1FwhKMRw==}
     engines: {node: ^20.19.0 || >=22.18.0}
     cpu: [x64]
     os: [win32]
 
-  '@ohos-rs/oxk@0.7.0':
-    resolution: {integrity: sha512-tCpZwQGRb4qpNszihNPS0UJy2ebK+LVDfphX8PZ4JgVjiHanswhEBrqPqevaQtXjP26lGMuiWzJrlLO7zh30Bw==}
+  '@ohos-rs/oxk@0.7.1':
+    resolution: {integrity: sha512-TLOAa2PRVysnoC7sTyHl24VlTMY6i0bOc4a9ddnQaSWYgenewu5qaCVHq6VePv7f8KVyhSErpCsijpe+mWT6kQ==}
     engines: {node: ^20.19.0 || >=22.18.0}
     hasBin: true
     peerDependencies:
@@ -339,37 +339,37 @@ snapshots:
       '@tybys/wasm-util': 0.10.3
     optional: true
 
-  '@ohos-rs/oxk-android-arm-eabi@0.7.0':
+  '@ohos-rs/oxk-android-arm-eabi@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-android-arm64@0.7.0':
+  '@ohos-rs/oxk-android-arm64@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-darwin-arm64@0.7.0':
+  '@ohos-rs/oxk-darwin-arm64@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-darwin-x64@0.7.0':
+  '@ohos-rs/oxk-darwin-x64@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-freebsd-x64@0.7.0':
+  '@ohos-rs/oxk-freebsd-x64@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-linux-arm-gnueabihf@0.7.0':
+  '@ohos-rs/oxk-linux-arm-gnueabihf@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-linux-arm64-gnu@0.7.0':
+  '@ohos-rs/oxk-linux-arm64-gnu@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-linux-arm64-musl@0.7.0':
+  '@ohos-rs/oxk-linux-arm64-musl@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-linux-x64-gnu@0.7.0':
+  '@ohos-rs/oxk-linux-x64-gnu@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-linux-x64-musl@0.7.0':
+  '@ohos-rs/oxk-linux-x64-musl@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-wasm32-wasi@0.7.0(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
+  '@ohos-rs/oxk-wasm32-wasi@0.7.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:
       '@napi-rs/wasm-runtime': 1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
     transitivePeerDependencies:
@@ -377,33 +377,33 @@ snapshots:
       - '@emnapi/runtime'
     optional: true
 
-  '@ohos-rs/oxk-win32-arm64-msvc@0.7.0':
+  '@ohos-rs/oxk-win32-arm64-msvc@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-win32-ia32-msvc@0.7.0':
+  '@ohos-rs/oxk-win32-ia32-msvc@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk-win32-x64-msvc@0.7.0':
+  '@ohos-rs/oxk-win32-x64-msvc@0.7.1':
     optional: true
 
-  '@ohos-rs/oxk@0.7.0(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
+  '@ohos-rs/oxk@0.7.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:
       prettier: 3.9.4
     optionalDependencies:
-      '@ohos-rs/oxk-android-arm-eabi': 0.7.0
-      '@ohos-rs/oxk-android-arm64': 0.7.0
-      '@ohos-rs/oxk-darwin-arm64': 0.7.0
-      '@ohos-rs/oxk-darwin-x64': 0.7.0
-      '@ohos-rs/oxk-freebsd-x64': 0.7.0
-      '@ohos-rs/oxk-linux-arm-gnueabihf': 0.7.0
-      '@ohos-rs/oxk-linux-arm64-gnu': 0.7.0
-      '@ohos-rs/oxk-linux-arm64-musl': 0.7.0
-      '@ohos-rs/oxk-linux-x64-gnu': 0.7.0
-      '@ohos-rs/oxk-linux-x64-musl': 0.7.0
-      '@ohos-rs/oxk-wasm32-wasi': 0.7.0(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
-      '@ohos-rs/oxk-win32-arm64-msvc': 0.7.0
-      '@ohos-rs/oxk-win32-ia32-msvc': 0.7.0
-      '@ohos-rs/oxk-win32-x64-msvc': 0.7.0
+      '@ohos-rs/oxk-android-arm-eabi': 0.7.1
+      '@ohos-rs/oxk-android-arm64': 0.7.1
+      '@ohos-rs/oxk-darwin-arm64': 0.7.1
+      '@ohos-rs/oxk-darwin-x64': 0.7.1
+      '@ohos-rs/oxk-freebsd-x64': 0.7.1
+      '@ohos-rs/oxk-linux-arm-gnueabihf': 0.7.1
+      '@ohos-rs/oxk-linux-arm64-gnu': 0.7.1
+      '@ohos-rs/oxk-linux-arm64-musl': 0.7.1
+      '@ohos-rs/oxk-linux-x64-gnu': 0.7.1
+      '@ohos-rs/oxk-linux-x64-musl': 0.7.1
+      '@ohos-rs/oxk-wasm32-wasi': 0.7.1(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
+      '@ohos-rs/oxk-win32-arm64-msvc': 0.7.1
+      '@ohos-rs/oxk-win32-ia32-msvc': 0.7.1
+      '@ohos-rs/oxk-win32-x64-msvc': 0.7.1
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'

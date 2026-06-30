@@ -2,10 +2,13 @@
   "private": true,
   "packageManager": "pnpm@10.22.0",
   "scripts": {
+    "check": "pnpm run format:check && pnpm run lint",
     "format": "pnpm run format:rs && pnpm run format:oxk",
     "format:rs": "cargo fmt --all",
     "format:oxk": "oxk format \"**/*.{ets,js,ts,json5}\" -t=10",
     "format:check": "sh scripts/format-check.sh",
+    "lint": "pnpm run lint:oxk",
+    "lint:oxk": "oxk lint --config .oxlintrc.jsonc . --threads=10",
     "prek": "prek run",
     "pre-commit": "prek run",
     "prek:all": "prek run --all-files",
@@ -13,6 +16,6 @@
   },
   "devDependencies": {
     "@j178/prek": "^0.4.5",
-    "@ohos-rs/oxk": "^0.7.0"
+    "@ohos-rs/oxk": "^0.7.1"
   }
 }

@@ -3,5 +3,7 @@
 [[repos]]
 repo = "local"
 hooks = [
-  { id = "format-check", name = "format and verify diff", entry = "pnpm format:check", language = "system", pass_filenames = false },
+  { id = "rustfmt", name = "rustfmt", entry = "rustfmt", language = "system", files = "\\.rs$" },
+  { id = "oxk-format", name = "oxk format", entry = "oxk format -t=10", language = "system", files = "\\.(ets|js|ts|json5)$" },
+  { id = "oxk-lint", name = "oxk lint", entry = "oxk lint --config .oxlintrc.jsonc --threads=10", language = "system", files = "\\.(ets|js|ts)$" },
 ]
