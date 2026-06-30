@@ -12,7 +12,8 @@
     "prek": "prek run",
     "pre-commit": "prek run",
     "prek:all": "prek run --all-files",
-    "prepare": "prek install"
+    "prepare": "prek install",
+    "pack": "bash ./scripts/pack.sh"
   },
   "devDependencies": {
     "@j178/prek": "^0.4.5",
