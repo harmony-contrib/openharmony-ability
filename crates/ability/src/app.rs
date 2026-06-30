@@ -28,9 +28,9 @@ use crate::{
         resource_manager as global_resource_manager,
         set_resource_manager as set_global_resource_manager,
     },
-    unknown_to_permission_promise, AbilityError, AvoidArea, AvoidAreaType, Configuration, Event,
-    OpenHarmonyWaker, PermissionRequest, PermissionRequestCode, PermissionRequestOutput, Rect,
-    ResourceManager, WAKER,
+    unknown_to_permission_promise, AbilityError, AvoidArea, AvoidAreaType, ColorMode, Configuration,
+    Event, OpenHarmonyWaker, PermissionRequest, PermissionRequestCode, PermissionRequestOutput,
+    Rect, ResourceManager, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -78,6 +78,9 @@ pub struct AbilityInitContext {
     pub pref_path: Option<String>,
     pub preferred_locales: Option<String>,
     pub module_name: Option<String>,
+    pub sdk_api_version: Option<i32>,
+    #[napi(js_name = "distributionOSApiVersion")]
+    pub distribution_api_version: Option<i32>,
 }
 
 impl AbilityInitContext {
@@ -91,6 +94,8 @@ impl AbilityInitContext {
             pref_path: context.get("prefPath")?,
             preferred_locales: context.get("preferredLocales")?,
             module_name: context.get("moduleName")?,
+            sdk_api_version: context.get("sdkApiVersion")?,
+            distribution_api_version: context.get("distributionOSApiVersion")?,
         })
     }
 }
@@ -108,6 +113,8 @@ pub struct OpenHarmonyAppInner {
     pub(crate) window_rect: Rect,
     pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
     pub(crate) init_context: AbilityInitContext,
+    
+    
 }
 
 impl PartialEq for OpenHarmonyAppInner {
@@ -164,6 +171,7 @@ impl OpenHarmonyAppInner {
             window_rect: Default::default(),
             avoid_areas: HashMap::new(),
             init_context: AbilityInitContext::default(),
+            
         }
     }
 
@@ -250,6 +258,76 @@ impl OpenHarmonyAppInner {
             } else {
                 return Err(Error::from_reason(
                     AbilityError::OnlyRunWithMainThread("exit".to_string()).to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Restart the application by calling ArkTS helper `restart()` via TSFN.
+    ///
+    /// Uses a ThreadsafeFunction to dispatch the call to the main thread,
+    /// since tauri commands run on worker threads where `get_main_thread_env()`
+    /// returns None.
+    ///
+    /// Returns 0 on success, negative on failure.
+    pub fn restart(&self) -> Result<i32> {
+        let tsfn = crate::get_restart_tsfn()
+            .ok_or_else(|| Error::from_reason("RESTART_TSFN not initialized"))?;
+
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let status = tsfn.call_with_return_value(
+            (),
+            napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking,
+            move |result: std::result::Result<napi_ohos::bindgen_prelude::Unknown<'static>, napi_ohos::Error>, _env| {
+                let code = match result {
+                    Ok(unknown) => {
+                        if unknown.get_type().ok() == Some(napi_ohos::ValueType::Number) {
+                            unsafe { unknown.cast::<i32>().unwrap_or(-1) }
+                        } else {
+                            crate::error!("restart TSFN returned non-number type");
+                            -1
+                        }
+                    }
+                    Err(e) => {
+                        crate::error!("restart TSFN callback error: {}", e);
+                        -1
+                    }
+                };
+                let _ = tx.send(code);
+                Ok(())
+            },
+        );
+
+        if status != napi_ohos::Status::Ok {
+            return Err(Error::from_reason(format!(
+                "call restart TSFN failed: {:?}",
+                status
+            )));
+        }
+
+        rx.recv()
+            .map_err(|_| Error::from_reason("restart TSFN channel closed"))
+    }
+
+    /// Set app color mode (dark/light/system) by calling ArkTS helper `setColorMode(mode)`.
+    ///
+    /// Mode values match OHOS `ConfigurationConstant.ColorMode`:
+    /// - `-1` = COLOR_MODE_NOT_SET (follow system)
+    /// - `0` = COLOR_MODE_DARK
+    /// - `1` = COLOR_MODE_LIGHT
+    pub fn set_color_mode(&self, mode: ColorMode) -> Result<()> {
+        let ret = unsafe { get_helper() };
+        if let Some(h) = ret.borrow().as_ref() {
+            if let Some(env) = get_main_thread_env().borrow().as_ref() {
+                let ret = h.get_value(env)?;
+                let set_color_mode_fn =
+                    ret.get_named_property::<Function<'_, i32, ()>>("setColorMode")?;
+                set_color_mode_fn.call(mode as i32)?;
+            } else {
+                return Err(Error::from_reason(
+                    AbilityError::OnlyRunWithMainThread("set_color_mode".to_string()).to_string(),
                 ));
             }
         }
@@ -462,9 +540,32 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().scale()
     }
 
-    /// Exit current app with code
+/// Exit current app with code
     pub fn exit(&self, code: i32) {
         self.inner.read().unwrap().exit(code).unwrap();
+    }
+
+    /// Restart the application.
+    ///
+    /// This is a hard process kill — `onDestroy` is NOT triggered.
+    /// Requires the app to be in the foreground.
+    /// Has a 3-second cooldown between calls.
+    ///
+    /// Returns 0 on success, negative error code on failure.
+    pub fn restart(&self) -> Result<i32> {
+        self.inner.read().unwrap().restart()
+    }
+
+    /// Set app color mode (dark/light/system).
+    /// Delegates to ArkTS helper `setColorMode(mode)`.
+    pub fn set_color_mode(&self, mode: ColorMode) -> Result<()> {
+        self.inner.read().unwrap().set_color_mode(mode)
+    }
+
+    /// Get an updater handle for checking and installing updates via AppGallery.
+    #[cfg(feature = "updater")]
+    pub fn updater(&self) -> super::updater::Updater {
+        super::updater::Updater
     }
 
     /// Request one or more runtime permissions through ArkTS helper.
@@ -597,6 +698,51 @@ impl Default for OpenHarmonyApp {
 unsafe impl Send for OpenHarmonyApp {}
 unsafe impl Sync for OpenHarmonyApp {}
 
+#[napi]
+#[cfg(target_env = "ohos")]
+pub fn is_desktop_device() -> bool {
+    cfg!(desktop)
+}
+
+/// Global queue for pending window close requests from ArkTS.
+/// When ArkTS intercepts a close-window URL, it pushes the OHOS window ID here
+/// instead of directly destroying the window. The tauri-runtime-wry event loop
+/// drains this queue and processes closes through the proper Rust lifecycle
+/// (CloseRequested → Destroyed → WindowsStore cleanup).
+#[cfg(target_env = "ohos")]
+static PENDING_WINDOW_CLOSES: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+/// NAPI function called from ArkTS to request a window close.
+/// This queues the OHOS window ID for processing by the Rust event loop,
+/// ensuring proper lifecycle events (CloseRequested, Destroyed) are emitted.
+///
+/// Timing: ArkTS calls this synchronously before `destroyWindow()` (async).
+/// The Rust event loop drains the queue at the start of the next iteration,
+/// processing window IDs before the async OHOS destruction completes.
+/// The Rust side only uses the ID to look up the Tauri window in WindowsStore —
+/// it never accesses the OHOS window object directly, so destroyed windows are safe.
+#[napi]
+#[cfg(target_env = "ohos")]
+pub fn notify_window_close(window_id: i32) {
+    match PENDING_WINDOW_CLOSES.lock() {
+        Ok(mut queue) => queue.push(window_id),
+        Err(poisoned) => {
+            log::warn!("[OHOS] PENDING_WINDOW_CLOSES mutex poisoned, recovering. window_id={}", window_id);
+            poisoned.into_inner().push(window_id);
+        }
+    }
+}
+
+/// Drain all pending window close requests.
+/// Called by tauri-runtime-wry event loop to process queued closes.
+#[cfg(target_env = "ohos")]
+pub fn drain_pending_window_closes() -> Vec<i32> {
+    PENDING_WINDOW_CLOSES
+        .lock()
+        .map(|mut q| q.drain(..).collect())
+        .unwrap_or_default()
+}
+
 #[derive(Clone)]
 pub struct SaveSaver<'a> {
     pub(crate) app: &'a OpenHarmonyApp,
@@ -616,5 +762,66 @@ pub struct SaveLoader<'a> {
 impl<'a> SaveLoader<'a> {
     pub fn load(&self) -> Option<Vec<u8>> {
         self.app.load()
+    }
+}
+
+// --- want.parameters storage for single-instance plugin ---
+
+#[cfg(target_env = "ohos")]
+static WANT_PARAMETERS: Mutex<String> = Mutex::new(String::new());
+
+#[cfg(target_env = "ohos")]
+pub(crate) fn store_want_parameters(json: &str) {
+    match WANT_PARAMETERS.lock() {
+        Ok(mut params) => *params = json.to_string(),
+        Err(e) => crate::error!("WANT_PARAMETERS mutex poisoned in store: {}", e),
+    }
+}
+
+/// Returns the latest `want.parameters` JSON string from `onNewWant`, then clears it.
+///
+/// Returns an empty string if no parameters are pending or if the mutex is poisoned.
+///
+/// # Concurrency
+/// - `store` is called from the ArkTS main thread (via NAPI `on_new_want` closure)
+/// - `take` is called from the tauri event loop thread (via `RunEvent::Opened` handler)
+/// - Cross-thread safety is ensured by `Mutex<String>`
+/// - If `store` is called twice before `take`, the first value is overwritten
+#[cfg(target_env = "ohos")]
+pub fn take_want_parameters() -> String {
+    match WANT_PARAMETERS.lock() {
+        Ok(mut p) => std::mem::take(&mut *p),
+        Err(e) => {
+            crate::error!("WANT_PARAMETERS mutex poisoned in take: {}", e);
+            String::new()
+        }
+    }
+}
+
+/// Tests for WANT_PARAMETERS global static.
+/// Combined into a single #[test] to avoid parallel execution races on the shared static.
+#[cfg(test)]
+mod want_parameters_tests {
+    use super::*;
+
+    #[test]
+    fn test_want_parameters_store_take_overwrite() {
+        // 1. store and take
+        take_want_parameters(); // ensure clean state
+        store_want_parameters(r#"{"key":"value","num":42}"#);
+        assert_eq!(take_want_parameters(), r#"{"key":"value","num":42}"#);
+
+        // 2. take clears after read
+        store_want_parameters(r#"{"source":"widget"}"#);
+        assert_eq!(take_want_parameters(), r#"{"source":"widget"}"#);
+        assert_eq!(take_want_parameters(), "");
+
+        // 3. take without store returns empty
+        assert_eq!(take_want_parameters(), "");
+
+        // 4. overwrite: last store wins
+        store_want_parameters(r#"{"first":1}"#);
+        store_want_parameters(r#"{"second":2}"#);
+        assert_eq!(take_want_parameters(), r#"{"second":2}"#);
     }
 }

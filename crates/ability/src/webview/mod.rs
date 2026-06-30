@@ -6,12 +6,13 @@ use napi_ohos::{
     Error, Result,
 };
 
-use crate::helper::{DownloadStartResult, WebViewInitData, WebViewStyle, Webview};
+use crate::helper::{DownloadStartResult, OnWindowNewResult, WebViewInitData, WebViewStyle, Webview};
 
 mod drag;
 
 type OnDownloadStart = Box<dyn Fn(String, &mut PathBuf) -> bool>;
 type OnDownloadEnd = Box<dyn Fn(String, Option<PathBuf>, bool)>;
+type OnWindowNew = Box<dyn Fn(String, bool, bool) -> bool>;
 
 #[cfg(feature = "webview")]
 #[derive(Default)]
@@ -28,12 +29,16 @@ pub struct WebViewBuilder {
     pub transparent: Option<bool>,
 
     id: Option<String>,
+    window_id: Option<i64>,
     #[cfg(feature = "drag_and_drop")]
     on_drag_and_drop: Option<Box<dyn Fn(String)>>,
     on_download_start: Option<OnDownloadStart>,
     on_download_end: Option<OnDownloadEnd>,
     on_navigation_request: Option<Box<dyn Fn(String) -> bool>>,
     on_title_change: Option<Box<dyn Fn(String)>>,
+    on_page_begin: Option<Box<dyn Fn(String)>>,
+    on_page_end: Option<Box<dyn Fn(String)>>,
+    on_window_new: Option<OnWindowNew>,
 }
 
 impl WebViewBuilder {
@@ -123,6 +128,13 @@ impl WebViewBuilder {
         }
     }
 
+    pub fn window_id(self, window_id: i64) -> WebViewBuilder {
+        WebViewBuilder {
+            window_id: Some(window_id),
+            ..self
+        }
+    }
+
     #[cfg(feature = "drag_and_drop")]
     pub fn on_drag_and_drop<F: Fn(String)>(self, on_drag_and_drop: F) -> WebViewBuilder {
         let static_handler = unsafe {
@@ -195,10 +207,62 @@ impl WebViewBuilder {
         }
     }
 
+    pub fn on_page_begin<F: Fn(String)>(self, on_page_begin: F) -> WebViewBuilder {
+        let static_handler = unsafe {
+            std::mem::transmute::<Box<dyn Fn(String)>, Box<dyn Fn(String) + 'static>>(Box::new(
+                on_page_begin,
+            ))
+        };
+        WebViewBuilder {
+            on_page_begin: Some(static_handler),
+            ..self
+        }
+    }
+
+    pub fn on_page_end<F: Fn(String)>(self, on_page_end: F) -> WebViewBuilder {
+        let static_handler = unsafe {
+            std::mem::transmute::<Box<dyn Fn(String)>, Box<dyn Fn(String) + 'static>>(Box::new(
+                on_page_end,
+            ))
+        };
+        WebViewBuilder {
+            on_page_end: Some(static_handler),
+            ..self
+        }
+    }
+
+    /// Register a handler for new window requests.
+    /// The handler receives `(target_url, is_alert, is_user_trigger)` and returns `bool`
+    /// (`true` = allow, `false` = deny).
+    ///
+    /// # Safety note
+    /// Uses `transmute` to erase the lifetime bound. This is safe because the builder
+    /// is consumed (via `build()`) before the closure's captured references go out of scope.
+    pub fn on_window_new<F: Fn(String, bool, bool) -> bool>(
+        self,
+        on_window_new: F,
+    ) -> WebViewBuilder {
+        // SAFETY: The builder is consumed before captured references expire.
+        // Same pattern as on_navigation_request, on_page_begin, etc.
+        let static_handler = unsafe {
+            std::mem::transmute::<
+                Box<dyn Fn(String, bool, bool) -> bool>,
+                Box<dyn Fn(String, bool, bool) -> bool + 'static>,
+            >(Box::new(on_window_new))
+        };
+        WebViewBuilder {
+            on_window_new: Some(static_handler),
+            ..self
+        }
+    }
+
     pub fn build(self) -> Result<Webview> {
         let id = self
             .id
             .ok_or(Error::from_reason("WebTag should be provided"))?;
+
+        // window_id 由调用方通过 window_id() 方法显式传入，不再依赖 thread_local
+        let window_id = self.window_id.unwrap_or(0);
 
         let ret = unsafe {
             use crate::get_helper;
@@ -218,7 +282,7 @@ impl WebViewBuilder {
                 #[cfg(feature = "drag_and_drop")]
                 let on_drag_and_drop = self.on_drag_and_drop.and_then(|handler| {
                     env.create_function_from_closure("on_drag_and_drop", move |ctx| {
-                        let ret = ctx.try_get::<String>(1)?;
+                        let ret = ctx.try_get::<String>(0)?;
                         let ret = match ret {
                             Either::A(s) => s,
                             Either::B(_ret) => String::new(),
@@ -231,8 +295,8 @@ impl WebViewBuilder {
 
                 let on_download_start = self.on_download_start.and_then(|handler| {
                     env.create_function_from_closure("on_download_start", move |ctx| {
-                        let origin_url = ctx.try_get::<String>(1)?;
-                        let temp_path = ctx.try_get::<String>(2)?;
+                        let origin_url = ctx.try_get::<String>(0)?;
+                        let temp_path = ctx.try_get::<String>(1)?;
                         let origin_url_str = match origin_url {
                             Either::A(s) => s,
                             Either::B(_ret) => String::new(),
@@ -253,9 +317,9 @@ impl WebViewBuilder {
 
                 let on_download_end = self.on_download_end.and_then(|handler| {
                     env.create_function_from_closure("on_download_end", move |ctx| {
-                        let origin_url = ctx.try_get::<String>(1)?;
-                        let temp_path = ctx.try_get::<String>(2)?;
-                        let success = ctx.try_get::<bool>(3)?;
+                        let origin_url = ctx.try_get::<String>(0)?;
+                        let temp_path = ctx.try_get::<String>(1)?;
+                        let success = ctx.try_get::<bool>(2)?;
                         let origin_url_str = match origin_url {
                             Either::A(s) => s,
                             Either::B(_ret) => String::new(),
@@ -276,7 +340,7 @@ impl WebViewBuilder {
 
                 let on_navigation_request = self.on_navigation_request.and_then(|handler| {
                     env.create_function_from_closure("on_navigation_request", move |ctx| {
-                        let ret = ctx.try_get::<String>(1)?;
+                        let ret = ctx.try_get::<String>(0)?;
                         let ret = match ret {
                             Either::A(s) => s,
                             Either::B(_ret) => String::new(),
@@ -289,7 +353,7 @@ impl WebViewBuilder {
 
                 let on_title_change = self.on_title_change.and_then(|handler| {
                     env.create_function_from_closure("on_title_change", move |ctx| {
-                        let ret = ctx.try_get::<String>(1)?;
+                        let ret = ctx.try_get::<String>(0)?;
                         let ret = match ret {
                             Either::A(s) => s,
                             Either::B(_ret) => String::new(),
@@ -300,9 +364,64 @@ impl WebViewBuilder {
                     .ok()
                 });
 
+                let on_page_begin = self.on_page_begin.and_then(|handler| {
+                    env.create_function_from_closure("on_page_begin", move |ctx| {
+                        let url = ctx.try_get::<String>(0)?;
+                        let url_str = match url {
+                            Either::A(s) => s,
+                            Either::B(_ret) => String::new(),
+                        };
+                        handler(url_str);
+                        Ok(())
+                    })
+                    .ok()
+                });
+
+                let on_page_end = self.on_page_end.and_then(|handler| {
+                    env.create_function_from_closure("on_page_end", move |ctx| {
+                        let url = ctx.try_get::<String>(0)?;
+                        let url_str = match url {
+                            Either::A(s) => s,
+                            Either::B(_ret) => String::new(),
+                        };
+                        handler(url_str);
+                        Ok(())
+                    })
+                    .ok()
+                });
+
+                let on_window_new = self.on_window_new.and_then(|handler| {
+                    match env.create_function_from_closure("on_window_new", move |ctx| {
+                        let target_url = ctx.try_get::<String>(0)?;
+                        let is_alert = ctx.try_get::<bool>(1)?;
+                        let is_user_trigger = ctx.try_get::<bool>(2)?;
+                        let target_url_str = match target_url {
+                            Either::A(s) => s,
+                            Either::B(_) => String::new(),
+                        };
+                        let is_alert_bool = match is_alert {
+                            Either::A(b) => b,
+                            Either::B(_) => false,
+                        };
+                        let is_user_trigger_bool = match is_user_trigger {
+                            Either::A(b) => b,
+                            Either::B(_) => false,
+                        };
+                        let allow = handler(target_url_str, is_alert_bool, is_user_trigger_bool);
+                        Ok(OnWindowNewResult { allow })
+                    }) {
+                        Ok(func) => Some(func),
+                        Err(e) => {
+                            log::error!("[WebViewBuilder] on_window_new NAPI registration failed: {}", e);
+                            None
+                        }
+                    }
+                });
+
                 let webview = create_webview_func.call(WebViewInitData {
                     url: self.url,
                     id: Some(id.clone()),
+                    window_id: Some(window_id),
                     style: self.style,
                     javascript_enabled: self.javascript_enabled,
                     devtools: self.devtools,
@@ -321,6 +440,9 @@ impl WebViewBuilder {
                     on_download_end,
                     on_navigation_request,
                     on_title_change,
+                    on_page_begin,
+                    on_page_end,
+                    on_window_new,
                 })?;
 
                 let web = Webview::new(id.clone(), webview)?;

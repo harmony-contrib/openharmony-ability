@@ -29,6 +29,7 @@ pub struct WindowStageEventCallback<'a> {
     pub on_window_size_change: Function<'a, Object<'a>, ()>,
     pub on_window_rect_change: Function<'a, Object<'a>, ()>,
     pub on_avoid_area_change: Function<'a, Object<'a>, ()>,
+    pub on_new_want: Function<'a, Object<'a>, ()>,
 }
 
 #[napi(object)]
@@ -285,6 +286,19 @@ pub fn create_lifecycle_handle<'a>(
             Ok(())
         })?;
 
+    let on_new_want_app = app.clone();
+    let on_new_want =
+        env.create_function_from_closure("on_new_want", move |ctx| {
+            let data = ctx.first_arg::<Object>()?;
+            let uri = data.get_named_property::<String>("uri")?;
+            let parameters_json = data.get_named_property::<String>("parametersJson")?;
+            crate::app::store_want_parameters(&parameters_json);
+            if let Some(ref mut h) = *on_new_want_app.event_loop.borrow_mut() {
+                h(Event::NewWant { uri })
+            }
+            Ok(())
+        })?;
+
     Ok(ApplicationLifecycle {
         environment_callback: EnvironmentCallback {
             on_configuration_updated,
@@ -301,6 +315,7 @@ pub fn create_lifecycle_handle<'a>(
             on_window_size_change: window_resize,
             on_avoid_area_change: avoid_area_change,
             on_window_stage_event: window_stage_event,
+            on_new_want,
         },
         keyboard_event_callback: KeyboardCallback {
             on_keyboard_height_change: keyboard_event_callback,

@@ -14,6 +14,8 @@ napi-derive-ohos = { workspace = true }
 openharmony-ability = { workspace = true, features = ["webview"] }
 openharmony-ability-derive = { workspace = true }
 ohos-hilog-binding = { version = "*" }
+# Required because the `#[ability(...)]` macro expands to code that calls `log::info!`
+log = "0.4"
 futures-executor = "0.3"
 
 [build-dependencies]

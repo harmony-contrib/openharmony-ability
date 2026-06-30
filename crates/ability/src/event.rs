@@ -90,6 +90,11 @@ pub enum Event<'a> {
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references/arkts-apis-window-window#onkeyboardheightchange7
     KeyboardEvent(i32),
 
+    /// ability new want event (deep link / URL scheme)
+    /// alias onNewWant
+    /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-uiAbility-V5#uiabilityonnewwant
+    NewWant { uri: String },
+
     UserEvent,
 }
 
@@ -118,6 +123,7 @@ impl<'a> Event<'a> {
             Event::Input(_) => "Input",
             Event::UserEvent => "UserEvent",
             Event::KeyboardEvent(_) => "KeyboardEvent",
+            Event::NewWant { .. } => "NewWant",
         }
     }
 }

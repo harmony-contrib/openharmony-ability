@@ -156,6 +156,18 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             ) -> napi_ohos::Result<openharmony_ability::ApplicationLifecycle<'a>> {
                 let init_context = openharmony_ability::AbilityInitContext::from_object(context.as_ref())?;
                 let resource_manager = openharmony_ability::ResourceManager::from_init_context(*env, context.as_ref())?;
+
+                // Initialize version information from ArkTS side
+                openharmony_ability::version::init(
+                    init_context.sdk_api_version.unwrap_or(0),
+                    init_context.distribution_api_version.unwrap_or(0),
+                );
+                log::info!(
+                    "OHOS version: sdk_api={}, distribution_api={}",
+                    openharmony_ability::version::sdk_api_version(),
+                    openharmony_ability::version::distribution_api_version(),
+                );
+
                 (*APP).set_init_context(init_context);
                 (*APP).set_resource_manager(resource_manager);
                 let lifecycle_handle = openharmony_ability::create_lifecycle_handle(env, (*APP).clone())?;

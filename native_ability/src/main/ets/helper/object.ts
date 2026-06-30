@@ -3,8 +3,8 @@ export function objectAssign(
   ...source: Object[]
 ): Record<string, Object> {
   for (const items of source) {
-    for (const key of Object.getOwnPropertyNames(Object.getPrototypeOf(items))) {
-      target[key] = Reflect.get(items, key);
+    for (const key of Object.keys(items)) {
+      target[key] = (items as Record<string, Object>)[key];
     }
   }
   return target;

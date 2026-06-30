@@ -8,3 +8,8 @@
 package/src/main/ets
 package/libs
 dist
+.omc
+.idea
+.hvigor
+.sisyphus
+Cargo.lock

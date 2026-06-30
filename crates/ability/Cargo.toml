@@ -6,13 +6,27 @@ license = "MIT OR Apache-2.0"
 description = "Binding Rust application on Harmony with Ability"
 
 [features]
-default = []
+default = ["log", "updater", "window"]
 drag_and_drop = []
 webview = ["dep:ohos-web-binding", "dep:http"]
+menu = []
+clipboard = ["log"]
+log = ["dep:log", "dep:ohos-hilog-binding"]
+statusbar = []
+updater = []
+window = []
 
 [dependencies]
 # common dependencies
 futures-channel = "0.3"
+crossbeam-channel = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+png = { workspace = true }
+
+log = { version = "0.4", optional = true }
 
 # for napi binding
 napi-ohos = { workspace = true, features = ["napi8"] }
@@ -24,6 +38,9 @@ ohos-xcomponent-binding = { workspace = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }
+
+# for clipboard feature
+ohos-hilog-binding = { workspace = true, optional = true }
 
 # for webview feature
 ohos-web-binding = { workspace = true, optional = true }

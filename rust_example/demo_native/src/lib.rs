@@ -116,11 +116,11 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
 }
 
 #[napi]
-pub fn set_background_color(_env: &Env, color: String) -> napi_ohos::Result<()> {
+pub fn set_background_color(_env: &Env, color: u32) -> napi_ohos::Result<()> {
     WEBVIEW_ID.with(|w| {
         if let Some(webview) = w.borrow().as_ref() {
             let set_background_color_js_function = webview
-                .get_named_property::<Function<'_, String, ()>>("setBackgroundColor")
+                .get_named_property::<Function<'_, u32, ()>>("setBackgroundColor")
                 .unwrap();
             set_background_color_js_function.call(color).unwrap();
         }
