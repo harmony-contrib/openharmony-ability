@@ -1,4 +1,4 @@
-name: PR Check
+name: Format & Lint
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  mention:
+  Lint:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
