@@ -1,11 +1,11 @@
 {
-  "name": '@ohos-rs/ability',
-  "version": '0.0.1',
-  "description": 'Adaptor for OpenHarmony/HarmonyNext native abilities',
-  "main": 'index.ets',
-  "author": 'richerfu',
-  "license": 'Apache-2.0',
+  "name": "@ohos-rs/ability",
+  "version": "0.0.1",
+  "description": "Adaptor for OpenHarmony/HarmonyNext native abilities",
+  "main": "index.ets",
+  "author": "richerfu",
+  "license": "Apache-2.0",
   "dependencies": {
-    "libnative_ability.so": 'file:./src/main/cpp/types/libnative_ability',
+    "libnative_ability.so": "file:./src/main/cpp/types/libnative_ability",
   },
 }

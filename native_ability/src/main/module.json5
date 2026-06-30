@@ -1,7 +1,7 @@
 {
   "module": {
-    "name": 'native_ability',
-    "type": 'har',
-    "deviceTypes": ['default', 'tablet', '2in1'],
+    "name": "native_ability",
+    "type": "har",
+    "deviceTypes": ["default", "tablet", "2in1"],
   },
 }

@@ -2,10 +2,10 @@
   "app": {
     "products": [
       {
-        "name": 'default',
-        "signingConfig": 'default',
-        "compatibleSdkVersion": '5.0.0(12)',
-        "runtimeOS": 'HarmonyOS',
+        "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS",
         "buildOption": {
           "strictMode": {
             "caseSensitiveCheck": true,
@@ -16,28 +16,28 @@
     ],
     "buildModeSet": [
       {
-        "name": 'debug',
+        "name": "debug",
       },
       {
-        "name": 'release',
+        "name": "release",
       },
     ],
     "signingConfigs": [],
   },
   "modules": [
     {
-      "name": 'entry',
-      "srcPath": './entry',
+      "name": "entry",
+      "srcPath": "./entry",
       "targets": [
         {
-          "name": 'default',
-          "applyToProducts": ['default'],
+          "name": "default",
+          "applyToProducts": ["default"],
         },
       ],
     },
     {
-      "name": 'native_ability',
-      "srcPath": '../native_ability',
+      "name": "native_ability",
+      "srcPath": "../native_ability",
     },
   ],
 }
