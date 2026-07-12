@@ -1,4 +1,5 @@
 import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from "@ohos/hypium";
+import { pickerLocation, pickerSuffixFilters } from "../main/ets/helper/fileDialog";
 
 export default function localUnitTest() {
   describe("localUnitTest", () => {
@@ -28,6 +29,19 @@ export default function localUnitTest() {
       // Defines a variety of assertion methods, which are used to declare expected boolean conditions.
       expect(a).assertContain(b);
       expect(a).assertEqual(a);
+    });
+    it("convertFileDialogFilters", 0, () => {
+      const result = pickerSuffixFilters([
+        { name: "Images", pattern: "png;jpg" },
+        { name: "All|files", pattern: "*" },
+      ]);
+      expect(JSON.stringify(result)).assertEqual(
+        JSON.stringify(["Images|.png,.jpg", "All files|.*"]),
+      );
+    });
+    it("acceptOnlyPickerUriLocations", 0, () => {
+      expect(pickerLocation("file://docs/example")).assertEqual("file://docs/example");
+      expect(pickerLocation("/data/storage/example")).assertUndefined();
     });
   });
 }

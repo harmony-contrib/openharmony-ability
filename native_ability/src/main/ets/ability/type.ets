@@ -84,6 +84,28 @@ export interface ArkHelper {
   createEmbeddedWebview: (data: WebViewInitData) => Object;
   requestPermission: (permission: string | string[]) => Promise<number | number[]>;
   getWindowAvoidArea: (type: number) => WindowAvoidAreaInfo | undefined;
+  openURL?: (url: string) => Promise<void> | boolean;
+  showFileDialog?: (options: FileDialogOptions) => Promise<FileDialogResult>;
+}
+
+export interface FileDialogFilter {
+  name?: string;
+  pattern?: string;
+}
+
+export interface FileDialogOptions {
+  type: "openFile" | "saveFile" | "openFolder";
+  allowMany: boolean;
+  defaultLocation?: string;
+  title?: string;
+  accept?: string;
+  cancel?: string;
+  filters: FileDialogFilter[];
+}
+
+export interface FileDialogResult {
+  files: string[];
+  filter: number;
 }
 
 export interface WindowAvoidAreaInfo {

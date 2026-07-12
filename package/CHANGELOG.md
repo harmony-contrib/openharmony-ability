@@ -1,3 +1,8 @@
+# Unreleased
+- Add optional `openURL` and `showFileDialog` native-module helper services.
+- Guard folder selection and selected-filter lookup by device type and system capability.
+
+---
 # 0.4.0-beta.7
 - Fix onBackPressIntercept ran failed.
 

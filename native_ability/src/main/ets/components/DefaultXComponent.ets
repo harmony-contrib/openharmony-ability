@@ -1,10 +1,13 @@
 import { NodeContent } from "@kit.ArkUI";
 import {
   ArkHelper,
+  FileDialogOptions,
+  FileDialogResult,
   WebViewInitData as NativeWebViewInitData,
   WindowAvoidAreaInfo,
 } from "../ability/type";
 import { exit, objectAssign } from "../helper";
+import { showFileDialog } from "../helper/fileDialog";
 import { Loadable } from "../helper/loadable";
 import { requestPermission } from "../helper/permission";
 import common from "@ohos.app.ability.common";
@@ -29,6 +32,17 @@ export struct DefaultXComponent {
     requestPermission: async (permission: string | string[]): Promise<number | number[]> => {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       return await requestPermission(context, permission);
+    },
+    openURL: async (url: string): Promise<void> => {
+      if (!canIUse("SystemCapability.Ability.AbilityRuntime.Core")) {
+        throw new Error("OpenHarmony openLink capability is unavailable");
+      }
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await context.openLink(url);
+    },
+    showFileDialog: async (options: FileDialogOptions): Promise<FileDialogResult> => {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      return await showFileDialog(context, options);
     },
     getWindowAvoidArea: (type: number): WindowAvoidAreaInfo | undefined => {
       try {

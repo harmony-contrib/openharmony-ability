@@ -63,6 +63,22 @@ struct Index {
 }
 ```
 
+The helper object passed to a native module's `render()` callback also provides
+the following optional platform services:
+
+- `openURL(url)` uses `UIAbilityContext.openLink()` and resolves only after the
+  platform accepts or rejects the request.
+- `showFileDialog(options)` uses a context-bound `DocumentViewPicker` for open,
+  save, and folder requests. It returns Picker URIs without rewriting them.
+
+File patterns use SDL's semicolon-separated extension form, for example
+`png;jpg`; the helper converts it to the Picker suffix format. A `*` pattern
+maps to `.*`. Folder selection and `getSelectedIndex()` are restricted by the
+OpenHarmony SDK to 2-in-1 devices. The helper checks both the device type and
+`SystemCapability.FileManagement.UserFileService.FolderSelection`, and rejects
+unsupported folder requests instead of opening a Picker flow that cannot
+complete.
+
 ### Custom Page Example
 
 ```ts
