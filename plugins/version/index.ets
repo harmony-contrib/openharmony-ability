@@ -1,1 +1,1 @@
-export { createVersionPlugin } from "./src/main/ets/VersionPlugin";
+export { VersionPlugin } from "./src/main/ets/VersionPlugin";

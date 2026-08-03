@@ -40,6 +40,7 @@ export interface MenuItemData {
 interface MenuBarRequest {
   windowId: string;
   items: MenuItemData[];
+  visible?: boolean;
 }
 
 interface MenuPopupRequest {
@@ -131,7 +132,12 @@ export class MenuBarRegistry {
     const key = MenuBarRegistry.key(sessionId, moduleName, request.windowId);
     const current = MenuBarRegistry.menubars.get(key);
     if (current) {
-      MenuBarRegistry.menubars.set(key, { ...current, visible: request.visible });
+      const updated: MenuBarRequest = {
+        windowId: current.windowId,
+        items: current.items,
+        visible: request.visible,
+      };
+      MenuBarRegistry.menubars.set(key, updated);
     }
     MenuBarRegistry.notify(key);
   }

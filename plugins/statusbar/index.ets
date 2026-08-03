@@ -1,1 +1,1 @@
-export { createStatusBarPlugin } from "./src/main/ets/StatusBarPlugin";
+export { StatusBarPlugin } from "./src/main/ets/StatusBarPlugin";

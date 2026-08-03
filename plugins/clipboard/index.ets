@@ -1,1 +1,1 @@
-export { createClipboardPlugin } from "./src/main/ets/ClipboardPlugin";
+export { ClipboardPlugin } from "./src/main/ets/ClipboardPlugin";

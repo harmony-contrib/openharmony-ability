@@ -975,7 +975,7 @@ class WebviewSurface {
   setCookie(id: string, url: string, value: string): boolean {
     // `configCookieSync` requires API 14; on older devices the runtime check rejects the call.
     // oxlint-disable-next-line arkts/system-api-version
-    const cookieApi = webview.WebCookieManager as unknown as CookieApi;
+    const cookieApi = webview.WebCookieManager as ESObject as CookieApi;
     if (typeof cookieApi.configCookieSync !== "function") {
       throw new Error("WebCookieManager.configCookieSync is unavailable on this API level");
     }
@@ -990,8 +990,13 @@ class WebviewSurface {
   async snapshot(id: string, callContext: BridgeCallContext): Promise<WebviewSnapshotResponse> {
     const entry = await this.controllerEntry(id, callContext);
     try {
-      const result = await entry.data.controller.getWebPageSnapshot();
-      return new WebviewSnapshotResponse(result.rgba, result.width, result.height);
+      // getWebPageSnapshot is not in the API 12 controller surface; resolved dynamically.
+      const result: ESObject = (await (entry.data.controller as ESObject).getWebPageSnapshot()) as ESObject;
+      return new WebviewSnapshotResponse(
+        result.rgba as Uint8Array,
+        result.width as number,
+        result.height as number,
+      );
     } catch (error) {
       throw new Error(`Unable to capture WebView snapshot: ${String(error)}`);
     }
@@ -1000,7 +1005,7 @@ class WebviewSurface {
   async createPdf(id: string, path: string, config: PdfConfig | null): Promise<boolean> {
     const entry = await this.controllerEntry(id, undefined);
     try {
-      const pdfConfig: webview.PdfConfiguration = {};
+      const pdfConfig: ESObject = {};
       if (config?.width !== undefined && config?.width !== null) {
         pdfConfig.width = config.width;
       }
@@ -1025,7 +1030,18 @@ class WebviewSurface {
       if (config?.shouldPrintBackground !== undefined && config?.shouldPrintBackground !== null) {
         pdfConfig.shouldPrintBackground = config.shouldPrintBackground;
       }
-      await entry.data.controller.createPdf(path, pdfConfig);
+      await new Promise<void>((resolve, reject) => {
+        (entry.data.controller as ESObject).createPdf(
+          pdfConfig,
+          (error: BusinessError, _data: ESObject): void => {
+            if (error) {
+              reject(new Error(`createPdf failed: code=${error.code} msg=${error.message}`));
+            } else {
+              resolve();
+            }
+          },
+        );
+      });
       return true;
     } catch (error) {
       throw new Error(`Unable to create WebView PDF: ${String(error)}`);
@@ -1033,7 +1049,7 @@ class WebviewSurface {
   }
 
   setDebuggingAccess(enabled: boolean): boolean {
-    const debuggingApi = webview.WebviewController as unknown as WebviewDebuggingApi;
+    const debuggingApi = webview.WebviewController as ESObject as WebviewDebuggingApi;
     if (typeof debuggingApi.setWebDebuggingAccess !== "function") {
       throw new Error("Web debugging access is unavailable on this ArkWeb API level");
     }
@@ -1042,7 +1058,7 @@ class WebviewSurface {
   }
 
   isDebuggingAccess(): boolean {
-    const debuggingApi = webview.WebviewController as unknown as WebviewDebuggingApi;
+    const debuggingApi = webview.WebviewController as ESObject as WebviewDebuggingApi;
     if (typeof debuggingApi.getWebDebuggingAccess !== "function") {
       return false;
     }
@@ -1194,7 +1210,10 @@ class WebviewSurface {
       throw new Error(`Unknown WebView controller '${id}'`);
     }
     if (callContext === undefined) {
-      await entry.waitForController(() => {});
+      await entry.waitForController((listener: () => void): () => void => {
+        listener();
+        return () => {};
+      });
       return entry;
     }
     this.assertCallActive(callContext);
@@ -1391,7 +1410,7 @@ export class WebviewPlugin extends AsyncPluginBase {
     } else if (action === "set-bounds") {
       const bounds = parseBoundsPayload(payload);
       const boundsSlotId = bounds.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      accepted = WebviewSurfaceRegistry.get(this.pluginContext, boundsSlotId).setBounds(
+      accepted = WebviewSurfaceRegistry.get(this.getContext(), boundsSlotId).setBounds(
         bounds.id,
         bounds.x,
         bounds.y,
@@ -1401,7 +1420,7 @@ export class WebviewPlugin extends AsyncPluginBase {
     } else if (action === "set-cookie") {
       const cookie = parseCookiePayload(payload);
       const cookieSlotId = cookie.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      accepted = WebviewSurfaceRegistry.get(this.pluginContext, cookieSlotId).setCookie(
+      accepted = WebviewSurfaceRegistry.get(this.getContext(), cookieSlotId).setCookie(
         cookie.id,
         cookie.url,
         cookie.value,
@@ -1410,7 +1429,7 @@ export class WebviewPlugin extends AsyncPluginBase {
       const snapshotRequest = parseSnapshotPayload(payload);
       const snapshotSlotId = snapshotRequest.slotId || DEFAULT_PLUGIN_NODE_SLOT;
       const snapshot = await WebviewSurfaceRegistry.get(
-        this.pluginContext,
+        this.getContext(),
         snapshotSlotId,
       ).snapshot(snapshotRequest.id, context);
       return { typeName: SNAPSHOT_RESPONSE_TYPE, value: snapshot };
@@ -1429,7 +1448,7 @@ export class WebviewPlugin extends AsyncPluginBase {
     } else if (action === "create-pdf") {
       const pdfRequest = parsePdfPayload(payload);
       const pdfSlotId = pdfRequest.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      accepted = await WebviewSurfaceRegistry.get(this.pluginContext, pdfSlotId).createPdf(
+      accepted = await WebviewSurfaceRegistry.get(this.getContext(), pdfSlotId).createPdf(
         pdfRequest.id,
         pdfRequest.path,
         pdfRequest.config ?? null,

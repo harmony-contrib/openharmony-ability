@@ -1,3 +1,4 @@
+import common from "@ohos.app.ability.common";
 import { updateManager } from "@kit.AppGalleryKit";
 import { bundleManager } from "@kit.AbilityKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
@@ -62,9 +63,9 @@ function parseCheckRequest(payload: BridgeTypedValue): UpdaterCheckRequest {
   return payload.value as UpdaterCheckRequest;
 }
 
-async function checkForUpdate(): Promise<UpdaterCheckResult | null> {
+async function checkForUpdate(context: common.UIAbilityContext): Promise<UpdaterCheckResult | null> {
   try {
-    const checkResult = await updateManager.checkAppUpdate();
+    const checkResult = await updateManager.checkAppUpdate(context);
     if (checkResult.updateAvailable !== updateManager.UpdateAvailableCode.LATER_VERSION_EXIST) {
       hilog.info(0x0000, "UpdaterPlugin", "No update available");
       return null;
@@ -86,7 +87,7 @@ async function checkForUpdate(): Promise<UpdaterCheckResult | null> {
     }
 
     // API 20+ exposes versionName; older API levels fall back to "unknown".
-    const version = (checkResult as Record<string, unknown>).versionName || "unknown";
+    const version = (checkResult as ESObject).versionName as string || "unknown";
 
     return new UpdaterCheckResult(true, currentVersion, String(version), null, null);
   } catch (error) {
@@ -102,8 +103,8 @@ async function checkForUpdate(): Promise<UpdaterCheckResult | null> {
   }
 }
 
-async function showUpdateDialog(): Promise<number> {
-  const resultCode = await updateManager.showUpdateDialog();
+async function showUpdateDialog(context: common.UIAbilityContext): Promise<number> {
+  const resultCode = await updateManager.showUpdateDialog(context);
   hilog.info(0x0000, "UpdaterPlugin", "showUpdateDialog result: %{public}d", resultCode);
   return resultCode;
 }
@@ -120,14 +121,14 @@ export class UpdaterPlugin extends AsyncPluginBase {
   ): Promise<BridgeTypedValue> {
     parseCheckRequest(payload);
     if (action === "check") {
-      const result = await checkForUpdate();
+      const result = await checkForUpdate(context.abilityContext);
       if (!context.isActive()) {
         throw new Error("Ability was destroyed while update check was pending");
       }
       return { typeName: CHECK_RESPONSE_TYPE, value: new UpdaterCheckResponse(result) };
     }
     if (action === "download-and-install") {
-      const resultCode = await showUpdateDialog();
+      const resultCode = await showUpdateDialog(context.abilityContext);
       if (!context.isActive()) {
         throw new Error("Ability was destroyed while update dialog was pending");
       }

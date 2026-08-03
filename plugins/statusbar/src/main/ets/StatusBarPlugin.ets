@@ -1,14 +1,16 @@
+import common from "@ohos.app.ability.common";
+import process from "@ohos.process";
 import { Want } from "@kit.AbilityKit";
 import { image } from "@kit.ImageKit";
 import { statusBarManager } from "@kit.DeskTopExtensionKit";
 import { emitter, BusinessError } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import {
+  AsyncPluginBase,
   BridgeCallContext,
+  BridgeContextRequirement,
   BridgePluginContext,
   BridgeTypedValue,
-  AsyncPluginBase,
-  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const ADD_REQUEST_TYPE = "ohos.statusbar.AddRequest";
@@ -60,6 +62,14 @@ interface StatusBarMenuItemData {
   iconHeight?: number | null;
 }
 
+interface ActionRequestPayload {
+  action: string;
+}
+
+interface TipsRequestPayload {
+  tips: string;
+}
+
 interface StatusBarItemData {
   icons: StatusBarIconData;
   quickOperation: QuickOperationData;
@@ -82,25 +92,33 @@ function parseAddRequest(payload: BridgeTypedValue): StatusBarItemData {
   return payload.value as StatusBarItemData;
 }
 
+interface IconRequestPayload {
+  icon: StatusBarIconData;
+}
+
 function parseIconRequest(payload: BridgeTypedValue): StatusBarIconData {
   if (payload.typeName !== ICON_REQUEST_TYPE || typeof payload.value !== "object") {
     throw new Error(`ohos.statusbar.update-icon requires bridge type ${ICON_REQUEST_TYPE}`);
   }
-  return (payload.value as { icon: StatusBarIconData }).icon;
+  return (payload.value as IconRequestPayload).icon;
+}
+
+interface MenuRequestPayload {
+  groups: StatusBarMenuItemData[][];
 }
 
 function parseMenuRequest(payload: BridgeTypedValue): StatusBarMenuItemData[][] {
   if (payload.typeName !== MENU_REQUEST_TYPE || typeof payload.value !== "object") {
     throw new Error(`ohos.statusbar.update-menu requires bridge type ${MENU_REQUEST_TYPE}`);
   }
-  return (payload.value as { groups: StatusBarMenuItemData[][] }).groups;
+  return (payload.value as MenuRequestPayload).groups;
 }
 
 function parseTipsRequest(payload: BridgeTypedValue): string {
   if (payload.typeName !== TIPS_REQUEST_TYPE || typeof payload.value !== "object") {
     throw new Error(`ohos.statusbar.update-tips requires bridge type ${TIPS_REQUEST_TYPE}`);
   }
-  const tips = (payload.value as { tips: string }).tips;
+  const tips = (payload.value as TipsRequestPayload).tips;
   if (typeof tips !== "string" || tips.trim().length === 0 || tips.trim().length > 128) {
     throw new Error("update-tips.tips must be 1..=128 chars");
   }
@@ -111,7 +129,7 @@ function parseActionRequest(payload: BridgeTypedValue): string {
   if (payload.typeName !== ACTION_REQUEST_TYPE || typeof payload.value !== "object") {
     throw new Error(`ohos.statusbar.predefined-action requires bridge type ${ACTION_REQUEST_TYPE}`);
   }
-  const action = (payload.value as { action: string }).action;
+  const action = (payload.value as ActionRequestPayload).action;
   if (typeof action !== "string" || !action.trim()) {
     throw new Error("predefined-action.action must not be empty");
   }
@@ -176,17 +194,23 @@ function processGroups(groups: StatusBarMenuItemData[][], abilityName: string): 
         const width = item.iconWidth ?? 24;
         const height = item.iconHeight ?? 24;
         const pm = createPixelMap(item.iconRgba, width, height);
-        (item as Record<string, unknown>).icon = pm ? { white: pm, black: pm } : undefined;
-        delete (item as Record<string, unknown>).iconRgba;
-        delete (item as Record<string, unknown>).iconWidth;
-        delete (item as Record<string, unknown>).iconHeight;
+        const iconObj: ESObject = {};
+        if (pm) {
+          iconObj.white = pm;
+          iconObj.black = pm;
+        }
+        const dynamicItem: ESObject = item as ESObject;
+        dynamicItem.icon = iconObj;
+        dynamicItem.iconRgba = null;
+        dynamicItem.iconWidth = null;
+        dynamicItem.iconHeight = null;
       }
     }
   }
 }
 
 const iconClickHandler = (event: emitter.EventData): void => {
-  const clickType = (event.data as Record<string, unknown>).clickType ?? "click";
+  const clickType = (event.data as ESObject).clickType as string ?? "click";
   const context = StatusBarPluginHolder.pluginContext;
   if (context) {
     context.invokeNativeSync("icon-click", CLICK_REQUEST_TYPE, CLICK_RESPONSE_TYPE, { clickType });
@@ -194,7 +218,7 @@ const iconClickHandler = (event: emitter.EventData): void => {
 };
 
 const menuClickHandler = (event: emitter.EventData): void => {
-  const menuCode = (event.data as Record<string, unknown>).menuCode ?? "";
+  const menuCode = (event.data as ESObject).menuCode as string ?? "";
   const context = StatusBarPluginHolder.pluginContext;
   if (context) {
     context.invokeNativeSync("menu-click", MENU_CLICK_REQUEST_TYPE, CLICK_RESPONSE_TYPE, {
@@ -252,6 +276,14 @@ export class StatusBarPlugin extends AsyncPluginBase {
     StatusBarPluginHolder.pluginContext = context;
   }
 
+  private requireContext(): BridgePluginContext {
+    const context = this.pluginContext;
+    if (context === undefined) {
+      throw new Error(`Bridge plugin '${this.id}' was used before its context was attached`);
+    }
+    return context;
+  }
+
   async invokeAsync(
     action: string,
     payload: BridgeTypedValue,
@@ -262,7 +294,7 @@ export class StatusBarPlugin extends AsyncPluginBase {
 
     if (action === "add") {
       const item = parseAddRequest(payload);
-      const icons = buildIcons(item.icons);
+      const icons: ESObject = buildIcons(item.icons);
       if (Object.keys(icons).length === 0) {
         throw new Error("add requires at least one icon variant");
       }
@@ -314,7 +346,7 @@ export class StatusBarPlugin extends AsyncPluginBase {
 
     if (action === "update-icon") {
       const icon = parseIconRequest(payload);
-      const icons = buildIcons(icon);
+      const icons: ESObject = buildIcons(icon);
       if (Object.keys(icons).length === 0) {
         throw new Error("update-icon requires at least one icon variant");
       }
@@ -365,7 +397,7 @@ export class StatusBarPlugin extends AsyncPluginBase {
 }
 
 async function executePredefinedAction(
-  context: BridgePluginContext["abilityContext"],
+  context: common.UIAbilityContext,
   actionType: string,
 ): Promise<void> {
   if (actionType === "show" || actionType === "show-all") {
@@ -377,7 +409,6 @@ async function executePredefinedAction(
     return;
   }
   if (actionType === "quit" || actionType === "exit") {
-    const process = await import("@ohos.process");
     new process.ProcessManager().exit(0);
     return;
   }

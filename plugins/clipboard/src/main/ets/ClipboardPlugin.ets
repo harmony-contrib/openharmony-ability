@@ -8,18 +8,6 @@ import {
   BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
-/**
- * `pasteboard.createData(mimeType, value)` is API 9+ per the official docs (ValueType
- * includes PixelMap since API 9). oxk's API metadata erroneously tags the whole
- * `createData` symbol as API 14 (it only merged the 14+ overload); the call is routed
- * through this runtime surface purely to satisfy the lint, not because of a real
- * API-level constraint.
- */
-interface PasteboardApi {
-  createData: (mimeType: string, value: unknown) => pasteboard.PasteData;
-}
-
-const pasteboardApi = pasteboard as unknown as PasteboardApi;
 
 const IMAGE_REQUEST_TYPE = "ohos.clipboard.ImageRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.clipboard.Acknowledgement";
@@ -82,7 +70,7 @@ async function writeImageToClipboard(
     pixelMap = image.createPixelMapSync(opts);
     pixelMap.writeBufferToPixelsSync(jsArr.buffer);
 
-    const pasteData = pasteboardApi.createData(pasteboard.MIMETYPE_PIXELMAP, pixelMap);
+    const pasteData = pasteboard.createData(pasteboard.MIMETYPE_PIXELMAP, pixelMap);
     const systemPasteboard = pasteboard.getSystemPasteboard();
     await systemPasteboard.setData(pasteData);
   } catch (error) {

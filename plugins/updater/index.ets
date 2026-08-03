@@ -1,1 +1,1 @@
-export { createUpdaterPlugin } from "./src/main/ets/UpdaterPlugin";
+export { UpdaterPlugin } from "./src/main/ets/UpdaterPlugin";
