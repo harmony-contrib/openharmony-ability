@@ -1,10 +1,10 @@
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
   BridgeTypedValue,
   BridgePluginContext,
-  BridgePluginFactory,
-  MainThreadSyncBridgePlugin,
+  AsyncPluginBase,
+  BridgeContextRequirement,
+  SyncPluginBase,
 } from "@ohos-rs/ability";
 
 const LOGIN_REQUEST_TYPE = "demo.login.LoginRequest";
@@ -90,7 +90,7 @@ function parseLoginResponse(payload: BridgeTypedValue): LoginResponse {
  * may open system UI or wait for a redirect; BridgeHost will resolve/reject the Rust future and
  * discard the result if NativeAbility is destroyed in the meantime.
  */
-class DemoIdentityProvider implements LoginProvider {
+export class DemoIdentityProvider implements LoginProvider {
   async authorize(request: LoginRequest, context: BridgeCallContext): Promise<LoginResponse> {
     if (!context.isActive()) {
       throw new Error("Ability was destroyed before login started");
@@ -113,22 +113,20 @@ class DemoIdentityProvider implements LoginProvider {
   }
 }
 
-class DemoLoginPlugin implements AsyncBridgePlugin {
+export class DemoLoginPlugin extends AsyncPluginBase {
   readonly id: string = "demo.login";
   readonly version: number = 1;
-  readonly execution: "async" = "async";
   /** Login can open system UI, so installation waits for DefaultXComponent's UIContext. */
-  readonly requires: ["ui-context"] = ["ui-context"];
+  readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
-  private readonly pluginContext: BridgePluginContext;
   private readonly provider: LoginProvider;
 
-  constructor(pluginContext: BridgePluginContext, provider: LoginProvider) {
-    this.pluginContext = pluginContext;
+  constructor(provider: LoginProvider) {
+    super();
     this.provider = provider;
   }
 
-  async onInstall(context: BridgePluginContext): Promise<void> {
+  override async onInstall(context: BridgePluginContext): Promise<void> {
     // This would throw before UIContext readiness; BridgeHost guarantees it is ready here.
     context.getUIContext();
     AppStorage.setOrCreate("bridgeLoginStatus", "ready");
@@ -159,7 +157,7 @@ class DemoLoginPlugin implements AsyncBridgePlugin {
       AppStorage.setOrCreate("bridgeLoginResult", response.userId);
       const result: LoginPublishResponse = {
         published: true,
-        module: this.pluginContext.moduleName,
+        module: this.getContext().moduleName,
       };
       return { typeName: LOGIN_PUBLISH_RESPONSE_TYPE, value: result as ESObject };
     }
@@ -168,30 +166,16 @@ class DemoLoginPlugin implements AsyncBridgePlugin {
   }
 }
 
-export function createDemoLoginPlugin(): BridgePluginFactory {
-  return {
-    id: "demo.login",
-    version: 1,
-    execution: "async",
-    requires: ["ui-context"],
-    modules: ["demo_native"],
-    create: (context: BridgePluginContext): AsyncBridgePlugin => {
-      return new DemoLoginPlugin(context, new DemoIdentityProvider());
-    },
-  };
-}
-
 /**
  * Synchronous counterpart for the demo. BridgeHost never accepts this through bridgeInvoke;
  * Rust can reach it only from an Env-scoped N-API main-thread callback.
  */
-class DemoMainThreadPlugin implements MainThreadSyncBridgePlugin {
+export class DemoMainThreadPlugin extends SyncPluginBase {
   readonly id: string = "demo.main-thread";
   readonly version: number = 1;
-  readonly execution: "sync-main-thread" = "sync-main-thread";
-  readonly requires: ["ui-context"] = ["ui-context"];
+  readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
-  onInstall(context: BridgePluginContext): void {
+  override onInstall(context: BridgePluginContext): void {
     context.getUIContext();
   }
 
@@ -223,17 +207,4 @@ class DemoMainThreadPlugin implements MainThreadSyncBridgePlugin {
     };
     return { typeName: MAIN_THREAD_INSPECT_RESPONSE_TYPE, value: response as ESObject };
   }
-}
-
-export function createDemoMainThreadPlugin(): BridgePluginFactory {
-  return {
-    id: "demo.main-thread",
-    version: 1,
-    execution: "sync-main-thread",
-    requires: ["ui-context"],
-    modules: ["demo_native"],
-    create: (_context: BridgePluginContext): MainThreadSyncBridgePlugin => {
-      return new DemoMainThreadPlugin();
-    },
-  };
 }

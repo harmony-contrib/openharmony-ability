@@ -1,9 +1,8 @@
 import {
-  AsyncBridgePlugin,
+  BridgeContextRequirement,
+  AsyncPluginBase,
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
-  BridgePluginFactory,
 } from "@ohos-rs/ability";
 
 interface DemoProfile {
@@ -22,10 +21,10 @@ class DemoProfileValue {
 }
 
 /** Demonstrates built-in and application-defined named N-API types without a JSON envelope. */
-class DemoTypedPlugin implements AsyncBridgePlugin {
+export class DemoTypedPlugin extends AsyncPluginBase {
   readonly id = "demo.raw";
   readonly version = 1;
-  readonly execution: "async" = "async";
+  readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(
     action: string,
@@ -67,13 +66,4 @@ class DemoTypedPlugin implements AsyncBridgePlugin {
 
     throw new Error(`Unsupported demo.raw action '${action}'`);
   }
-}
-
-export function createDemoRawPlugin(): BridgePluginFactory {
-  return {
-    id: "demo.raw",
-    version: 1,
-    execution: "async",
-    create: (_context: BridgePluginContext): AsyncBridgePlugin => new DemoTypedPlugin(),
-  };
 }

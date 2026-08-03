@@ -1,11 +1,11 @@
+import common from "@ohos.app.ability.common";
 import deviceInfo from "@ohos.deviceInfo";
 import picker from "@ohos.file.picker";
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
-  BridgePluginContext,
-  BridgePluginFactory,
   BridgeTypedValue,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const DIALOG_OPTIONS_TYPE = "ohos.files.DialogOptions";
@@ -94,7 +94,7 @@ function supportsFolderSelection(): boolean {
 }
 
 async function showFileDialog(
-  context: BridgePluginContext["abilityContext"],
+  context: common.UIAbilityContext,
   options: FileDialogOptions,
 ): Promise<FileDialogResponse> {
   const documentPicker = new picker.DocumentViewPicker(context);
@@ -130,11 +130,10 @@ async function showFileDialog(
   return new FileDialogResponse(await documentPicker.select(selectOptions), -1);
 }
 
-class FilesPlugin implements AsyncBridgePlugin {
+export class FilesPlugin extends AsyncPluginBase {
   readonly id = "ohos.files";
   readonly version = 1;
-  readonly execution = "async" as const;
-  readonly requires = ["ability"] as const;
+  readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(
     action: string,
@@ -151,14 +150,4 @@ class FilesPlugin implements AsyncBridgePlugin {
     }
     return { typeName: DIALOG_RESPONSE_TYPE, value: response };
   }
-}
-
-export function createFilesPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.files",
-    version: 1,
-    execution: "async",
-    requires: ["ability"],
-    create: (_context: BridgePluginContext): AsyncBridgePlugin => new FilesPlugin(),
-  };
 }

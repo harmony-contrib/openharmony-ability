@@ -1,1 +1,1 @@
-export { createPermissionPlugin } from "./src/main/ets/PermissionPlugin";
+export { PermissionPlugin } from "./src/main/ets/PermissionPlugin";

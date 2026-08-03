@@ -1,9 +1,8 @@
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
-  BridgePluginContext,
-  BridgePluginFactory,
   BridgeTypedValue,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const OPEN_REQUEST_TYPE = "ohos.url.OpenRequest";
@@ -32,11 +31,10 @@ function parseOpenRequest(payload: BridgeTypedValue): UrlOpenRequest {
   return request;
 }
 
-class UrlPlugin implements AsyncBridgePlugin {
+export class UrlPlugin extends AsyncPluginBase {
   readonly id = "ohos.url";
   readonly version = 1;
-  readonly execution = "async" as const;
-  readonly requires = ["ability"] as const;
+  readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(
     action: string,
@@ -57,14 +55,4 @@ class UrlPlugin implements AsyncBridgePlugin {
     }
     return { typeName: OPEN_RESPONSE_TYPE, value: new UrlOpenResponse(true) };
   }
-}
-
-export function createUrlPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.url",
-    version: 1,
-    execution: "async",
-    requires: ["ability"],
-    create: (_context: BridgePluginContext): AsyncBridgePlugin => new UrlPlugin(),
-  };
 }

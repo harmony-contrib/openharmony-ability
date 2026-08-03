@@ -2,9 +2,8 @@ import window from "@ohos.window";
 import {
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
-  BridgePluginFactory,
-  MainThreadSyncBridgePlugin,
+  BridgeContextRequirement,
+  SyncPluginBase,
 } from "@ohos-rs/ability";
 
 const AVOID_AREA_REQUEST_TYPE = "ohos.window.AvoidAreaRequest";
@@ -63,11 +62,10 @@ function parseAvoidAreaRequest(payload: BridgeTypedValue): AvoidAreaRequest {
   return request;
 }
 
-class WindowPlugin implements MainThreadSyncBridgePlugin {
+export class WindowPlugin extends SyncPluginBase {
   readonly id = "ohos.window";
   readonly version = 1;
-  readonly execution: "sync-main-thread" = "sync-main-thread";
-  readonly requires: ["window-stage"] = ["window-stage"];
+  readonly requires: BridgeContextRequirement[] = ["window-stage"];
 
   invokeSync(
     action: string,
@@ -87,14 +85,4 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
       throw new Error(`Unable to get window avoid area: ${String(error)}`);
     }
   }
-}
-
-export function createWindowPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.window",
-    version: 1,
-    execution: "sync-main-thread",
-    requires: ["window-stage"],
-    create: (_context: BridgePluginContext): MainThreadSyncBridgePlugin => new WindowPlugin(),
-  };
 }

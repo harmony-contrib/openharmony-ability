@@ -116,11 +116,17 @@ export class NativeAbility extends UIAbility {
     if (this.bridgeSessionId) {
       await BridgeHostRegistry.dispose(this.bridgeSessionId);
     }
-    this.bridgeSessionId = await BridgeHostRegistry.open(
-      requestedModules,
-      this.context as common.UIAbilityContext,
-      this.bridgePlugins,
-    );
+    try {
+      this.bridgeSessionId = await BridgeHostRegistry.open(
+        requestedModules,
+        this.context as common.UIAbilityContext,
+        this.bridgePlugins,
+      );
+    } catch (error) {
+      // A plugin factory/install failure here aborts onCreate before module.init runs,
+      // which later surfaces as "OpenHarmony app not initialized" from every napi call.
+      console.error(`[NativeAbility] BridgeHostRegistry.open failed: ${String(error)}`);
+    }
     AppStorage.setOrCreate("bridgeSessionId", this.bridgeSessionId);
 
     this.nativeModules = [];
@@ -128,22 +134,37 @@ export class NativeAbility extends UIAbility {
     this.loadedModuleNames = [];
 
     for (const moduleName of requestedModules) {
-      const module: Module = await NativeModuleLoader.load(moduleName, this.loadMode);
-      this.nativeModules.push(module);
-      this.loadedModuleNames.push(moduleName);
+      try {
+        const module: Module = await NativeModuleLoader.load(moduleName, this.loadMode);
+        this.nativeModules.push(module);
+        this.loadedModuleNames.push(moduleName);
+      } catch (error) {
+        // A dynamic import failure aborts onCreate before module.init runs; the Rust-side
+        // INNER_APP is then never set and every napi call reports "OpenHarmony app not
+        // initialized". A stale/incompatible .so is the usual cause.
+        console.error(
+          `[NativeAbility] failed to load native module ${moduleName}: ${String(error)}`,
+        );
+      }
     }
 
     for (let i = 0; i < this.nativeModules.length; i++) {
       const module: Module = this.nativeModules[i];
       const moduleName: string = this.loadedModuleNames[i];
-      const lifecycle: ApplicationLifecycle = module.init(this.createInitContext(moduleName));
-
-      this.lifecycles.push(lifecycle);
-
-      const restoredState = restoredStateMap[moduleName] ?? state;
       try {
-        lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
-      } catch {}
+        const lifecycle: ApplicationLifecycle = module.init(this.createInitContext(moduleName));
+        this.lifecycles.push(lifecycle);
+
+        const restoredState = restoredStateMap[moduleName] ?? state;
+        try {
+          lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
+        } catch {}
+      } catch (error) {
+        // `#[ability] init` sets the Rust-side INNER_APP; when it fails, every later
+        // napi call reports "OpenHarmony app not initialized". Log the exact failure
+        // so the root cause (stale .so, context mismatch, bridge open failure) is visible.
+        console.error(`[NativeAbility] module.init failed for ${moduleName}: ${String(error)}`);
+      }
     }
 
     for (const moduleName of requestedModules) {
@@ -245,7 +266,7 @@ export class NativeAbility extends UIAbility {
 
   onSaveState(
     reason: AbilityConstant.StateType,
-    wantParam: Record<string, Object>,
+    wantParam: Record<string, object>,
   ): AbilityConstant.OnSaveResult {
     const stateMap: Record<string, string> = {};
 

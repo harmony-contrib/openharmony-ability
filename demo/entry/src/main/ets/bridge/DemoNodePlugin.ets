@@ -1,13 +1,13 @@
 import { BuilderNode, FrameNode } from "@ohos.arkui.node";
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
   BridgeNodeSlot,
   BridgeNodeSlotRegistry,
   BridgeTypedValue,
   BridgePluginContext,
-  BridgePluginFactory,
   DEFAULT_PLUGIN_NODE_SLOT,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 interface BadgeData {
@@ -30,11 +30,11 @@ function BuildBadge(data: BadgeData) {
 const badgeBuilder = wrapBuilder<[BadgeData]>(BuildBadge);
 
 /** Demonstrates that a bridge plugin can mount a normal ArkUI BuilderNode, not only WebView. */
-class DemoNodePlugin implements AsyncBridgePlugin {
+export class DemoNodePlugin extends AsyncPluginBase {
   readonly id = "demo.node-badge";
   readonly version = 1;
-  readonly execution: "async" = "async";
-  readonly requires: ["ui-context"] = ["ui-context"];
+  readonly requires: BridgeContextRequirement[] = ["ui-context"];
+
   private slot?: BridgeNodeSlot;
 
   onInstall(context: BridgePluginContext): void {
@@ -66,15 +66,4 @@ class DemoNodePlugin implements AsyncBridgePlugin {
     this.slot?.unmount("demo.node-badge");
     this.slot = undefined;
   }
-}
-
-export function createDemoNodePlugin(): BridgePluginFactory {
-  return {
-    id: "demo.node-badge",
-    version: 1,
-    execution: "async",
-    requires: ["ui-context"],
-    modules: ["demo_native"],
-    create: (_context: BridgePluginContext): AsyncBridgePlugin => new DemoNodePlugin(),
-  };
 }

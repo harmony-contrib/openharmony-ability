@@ -1,1 +1,1 @@
-export { createWindowPlugin } from "./src/main/ets/WindowPlugin";
+export { WindowPlugin } from "./src/main/ets/WindowPlugin";

@@ -1,11 +1,10 @@
 import abilityAccessCtrl, { Permissions } from "@ohos.abilityAccessCtrl";
 import hilog from "@ohos.hilog";
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
-  BridgePluginFactory,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const TAG = "PermissionBridgePlugin";
@@ -43,11 +42,10 @@ function parsePermissions(payload: BridgeTypedValue): string[] {
   }
 }
 
-class PermissionPlugin implements AsyncBridgePlugin {
+export class PermissionPlugin extends AsyncPluginBase {
   readonly id = "ohos.permission";
   readonly version = 1;
-  readonly execution: "async" = "async";
-  readonly requires: ["ability"] = ["ability"];
+  readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(
     action: string,
@@ -80,14 +78,4 @@ class PermissionPlugin implements AsyncBridgePlugin {
     }
     return { typeName: PERMISSION_RESPONSE_TYPE, value: new PermissionResponse(codes) };
   }
-}
-
-export function createPermissionPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.permission",
-    version: 1,
-    execution: "async",
-    requires: ["ability"],
-    create: (_context: BridgePluginContext): AsyncBridgePlugin => new PermissionPlugin(),
-  };
 }

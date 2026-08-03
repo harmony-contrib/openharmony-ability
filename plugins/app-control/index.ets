@@ -1,1 +1,1 @@
-export { createAppControlPlugin } from "./src/main/ets/AppControlPlugin";
+export { AppControlPlugin } from "./src/main/ets/AppControlPlugin";
