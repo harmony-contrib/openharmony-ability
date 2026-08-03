@@ -22,9 +22,9 @@ openharmony-ability-plugin-updater = { workspace = true }
 openharmony-ability-plugin-version = { workspace = true }
 openharmony-ability-plugin-webview = { workspace = true }
 openharmony-ability-plugin-window = { workspace = true }
-ohos-hilog-binding = { version = "*" }
+ohos-hilog-binding = { workspace = true }
 futures-channel = { workspace = true }
-futures-executor = { workspace = true }
+futures-executor = "0.3"
 http = { workspace = true }
 log = "0.4"
 

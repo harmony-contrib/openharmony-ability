@@ -339,12 +339,17 @@ fn openharmony_app(app: OpenHarmonyApp) {
                 });
             }
         }
-        Event::Input(InputEvent::ImeEvent(text)) => {
-            hilog_info!(format!("ohos-rs input_text: {text:?}").as_str());
-        }
-        Event::Input(_) => {
-            hilog_info!("ohos-rs input");
-        }
+        Event::Input(input) => match input {
+            InputEvent::ImeEvent(text) => {
+                hilog_info!(format!("ohos-rs input_text: {text:?}").as_str());
+            }
+            InputEvent::MouseEvent(mouse) => {
+                hilog_info!(format!("ohos-rs mouse: {mouse:?}").as_str());
+            }
+            _ => {
+                hilog_info!("ohos-rs input");
+            }
+        },
         Event::WindowRedraw(_) => {
             hilog_info!("ohos-rs window_redraw");
         }
