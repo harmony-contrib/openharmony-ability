@@ -3,7 +3,7 @@
 [[repos]]
 repo = "local"
 hooks = [
-  { id = "rustfmt", name = "rustfmt", entry = "rustfmt", language = "system", files = "\\.rs$" },
+  { id = "rustfmt", name = "rustfmt", entry = "cargo fmt --all -- --check", language = "system", files = "\\.rs$", pass_filenames = false },
   { id = "oxk-format", name = "oxk format", entry = "oxk format -t=10", language = "system", files = "\\.(ets|js|ts|json5)$" },
   { id = "oxk-lint", name = "oxk lint", entry = "oxk lint --config .oxlintrc.jsonc --threads=10", language = "system", files = "\\.(ets|js|ts)$" },
 ]

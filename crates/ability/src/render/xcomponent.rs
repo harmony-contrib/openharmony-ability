@@ -145,6 +145,15 @@ pub fn render(
         Ok(())
     });
 
+    let on_mouse_event_app = app.clone();
+    xcomponent.on_mouse_event(move |_, _, data| {
+        if let Some(ref mut h) = *on_mouse_event_app.event_loop.borrow_mut() {
+            h(Event::Input(InputEvent::MouseEvent(data)));
+        }
+        Ok(())
+    })?;
+    xcomponent.register_mouse_event_callback()?;
+
     xcomponent.register_callback()?;
 
     root.mount(xcomponent_native)

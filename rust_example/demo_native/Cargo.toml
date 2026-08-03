@@ -13,7 +13,7 @@ napi-derive-ohos = { workspace = true }
 
 openharmony-ability = { workspace = true, features = ["webview"] }
 openharmony-ability-derive = { workspace = true }
-ohos-hilog-binding = { version = "*" }
+ohos-hilog-binding = { workspace = true }
 futures-executor = "0.3"
 
 [build-dependencies]

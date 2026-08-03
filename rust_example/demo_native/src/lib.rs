@@ -191,6 +191,9 @@ fn openharmony_app(app: OpenHarmonyApp) {
             InputEvent::ImeEvent(text) => {
                 hilog_info!(format!("ohos-rs macro input_text: {:?}", text).as_str());
             }
+            InputEvent::MouseEvent(mouse) => {
+                hilog_info!(format!("ohos-rs macro mouse: {:?}", mouse).as_str());
+            }
             _ => {
                 hilog_info!("ohos-rs macro input:");
             }
