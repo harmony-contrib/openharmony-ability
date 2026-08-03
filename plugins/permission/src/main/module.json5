@@ -1,0 +1,7 @@
+{
+  "module": {
+    "name": "plugin_permission",
+    "type": "har",
+    "deviceTypes": ["default", "tablet", "2in1"],
+  },
+}

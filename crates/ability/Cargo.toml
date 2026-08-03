@@ -7,12 +7,10 @@ description = "Binding Rust application on Harmony with Ability"
 
 [features]
 default = []
-drag_and_drop = []
-webview = ["dep:ohos-web-binding", "dep:http"]
 
 [dependencies]
 # common dependencies
-futures-channel = "0.3"
+futures-channel = { workspace = true }
 
 # for napi binding
 napi-ohos = { workspace = true, features = ["napi8"] }
@@ -24,7 +22,3 @@ ohos-xcomponent-binding = { workspace = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }
-
-# for webview feature
-ohos-web-binding = { workspace = true, optional = true }
-http = { workspace = true, optional = true }

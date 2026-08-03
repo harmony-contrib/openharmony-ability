@@ -8,7 +8,10 @@
   "dependencies": {
     "libentry.so": "file:./src/main/cpp/types/libentry",
     "libdemo_native.so": "file:./src/main/cpp/types/libdemo_native",
-    "libark_web.so": "file:./src/main/cpp/types/libark_web",
     "@ohos-rs/ability": "file:../../native_ability",
+    "@ohos-rs/plugin-app-control": "file:../../plugins/app-control",
+    "@ohos-rs/plugin-permission": "file:../../plugins/permission",
+    "@ohos-rs/plugin-webview": "file:../../plugins/webview",
+    "@ohos-rs/plugin-window": "file:../../plugins/window",
   },
 }

@@ -7,8 +7,8 @@ use napi_ohos::{
 };
 
 use crate::{
-    AvoidArea, AvoidAreaInfo, AvoidAreaType, ContentRect, Event, OpenHarmonyApp, Rect, SaveLoader,
-    SaveSaver, Size, StageEventType, WAKER,
+    AvoidArea, AvoidAreaInfo, AvoidAreaType, ContentRect, Event, OpenHarmonyApp,
+    PluginLifecycleEvent, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
 };
 
 #[napi(object)]
@@ -21,7 +21,7 @@ pub struct EnvironmentCallback<'a> {
 pub struct WindowStageEventCallback<'a> {
     pub on_window_stage_create: Function<'a, (), ()>,
     pub on_window_stage_destroy: Function<'a, (), ()>,
-    pub on_ability_create: Function<'a, (), ()>,
+    pub on_ability_create: Function<'a, String, ()>,
     pub on_ability_destroy: Function<'a, (), ()>,
     pub on_ability_save_state: Function<'a, (), ()>,
     pub on_ability_restore_state: Function<'a, (), ()>,
@@ -85,7 +85,10 @@ pub fn create_lifecycle_handle<'a>(
 
     let on_memory_level_app = app.clone();
     let on_memory_level: Function<'_, i32, ()> =
-        env.create_function_from_closure("memory_level", move |_ctx| {
+        env.create_function_from_closure("memory_level", move |ctx| {
+            let level = ctx.first_arg::<i32>()?;
+            let _ = on_memory_level_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::MemoryLevel { level });
             if let Some(ref mut h) = *on_memory_level_app.event_loop.borrow_mut() {
                 h(Event::LowMemory)
             }
@@ -125,6 +128,8 @@ pub fn create_lifecycle_handle<'a>(
                 .write()
                 .unwrap()
                 .configuration = configuration.clone();
+            let _ = configuration_updated_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::ConfigurationUpdated);
             let conf = configuration.clone();
             if let Some(ref mut h) = *configuration_updated_app.event_loop.borrow_mut() {
                 h(Event::ConfigChanged(conf))
@@ -136,6 +141,8 @@ pub fn create_lifecycle_handle<'a>(
     let window_stage_event =
         env.create_function_from_closure("window_stage_event", move |ctx| {
             let event_type = ctx.first_arg::<i32>()?;
+            let _ = window_stage_event_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageEvent { event_type });
 
             if let Some(ref mut h) = *window_stage_event_app.event_loop.borrow_mut() {
                 let state_event = StageEventType::from(event_type);
@@ -216,6 +223,8 @@ pub fn create_lifecycle_handle<'a>(
     let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
         env.create_function_from_closure("on_ability_create", move |_ctx| {
+            let _ = on_window_stage_create_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageCreated);
             if let Some(ref mut h) = *on_window_stage_create_app.event_loop.borrow_mut() {
                 h(Event::WindowCreate)
             }
@@ -225,6 +234,8 @@ pub fn create_lifecycle_handle<'a>(
     let on_window_stage_destroy_app = app.clone();
     let on_window_stage_destroy =
         env.create_function_from_closure("on_window_stage_destroy", move |_ctx| {
+            let _ = on_window_stage_destroy_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageDestroyed);
             if let Some(ref mut h) = *on_window_stage_destroy_app.event_loop.borrow_mut() {
                 h(Event::WindowDestroy)
             }
@@ -232,16 +243,22 @@ pub fn create_lifecycle_handle<'a>(
         })?;
 
     let on_ability_create_app = app.clone();
-    let on_ability_create = env.create_function_from_closure("on_ability_create", move |_ctx| {
-        if let Some(ref mut h) = *on_ability_create_app.event_loop.borrow_mut() {
-            h(Event::Create)
-        }
-        Ok(())
-    })?;
+    let on_ability_create: Function<'_, String, ()> =
+        env.create_function_from_closure("on_ability_create", move |ctx| {
+            let restored_state = ctx.first_arg::<String>().unwrap_or_default();
+            let _ = on_ability_create_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::AbilityCreated { restored_state });
+            if let Some(ref mut h) = *on_ability_create_app.event_loop.borrow_mut() {
+                h(Event::Create)
+            }
+            Ok(())
+        })?;
 
     let on_ability_destroy_app = app.clone();
     let on_ability_destroy =
         env.create_function_from_closure("on_ability_destroy", move |_ctx| {
+            let _ = on_ability_destroy_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::AbilityDestroyed);
             if let Some(ref mut h) = *on_ability_destroy_app.event_loop.borrow_mut() {
                 h(Event::Destroy)
             }

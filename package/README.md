@@ -1,6 +1,9 @@
 # @ohos-rs/ability
 
-`@ohos-rs/ability` provides ArkTS-side helpers for loading native modules and forwarding OpenHarmony lifecycle events into native code. The same `NativeAbility` entry can be reused by Rust modules and C/SDL-style native modules.
+`@ohos-rs/ability` provides the ArkTS-side runtime for loading native modules, forwarding
+OpenHarmony lifecycle events, and hosting generic bridge plugins. Concrete capabilities live in
+separate HAR packages; the core package does not contain permission, window, exit, or WebView
+helpers.
 
 ## Install
 
@@ -43,7 +46,8 @@ When using `sync`, add the corresponding library to `build-profile.json5` runtim
 
 ### `DefaultXComponent`
 
-`DefaultXComponent` loads the native module and binds the default native rendering surface.
+`DefaultXComponent` loads the native module and binds the default native rendering surface. It
+also exposes the generic `xcomponent-overlay` node slot for capability plugins.
 
 ```ts
 import { DefaultXComponent } from "@ohos-rs/ability";
@@ -62,6 +66,68 @@ struct Index {
   }
 }
 ```
+
+### Plugins and node slots
+
+Compose ArkTS plugin factories explicitly in `NativeAbility.bridgePlugins`. A capability that
+needs UI nodes mounts a `FrameNode` into a generic slot; the framework never embeds a WebView
+special case.
+
+```ts
+import { BridgeNodeHost, DefaultXComponent, NativeAbility } from "@ohos-rs/ability";
+import { createWebviewPlugin } from "@ohos-rs/plugin-webview";
+
+export default class EntryAbility extends NativeAbility {
+  public moduleName = "demo_native";
+  public bridgePlugins = [createWebviewPlugin()];
+}
+
+@Entry
+@Component
+struct Page {
+  @Builder BusinessOverlay() {
+    Text("business overlay")
+  }
+
+  build() {
+    Stack() {
+      DefaultXComponent({ moduleName: "demo_native" })
+      BridgeNodeHost({
+        moduleName: "demo_native",
+        slotId: "webview-panel",
+        foreground: this.BusinessOverlay,
+      })
+    }
+  }
+}
+```
+
+### Typed bridge values
+
+ArkTS plugins receive a real N-API value with a stable type name, rather than a mandatory JSON
+envelope. Check the name at the capability boundary and return the declared response name.
+
+```ts
+import type { AsyncBridgePlugin, BridgeTypedValue } from "@ohos-rs/ability";
+
+class ProfilePlugin implements AsyncBridgePlugin {
+  // id/version/execution omitted
+  async invokeAsync(_action: string, request: BridgeTypedValue): Promise<BridgeTypedValue> {
+    if (request.typeName !== "account.Profile") {
+      throw new Error("unexpected bridge type");
+    }
+    const profile = request.value as { userId: string; visits: number };
+    return {
+      typeName: "account.Profile",
+      value: { userId: profile.userId, visits: profile.visits + 1 } as ESObject,
+    };
+  }
+}
+```
+
+`std.string` and `std.bytes` are built-in names; application-owned `#[napi(object)]` structs use
+an explicit Rust `impl_bridge_napi_type!(Type, "name")` contract. The bridge deliberately has no
+JSON transport type.
 
 ### Custom Page Example
 

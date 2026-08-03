@@ -5,6 +5,10 @@ resolver = "2"
 [workspace.dependencies]
 openharmony-ability-derive = { version = "0.3.0", path = "crates/derive" }
 openharmony-ability = { version = "0.3.0", path = "crates/ability" }
+openharmony-ability-plugin-app-control = { version = "0.3.0", path = "crates/plugin-app-control" }
+openharmony-ability-plugin-permission = { version = "0.3.0", path = "crates/plugin-permission" }
+openharmony-ability-plugin-webview = { version = "0.3.0", path = "crates/plugin-webview" }
+openharmony-ability-plugin-window = { version = "0.3.0", path = "crates/plugin-window" }
 
 napi-sys-ohos = { version = "1.1", features = ["napi8"] }
 napi-ohos = { version = "1.1" }
@@ -18,8 +22,11 @@ proc-macro2 = { version = "1.0" }
 ohos-arkui-binding = { version = "0.1" }
 ohos-xcomponent-binding = { version = "0.2" }
 ohos-ime-binding = { version = "0.1" }
-ohos-web-binding = { version = "0.1" }
 ohos-display-binding = { version = "0.0.1" }
 ohos-resource-manager-binding = { version = "0.2" }
 
-http = { version = "1.1" }
+# Bridge runtime and examples use these without pinning versions in member manifests.
+futures-channel = { version = "0.3" }
+futures-executor = { version = "0.3" }
+http = { version = "1" }
+ohos-web-binding = { version = "0.2.1" }

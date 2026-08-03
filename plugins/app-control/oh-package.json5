@@ -1,0 +1,10 @@
+{
+  "name": "@ohos-rs/plugin-app-control",
+  "version": "1.0.0",
+  "description": "Application-control capability plugin for @ohos-rs/ability",
+  "main": "index.ets",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@ohos-rs/ability": "file:../../native_ability",
+  },
+}

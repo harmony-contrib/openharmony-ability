@@ -1,6 +1,6 @@
 {
   "name": "@ohos-rs/ability",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Adaptor for OpenHarmony/HarmonyNext native abilities",
   "main": "index.ets",
   "author": "richerfu",

@@ -1,5 +1,6 @@
 import { DefaultXComponent } from "./DefaultXComponent";
-import { Loadable } from "../helper/loadable";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
+import { invokeNativeBackPressInterceptor } from "../runtime/BackPress";
 
 export const RouteName = "NativeAbility";
 
@@ -8,27 +9,20 @@ export const RouteName = "NativeAbility";
 struct Index {
   @StorageProp("moduleName") moduleNames: string | string[] = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
-  private nativeModule: ESObject = null;
   @State private primaryModuleName: string = "";
 
   async aboutToAppear(): Promise<void> {
-    const moduleName = Loadable.resolvePrimaryModuleName(this.moduleNames);
+    const moduleName = NativeModuleLoader.resolveModuleNames(this.moduleNames)[0] ?? "";
     if (!moduleName) {
       throw new Error("dynamic moduleName is empty");
     }
 
-    this.nativeModule = await Loadable.load(moduleName, this.loadMode);
+    await NativeModuleLoader.load(moduleName, this.loadMode);
     this.primaryModuleName = moduleName;
   }
 
   onBackPress(): boolean {
-    if (typeof this.nativeModule?.onBackPressIntercept === "function") {
-      return this.nativeModule.onBackPressIntercept();
-    }
-    if (typeof this.nativeModule?.on_back_press_intercept === "function") {
-      return this.nativeModule.on_back_press_intercept();
-    }
-    return false;
+    return invokeNativeBackPressInterceptor(this.primaryModuleName);
   }
 
   build() {

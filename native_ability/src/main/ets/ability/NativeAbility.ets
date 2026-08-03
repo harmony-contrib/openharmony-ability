@@ -1,24 +1,36 @@
 import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
-import webview from "@ohos.web.webview";
 import * as Entry from "../components/MainPage";
-import { AbilityInitContext, ApplicationLifecycle, Module } from "./type";
-import { Loadable } from "../helper/loadable";
+import { BridgeHostRegistry } from "../bridge/BridgeHost";
+import {
+  AbilityInitContext,
+  ApplicationLifecycle,
+  BridgeAbilityCreateLifecyclePayload,
+  BridgeEmptyLifecyclePayload,
+  BridgeLifecycleEvent,
+  BridgeMemoryLevelLifecyclePayload,
+  BridgePluginFactory,
+  BridgeWindowStageEventLifecyclePayload,
+  Module,
+} from "./type";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";
 
 export class NativeAbility extends UIAbility {
   public moduleName: string | string[] = "";
   public defaultPage: boolean = true;
-  public mode: "xcomponent" | "webview" = "xcomponent";
   public loadMode: "async" | "sync" = "async";
+  /** Application-provided capability plugins. NativeAbility itself has no concrete plugin imports. */
+  public bridgePlugins: BridgePluginFactory[] = [];
   private nativeModules: Module[] = [];
   private lifecycles: ApplicationLifecycle[] = [];
   private loadedModuleNames: string[] = [];
+  private bridgeSessionId: string = "";
 
   protected resolveModuleNames(): string[] {
-    const moduleNames = Loadable.resolveModuleNames(this.moduleName);
+    const moduleNames = NativeModuleLoader.resolveModuleNames(this.moduleName);
     if (moduleNames.length === 0) {
       throw new Error("moduleName must contain at least one module");
     }
@@ -29,7 +41,7 @@ export class NativeAbility extends UIAbility {
     for (const lifecycle of this.lifecycles) {
       try {
         handler(lifecycle);
-      } catch (_) {}
+      } catch {}
     }
   }
 
@@ -39,7 +51,7 @@ export class NativeAbility extends UIAbility {
     }
 
     try {
-      const parsed = JSON.parse(rawState) as Record<string, Object>;
+      const parsed = JSON.parse(rawState) as Record<string, object>;
       const mapped: Record<string, string> = {};
       const keys = Object.keys(parsed);
       for (const key of keys) {
@@ -47,7 +59,7 @@ export class NativeAbility extends UIAbility {
         mapped[key] = typeof value === "string" ? value : String(value);
       }
       return mapped;
-    } catch (_) {
+    } catch {
       return {};
     }
   }
@@ -63,35 +75,62 @@ export class NativeAbility extends UIAbility {
     };
   }
 
-  async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
+  protected async notifyBridgeLifecycle(event: BridgeLifecycleEvent): Promise<void> {
+    if (!this.bridgeSessionId) {
+      return;
+    }
+    for (const moduleName of this.loadedModuleNames) {
+      await BridgeHostRegistry.emitLifecycle(this.bridgeSessionId, moduleName, event);
+    }
+  }
+
+  protected async setBridgeWindowStage(windowStage: window.WindowStage): Promise<void> {
+    if (!this.bridgeSessionId) {
+      return;
+    }
+    for (const moduleName of this.loadedModuleNames) {
+      await BridgeHostRegistry.setWindowStage(this.bridgeSessionId, moduleName, windowStage);
+    }
+  }
+
+  protected async clearBridgeWindowStage(): Promise<void> {
+    if (!this.bridgeSessionId) {
+      return;
+    }
+    for (const moduleName of this.loadedModuleNames) {
+      await BridgeHostRegistry.clearWindowStage(this.bridgeSessionId, moduleName);
+    }
+  }
+
+  async onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): Promise<void> {
     const isRestore: boolean =
       (want.parameters?.["ohos.ability.params.abilityRecoveryRestart"] as boolean) ?? false;
-    const state = isRestore ? ((want.parameters?.[STATE_KEY] as string) ?? "") : "";
+    const savedState = want.parameters?.[STATE_KEY];
+    const state = isRestore && savedState !== undefined ? savedState.toString() : "";
 
     AppStorage.setOrCreate("moduleName", this.moduleName);
     AppStorage.setOrCreate("loadMode", this.loadMode);
 
     const requestedModules: string[] = this.resolveModuleNames();
     const restoredStateMap: Record<string, string> = this.parseSavedStateMap(state);
-    let webEngineRequired = false;
+    if (this.bridgeSessionId) {
+      await BridgeHostRegistry.dispose(this.bridgeSessionId);
+    }
+    this.bridgeSessionId = await BridgeHostRegistry.open(
+      requestedModules,
+      this.context as common.UIAbilityContext,
+      this.bridgePlugins,
+    );
+    AppStorage.setOrCreate("bridgeSessionId", this.bridgeSessionId);
 
     this.nativeModules = [];
     this.lifecycles = [];
     this.loadedModuleNames = [];
 
     for (const moduleName of requestedModules) {
-      const module: Module = await Loadable.load(moduleName, this.loadMode);
+      const module: Module = await NativeModuleLoader.load(moduleName, this.loadMode);
       this.nativeModules.push(module);
       this.loadedModuleNames.push(moduleName);
-
-      if (typeof module.registerCustomProtocol === "function") {
-        module.registerCustomProtocol();
-        webEngineRequired = true;
-      }
-    }
-
-    if (webEngineRequired) {
-      webview.WebviewController.initializeWebEngine();
     }
 
     for (let i = 0; i < this.nativeModules.length; i++) {
@@ -104,11 +143,19 @@ export class NativeAbility extends UIAbility {
       const restoredState = restoredStateMap[moduleName] ?? state;
       try {
         lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
-      } catch (_) {}
+      } catch {}
+    }
+
+    for (const moduleName of requestedModules) {
+      await BridgeHostRegistry.emitLifecycle(this.bridgeSessionId, moduleName, {
+        kind: "ability-create",
+        payload: new BridgeAbilityCreateLifecyclePayload(restoredStateMap[moduleName] ?? state),
+      });
     }
   }
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
+    await this.setBridgeWindowStage(windowStage);
     this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageCreate());
 
     try {
@@ -116,13 +163,17 @@ export class NativeAbility extends UIAbility {
         this.forEachLifecycle((lifecycle) =>
           lifecycle.windowStageEventCallback.onWindowStageEvent(event),
         );
+        this.notifyBridgeLifecycle({
+          kind: "window-stage-event",
+          payload: new BridgeWindowStageEventLifecyclePayload(event),
+        }).catch(() => {});
       });
-    } catch (_) {}
+    } catch {}
 
     let win: window.Window | null = null;
     try {
       win = await windowStage.getMainWindow();
-    } catch (_) {
+    } catch {
       win = null;
     }
 
@@ -148,28 +199,48 @@ export class NativeAbility extends UIAbility {
             lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
           );
         });
-      } catch (_) {}
+      } catch {}
     }
 
     if (this.defaultPage) {
       try {
         await windowStage.loadContentByName(Entry.RouteName);
-      } catch (_) {}
+      } catch {}
     }
+  }
+
+  async onWindowStageDestroy(): Promise<void> {
+    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy());
+    await this.clearBridgeWindowStage();
   }
 
   onMemoryLevel(level: AbilityConstant.MemoryLevel): void {
     this.forEachLifecycle((lifecycle) => lifecycle.environmentCallback.onMemoryLevel(level));
+    this.notifyBridgeLifecycle({
+      kind: "memory-level",
+      payload: new BridgeMemoryLevelLifecyclePayload(level),
+    }).catch(() => {});
   }
 
-  onDestroy(): void | Promise<void> {
+  async onDestroy(): Promise<void> {
+    await this.notifyBridgeLifecycle({
+      kind: "ability-destroy",
+      payload: new BridgeEmptyLifecyclePayload(),
+    });
     this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onAbilityDestroy());
+    const bridgeSessionId = this.bridgeSessionId;
+    this.bridgeSessionId = "";
+    await BridgeHostRegistry.dispose(bridgeSessionId);
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {
     this.forEachLifecycle((lifecycle) =>
       lifecycle.environmentCallback.onConfigurationUpdated(newConfig),
     );
+    this.notifyBridgeLifecycle({
+      kind: "configuration-updated",
+      payload: new BridgeEmptyLifecyclePayload(),
+    }).catch(() => {});
   }
 
   onSaveState(
@@ -187,17 +258,17 @@ export class NativeAbility extends UIAbility {
 
       try {
         stateMap[moduleName] = lifecycle.windowStageEventCallback.onAbilitySaveState() ?? "";
-      } catch (_) {}
+      } catch {}
     }
 
     const stateValues = Object.values(stateMap);
+    let stateToSave: string = "";
     if (stateValues.length === 1) {
-      wantParam[STATE_KEY] = stateValues[0];
+      stateToSave = stateValues[0];
     } else if (stateValues.length > 1) {
-      wantParam[STATE_KEY] = JSON.stringify(stateMap);
-    } else {
-      wantParam[STATE_KEY] = "";
+      stateToSave = JSON.stringify(stateMap);
     }
+    wantParam[STATE_KEY] = new String(stateToSave);
 
     return AbilityConstant.OnSaveResult.RECOVERY_AGREE;
   }

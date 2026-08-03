@@ -1,75 +1,34 @@
 use std::{
-    cell::Cell,
     cell::RefCell,
     collections::HashMap,
     fmt::Debug,
-    rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicI64},
         Arc, Mutex, RwLock,
     },
 };
 
-use futures_channel::oneshot;
 use napi_derive_ohos::napi;
-use napi_ohos::{
-    bindgen_prelude::{CallbackContext, Function, JsObjectValue, Object, Unknown},
-    threadsafe_function::ThreadsafeFunctionCallMode,
-    Error, Result,
-};
+use napi_ohos::{bindgen_prelude::Object, Env, Error, Result};
 use ohos_arkui_binding::XComponent;
 use ohos_display_binding::default_display_scaled_density;
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
-    get_helper, get_main_thread_env, get_permission_request_tsfn,
+    bridge::MainThreadBridgeEndpoint,
     resource::{
         resource_manager as global_resource_manager,
         set_resource_manager as set_global_resource_manager,
     },
-    unknown_to_permission_promise, AbilityError, AvoidArea, AvoidAreaType, Configuration, Event,
-    OpenHarmonyWaker, PermissionRequest, PermissionRequestCode, PermissionRequestOutput, Rect,
-    ResourceManager, WAKER,
+    AvoidArea, AvoidAreaType, BridgeMainThread, BridgeMainThreadEvent, BridgePlugin,
+    BridgePluginRegistry, BridgeRuntime, Configuration, Event, MainThreadScheduler,
+    OpenHarmonyWaker, PluginLifecycleEvent, Rect, ResourceManager, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
 
 pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
-
-const DEFAULT_AVOID_AREA_TYPES: [AvoidAreaType; 5] = [
-    AvoidAreaType::System,
-    AvoidAreaType::Cutout,
-    AvoidAreaType::SystemGesture,
-    AvoidAreaType::Keyboard,
-    AvoidAreaType::NavigationIndicator,
-];
-
-fn parse_rect_from_object(rect: Object<'_>) -> Option<Rect> {
-    let top = rect.get_named_property::<i32>("top").ok()?;
-    let left = rect.get_named_property::<i32>("left").ok()?;
-    let width = rect.get_named_property::<i32>("width").ok()?;
-    let height = rect.get_named_property::<i32>("height").ok()?;
-    Some(Rect {
-        top,
-        left,
-        width,
-        height,
-    })
-}
-
-fn parse_avoid_area_options(options: Object<'_>) -> Option<(AvoidAreaType, AvoidArea)> {
-    let area_type = AvoidAreaType::from(options.get_named_property::<i32>("type").ok()?);
-    let area = options.get_named_property::<Object>("area").ok()?;
-    let avoid_area = AvoidArea {
-        visible: area.get_named_property::<bool>("visible").ok()?,
-        left_rect: parse_rect_from_object(area.get_named_property::<Object>("leftRect").ok()?)?,
-        top_rect: parse_rect_from_object(area.get_named_property::<Object>("topRect").ok()?)?,
-        right_rect: parse_rect_from_object(area.get_named_property::<Object>("rightRect").ok()?)?,
-        bottom_rect: parse_rect_from_object(area.get_named_property::<Object>("bottomRect").ok()?)?,
-    };
-    Some((area_type, avoid_area))
-}
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
@@ -238,23 +197,6 @@ impl OpenHarmonyAppInner {
     pub fn set_resource_manager(&mut self, resource_manager: Option<ResourceManager>) {
         set_global_resource_manager(resource_manager);
     }
-
-    pub fn exit(&self, code: i32) -> Result<()> {
-        let ret = unsafe { get_helper() };
-        if let Some(h) = ret.borrow().as_ref() {
-            // Try to get main thread env
-            if let Some(env) = get_main_thread_env().borrow().as_ref() {
-                let ret = h.get_value(env)?;
-                let exit_func = ret.get_named_property::<Function<'_, i32, ()>>("exit")?;
-                exit_func.call(code)?;
-            } else {
-                return Err(Error::from_reason(
-                    AbilityError::OnlyRunWithMainThread("exit".to_string()).to_string(),
-                ));
-            }
-        }
-        Ok(())
-    }
 }
 
 type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>;
@@ -266,6 +208,9 @@ pub struct OpenHarmonyApp {
     pub(crate) event_loop: EventLoop,
     pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
+    bridge_runtime: Arc<RwLock<Option<BridgeRuntime>>>,
+    bridge_main_thread: Arc<RwLock<Option<MainThreadBridgeEndpoint>>>,
+    bridge_plugins: Arc<BridgePluginRegistry>,
     is_keyboard_show: Arc<Mutex<bool>>,
 }
 
@@ -316,6 +261,9 @@ impl OpenHarmonyApp {
             back_press_interceptor: Arc::new(RefCell::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
             ime: Arc::new(RefCell::new(None)),
+            bridge_runtime: Arc::new(RwLock::new(None)),
+            bridge_main_thread: Arc::new(RwLock::new(None)),
+            bridge_plugins: Arc::new(BridgePluginRegistry::default()),
             is_keyboard_show: Arc::new(Mutex::new(false)),
         }
     }
@@ -364,6 +312,90 @@ impl OpenHarmonyApp {
         global_resource_manager()
     }
 
+    /// Returns the generic ArkTS bridge for this native module.
+    ///
+    /// The runtime is initialized when the module is rendered. Calls can be made from a worker
+    /// thread; they are always marshalled back to ArkTS through a ThreadsafeFunction.
+    pub fn bridge(&self) -> Result<BridgeRuntime> {
+        self.bridge_runtime
+            .read()
+            .map_err(|_| Error::from_reason("Failed to read bridge runtime"))?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| {
+                Error::from_reason(
+                    "Bridge runtime is not ready. Call it after the NativeAbility XComponent is rendered.",
+                )
+            })
+    }
+
+    /// Schedules a Rust closure onto the ArkTS/N-API main thread.
+    ///
+    /// UI and ArkTS work should normally use [`Self::bridge`]'s typed plugin calls. This helper
+    /// is for a small Rust-side state transition that must observe main-thread affinity.
+    pub fn main_thread(&self) -> Result<MainThreadScheduler> {
+        Ok(self.bridge()?.main_thread())
+    }
+
+    /// Runs a synchronous bridge call while the caller owns the current N-API main-thread `Env`.
+    ///
+    /// A `BridgeMainThread` cannot be cloned or sent to a worker. In particular,
+    /// `MainThreadScheduler::run` does not provide this capability because it does not carry a
+    /// scoped N-API environment.
+    pub fn with_main_thread_bridge<T>(
+        &self,
+        env: &Env,
+        operation: impl FnOnce(BridgeMainThread<'_>) -> Result<T>,
+    ) -> Result<T> {
+        let bridge = self
+            .bridge_main_thread
+            .read()
+            .map_err(|_| Error::from_reason("Failed to read main-thread bridge"))?;
+        let endpoint = bridge.as_ref().ok_or_else(|| {
+            Error::from_reason(
+                "Synchronous bridge is not ready. Call it after the NativeAbility XComponent is rendered.",
+            )
+        })?;
+        operation(BridgeMainThread::new(env, endpoint))
+    }
+
+    /// Registers a Rust facade for ArkTS-originated events and lifecycle notifications.
+    ///
+    /// Register during the `#[ability]` initializer, before UI rendering starts. Registration is
+    /// keyed by `BridgePlugin::ID`, so duplicate contracts fail deterministically.
+    pub fn register_plugin<P>(&self, plugin: P) -> Result<()>
+    where
+        P: BridgePlugin,
+    {
+        self.bridge_plugins.register(plugin)
+    }
+
+    #[doc(hidden)]
+    pub fn dispatch_bridge_main_thread_event<'env>(
+        &self,
+        event: BridgeMainThreadEvent<'env>,
+    ) -> Result<napi_ohos::bindgen_prelude::Unknown<'env>> {
+        self.bridge_plugins.dispatch_main_thread_event(event)
+    }
+
+    #[doc(hidden)]
+    pub fn dispatch_plugin_lifecycle(&self, event: PluginLifecycleEvent) -> Result<()> {
+        self.bridge_plugins.dispatch_lifecycle(event)
+    }
+
+    pub(crate) fn set_bridge_bindings(
+        &self,
+        runtime: BridgeRuntime,
+        main_thread_endpoint: MainThreadBridgeEndpoint,
+    ) {
+        if let Ok(mut guard) = self.bridge_runtime.write() {
+            guard.replace(runtime);
+        }
+        if let Ok(mut guard) = self.bridge_main_thread.write() {
+            guard.replace(main_thread_endpoint);
+        }
+    }
+
     #[doc(hidden)]
     pub fn set_resource_manager(&self, resource_manager: Option<ResourceManager>) {
         self.inner
@@ -404,53 +436,11 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().window_rect()
     }
 
-    fn fetch_avoid_area_from_helper(
-        &self,
-        area_type: AvoidAreaType,
-    ) -> Option<(AvoidAreaType, AvoidArea)> {
-        let helper = unsafe { get_helper() };
-        let helper_borrow = helper.borrow();
-        let helper_ref = helper_borrow.as_ref()?;
-        let env = get_main_thread_env();
-        let env_borrow = env.borrow();
-        let env_ref = env_borrow.as_ref()?;
-        let helper_object = helper_ref.get_value(env_ref).ok()?;
-        let get_window_avoid_area = helper_object
-            .get_named_property::<Function<'_, i32, Object<'_>>>("getWindowAvoidArea")
-            .ok()?;
-        let options = get_window_avoid_area.call(i32::from(area_type)).ok()?;
-        parse_avoid_area_options(options)
-    }
-
-    fn ensure_avoid_area_cached(&self, area_type: AvoidAreaType) {
-        if self.inner.read().unwrap().avoid_area(area_type).is_some() {
-            return;
-        }
-        if let Some((fetched_type, area)) = self.fetch_avoid_area_from_helper(area_type) {
-            self.inner
-                .write()
-                .unwrap()
-                .avoid_areas
-                .insert(fetched_type, area);
-        }
-    }
-
-    fn ensure_avoid_areas_cached(&self) {
-        if !self.inner.read().unwrap().avoid_areas.is_empty() {
-            return;
-        }
-        for area_type in DEFAULT_AVOID_AREA_TYPES {
-            self.ensure_avoid_area_cached(area_type);
-        }
-    }
-
     pub fn avoid_area(&self, area_type: AvoidAreaType) -> Option<AvoidArea> {
-        self.ensure_avoid_area_cached(area_type);
         self.inner.read().unwrap().avoid_area(area_type)
     }
 
     pub fn avoid_areas(&self) -> HashMap<AvoidAreaType, AvoidArea> {
-        self.ensure_avoid_areas_cached();
         self.inner.read().unwrap().avoid_areas()
     }
     pub fn native_window(&self) -> Option<RawWindow> {
@@ -460,90 +450,6 @@ impl OpenHarmonyApp {
     /// Get current app scale
     pub fn scale(&self) -> f32 {
         self.inner.read().unwrap().scale()
-    }
-
-    /// Exit current app with code
-    pub fn exit(&self, code: i32) {
-        self.inner.read().unwrap().exit(code).unwrap();
-    }
-
-    /// Request one or more runtime permissions through ArkTS helper.
-    /// Returns each requested permission and the corresponding request result code.
-    /// ! Don't call this function from main thread with block_on.
-    pub async fn request_permission<P>(&self, permission: P) -> Result<Vec<PermissionRequestCode>>
-    where
-        P: Into<PermissionRequest>,
-    {
-        let request = permission.into();
-        let requested_permissions = request.permissions();
-        let input = request.into_input();
-
-        let permission_tsfn = get_permission_request_tsfn().ok_or_else(|| {
-            Error::from_reason("requestPermission threadsafe function is not initialized")
-        })?;
-
-        let (tx, rx) = oneshot::channel::<Result<PermissionRequestOutput>>();
-        let status = permission_tsfn.call_with_return_value(
-            input,
-            ThreadsafeFunctionCallMode::NonBlocking,
-            move |result, _| {
-                match result {
-                    Ok(value) => {
-                        let tx_cell = Rc::new(Cell::new(Some(tx)));
-                        let tx_in_catch = tx_cell.clone();
-                        let promise = unknown_to_permission_promise(value)?;
-                        promise
-                            .then(move |ctx| {
-                                if let Some(sender) = tx_cell.replace(None) {
-                                    let _ = sender.send(Ok(ctx.value));
-                                }
-                                Ok(())
-                            })?
-                            .catch(move |ctx: CallbackContext<Unknown>| {
-                                if let Some(sender) = tx_in_catch.replace(None) {
-                                    let _ = sender.send(Err(ctx.value.into()));
-                                }
-                                Ok(())
-                            })?;
-                    }
-                    Err(err) => {
-                        let _ = tx.send(Err(err));
-                    }
-                }
-
-                Ok(())
-            },
-        );
-
-        if status != napi_ohos::Status::Ok {
-            return Err(Error::from_reason(format!(
-                "call requestPermission failed with status: {:?}",
-                status
-            )));
-        }
-
-        let output = rx
-            .await
-            .map_err(|_| Error::from_reason("requestPermission callback receiver dropped"))??;
-
-        let codes = match output {
-            napi_ohos::Either::A(code) => vec![code],
-            napi_ohos::Either::B(codes) => codes,
-        };
-
-        if requested_permissions.len() != codes.len() {
-            return Err(Error::from_reason(format!(
-                "requestPermission result length mismatch: requested {}, got {}",
-                requested_permissions.len(),
-                codes.len()
-            )));
-        }
-
-        Ok(requested_permissions
-            .into_iter()
-            .zip(codes)
-            .map(|(permission, code)| PermissionRequestCode { permission, code })
-            .collect())
     }
 
     pub fn run_loop<'a, F: FnMut(Event) + 'a>(&self, mut event_handle: F) {
