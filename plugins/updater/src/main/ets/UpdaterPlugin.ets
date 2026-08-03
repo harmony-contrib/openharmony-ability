@@ -63,7 +63,9 @@ function parseCheckRequest(payload: BridgeTypedValue): UpdaterCheckRequest {
   return payload.value as UpdaterCheckRequest;
 }
 
-async function checkForUpdate(context: common.UIAbilityContext): Promise<UpdaterCheckResult | null> {
+async function checkForUpdate(
+  context: common.UIAbilityContext,
+): Promise<UpdaterCheckResult | null> {
   try {
     const checkResult = await updateManager.checkAppUpdate(context);
     if (checkResult.updateAvailable !== updateManager.UpdateAvailableCode.LATER_VERSION_EXIST) {
@@ -87,7 +89,7 @@ async function checkForUpdate(context: common.UIAbilityContext): Promise<Updater
     }
 
     // API 20+ exposes versionName; older API levels fall back to "unknown".
-    const version = (checkResult as ESObject).versionName as string || "unknown";
+    const version = ((checkResult as ESObject).versionName as string) || "unknown";
 
     return new UpdaterCheckResult(true, currentVersion, String(version), null, null);
   } catch (error) {

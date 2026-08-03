@@ -9,10 +9,7 @@ use std::{future::Future, pin::Pin};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use napi_derive_ohos::napi;
-use napi_ohos::{
-    bindgen_prelude::Unknown,
-    Error, Result,
-};
+use napi_ohos::{bindgen_prelude::Unknown, Error, Result};
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeMainThreadEvent, BridgePlugin, OpenHarmonyApp,
@@ -505,8 +502,8 @@ impl StatusBarExt for OpenHarmonyApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        QuickOperationData, StatusBarIconData, StatusBarItemData, StatusBarMenuItemData,
-        StatusBarMenuActionData,
+        QuickOperationData, StatusBarIconData, StatusBarItemData, StatusBarMenuActionData,
+        StatusBarMenuItemData,
     };
     use openharmony_ability::BridgeNapiType;
 

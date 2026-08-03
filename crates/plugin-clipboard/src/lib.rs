@@ -87,13 +87,12 @@ impl ClipboardExt for OpenHarmonyApp {
         width: u32,
         height: u32,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        let validated = validate_dimensions(rgba.len(), width, height).map(|()| {
-            ClipboardImageRequest {
+        let validated =
+            validate_dimensions(rgba.len(), width, height).map(|()| ClipboardImageRequest {
                 rgba,
                 width,
                 height,
-            }
-        });
+            });
         let bridge = self.bridge();
 
         Box::pin(async move {

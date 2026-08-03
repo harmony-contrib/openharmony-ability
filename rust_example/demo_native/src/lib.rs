@@ -20,24 +20,24 @@ use openharmony_ability::{Event, InputEvent, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
 use openharmony_ability_plugin_app_control::AppControlExt;
 use openharmony_ability_plugin_clipboard::ClipboardExt;
-use openharmony_ability_plugin_files::{dialog_type, FileDialogFilter, FileDialogOptions, FilesExt};
-use openharmony_ability_plugin_menu::{
-    item_kind, MenuExt, MenuItemData,
+use openharmony_ability_plugin_files::{
+    dialog_type, FileDialogFilter, FileDialogOptions, FilesExt,
 };
+use openharmony_ability_plugin_menu::{item_kind, MenuExt, MenuItemData};
 use openharmony_ability_plugin_permission::PermissionExt;
 use openharmony_ability_plugin_statusbar::{
     QuickOperationData, StatusBarExt, StatusBarIconData, StatusBarItemData,
-    StatusBarMenuItemData, StatusBarMenuActionData,
+    StatusBarMenuActionData, StatusBarMenuItemData,
 };
 use openharmony_ability_plugin_updater::UpdaterExt;
 use openharmony_ability_plugin_url::UrlExt;
 use openharmony_ability_plugin_version::VersionExt;
-use openharmony_ability_plugin_window::WindowExtMulti;
 use openharmony_ability_plugin_webview::{
     WebviewBridgePlugin, WebviewCallbacksBuilder, WebviewClient, WebviewCreateRequest,
     WebviewDownloadStartResponse, WebviewExt, WebviewJavascriptProxyBuilder, WebviewProtocol,
     WebviewProtocolOptions,
 };
+use openharmony_ability_plugin_window::WindowExtMulti;
 
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
 static PERMISSION_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -290,8 +290,7 @@ fn openharmony_app(app: OpenHarmonyApp) {
     {
         hilog_info!(format!("failed to register statusbar facade: {error}").as_str());
     }
-    if let Err(error) =
-        app.register_plugin(openharmony_ability_plugin_updater::UpdaterBridgePlugin)
+    if let Err(error) = app.register_plugin(openharmony_ability_plugin_updater::UpdaterBridgePlugin)
     {
         hilog_info!(format!("failed to register updater facade: {error}").as_str());
     }
@@ -451,7 +450,9 @@ pub fn demo_version_info(env: &Env) -> Result<String> {
     let dist = app.distribution_api_version(env)?;
     let desktop = app.is_desktop_device(env)?;
     let can_use = app.can_i_use(env, "SystemCapability.Window.SessionManager")?;
-    Ok(format!("sdk={sdk}, dist={dist}, desktop={desktop}, window-session={can_use}"))
+    Ok(format!(
+        "sdk={sdk}, dist={dist}, desktop={desktop}, window-session={can_use}"
+    ))
 }
 
 /// PR #63 capability demo: clipboard image write.

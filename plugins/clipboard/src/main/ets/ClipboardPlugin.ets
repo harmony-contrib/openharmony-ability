@@ -8,7 +8,6 @@ import {
   BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
-
 const IMAGE_REQUEST_TYPE = "ohos.clipboard.ImageRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.clipboard.Acknowledgement";
 

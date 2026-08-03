@@ -61,20 +61,22 @@ pub trait VersionExt {
 impl VersionExt for OpenHarmonyApp {
     fn sdk_api_version(&self, env: &Env) -> Result<i32> {
         self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge.call_sync::<VersionBridgePlugin, VersionRequest, VersionResponse>(
-                "get-sdk-api-version",
-                VersionRequest { syscap: None },
-            )?;
+            let response = bridge
+                .call_sync::<VersionBridgePlugin, VersionRequest, VersionResponse>(
+                    "get-sdk-api-version",
+                    VersionRequest { syscap: None },
+                )?;
             Ok(response.value)
         })
     }
 
     fn distribution_api_version(&self, env: &Env) -> Result<i32> {
         self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge.call_sync::<VersionBridgePlugin, VersionRequest, VersionResponse>(
-                "get-distribution-api-version",
-                VersionRequest { syscap: None },
-            )?;
+            let response = bridge
+                .call_sync::<VersionBridgePlugin, VersionRequest, VersionResponse>(
+                    "get-distribution-api-version",
+                    VersionRequest { syscap: None },
+                )?;
             Ok(response.value)
         })
     }
@@ -82,22 +84,24 @@ impl VersionExt for OpenHarmonyApp {
     fn can_i_use(&self, env: &Env, syscap: &str) -> Result<bool> {
         validate_syscap(syscap)?;
         self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge.call_sync::<VersionBridgePlugin, VersionRequest, VersionResponse>(
-                "can-i-use",
-                VersionRequest {
-                    syscap: Some(syscap.to_owned()),
-                },
-            )?;
+            let response = bridge
+                .call_sync::<VersionBridgePlugin, VersionRequest, VersionResponse>(
+                    "can-i-use",
+                    VersionRequest {
+                        syscap: Some(syscap.to_owned()),
+                    },
+                )?;
             Ok(response.result.unwrap_or(false))
         })
     }
 
     fn is_desktop_device(&self, env: &Env) -> Result<bool> {
         self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge.call_sync::<VersionBridgePlugin, VersionRequest, VersionResponse>(
-                "is-desktop-device",
-                VersionRequest { syscap: None },
-            )?;
+            let response = bridge
+                .call_sync::<VersionBridgePlugin, VersionRequest, VersionResponse>(
+                    "is-desktop-device",
+                    VersionRequest { syscap: None },
+                )?;
             Ok(response.result.unwrap_or(false))
         })
     }

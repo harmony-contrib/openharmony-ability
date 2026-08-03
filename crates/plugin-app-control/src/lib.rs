@@ -125,8 +125,8 @@ impl AppControlExt for OpenHarmonyApp {
 
     fn restart(&self, env: &Env) -> Result<()> {
         self.with_main_thread_bridge(env, |bridge| {
-            let response =
-                bridge.call_sync::<AppControlBridgePlugin, RestartRequest, RestartResponse>(
+            let response = bridge
+                .call_sync::<AppControlBridgePlugin, RestartRequest, RestartResponse>(
                     "restart",
                     RestartRequest { requested: true },
                 )?;
@@ -141,8 +141,8 @@ impl AppControlExt for OpenHarmonyApp {
             ));
         }
         self.with_main_thread_bridge(env, |bridge| {
-            let response =
-                bridge.call_sync::<AppControlBridgePlugin, ColorModeRequest, ColorModeResponse>(
+            let response = bridge
+                .call_sync::<AppControlBridgePlugin, ColorModeRequest, ColorModeResponse>(
                     "set-color-mode",
                     ColorModeRequest { mode },
                 )?;

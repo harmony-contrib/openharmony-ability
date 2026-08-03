@@ -10,17 +10,11 @@
 //!
 //! Menu items are structured, named N-API values (`ohos.menu.MenuItemData`), never JSON.
 
-use std::{
-    future::Future,
-    pin::Pin,
-};
+use std::{future::Future, pin::Pin};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use napi_derive_ohos::napi;
-use napi_ohos::{
-    bindgen_prelude::Unknown,
-    Error, Result,
-};
+use napi_ohos::{bindgen_prelude::Unknown, Error, Result};
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeMainThreadEvent, BridgePlugin, OpenHarmonyApp,
@@ -359,10 +353,7 @@ impl MenuExt for OpenHarmonyApp {
             let response = bridge?
                 .call_async::<MenuBridgePlugin, MenuVisibilityRequest, MenuAcknowledgement>(
                     "set-menubar-visible",
-                    MenuVisibilityRequest {
-                        window_id,
-                        visible,
-                    },
+                    MenuVisibilityRequest { window_id, visible },
                     BridgeCallOptions::default(),
                 )
                 .await?;
@@ -398,13 +389,15 @@ mod tests {
 
     #[test]
     fn menu_item_builds_recursive_tree() {
-        let file = MenuItemData::new("file", item_kind::SUBMENU).text("File").submenu(vec![
-            MenuItemData::new("file.open", item_kind::NORMAL).text("Open"),
-            MenuItemData::new("file.sep", item_kind::SEPARATOR),
-            MenuItemData::new("file.quit", item_kind::PREDEFINED)
-                .predefined("quit")
-                .accelerator("Ctrl+Q"),
-        ]);
+        let file = MenuItemData::new("file", item_kind::SUBMENU)
+            .text("File")
+            .submenu(vec![
+                MenuItemData::new("file.open", item_kind::NORMAL).text("Open"),
+                MenuItemData::new("file.sep", item_kind::SEPARATOR),
+                MenuItemData::new("file.quit", item_kind::PREDEFINED)
+                    .predefined("quit")
+                    .accelerator("Ctrl+Q"),
+            ]);
         let request = MenuBarRequest {
             window_id: "main".to_owned(),
             items: vec![file],

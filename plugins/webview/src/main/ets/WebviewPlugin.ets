@@ -991,7 +991,9 @@ class WebviewSurface {
     const entry = await this.controllerEntry(id, callContext);
     try {
       // getWebPageSnapshot is not in the API 12 controller surface; resolved dynamically.
-      const result: ESObject = (await (entry.data.controller as ESObject).getWebPageSnapshot()) as ESObject;
+      const result: ESObject = (await (
+        entry.data.controller as ESObject
+      ).getWebPageSnapshot()) as ESObject;
       return new WebviewSnapshotResponse(
         result.rgba as Uint8Array,
         result.width as number,
@@ -1210,7 +1212,7 @@ class WebviewSurface {
       throw new Error(`Unknown WebView controller '${id}'`);
     }
     if (callContext === undefined) {
-      await entry.waitForController((listener: () => void): () => void => {
+      await entry.waitForController((listener: () => void): (() => void) => {
         listener();
         return () => {};
       });
@@ -1428,10 +1430,10 @@ export class WebviewPlugin extends AsyncPluginBase {
     } else if (action === "snapshot") {
       const snapshotRequest = parseSnapshotPayload(payload);
       const snapshotSlotId = snapshotRequest.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      const snapshot = await WebviewSurfaceRegistry.get(
-        this.getContext(),
-        snapshotSlotId,
-      ).snapshot(snapshotRequest.id, context);
+      const snapshot = await WebviewSurfaceRegistry.get(this.getContext(), snapshotSlotId).snapshot(
+        snapshotRequest.id,
+        context,
+      );
       return { typeName: SNAPSHOT_RESPONSE_TYPE, value: snapshot };
     } else if (action === "set-debugging-access") {
       const debugRequest = parseBoolPayload(payload);

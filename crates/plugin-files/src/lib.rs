@@ -176,9 +176,7 @@ impl FilesExt for OpenHarmonyApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        dialog_type, FileDialogFilter, FileDialogOptions, FileDialogResponse,
-    };
+    use super::{dialog_type, FileDialogFilter, FileDialogOptions, FileDialogResponse};
     use openharmony_ability::BridgeNapiType;
 
     #[test]
@@ -201,9 +199,9 @@ mod tests {
     fn dialog_options_validate_kind_and_shape() {
         let open = FileDialogOptions::new(dialog_type::OPEN_FILE)
             .allow_many(true)
-            .filters(vec![
-                FileDialogFilter::new().name("Documents").pattern("md;txt"),
-            ]);
+            .filters(vec![FileDialogFilter::new()
+                .name("Documents")
+                .pattern("md;txt")]);
         assert!(open.validate().is_ok());
 
         let bad_kind = FileDialogOptions::new("open-filesystem");

@@ -333,7 +333,9 @@ export class WindowPlugin extends SyncPluginBase {
       const request = parseColorRequest(payload);
       const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
       try {
-        this.dynamic(win).setWindowBackgroundColor(`#${request.color.toString(16).padStart(8, "0")}`);
+        this.dynamic(win).setWindowBackgroundColor(
+          `#${request.color.toString(16).padStart(8, "0")}`,
+        );
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
       } catch (error) {
         throw new Error(`setWindowBackgroundColor failed: ${String(error)}`);
@@ -453,7 +455,9 @@ export class WindowPlugin extends SyncPluginBase {
     try {
       const dynamic: ESObject = this.dynamic(win);
       const value: boolean =
-        action === "is-maximized" ? (dynamic.isMaximized() as boolean) : (dynamic.isMinimized() as boolean);
+        action === "is-maximized"
+          ? (dynamic.isMaximized() as boolean)
+          : (dynamic.isMinimized() as boolean);
       return { typeName: STATE_RESPONSE_TYPE, value: new WindowStateResponse(value) };
     } catch (error) {
       throw new Error(`${action} failed: ${String(error)}`);

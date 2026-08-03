@@ -697,7 +697,11 @@ impl WebviewHandle {
 
     /// Generates a PDF of the current page into `path`. Must be called after the page has
     /// fully loaded (`on_page_end`).
-    pub async fn create_pdf(&self, path: impl Into<String>, config: Option<PdfConfig>) -> Result<()> {
+    pub async fn create_pdf(
+        &self,
+        path: impl Into<String>,
+        config: Option<PdfConfig>,
+    ) -> Result<()> {
         let request = WebviewPdfRequest {
             id: self.id.clone(),
             slot_id: self.slot_id.clone(),
@@ -905,7 +909,10 @@ impl WebviewBoundsRequest {
         if self.id.trim().is_empty() {
             return Err(Error::from_reason("WebView id must not be empty"));
         }
-        if !self.width.is_finite() || !self.height.is_finite() || self.width <= 0.0 || self.height <= 0.0
+        if !self.width.is_finite()
+            || !self.height.is_finite()
+            || self.width <= 0.0
+            || self.height <= 0.0
         {
             return Err(Error::from_reason(
                 "WebView bounds width and height must be positive finite numbers",

@@ -210,7 +210,7 @@ function processGroups(groups: StatusBarMenuItemData[][], abilityName: string): 
 }
 
 const iconClickHandler = (event: emitter.EventData): void => {
-  const clickType = (event.data as ESObject).clickType as string ?? "click";
+  const clickType = ((event.data as ESObject).clickType as string) ?? "click";
   const context = StatusBarPluginHolder.pluginContext;
   if (context) {
     context.invokeNativeSync("icon-click", CLICK_REQUEST_TYPE, CLICK_RESPONSE_TYPE, { clickType });
@@ -218,7 +218,7 @@ const iconClickHandler = (event: emitter.EventData): void => {
 };
 
 const menuClickHandler = (event: emitter.EventData): void => {
-  const menuCode = (event.data as ESObject).menuCode as string ?? "";
+  const menuCode = ((event.data as ESObject).menuCode as string) ?? "";
   const context = StatusBarPluginHolder.pluginContext;
   if (context) {
     context.invokeNativeSync("menu-click", MENU_CLICK_REQUEST_TYPE, CLICK_RESPONSE_TYPE, {
@@ -253,7 +253,10 @@ function registerClickHandlers(): void {
       "statusBarIconClick" as "statusBarIconClick",
       iconClickHandler as Callback<emitter.EventData>,
     );
-    statusBarManager.on("rightMenuClick" as "rightMenuClick", menuClickHandler as Callback<emitter.EventData>);
+    statusBarManager.on(
+      "rightMenuClick" as "rightMenuClick",
+      menuClickHandler as Callback<emitter.EventData>,
+    );
   } catch (error) {
     hilog.error(
       0x0000,
@@ -432,4 +435,3 @@ async function executePredefinedAction(
   }
   throw new Error(`Unsupported predefined action '${actionType}'`);
 }
-

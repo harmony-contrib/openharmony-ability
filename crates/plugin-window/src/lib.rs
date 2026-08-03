@@ -271,10 +271,11 @@ impl WindowExtMulti for OpenHarmonyApp {
     fn create_os_window(&self, env: &Env, request: WindowCreateRequest) -> Result<i64> {
         request.validate()?;
         self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge.call_sync::<WindowBridgePlugin, WindowCreateRequest, WindowCreateResponse>(
-                "create-os-window",
-                request,
-            )?;
+            let response = bridge
+                .call_sync::<WindowBridgePlugin, WindowCreateRequest, WindowCreateResponse>(
+                    "create-os-window",
+                    request,
+                )?;
             Ok(response.window_id)
         })
     }
@@ -336,7 +337,10 @@ impl WindowExtMulti for OpenHarmonyApp {
             bridge
                 .call_sync::<WindowBridgePlugin, WindowFocusableRequest, WindowAcknowledgement>(
                     "set-focusable",
-                    WindowFocusableRequest { window_id, focusable },
+                    WindowFocusableRequest {
+                        window_id,
+                        focusable,
+                    },
                 )?
                 .ensure()
         })
@@ -421,10 +425,11 @@ impl WindowCommandHelper for OpenHarmonyApp {
 
     fn window_state(&self, env: &Env, action: &str, window_id: i64) -> Result<bool> {
         self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge.call_sync::<WindowBridgePlugin, WindowIdRequest, WindowStateResponse>(
-                action,
-                WindowIdRequest { window_id },
-            )?;
+            let response = bridge
+                .call_sync::<WindowBridgePlugin, WindowIdRequest, WindowStateResponse>(
+                    action,
+                    WindowIdRequest { window_id },
+                )?;
             Ok(response.value)
         })
     }

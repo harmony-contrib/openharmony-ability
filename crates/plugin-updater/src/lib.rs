@@ -76,9 +76,7 @@ pub trait UpdaterExt {
     /// Checks AppGallery for an available update. Pure query, no dialog.
     fn check(&self) -> Pin<Box<dyn Future<Output = Result<Option<UpdaterCheckResult>>> + Send>>;
     /// Shows the AppGallery update dialog and drives the download + install flow.
-    fn download_and_install(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+    fn download_and_install(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 }
 
 impl UpdaterExt for OpenHarmonyApp {
@@ -96,9 +94,7 @@ impl UpdaterExt for OpenHarmonyApp {
         })
     }
 
-    fn download_and_install(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+    fn download_and_install(&self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         let bridge = self.bridge();
         Box::pin(async move {
             let response = bridge?
@@ -115,7 +111,7 @@ impl UpdaterExt for OpenHarmonyApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{UpdaterCheckRequest, UpdaterCheckResult, UpdaterCheckResponse};
+    use super::{UpdaterCheckRequest, UpdaterCheckResponse, UpdaterCheckResult};
     use openharmony_ability::BridgeNapiType;
 
     #[test]
