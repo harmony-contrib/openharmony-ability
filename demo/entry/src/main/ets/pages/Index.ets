@@ -1,3 +1,4 @@
+import { LengthMetrics } from "@ohos.arkui.node";
 import {
   BridgeNodeHost,
   DefaultXComponent,
@@ -12,6 +13,9 @@ import {
   demoPluginProfile,
   demoPluginSyncContext,
   demoPluginString,
+  demoOpenUrl,
+  demoFileDialogOpen,
+  demoFileDialogSave,
   setBackgroundColor,
   setVisible,
   toggleBackPressIntercept,
@@ -32,6 +36,8 @@ struct Index {
   @State mainThreadResult: string = "not inspected";
   @State webviewResult: string = "WebView not created";
   @State webviewScriptResult: string = "JavaScript not called";
+  @State urlResult: string = "not called";
+  @State fileDialogResult: string = "not called";
 
   async handlePermissionDemo() {
     const result: number[] = await demoRequestPermissionFromMainThread();
@@ -120,6 +126,37 @@ struct Index {
     }
   }
 
+  async handleOpenUrl() {
+    this.urlResult = "opening…";
+    try {
+      await demoOpenUrl();
+      this.urlResult = "opened via ohos.url / context.openLink";
+    } catch (error) {
+      this.urlResult = `open failed: ${String(error)}`;
+    }
+  }
+
+  async handleFileDialogOpen() {
+    this.fileDialogResult = "picking…";
+    try {
+      const files = await demoFileDialogOpen();
+      this.fileDialogResult =
+        files.length > 0 ? `selected ${files.length}: ${files[0]}` : "cancelled";
+    } catch (error) {
+      this.fileDialogResult = `open dialog failed: ${String(error)}`;
+    }
+  }
+
+  async handleFileDialogSave() {
+    this.fileDialogResult = "picking…";
+    try {
+      const files = await demoFileDialogSave();
+      this.fileDialogResult = files.length > 0 ? `saved to ${files[0]}` : "cancelled";
+    } catch (error) {
+      this.fileDialogResult = `save dialog failed: ${String(error)}`;
+    }
+  }
+
   @Builder
   DemoSwitcher(label: string, index: number) {
     Button(label)
@@ -155,34 +192,44 @@ struct Index {
 
   @Builder
   XComponentDemo() {
-    Column({ space: 12 }) {
-      Button("request permission demo")
-        .onClick(() => this.handlePermissionDemo())
-      Button("async bridge login demo")
-        .onClick(() => this.handlePluginLogin())
-      Text(this.loginResult)
-      Button("sync main-thread plugin demo")
-        .onClick(() => this.handleSyncPluginContext())
-      Text(this.mainThreadResult)
-      Button("String + Uint8Array typed plugin demo")
-        .onClick(() => this.handleRawPayloadDemo())
-      Text(this.rawPayloadResult)
-      Button("named #[napi(object)] type demo")
-        .onClick(() => this.handleProfileDemo())
-      Text(this.profileResult)
-      Button(this.interceptEnabled ? "back intercept: ON" : "back intercept: OFF")
-        .onClick(() => this.handleToggleBackIntercept())
-      Text("Swipe back to test intercept behavior.")
-      DefaultXComponent({ moduleName: MODULE_NAME }).layoutWeight(1)
+    Scroll() {
+      Column({ space: 12 }) {
+        Button("request permission demo")
+          .onClick(() => this.handlePermissionDemo())
+        Button("async bridge login demo")
+          .onClick(() => this.handlePluginLogin())
+        Text(this.loginResult)
+        Button("sync main-thread plugin demo")
+          .onClick(() => this.handleSyncPluginContext())
+        Text(this.mainThreadResult)
+        Button("String + Uint8Array typed plugin demo")
+          .onClick(() => this.handleRawPayloadDemo())
+        Text(this.rawPayloadResult)
+        Button("named #[napi(object)] type demo")
+          .onClick(() => this.handleProfileDemo())
+        Text(this.profileResult)
+        Button(this.interceptEnabled ? "back intercept: ON" : "back intercept: OFF")
+          .onClick(() => this.handleToggleBackIntercept())
+        Text("Swipe back to test intercept behavior.")
+        DefaultXComponent({ moduleName: MODULE_NAME })
+          .width("100%")
+          .height(280)
+      }
+      .width("100%")
+      .padding(8)
     }
     .width("100%")
-    .height("100%");
+    .height("100%")
+    .scrollable(ScrollDirection.Vertical);
   }
 
   @Builder
   WebviewDemo() {
     Column({ space: 12 }) {
-      Row({ space: 12 }) {
+      Flex({
+        wrap: FlexWrap.Wrap,
+        space: { main: LengthMetrics.vp(12), cross: LengthMetrics.vp(8) },
+      }) {
         Button("create webview")
           .onClick(() => this.handleCreateWebview())
         Button("background red")
@@ -191,7 +238,7 @@ struct Index {
           .onClick(() => this.handleWebviewScript())
         Button(this.webviewVisible ? "hide webview" : "show webview")
           .onClick(() => this.handleToggleWebviewVisible())
-      }
+      }.width("100%")
       Text(this.webviewResult)
       Text(`document.title: ${this.webviewScriptResult}`)
       Stack() {
@@ -210,17 +257,53 @@ struct Index {
     .height("100%");
   }
 
+  @Builder
+  PlatformServicesDemo() {
+    Scroll() {
+      Column({ space: 12 }) {
+        Text("PR #65 native platform services (ohos.url / ohos.files)")
+          .fontSize(14)
+          .fontColor("#333")
+        Button("open external URL (ohos.url)")
+          .onClick(() => this.handleOpenUrl())
+        Text(this.urlResult)
+        Button("open file dialog: multi-select + filters (ohos.files)")
+          .onClick(() => this.handleFileDialogOpen())
+        Button("save file dialog: PDF filter (ohos.files)")
+          .onClick(() => this.handleFileDialogSave())
+        Text(this.fileDialogResult)
+        Text(
+          "File dialog params are structured named N-API values; filter strings are converted only inside the plugin.",
+        )
+          .fontSize(12)
+          .fontColor("#888")
+      }
+      .width("100%")
+      .padding(8)
+    }
+    .width("100%")
+    .height("100%")
+    .scrollable(ScrollDirection.Vertical);
+  }
+
   build() {
     Column({ space: 16 }) {
-      Row({ space: 12 }) {
+      Flex({
+        wrap: FlexWrap.Wrap,
+        space: { main: LengthMetrics.vp(12), cross: LengthMetrics.vp(8) },
+      }) {
         this.DemoSwitcher("XComponent demo", 0)
         this.DemoSwitcher("WebView + slot demo", 1)
+        this.DemoSwitcher("Platform services demo", 2)
       }.width("100%")
       if (this.currentDemo === 0) {
         this.XComponentDemo();
       }
-      if (this.currentDemo !== 0) {
+      if (this.currentDemo === 1) {
         this.WebviewDemo();
+      }
+      if (this.currentDemo === 2) {
+        this.PlatformServicesDemo();
       }
     }
     .width("100%")

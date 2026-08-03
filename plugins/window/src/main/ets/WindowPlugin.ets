@@ -2,9 +2,8 @@ import window from "@ohos.window";
 import {
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
-  BridgePluginFactory,
-  MainThreadSyncBridgePlugin,
+  BridgeContextRequirement,
+  SyncPluginBase,
 } from "@ohos-rs/ability";
 
 const AVOID_AREA_REQUEST_TYPE = "ohos.window.AvoidAreaRequest";
@@ -253,15 +252,15 @@ class SubWindowRegistry {
   }
 }
 
-class WindowPlugin implements MainThreadSyncBridgePlugin {
+export class WindowPlugin extends SyncPluginBase {
   readonly id = "ohos.window";
   readonly version = 1;
-  readonly execution = "sync-main-thread" as const;
-  readonly requires = ["window-stage"] as const;
-  private readonly pluginContext: BridgePluginContext;
+  readonly requires: BridgeContextRequirement[] = ["window-stage"];
+  private pluginContext?: BridgePluginContext;
 
-  constructor(pluginContext: BridgePluginContext) {
-    this.pluginContext = pluginContext;
+  override attachContext(context: BridgePluginContext): void {
+    super.attachContext(context);
+    this.pluginContext = context;
   }
 
   invokeSync(
@@ -293,7 +292,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
           windowType: window.WindowType.TYPE_APP,
         };
         const created = windowStage.createSubWindow(config.name);
-        SubWindowRegistry.put(this.pluginContext.sessionId, windowId, created);
+        SubWindowRegistry.put(this.requireContext().sessionId, windowId, created);
         return { typeName: CREATE_RESPONSE_TYPE, value: new WindowCreateResponse(windowId) };
       } catch (error) {
         throw new Error(`createSubWindow failed: ${String(error)}`);
@@ -302,7 +301,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
 
     if (action === "set-decorations") {
       const request = parseDecorationsRequest(payload);
-      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
       try {
         // Decorations are rendered by the business page; the registry entry keeps the
         // window alive across calls. No-op beyond validation on this platform.
@@ -315,7 +314,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
 
     if (action === "set-background-color") {
       const request = parseColorRequest(payload);
-      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
       try {
         win.setWindowBackgroundColor(`#${request.color.toString(16).padStart(8, "0")}`);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -326,7 +325,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
 
     if (action === "set-blur") {
       const request = parseBlurRequest(payload);
-      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
       try {
         win.setBlur(request.radius);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -337,7 +336,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
 
     if (action === "focus") {
       const request = parseWindowIdRequest(payload);
-      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
       try {
         win.focus();
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -348,7 +347,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
 
     if (action === "set-focusable") {
       const request = parseFocusableRequest(payload);
-      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
       try {
         win.setFocusable(request.focusable);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -359,7 +358,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
 
     if (action === "move-to") {
       const request = parseMoveRequest(payload);
-      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
       try {
         win.moveWindowTo(request.x, request.y);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -370,7 +369,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
 
     if (action === "resize") {
       const request = parseResizeRequest(payload);
-      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
       try {
         win.resize(request.width, request.height);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -410,7 +409,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
     payload: BridgeTypedValue,
   ): BridgeTypedValue {
     const request = parseWindowIdRequest(payload);
-    const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+    const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
     try {
       if (action === "minimize") {
         win.minimize();
@@ -433,7 +432,7 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
     payload: BridgeTypedValue,
   ): BridgeTypedValue {
     const request = parseWindowIdRequest(payload);
-    const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+    const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
     try {
       const value = action === "is-maximized" ? win.isMaximized() : win.isMinimized();
       return { typeName: STATE_RESPONSE_TYPE, value: new WindowStateResponse(value) };
@@ -445,14 +444,4 @@ class WindowPlugin implements MainThreadSyncBridgePlugin {
   private static nextWindowId(): number {
     return Date.now() % 0x7fffffff;
   }
-}
-
-export function createWindowPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.window",
-    version: 1,
-    execution: "sync-main-thread",
-    requires: ["window-stage"],
-    create: (context: BridgePluginContext): MainThreadSyncBridgePlugin => new WindowPlugin(context),
-  };
 }

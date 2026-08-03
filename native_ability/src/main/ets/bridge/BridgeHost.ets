@@ -54,23 +54,6 @@ function normalizedRequirements(requires?: BridgeContextRequirement[]): BridgeCo
   return requires ? requires.slice() : [];
 }
 
-function sameRequirements(
-  first?: BridgeContextRequirement[],
-  second?: BridgeContextRequirement[],
-): boolean {
-  const left = normalizedRequirements(first);
-  const right = normalizedRequirements(second);
-  if (left.length !== right.length) {
-    return false;
-  }
-  for (const requirement of left) {
-    if (right.indexOf(requirement) < 0) {
-      return false;
-    }
-  }
-  return true;
-}
-
 /**
  * One module-scoped host. It owns context readiness, lifecycle replay, timeout/cancellation and
  * the direct ArkTS-to-Rust N-API event port; concrete capability implementations are supplied
@@ -105,11 +88,14 @@ class BridgeHost {
       }
       this.validateFactory(factory);
 
-      const plugin = factory.create(this.pluginContext(factory.id));
-      this.validatePlugin(factory, plugin);
+      // Identity lives on the instance: create, validate, then inject the
+      // session-scoped context before any lifecycle hook can run.
+      const plugin = factory.create();
+      this.validatePlugin(plugin);
       if (this.plugins.has(plugin.id)) {
         throw new Error(`Duplicate bridge plugin '${plugin.id}' in module ${this.moduleName}`);
       }
+      plugin.attachContext?.(this.pluginContext(plugin.id));
       this.plugins.set(plugin.id, { factory, plugin, installed: false });
     }
     await this.activateReadyPlugins();
@@ -390,7 +376,7 @@ class BridgeHost {
 
   private missingRequirements(entry: HostedPlugin): BridgeContextRequirement[] {
     const missing: BridgeContextRequirement[] = [];
-    for (const requirement of normalizedRequirements(entry.factory.requires)) {
+    for (const requirement of normalizedRequirements(entry.plugin.requires)) {
       if (requirement === "window-stage" && this.windowStage === undefined) {
         missing.push(requirement);
       }
@@ -625,31 +611,23 @@ class BridgeHost {
   }
 
   private validateFactory(factory: BridgePluginFactory): void {
-    if (!isBridgeIdentifier(factory.id) || factory.version <= 0) {
+    if (typeof factory.create !== "function") {
       throw new Error(`Invalid bridge plugin factory for module ${this.moduleName}`);
     }
-    for (const requirement of normalizedRequirements(factory.requires)) {
+  }
+
+  private validatePlugin(plugin: BridgePlugin): void {
+    if (!isBridgeIdentifier(plugin.id) || plugin.version <= 0) {
+      throw new Error(`Invalid bridge plugin declaration for module ${this.moduleName}`);
+    }
+    for (const requirement of normalizedRequirements(plugin.requires)) {
       if (
         requirement !== "ability" &&
         requirement !== "window-stage" &&
         requirement !== "ui-context"
       ) {
-        throw new Error(`Invalid context requirement '${requirement}' for '${factory.id}'`);
+        throw new Error(`Invalid context requirement '${requirement}' for '${plugin.id}'`);
       }
-    }
-  }
-
-  private validatePlugin(factory: BridgePluginFactory, plugin: BridgePlugin): void {
-    if (!isBridgeIdentifier(plugin.id) || plugin.version <= 0) {
-      throw new Error(`Invalid bridge plugin declaration for module ${this.moduleName}`);
-    }
-    if (
-      plugin.id !== factory.id ||
-      plugin.version !== factory.version ||
-      plugin.execution !== factory.execution ||
-      !sameRequirements(factory.requires, plugin.requires)
-    ) {
-      throw new Error(`Bridge plugin '${factory.id}' does not match its factory contract`);
     }
   }
 

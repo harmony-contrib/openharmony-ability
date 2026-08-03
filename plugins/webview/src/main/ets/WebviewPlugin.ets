@@ -3,14 +3,14 @@ import { UIContext } from "@ohos.arkui.UIContext";
 import { BuilderNode, FrameNode } from "@ohos.arkui.node";
 import webview from "@ohos.web.webview";
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
   BridgeNodeSlot,
   BridgeNodeSlotRegistry,
   BridgeTypedValue,
   BridgePluginContext,
-  BridgePluginFactory,
   DEFAULT_PLUGIN_NODE_SLOT,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
@@ -53,7 +53,7 @@ interface CookieApi {
 }
 
 function enableWebDebuggingIfAvailable(): void {
-  const debuggingApi = webview.WebviewController as unknown as WebviewDebuggingApi;
+  const debuggingApi = webview.WebviewController as ESObject as WebviewDebuggingApi;
   if (typeof debuggingApi.setWebDebuggingAccess !== "function") {
     console.warn("WebView debugging is unavailable on this ArkWeb API level");
     return;
@@ -1273,18 +1273,12 @@ class WebviewSurfaceRegistry {
   }
 }
 
-class WebviewPlugin implements AsyncBridgePlugin {
+export class WebviewPlugin extends AsyncPluginBase {
   readonly id = "ohos.webview";
   readonly version = 1;
-  readonly execution = "async";
-  readonly requires: ["ui-context"] = ["ui-context"];
-  private readonly pluginContext: BridgePluginContext;
+  readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
-  constructor(pluginContext: BridgePluginContext) {
-    this.pluginContext = pluginContext;
-  }
-
-  onInstall(context: BridgePluginContext): void {
+  override onInstall(context: BridgePluginContext): void {
     ensureWebEngineInitialized(context);
   }
 
@@ -1301,7 +1295,7 @@ class WebviewPlugin implements AsyncBridgePlugin {
       const slotId = createPayload.slotId || DEFAULT_PLUGIN_NODE_SLOT;
       const payloadWithSlot = withSlotId(createPayload, slotId);
       const surface = await WebviewSurfaceRegistry.getWhenMounted(
-        this.pluginContext,
+        this.getContext(),
         slotId,
         context,
       );
@@ -1320,7 +1314,7 @@ class WebviewPlugin implements AsyncBridgePlugin {
     if (action === "evaluate-script") {
       const scriptPayload = parseScriptPayload(payload);
       const slotId = scriptPayload.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      const result = await WebviewSurfaceRegistry.get(this.pluginContext, slotId).evaluateScript(
+      const result = await WebviewSurfaceRegistry.get(this.getContext(), slotId).evaluateScript(
         scriptPayload.id,
         scriptPayload.script,
         context,
@@ -1336,7 +1330,7 @@ class WebviewPlugin implements AsyncBridgePlugin {
       throw new Error("WebView controller id must not be empty");
     }
     const slotId = controllerPayload.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-    const surface = WebviewSurfaceRegistry.get(this.pluginContext, slotId);
+    const surface = WebviewSurfaceRegistry.get(this.getContext(), slotId);
     let accepted = false;
     if (action === "get-url") {
       return {
@@ -1451,16 +1445,6 @@ class WebviewPlugin implements AsyncBridgePlugin {
   onDispose(context: BridgePluginContext): void {
     WebviewSurfaceRegistry.disposeSession(context);
   }
-}
-
-export function createWebviewPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.webview",
-    version: 1,
-    execution: "async",
-    requires: ["ui-context"],
-    create: (context: BridgePluginContext): AsyncBridgePlugin => new WebviewPlugin(context),
-  };
 }
 
 declare class WebviewController extends webview.WebviewController {}

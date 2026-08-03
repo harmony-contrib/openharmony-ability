@@ -70,5 +70,13 @@
       "name": "plugin_window",
       "srcPath": "../plugins/window",
     },
+    {
+      "name": "plugin_url",
+      "srcPath": "../plugins/url",
+    },
+    {
+      "name": "plugin_files",
+      "srcPath": "../plugins/files",
+    },
   ],
 }

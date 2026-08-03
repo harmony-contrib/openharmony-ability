@@ -75,10 +75,12 @@ dependencies = [
  "openharmony-ability-derive",
  "openharmony-ability-plugin-app-control",
  "openharmony-ability-plugin-clipboard",
+ "openharmony-ability-plugin-files",
  "openharmony-ability-plugin-menu",
  "openharmony-ability-plugin-permission",
  "openharmony-ability-plugin-statusbar",
  "openharmony-ability-plugin-updater",
+ "openharmony-ability-plugin-url",
  "openharmony-ability-plugin-version",
  "openharmony-ability-plugin-webview",
  "openharmony-ability-plugin-window",
@@ -538,6 +540,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openharmony-ability-plugin-files"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
 name = "openharmony-ability-plugin-menu"
 version = "0.3.0"
 dependencies = [
@@ -568,6 +579,15 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-updater"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-url"
 version = "0.3.0"
 dependencies = [
  "napi-derive-ohos",

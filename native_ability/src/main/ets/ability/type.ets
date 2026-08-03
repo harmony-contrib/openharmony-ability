@@ -187,6 +187,11 @@ interface BridgePluginBase {
 
 export interface AsyncBridgePlugin extends BridgePluginBase {
   execution: "async";
+  /**
+   * Optional: session-scoped context injection, called by BridgeHost right after creation
+   * (before onInstall). PluginBase implements it; interface-only plugins may omit it.
+   */
+  attachContext?: (context: BridgePluginContext) => void;
   onInstall?: (context: BridgePluginContext) => void | Promise<void>;
   onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginContext) => void | Promise<void>;
   invokeAsync: (
@@ -199,6 +204,8 @@ export interface AsyncBridgePlugin extends BridgePluginBase {
 
 export interface MainThreadSyncBridgePlugin extends BridgePluginBase {
   execution: "sync-main-thread";
+  /** See [`AsyncBridgePlugin.attachContext`]. */
+  attachContext?: (context: BridgePluginContext) => void;
   onInstall?: (context: BridgePluginContext) => void;
   onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginContext) => void;
   invokeSync: (
@@ -211,12 +218,90 @@ export interface MainThreadSyncBridgePlugin extends BridgePluginBase {
 
 export type BridgePlugin = AsyncBridgePlugin | MainThreadSyncBridgePlugin;
 
-/** A factory creates one plugin instance per native module and Ability session. */
+/**
+ * Shared base for plugin implementations. Concrete plugins declare only their identity
+ * (`id` / `version` / `requires`) and the invoke method; the execution mode and optional
+ * lifecycle hooks come from the mode-specific bases below. The session-scoped context is
+ * injected by `BridgeHost` through [`PluginBase.attachContext`] after creation, so plugin
+ * constructors never need it.
+ */
+export abstract class PluginBase {
+  abstract readonly id: string;
+  abstract readonly version: number;
+  abstract readonly requires: BridgeContextRequirement[];
+  private context?: BridgePluginContext;
+
+  onInstall(_context: BridgePluginContext): void | Promise<void> {}
+  onLifecycle(_event: BridgeLifecycleEvent, _context: BridgePluginContext): void | Promise<void> {}
+  onDispose(_context: BridgePluginContext): void | Promise<void> {}
+
+  /**
+   * Called once by `BridgeHost` right after creation, before `onInstall`. Subclasses that
+   * need the context outside the lifecycle hooks can read it via [`PluginBase.getContext`].
+   */
+  attachContext(context: BridgePluginContext): void {
+    this.context = context;
+  }
+
+  protected getContext(): BridgePluginContext {
+    const context = this.context;
+    if (context === undefined) {
+      throw new Error(`Bridge plugin '${this.id}' was used before its context was attached`);
+    }
+    return context;
+  }
+}
+
+/** Base class for asynchronous plugins. `execution` is fixed by the base; subclasses never
+ * repeat the literal annotation (ArkTS rejects `as const`, so the base owns the annotation). */
+export abstract class AsyncPluginBase extends PluginBase implements AsyncBridgePlugin {
+  readonly execution: "async" = "async";
+
+  abstract invokeAsync(
+    action: string,
+    request: BridgeTypedValue,
+    context: BridgeCallContext,
+  ): Promise<BridgeTypedValue>;
+}
+
+/** Base class for main-thread synchronous plugins. See [`AsyncPluginBase`]. */
+export abstract class SyncPluginBase extends PluginBase implements MainThreadSyncBridgePlugin {
+  readonly execution: "sync-main-thread" = "sync-main-thread";
+
+  abstract invokeSync(
+    action: string,
+    request: BridgeTypedValue,
+    context: BridgeCallContext,
+  ): BridgeTypedValue;
+}
+
+/**
+ * Registration entry for one plugin. Identity (`id` / `version` / `execution` / `requires`)
+ * lives only on the plugin instance; the factory is a plain per-session instance creator
+ * (plus an optional module filter). Use [`LazyPlugin`] to build one.
+ */
 export interface BridgePluginFactory {
-  id: string;
-  version: number;
-  execution: BridgePluginExecution;
-  requires?: BridgeContextRequirement[];
+  /** Optional: restrict this plugin to the listed native module names. */
   modules?: string[];
-  create: (context: BridgePluginContext) => BridgePlugin;
+  /** Creates one plugin instance per native module and Ability session. */
+  create: () => BridgePlugin;
+}
+
+/**
+ * Lazy plugin registration entry: defers instance creation to `BridgeHost.install` (one
+ * instance per native module and Ability session) and optionally filters by native module.
+ * Identity fields are read from the created instance, so they are never repeated here.
+ */
+export class LazyPlugin implements BridgePluginFactory {
+  readonly modules?: string[];
+  private readonly createFn: () => BridgePlugin;
+
+  constructor(create: () => BridgePlugin, modules?: string[]) {
+    this.createFn = create;
+    this.modules = modules;
+  }
+
+  create(): BridgePlugin {
+    return this.createFn();
+  }
 }

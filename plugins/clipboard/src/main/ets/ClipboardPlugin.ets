@@ -2,11 +2,10 @@ import pasteboard from "@ohos.pasteboard";
 import { image } from "@kit.ImageKit";
 import { BusinessError } from "@kit.BasicServicesKit";
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
-  BridgePluginFactory,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 /**
@@ -94,11 +93,10 @@ async function writeImageToClipboard(
   }
 }
 
-class ClipboardPlugin implements AsyncBridgePlugin {
+export class ClipboardPlugin extends AsyncPluginBase {
   readonly id = "ohos.clipboard";
   readonly version = 1;
-  readonly execution = "async" as const;
-  readonly requires = ["ability"] as const;
+  readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(
     action: string,
@@ -115,14 +113,4 @@ class ClipboardPlugin implements AsyncBridgePlugin {
     }
     return { typeName: ACKNOWLEDGEMENT_TYPE, value: new ClipboardAcknowledgement(true) };
   }
-}
-
-export function createClipboardPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.clipboard",
-    version: 1,
-    execution: "async",
-    requires: ["ability"],
-    create: (_context: BridgePluginContext): AsyncBridgePlugin => new ClipboardPlugin(),
-  };
 }

@@ -2,9 +2,8 @@ import { deviceInfo } from "@kit.BasicServicesKit";
 import {
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
-  BridgePluginFactory,
-  MainThreadSyncBridgePlugin,
+  SyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const VERSION_REQUEST_TYPE = "ohos.version.VersionRequest";
@@ -38,11 +37,10 @@ function requireSyscap(request: VersionRequest): string {
   return request.syscap.trim();
 }
 
-class VersionPlugin implements MainThreadSyncBridgePlugin {
+export class VersionPlugin extends SyncPluginBase {
   readonly id = "ohos.version";
   readonly version = 1;
-  readonly execution = "sync-main-thread" as const;
-  readonly requires = ["ability"] as const;
+  readonly requires: BridgeContextRequirement[] = ["ability"];
 
   invokeSync(
     action: string,
@@ -78,14 +76,4 @@ class VersionPlugin implements MainThreadSyncBridgePlugin {
     }
     throw new Error(`Unsupported ohos.version action '${action}'`);
   }
-}
-
-export function createVersionPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.version",
-    version: 1,
-    execution: "sync-main-thread",
-    requires: ["ability"],
-    create: (_context: BridgePluginContext): MainThreadSyncBridgePlugin => new VersionPlugin(),
-  };
 }

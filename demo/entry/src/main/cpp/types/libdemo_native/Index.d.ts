@@ -202,6 +202,15 @@ export declare function demoPluginString(): Promise<string>;
 /** Synchronous plugins remain scoped to the N-API main-thread `Env`. */
 export declare function demoPluginSyncContext(): string;
 
+/** PR #65: opens an external URL through `ohos.url` / `context.openLink`. */
+export declare function demoOpenUrl(): Promise<void>;
+
+/** PR #65: open-file dialog through `ohos.files` (multi-select + text/image filters). */
+export declare function demoFileDialogOpen(): Promise<Array<string>>;
+
+/** PR #65: save-file dialog through `ohos.files` with a PDF filter. */
+export declare function demoFileDialogSave(): Promise<Array<string>>;
+
 export declare function demoRequestPermissionFromMainThread(): Promise<Array<number>>;
 
 /**

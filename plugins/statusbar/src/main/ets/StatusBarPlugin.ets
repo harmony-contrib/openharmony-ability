@@ -4,11 +4,11 @@ import { statusBarManager } from "@kit.DeskTopExtensionKit";
 import { emitter, BusinessError } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
   BridgePluginContext,
-  BridgePluginFactory,
   BridgeTypedValue,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const ADD_REQUEST_TYPE = "ohos.statusbar.AddRequest";
@@ -210,7 +210,7 @@ class StatusBarPluginHolder {
 function registerClickHandlers(): void {
   try {
     statusBarManager.off(
-      "statusBarIconClick" as const,
+      "statusBarIconClick" as "statusBarIconClick",
       iconClickHandler as Callback<emitter.EventData>,
     );
   } catch (error) {
@@ -218,7 +218,7 @@ function registerClickHandlers(): void {
   }
   try {
     statusBarManager.off(
-      "rightMenuClick" as const,
+      "rightMenuClick" as "rightMenuClick",
       menuClickHandler as Callback<emitter.EventData>,
     );
   } catch (error) {
@@ -226,10 +226,10 @@ function registerClickHandlers(): void {
   }
   try {
     statusBarManager.on(
-      "statusBarIconClick" as const,
+      "statusBarIconClick" as "statusBarIconClick",
       iconClickHandler as Callback<emitter.EventData>,
     );
-    statusBarManager.on("rightMenuClick" as const, menuClickHandler as Callback<emitter.EventData>);
+    statusBarManager.on("rightMenuClick" as "rightMenuClick", menuClickHandler as Callback<emitter.EventData>);
   } catch (error) {
     hilog.error(
       0x0000,
@@ -240,16 +240,16 @@ function registerClickHandlers(): void {
   }
 }
 
-class StatusBarPlugin implements AsyncBridgePlugin {
+export class StatusBarPlugin extends AsyncPluginBase {
   readonly id = "ohos.statusbar";
   readonly version = 1;
-  readonly execution = "async" as const;
-  readonly requires = ["ability"] as const;
-  private readonly pluginContext: BridgePluginContext;
+  readonly requires: BridgeContextRequirement[] = ["ability"];
+  private pluginContext?: BridgePluginContext;
 
-  constructor(pluginContext: BridgePluginContext) {
-    this.pluginContext = pluginContext;
-    StatusBarPluginHolder.pluginContext = pluginContext;
+  override attachContext(context: BridgePluginContext): void {
+    super.attachContext(context);
+    this.pluginContext = context;
+    StatusBarPluginHolder.pluginContext = context;
   }
 
   async invokeAsync(
@@ -257,7 +257,7 @@ class StatusBarPlugin implements AsyncBridgePlugin {
     payload: BridgeTypedValue,
     _context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
-    const abilityContext = this.pluginContext.abilityContext;
+    const abilityContext = this.requireContext().abilityContext;
     const abilityName = abilityContext.abilityInfo.name;
 
     if (action === "add") {
@@ -402,12 +402,3 @@ async function executePredefinedAction(
   throw new Error(`Unsupported predefined action '${actionType}'`);
 }
 
-export function createStatusBarPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.statusbar",
-    version: 1,
-    execution: "async",
-    requires: ["ability"],
-    create: (context: BridgePluginContext): AsyncBridgePlugin => new StatusBarPlugin(context),
-  };
-}

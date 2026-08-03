@@ -469,6 +469,8 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 webview ta
 | 系统托盘（add/remove/icon/menu/tips/预定义动作/点击事件） | `plugin-statusbar` / `ohos.statusbar` | 出站 async + `ability`；点击事件为 scoped 主线程具名 N-API `icon-click` / `menu-click`，Rust 经 `StatusBarExt::*_click_receiver` 供 tray 监听 |
 | 版本检测（`sdk_api_version` / `distribution_api_version` / `canIUse` / `is_desktop_device`） | core `version` 模块（init/getters）+ `plugin-version` / `ohos.version` | 版本号由 `#[ability]` 宏从 `AbilityInitContext` 初始化，任意线程可读；`can-i-use` / `is-desktop-device` 为 sync + `ability` |
 | `Loadable` | `runtime/NativeModuleLoader` | framework 内部 runtime，不是能力 bridge |
+| `openURL` | `plugin-url` / `ohos.url` | async + `ability`；`context.openLink` |
+| `showFileDialog`（open/save/folder） | `plugin-files` / `ohos.files` | async + `ability`；结构化 `DialogOptions` 传参，filter 字符串语法仅在 ArkTS 插件内部转换 |
 | `random`、`objectAssign` 等纯工具函数 | 使用点或插件内部 | 不再作为 framework helper 暴露 |
 
 迁移时应删除 core 中针对该能力的 helper、类型、factory import、宏参数和页面专用字段；禁止保留

@@ -3,9 +3,8 @@ import process from "@ohos.process";
 import {
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
-  BridgePluginFactory,
-  MainThreadSyncBridgePlugin,
+  BridgeContextRequirement,
+  SyncPluginBase,
 } from "@ohos-rs/ability";
 
 const TERMINATE_REQUEST_TYPE = "ohos.app_control.TerminateRequest";
@@ -66,11 +65,10 @@ function parseColorModeRequest(payload: BridgeTypedValue): ColorModeRequest {
   return request;
 }
 
-class AppControlPlugin implements MainThreadSyncBridgePlugin {
+export class AppControlPlugin extends SyncPluginBase {
   readonly id = "ohos.app-control";
   readonly version = 1;
-  readonly execution = "sync-main-thread" as const;
-  readonly requires = ["ability"] as const;
+  readonly requires: BridgeContextRequirement[] = ["ability"];
   private lastRestartAt: number = 0;
 
   invokeSync(
@@ -120,14 +118,4 @@ class AppControlPlugin implements MainThreadSyncBridgePlugin {
 
     throw new Error(`Unsupported ohos.app-control action '${action}'`);
   }
-}
-
-export function createAppControlPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.app-control",
-    version: 1,
-    execution: "sync-main-thread",
-    requires: ["ability"],
-    create: (_context: BridgePluginContext): MainThreadSyncBridgePlugin => new AppControlPlugin(),
-  };
 }

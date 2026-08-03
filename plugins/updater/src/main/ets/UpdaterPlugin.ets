@@ -3,11 +3,10 @@ import { bundleManager } from "@kit.AbilityKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { BusinessError } from "@kit.BasicServicesKit";
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
-  BridgePluginFactory,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const CHECK_REQUEST_TYPE = "ohos.updater.CheckRequest";
@@ -109,11 +108,10 @@ async function showUpdateDialog(): Promise<number> {
   return resultCode;
 }
 
-class UpdaterPlugin implements AsyncBridgePlugin {
+export class UpdaterPlugin extends AsyncPluginBase {
   readonly id = "ohos.updater";
   readonly version = 1;
-  readonly execution = "async" as const;
-  readonly requires = ["ability"] as const;
+  readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(
     action: string,
@@ -140,14 +138,4 @@ class UpdaterPlugin implements AsyncBridgePlugin {
     }
     throw new Error(`Unsupported ohos.updater action '${action}'`);
   }
-}
-
-export function createUpdaterPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.updater",
-    version: 1,
-    execution: "async",
-    requires: ["ability"],
-    create: (_context: BridgePluginContext): AsyncBridgePlugin => new UpdaterPlugin(),
-  };
 }

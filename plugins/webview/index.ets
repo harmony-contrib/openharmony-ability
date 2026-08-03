@@ -1,1 +1,1 @@
-export { createWebviewPlugin } from "./src/main/ets/WebviewPlugin";
+export { WebviewPlugin } from "./src/main/ets/WebviewPlugin";

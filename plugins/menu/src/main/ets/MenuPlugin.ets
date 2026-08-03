@@ -1,9 +1,9 @@
 import {
-  AsyncBridgePlugin,
   BridgeCallContext,
   BridgePluginContext,
-  BridgePluginFactory,
   BridgeTypedValue,
+  AsyncPluginBase,
+  BridgeContextRequirement,
 } from "@ohos-rs/ability";
 
 const MENUBAR_REQUEST_TYPE = "ohos.menu.MenuBarRequest";
@@ -169,11 +169,10 @@ export class MenuBarRegistry {
   }
 }
 
-class MenuPlugin implements AsyncBridgePlugin {
+export class MenuPlugin extends AsyncPluginBase {
   readonly id = "ohos.menu";
   readonly version = 1;
-  readonly execution = "async" as const;
-  readonly requires = ["ability"] as const;
+  readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(
     action: string,
@@ -321,17 +320,4 @@ class MenuPluginHolder {
     }
     dispatchMenuClick(context, id, windowId);
   }
-}
-
-export function createMenuPlugin(): BridgePluginFactory {
-  return {
-    id: "ohos.menu",
-    version: 1,
-    execution: "async",
-    requires: ["ability"],
-    create: (context: BridgePluginContext): AsyncBridgePlugin => {
-      MenuPluginHolder.context = context;
-      return new MenuPlugin(context);
-    },
-  };
 }
