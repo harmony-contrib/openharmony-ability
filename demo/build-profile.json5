@@ -71,6 +71,26 @@
       "srcPath": "../plugins/window",
     },
     {
+      "name": "plugin_clipboard",
+      "srcPath": "../plugins/clipboard",
+    },
+    {
+      "name": "plugin_menu",
+      "srcPath": "../plugins/menu",
+    },
+    {
+      "name": "plugin_statusbar",
+      "srcPath": "../plugins/statusbar",
+    },
+    {
+      "name": "plugin_updater",
+      "srcPath": "../plugins/updater",
+    },
+    {
+      "name": "plugin_version",
+      "srcPath": "../plugins/version",
+    },
+    {
       "name": "plugin_url",
       "srcPath": "../plugins/url",
     },
