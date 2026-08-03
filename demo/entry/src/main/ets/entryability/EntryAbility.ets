@@ -3,7 +3,9 @@ import Want from "@ohos.app.ability.Want";
 import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
 import { createAppControlPlugin } from "@ohos-rs/plugin-app-control";
+import { createFilesPlugin } from "@ohos-rs/plugin-files";
 import { createPermissionPlugin } from "@ohos-rs/plugin-permission";
+import { createUrlPlugin } from "@ohos-rs/plugin-url";
 import { createWebviewPlugin } from "@ohos-rs/plugin-webview";
 import { createWindowPlugin } from "@ohos-rs/plugin-window";
 import { createDemoLoginPlugin, createDemoMainThreadPlugin } from "../bridge/DemoLoginPlugin";
@@ -16,8 +18,10 @@ export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [
     createPermissionPlugin(),
     createAppControlPlugin(),
+    createFilesPlugin(),
     createWindowPlugin(),
     createWebviewPlugin(),
+    createUrlPlugin(),
     createDemoLoginPlugin(),
     createDemoMainThreadPlugin(),
     createDemoRawPlugin(),

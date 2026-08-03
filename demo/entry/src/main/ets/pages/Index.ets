@@ -12,6 +12,9 @@ import {
   demoPluginProfile,
   demoPluginSyncContext,
   demoPluginString,
+  demoOpenUrl,
+  demoFileDialogOpen,
+  demoFileDialogSave,
   setBackgroundColor,
   setVisible,
   toggleBackPressIntercept,
@@ -32,6 +35,8 @@ struct Index {
   @State mainThreadResult: string = "not inspected";
   @State webviewResult: string = "WebView not created";
   @State webviewScriptResult: string = "JavaScript not called";
+  @State urlResult: string = "not called";
+  @State fileDialogResult: string = "not called";
 
   async handlePermissionDemo() {
     const result: number[] = await demoRequestPermissionFromMainThread();
@@ -117,6 +122,37 @@ struct Index {
       this.webviewScriptResult = await evaluateDemoWebviewScript();
     } catch (error) {
       this.webviewScriptResult = `JavaScript failed: ${String(error)}`;
+    }
+  }
+
+  async handleOpenUrl() {
+    this.urlResult = "opening…";
+    try {
+      await demoOpenUrl();
+      this.urlResult = "opened via ohos.url / context.openLink";
+    } catch (error) {
+      this.urlResult = `open failed: ${String(error)}`;
+    }
+  }
+
+  async handleFileDialogOpen() {
+    this.fileDialogResult = "picking…";
+    try {
+      const files = await demoFileDialogOpen();
+      this.fileDialogResult =
+        files.length > 0 ? `selected ${files.length}: ${files[0]}` : "cancelled";
+    } catch (error) {
+      this.fileDialogResult = `open dialog failed: ${String(error)}`;
+    }
+  }
+
+  async handleFileDialogSave() {
+    this.fileDialogResult = "picking…";
+    try {
+      const files = await demoFileDialogSave();
+      this.fileDialogResult = files.length > 0 ? `saved to ${files[0]}` : "cancelled";
+    } catch (error) {
+      this.fileDialogResult = `save dialog failed: ${String(error)}`;
     }
   }
 
@@ -210,17 +246,46 @@ struct Index {
     .height("100%");
   }
 
+  @Builder
+  PlatformServicesDemo() {
+    Column({ space: 12 }) {
+      Text("PR #65 native platform services (ohos.url / ohos.files)")
+        .fontSize(14)
+        .fontColor("#333")
+      Button("open external URL (ohos.url)")
+        .onClick(() => this.handleOpenUrl())
+      Text(this.urlResult)
+      Button("open file dialog: multi-select + filters (ohos.files)")
+        .onClick(() => this.handleFileDialogOpen())
+      Button("save file dialog: PDF filter (ohos.files)")
+        .onClick(() => this.handleFileDialogSave())
+      Text(this.fileDialogResult)
+      Text(
+        "File dialog params are structured named N-API values; filter strings are converted only inside the plugin.",
+      )
+        .fontSize(12)
+        .fontColor("#888")
+    }
+    .width("100%")
+    .height("100%")
+    .padding(8);
+  }
+
   build() {
     Column({ space: 16 }) {
       Row({ space: 12 }) {
         this.DemoSwitcher("XComponent demo", 0)
         this.DemoSwitcher("WebView + slot demo", 1)
+        this.DemoSwitcher("Platform services demo", 2)
       }.width("100%")
       if (this.currentDemo === 0) {
         this.XComponentDemo();
       }
-      if (this.currentDemo !== 0) {
+      if (this.currentDemo === 1) {
         this.WebviewDemo();
+      }
+      if (this.currentDemo === 2) {
+        this.PlatformServicesDemo();
       }
     }
     .width("100%")

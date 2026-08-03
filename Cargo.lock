@@ -57,7 +57,9 @@ dependencies = [
  "ohos-hilog-binding",
  "openharmony-ability",
  "openharmony-ability-derive",
+ "openharmony-ability-plugin-files",
  "openharmony-ability-plugin-permission",
+ "openharmony-ability-plugin-url",
  "openharmony-ability-plugin-webview",
 ]
 
@@ -500,7 +502,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "openharmony-ability-plugin-files"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
 name = "openharmony-ability-plugin-permission"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-url"
 version = "0.3.0"
 dependencies = [
  "napi-derive-ohos",

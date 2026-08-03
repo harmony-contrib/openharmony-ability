@@ -442,6 +442,8 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 webview ta
 | `getWindowAvoidArea` | `plugin-window` / `ohos.window` | sync + `window-stage`；返回完整避让区 |
 | `createWebview`、嵌入式 WebView、custom protocol、导航/下载/标题回调 | `plugin-webview` / `ohos.webview` | 出站 async + `ui-context`；入站为 scoped 主线程具名 N-API；scheme 在 engine 初始化前声明 |
 | `Loadable` | `runtime/NativeModuleLoader` | framework 内部 runtime，不是能力 bridge |
+| `openURL` | `plugin-url` / `ohos.url` | async + `ability`；`context.openLink` |
+| `showFileDialog`（open/save/folder） | `plugin-files` / `ohos.files` | async + `ability`；结构化 `DialogOptions` 传参，filter 字符串语法仅在 ArkTS 插件内部转换 |
 | `random`、`objectAssign` 等纯工具函数 | 使用点或插件内部 | 不再作为 framework helper 暴露 |
 
 迁移时应删除 core 中针对该能力的 helper、类型、factory import、宏参数和页面专用字段；禁止保留

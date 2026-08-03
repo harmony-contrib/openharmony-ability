@@ -18,7 +18,9 @@ use napi_ohos::{Env, Error, Result};
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{Event, InputEvent, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
+use openharmony_ability_plugin_files::{dialog_type, FileDialogFilter, FileDialogOptions, FilesExt};
 use openharmony_ability_plugin_permission::PermissionExt;
+use openharmony_ability_plugin_url::UrlExt;
 use openharmony_ability_plugin_webview::{
     WebviewBridgePlugin, WebviewCallbacksBuilder, WebviewClient, WebviewCreateRequest,
     WebviewDownloadStartResponse, WebviewExt, WebviewJavascriptProxyBuilder, WebviewProtocol,
@@ -268,6 +270,12 @@ fn openharmony_app(app: OpenHarmonyApp) {
     }
     app.register_plugin(WebviewBridgePlugin)
         .expect("demo WebView facade must be registered");
+    if let Err(error) = app.register_plugin(openharmony_ability_plugin_url::UrlBridgePlugin) {
+        hilog_info!(format!("failed to register url facade: {error}").as_str());
+    }
+    if let Err(error) = app.register_plugin(openharmony_ability_plugin_files::FilesBridgePlugin) {
+        hilog_info!(format!("failed to register files facade: {error}").as_str());
+    }
     hilog_info!(format!(
         "init context => module={:?}, base={:?}, pref={:?}, locales={:?}",
         app.module_name(),
@@ -327,4 +335,33 @@ fn openharmony_app(app: OpenHarmonyApp) {
             hilog_info!(format!("ohos-rs: {}", event.as_str()).as_str());
         }
     });
+}
+
+/// PR #65 capability demo: open an external URL through `ohos.url`.
+#[napi]
+pub async fn demo_open_url() -> Result<()> {
+    current_app()?.open_url("https://www.openharmony.cn").await
+}
+
+/// PR #65 capability demo: open-file dialog through `ohos.files`.
+#[napi]
+pub async fn demo_file_dialog_open() -> Result<Vec<String>> {
+    let options = FileDialogOptions::new(dialog_type::OPEN_FILE)
+        .allow_many(true)
+        .filters(vec![
+            FileDialogFilter::new().name("Text").pattern("txt;md"),
+            FileDialogFilter::new().name("Images").pattern("png;jpg"),
+        ]);
+    let response = current_app()?.show_file_dialog(options).await?;
+    Ok(response.files)
+}
+
+/// PR #65 capability demo: save-file dialog through `ohos.files`.
+#[napi]
+pub async fn demo_file_dialog_save() -> Result<Vec<String>> {
+    let options = FileDialogOptions::new(dialog_type::SAVE_FILE)
+        .default_location("file://docs")
+        .filters(vec![FileDialogFilter::new().name("PDF").pattern("pdf")]);
+    let response = current_app()?.show_file_dialog(options).await?;
+    Ok(response.files)
 }
