@@ -18,7 +18,9 @@ use napi_ohos::{Env, Error, Result};
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{Event, InputEvent, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
-use openharmony_ability_plugin_files::{dialog_type, FileDialogFilter, FileDialogOptions, FilesExt};
+use openharmony_ability_plugin_files::{
+    dialog_type, FileDialogFilter, FileDialogOptions, FilesExt,
+};
 use openharmony_ability_plugin_permission::PermissionExt;
 use openharmony_ability_plugin_url::UrlExt;
 use openharmony_ability_plugin_webview::{
