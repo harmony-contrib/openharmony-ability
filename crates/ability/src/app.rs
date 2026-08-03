@@ -37,6 +37,11 @@ pub struct AbilityInitContext {
     pub pref_path: Option<String>,
     pub preferred_locales: Option<String>,
     pub module_name: Option<String>,
+    /// OpenHarmony base API Level provided by ArkTS `deviceInfo.sdkApiVersion`.
+    pub sdk_api_version: Option<i32>,
+    /// HarmonyOS distribution version provided by ArkTS `deviceInfo.distributionOSApiVersion`.
+    #[napi(js_name = "distributionOSApiVersion")]
+    pub distribution_api_version: Option<i32>,
 }
 
 impl AbilityInitContext {
@@ -50,6 +55,8 @@ impl AbilityInitContext {
             pref_path: context.get("prefPath")?,
             preferred_locales: context.get("preferredLocales")?,
             module_name: context.get("moduleName")?,
+            sdk_api_version: context.get("sdkApiVersion")?,
+            distribution_api_version: context.get("distributionOSApiVersion")?,
         })
     }
 }
@@ -523,4 +530,38 @@ impl<'a> SaveLoader<'a> {
     pub fn load(&self) -> Option<Vec<u8>> {
         self.app.load()
     }
+}
+
+/// Latest `want.parameters` JSON from `onNewWant` (deep-link / URL scheme).
+static WANT_PARAMETERS: Mutex<String> = Mutex::new(String::new());
+
+/// Initial `want.uri` from `onCreate` (cold start).
+static INITIAL_WANT_URI: Mutex<String> = Mutex::new(String::new());
+
+pub(crate) fn store_want_parameters(json: &str) {
+    if let Ok(mut params) = WANT_PARAMETERS.lock() {
+        *params = json.to_string();
+    }
+}
+
+/// Returns the latest `want.parameters` JSON string from `onNewWant`, then clears it.
+pub fn take_want_parameters() -> String {
+    WANT_PARAMETERS
+        .lock()
+        .map(|mut p| std::mem::take(&mut *p))
+        .unwrap_or_default()
+}
+
+pub(crate) fn store_initial_want_uri(uri: &str) {
+    if let Ok(mut u) = INITIAL_WANT_URI.lock() {
+        *u = uri.to_string();
+    }
+}
+
+/// Returns the initial `want.uri` from `onCreate` (cold start), then clears it.
+pub fn take_initial_want_uri() -> String {
+    INITIAL_WANT_URI
+        .lock()
+        .map(|mut u| std::mem::take(&mut *u))
+        .unwrap_or_default()
 }

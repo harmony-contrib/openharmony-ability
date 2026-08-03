@@ -7,6 +7,7 @@ description = "Binding Rust application on Harmony with Ability"
 
 [features]
 default = []
+log = []
 
 [dependencies]
 # common dependencies
@@ -18,7 +19,9 @@ napi-derive-ohos = { workspace = true }
 
 # for xcomponent native render
 ohos-arkui-binding = { workspace = true, features = ["napi"] }
+ohos-arkui-sys = { workspace = true }
 ohos-xcomponent-binding = { workspace = true }
+ohos-xcomponent-sys = { workspace = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }

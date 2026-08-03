@@ -126,6 +126,8 @@ fn webview_id_from_controller_event(event: WebviewControllerEvent) -> Result<Str
 pub struct WebviewStyle {
     pub x: Option<Either<f64, String>>,
     pub y: Option<Either<f64, String>>,
+    pub width: Option<Either<f64, String>>,
+    pub height: Option<Either<f64, String>>,
     pub visible: Option<bool>,
     pub background_color: Option<String>,
 }
@@ -177,6 +179,8 @@ pub struct WebviewInitializationScript {
 pub struct WebviewCreateRequest {
     pub id: String,
     pub slot_id: String,
+    /// Target OS sub-window id for per-window WebView creation (multi-window support).
+    pub window_id: Option<String>,
     pub url: Option<String>,
     pub html: Option<String>,
     pub style: WebviewStyle,
@@ -200,6 +204,7 @@ impl WebviewCreateRequest {
         Self {
             id: id.into(),
             slot_id: DEFAULT_WEBVIEW_SLOT.to_owned(),
+            window_id: None,
             url: None,
             html: None,
             style: WebviewStyle::default(),
@@ -216,6 +221,11 @@ impl WebviewCreateRequest {
 
     pub fn slot_id(mut self, slot_id: impl Into<String>) -> Self {
         self.slot_id = slot_id.into();
+        self
+    }
+
+    pub fn window_id(mut self, window_id: impl Into<String>) -> Self {
+        self.window_id = Some(window_id.into());
         self
     }
 
@@ -605,6 +615,102 @@ impl WebviewHandle {
         .await
     }
 
+    /// Repositions and resizes the WebView surface (per-window bounds).
+    pub async fn set_bounds(&self, x: f64, y: f64, width: f64, height: f64) -> Result<()> {
+        let request = WebviewBoundsRequest {
+            id: self.id.clone(),
+            slot_id: self.slot_id.clone(),
+            x,
+            y,
+            width,
+            height,
+        };
+        request.validate()?;
+        self.client
+            .call::<_, WebviewAcknowledgement>("set-bounds", request)
+            .await?
+            .ensure()
+    }
+
+    /// Sets a single cookie for the given URL via `WebCookieManager.configCookieSync`.
+    pub async fn set_cookie(&self, url: impl Into<String>, value: impl Into<String>) -> Result<()> {
+        let request = WebviewCookieRequest {
+            id: self.id.clone(),
+            slot_id: self.slot_id.clone(),
+            url: url.into(),
+            value: value.into(),
+        };
+        request.validate()?;
+        self.client
+            .call::<_, WebviewAcknowledgement>("set-cookie", request)
+            .await?
+            .ensure()
+    }
+
+    /// Captures the current page as RGBA pixels.
+    pub async fn snapshot(&self) -> Result<Option<(Vec<u8>, u32, u32)>> {
+        let response = self
+            .client
+            .call::<_, WebviewSnapshotResponse>(
+                "snapshot",
+                WebviewSnapshotRequest {
+                    id: self.id.clone(),
+                    slot_id: self.slot_id.clone(),
+                },
+            )
+            .await?;
+        Ok(response
+            .rgba
+            .map(|rgba| (rgba, response.width, response.height)))
+    }
+
+    /// Toggles Web debugging at runtime (`setWebDebuggingAccess`).
+    pub async fn set_web_debugging_access(&self, enabled: bool) -> Result<()> {
+        self.client
+            .call::<_, WebviewAcknowledgement>(
+                "set-debugging-access",
+                WebviewBoolRequest {
+                    id: self.id.clone(),
+                    slot_id: self.slot_id.clone(),
+                    enabled: Some(enabled),
+                },
+            )
+            .await?
+            .ensure()
+    }
+
+    /// Reads the current Web debugging access flag.
+    pub async fn is_web_debugging_access(&self) -> Result<bool> {
+        let response = self
+            .client
+            .call::<_, WebviewBoolResponse>(
+                "is-debugging-access",
+                WebviewBoolRequest {
+                    id: self.id.clone(),
+                    slot_id: self.slot_id.clone(),
+                    enabled: None,
+                },
+            )
+            .await?;
+        Ok(response.value)
+    }
+
+    /// Generates a PDF of the current page into `path`. Must be called after the page has
+    /// fully loaded (`on_page_end`).
+    pub async fn create_pdf(&self, path: impl Into<String>, config: Option<PdfConfig>) -> Result<()> {
+        let request = WebviewPdfRequest {
+            id: self.id.clone(),
+            slot_id: self.slot_id.clone(),
+            path: path.into(),
+            config,
+        };
+        request.validate()?;
+        self.client
+            .call::<_, WebviewAcknowledgement>("create-pdf", request)
+            .await?
+            .ensure()
+    }
+
     pub async fn remove(&self) -> Result<()> {
         self.acknowledge("remove", self.controller_request()).await
     }
@@ -780,6 +886,137 @@ pub struct WebviewStringResponse {
 }
 
 impl_bridge_napi_type!(WebviewStringResponse, "ohos.webview.StringResponse");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewBoundsRequest {
+    pub id: String,
+    pub slot_id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl_bridge_napi_type!(WebviewBoundsRequest, "ohos.webview.BoundsRequest");
+
+impl WebviewBoundsRequest {
+    fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            return Err(Error::from_reason("WebView id must not be empty"));
+        }
+        if !self.width.is_finite() || !self.height.is_finite() || self.width <= 0.0 || self.height <= 0.0
+        {
+            return Err(Error::from_reason(
+                "WebView bounds width and height must be positive finite numbers",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewCookieRequest {
+    pub id: String,
+    pub slot_id: String,
+    pub url: String,
+    /// Set-Cookie format value, e.g. `name=value; Domain=...; Path=...`.
+    pub value: String,
+}
+
+impl_bridge_napi_type!(WebviewCookieRequest, "ohos.webview.CookieRequest");
+
+impl WebviewCookieRequest {
+    fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            return Err(Error::from_reason("WebView id must not be empty"));
+        }
+        if self.url.trim().is_empty() {
+            return Err(Error::from_reason("cookie url must not be empty"));
+        }
+        if self.value.trim().is_empty() {
+            return Err(Error::from_reason("cookie value must not be empty"));
+        }
+        Ok(())
+    }
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewSnapshotRequest {
+    pub id: String,
+    pub slot_id: String,
+}
+
+impl_bridge_napi_type!(WebviewSnapshotRequest, "ohos.webview.SnapshotRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewSnapshotResponse {
+    pub rgba: Option<Vec<u8>>,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl_bridge_napi_type!(WebviewSnapshotResponse, "ohos.webview.SnapshotResponse");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewBoolRequest {
+    pub id: String,
+    pub slot_id: String,
+    pub enabled: Option<bool>,
+}
+
+impl_bridge_napi_type!(WebviewBoolRequest, "ohos.webview.BoolRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewBoolResponse {
+    pub value: bool,
+}
+
+impl_bridge_napi_type!(WebviewBoolResponse, "ohos.webview.BoolResponse");
+
+/// PDF export options. Field names match ArkTS `PdfConfiguration`.
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct PdfConfig {
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub margin_top: Option<f64>,
+    pub margin_bottom: Option<f64>,
+    pub margin_left: Option<f64>,
+    pub margin_right: Option<f64>,
+    pub scale: Option<f64>,
+    pub should_print_background: Option<bool>,
+}
+
+impl_bridge_napi_type!(PdfConfig, "ohos.webview.PdfConfig");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPdfRequest {
+    pub id: String,
+    pub slot_id: String,
+    pub path: String,
+    pub config: Option<PdfConfig>,
+}
+
+impl_bridge_napi_type!(WebviewPdfRequest, "ohos.webview.PdfRequest");
+
+impl WebviewPdfRequest {
+    fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            return Err(Error::from_reason("WebView id must not be empty"));
+        }
+        if self.path.trim().is_empty() {
+            return Err(Error::from_reason("pdf path must not be empty"));
+        }
+        Ok(())
+    }
+}
 
 #[napi(object)]
 #[derive(Clone, Debug)]

@@ -3,7 +3,12 @@ import Want from "@ohos.app.ability.Want";
 import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
 import { createAppControlPlugin } from "@ohos-rs/plugin-app-control";
+import { createClipboardPlugin } from "@ohos-rs/plugin-clipboard";
+import { createMenuPlugin } from "@ohos-rs/plugin-menu";
 import { createPermissionPlugin } from "@ohos-rs/plugin-permission";
+import { createStatusBarPlugin } from "@ohos-rs/plugin-statusbar";
+import { createUpdaterPlugin } from "@ohos-rs/plugin-updater";
+import { createVersionPlugin } from "@ohos-rs/plugin-version";
 import { createWebviewPlugin } from "@ohos-rs/plugin-webview";
 import { createWindowPlugin } from "@ohos-rs/plugin-window";
 import { createDemoLoginPlugin, createDemoMainThreadPlugin } from "../bridge/DemoLoginPlugin";
@@ -18,6 +23,11 @@ export default class EntryAbility extends NativeAbility {
     createAppControlPlugin(),
     createWindowPlugin(),
     createWebviewPlugin(),
+    createVersionPlugin(),
+    createClipboardPlugin(),
+    createUpdaterPlugin(),
+    createMenuPlugin(),
+    createStatusBarPlugin(),
     createDemoLoginPlugin(),
     createDemoMainThreadPlugin(),
     createDemoRawPlugin(),

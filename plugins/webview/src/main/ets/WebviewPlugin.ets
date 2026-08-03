@@ -20,6 +20,13 @@ const ACKNOWLEDGEMENT_TYPE = "ohos.webview.Acknowledgement";
 const SCRIPT_REQUEST_TYPE = "ohos.webview.ScriptRequest";
 const SCRIPT_RESPONSE_TYPE = "ohos.webview.ScriptResponse";
 const STRING_RESPONSE_TYPE = "ohos.webview.StringResponse";
+const BOUNDS_REQUEST_TYPE = "ohos.webview.BoundsRequest";
+const COOKIE_REQUEST_TYPE = "ohos.webview.CookieRequest";
+const SNAPSHOT_REQUEST_TYPE = "ohos.webview.SnapshotRequest";
+const SNAPSHOT_RESPONSE_TYPE = "ohos.webview.SnapshotResponse";
+const BOOL_REQUEST_TYPE = "ohos.webview.BoolRequest";
+const BOOL_RESPONSE_TYPE = "ohos.webview.BoolResponse";
+const PDF_REQUEST_TYPE = "ohos.webview.PdfRequest";
 const NAVIGATION_REQUEST_TYPE = "ohos.webview.NavigationRequest";
 const NAVIGATION_RESPONSE_TYPE = "ohos.webview.NavigationResponse";
 const DOWNLOAD_START_REQUEST_TYPE = "ohos.webview.DownloadStartRequest";
@@ -37,6 +44,12 @@ const EVENT_ACKNOWLEDGEMENT_TYPE = "ohos.webview.EventAcknowledgement";
  */
 interface WebviewDebuggingApi {
   setWebDebuggingAccess?: (enabled: boolean) => void;
+  getWebDebuggingAccess?: () => boolean;
+}
+
+/** API-14-only `WebCookieManager` surface, resolved at runtime to keep the API 12 baseline. */
+interface CookieApi {
+  configCookieSync?: (url: string, value: string) => boolean;
 }
 
 function enableWebDebuggingIfAvailable(): void {
@@ -51,6 +64,8 @@ function enableWebDebuggingIfAvailable(): void {
 interface WebviewStyle {
   x?: number | string | null;
   y?: number | string | null;
+  width?: number | string | null;
+  height?: number | string | null;
   visible?: boolean | null;
   backgroundColor?: string | null;
 }
@@ -70,6 +85,8 @@ interface WebviewEventOptions {
 interface WebviewCreatePayload {
   id: string;
   slotId?: string;
+  /** Target OS sub-window id for per-window WebView creation (multi-window support). */
+  windowId?: string | null;
   url?: string | null;
   html?: string | null;
   style?: WebviewStyle | null;
@@ -226,6 +243,149 @@ class WebviewAcceptedResponse {
   constructor(accepted: boolean) {
     this.accepted = accepted;
   }
+}
+
+class WebviewSnapshotResponse {
+  readonly rgba: Uint8Array;
+  readonly width: number;
+  readonly height: number;
+
+  constructor(rgba: Uint8Array, width: number, height: number) {
+    this.rgba = rgba;
+    this.width = width;
+    this.height = height;
+  }
+}
+
+class WebviewBoolResponse {
+  readonly value: boolean;
+
+  constructor(value: boolean) {
+    this.value = value;
+  }
+}
+
+interface WebviewBoundsPayload {
+  id: string;
+  slotId?: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface WebviewCookiePayload {
+  id: string;
+  slotId?: string | null;
+  url: string;
+  value: string;
+}
+
+interface WebviewSnapshotPayload {
+  id: string;
+  slotId?: string | null;
+}
+
+interface WebviewBoolPayload {
+  id: string;
+  slotId?: string | null;
+  enabled?: boolean | null;
+}
+
+interface PdfConfig {
+  width?: number | null;
+  height?: number | null;
+  marginTop?: number | null;
+  marginBottom?: number | null;
+  marginLeft?: number | null;
+  marginRight?: number | null;
+  scale?: number | null;
+  shouldPrintBackground?: boolean | null;
+}
+
+interface WebviewPdfPayload {
+  id: string;
+  slotId?: string | null;
+  path: string;
+  config?: PdfConfig | null;
+}
+
+function parseBoundsPayload(payload: BridgeTypedValue): WebviewBoundsPayload {
+  if (
+    payload.typeName !== BOUNDS_REQUEST_TYPE ||
+    payload.value === null ||
+    typeof payload.value !== "object"
+  ) {
+    throw new Error(`ohos.webview.set-bounds requires bridge type ${BOUNDS_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WebviewBoundsPayload;
+  if (!request?.id?.trim()) {
+    throw new Error("WebView bounds controller id must not be empty");
+  }
+  if (request.width <= 0 || request.height <= 0) {
+    throw new Error("WebView bounds width and height must be positive");
+  }
+  return request;
+}
+
+function parseCookiePayload(payload: BridgeTypedValue): WebviewCookiePayload {
+  if (
+    payload.typeName !== COOKIE_REQUEST_TYPE ||
+    payload.value === null ||
+    typeof payload.value !== "object"
+  ) {
+    throw new Error(`ohos.webview.set-cookie requires bridge type ${COOKIE_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WebviewCookiePayload;
+  if (!request?.id?.trim() || !request.url?.trim() || !request.value?.trim()) {
+    throw new Error("WebView cookie requires non-empty id, url and value");
+  }
+  return request;
+}
+
+function parseSnapshotPayload(payload: BridgeTypedValue): WebviewSnapshotPayload {
+  if (
+    payload.typeName !== SNAPSHOT_REQUEST_TYPE ||
+    payload.value === null ||
+    typeof payload.value !== "object"
+  ) {
+    throw new Error(`ohos.webview.snapshot requires bridge type ${SNAPSHOT_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WebviewSnapshotPayload;
+  if (!request?.id?.trim()) {
+    throw new Error("WebView snapshot controller id must not be empty");
+  }
+  return request;
+}
+
+function parseBoolPayload(payload: BridgeTypedValue): WebviewBoolPayload {
+  if (
+    payload.typeName !== BOOL_REQUEST_TYPE ||
+    payload.value === null ||
+    typeof payload.value !== "object"
+  ) {
+    throw new Error(`ohos.webview debugging requires bridge type ${BOOL_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WebviewBoolPayload;
+  if (!request?.id?.trim()) {
+    throw new Error("WebView debugging controller id must not be empty");
+  }
+  return request;
+}
+
+function parsePdfPayload(payload: BridgeTypedValue): WebviewPdfPayload {
+  if (
+    payload.typeName !== PDF_REQUEST_TYPE ||
+    payload.value === null ||
+    typeof payload.value !== "object"
+  ) {
+    throw new Error(`ohos.webview.create-pdf requires bridge type ${PDF_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WebviewPdfPayload;
+  if (!request?.id?.trim() || !request.path?.trim()) {
+    throw new Error("WebView PDF requires non-empty id and path");
+  }
+  return request;
 }
 
 class WebviewScriptResponse {
@@ -460,6 +620,12 @@ function normalizeStyle(
   if (style.y !== undefined && style.y !== null) {
     normalized.y = style.y;
   }
+  if (style.width !== undefined && style.width !== null) {
+    normalized.width = style.width;
+  }
+  if (style.height !== undefined && style.height !== null) {
+    normalized.height = style.height;
+  }
   if (style.visible !== undefined && style.visible !== null) {
     normalized.visible = style.visible;
   }
@@ -493,6 +659,7 @@ function withSlotId(payload: WebviewCreatePayload, slotId: string): WebviewCreat
   const copied: WebviewCreatePayload = {
     id: payload.id,
     slotId,
+    windowId: payload.windowId,
     url: payload.url,
     html: payload.html,
     style: payload.style,
@@ -613,8 +780,8 @@ function setupDownloadDelegate(data: ManagedWebview): void {
 @Builder
 function BuildWebview(data: ManagedWebview) {
   Web({ src: "", controller: data.controller as webview.WebviewController })
-    .width("100%")
-    .height("100%")
+    .width(data.style.width ?? "100%")
+    .height(data.style.height ?? "100%")
     .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
     .backgroundColor(data.style.backgroundColor)
     .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
@@ -792,6 +959,96 @@ class WebviewSurface {
     return true;
   }
 
+  setBounds(id: string, x: number, y: number, width: number, height: number): boolean {
+    const entry = this.entries.get(id);
+    if (!entry) {
+      return false;
+    }
+    entry.data.style.x = x;
+    entry.data.style.y = y;
+    entry.data.style.width = width;
+    entry.data.style.height = height;
+    entry.node.update(entry.data);
+    return true;
+  }
+
+  setCookie(id: string, url: string, value: string): boolean {
+    // `configCookieSync` requires API 14; on older devices the runtime check rejects the call.
+    // oxlint-disable-next-line arkts/system-api-version
+    const cookieApi = webview.WebCookieManager as unknown as CookieApi;
+    if (typeof cookieApi.configCookieSync !== "function") {
+      throw new Error("WebCookieManager.configCookieSync is unavailable on this API level");
+    }
+    try {
+      cookieApi.configCookieSync(url, value);
+      return true;
+    } catch (error) {
+      throw new Error(`Unable to set WebView cookie: ${String(error)}`);
+    }
+  }
+
+  async snapshot(id: string, callContext: BridgeCallContext): Promise<WebviewSnapshotResponse> {
+    const entry = await this.controllerEntry(id, callContext);
+    try {
+      const result = await entry.data.controller.getWebPageSnapshot();
+      return new WebviewSnapshotResponse(result.rgba, result.width, result.height);
+    } catch (error) {
+      throw new Error(`Unable to capture WebView snapshot: ${String(error)}`);
+    }
+  }
+
+  async createPdf(id: string, path: string, config: PdfConfig | null): Promise<boolean> {
+    const entry = await this.controllerEntry(id, undefined);
+    try {
+      const pdfConfig: webview.PdfConfiguration = {};
+      if (config?.width !== undefined && config?.width !== null) {
+        pdfConfig.width = config.width;
+      }
+      if (config?.height !== undefined && config?.height !== null) {
+        pdfConfig.height = config.height;
+      }
+      if (config?.marginTop !== undefined && config?.marginTop !== null) {
+        pdfConfig.marginTop = config.marginTop;
+      }
+      if (config?.marginBottom !== undefined && config?.marginBottom !== null) {
+        pdfConfig.marginBottom = config.marginBottom;
+      }
+      if (config?.marginLeft !== undefined && config?.marginLeft !== null) {
+        pdfConfig.marginLeft = config.marginLeft;
+      }
+      if (config?.marginRight !== undefined && config?.marginRight !== null) {
+        pdfConfig.marginRight = config.marginRight;
+      }
+      if (config?.scale !== undefined && config?.scale !== null) {
+        pdfConfig.scale = config.scale;
+      }
+      if (config?.shouldPrintBackground !== undefined && config?.shouldPrintBackground !== null) {
+        pdfConfig.shouldPrintBackground = config.shouldPrintBackground;
+      }
+      await entry.data.controller.createPdf(path, pdfConfig);
+      return true;
+    } catch (error) {
+      throw new Error(`Unable to create WebView PDF: ${String(error)}`);
+    }
+  }
+
+  setDebuggingAccess(enabled: boolean): boolean {
+    const debuggingApi = webview.WebviewController as unknown as WebviewDebuggingApi;
+    if (typeof debuggingApi.setWebDebuggingAccess !== "function") {
+      throw new Error("Web debugging access is unavailable on this ArkWeb API level");
+    }
+    debuggingApi.setWebDebuggingAccess(enabled);
+    return true;
+  }
+
+  isDebuggingAccess(): boolean {
+    const debuggingApi = webview.WebviewController as unknown as WebviewDebuggingApi;
+    if (typeof debuggingApi.getWebDebuggingAccess !== "function") {
+      return false;
+    }
+    return debuggingApi.getWebDebuggingAccess();
+  }
+
   async getUrl(id: string, callContext: BridgeCallContext): Promise<string> {
     const entry = await this.controllerEntry(id, callContext);
     try {
@@ -928,12 +1185,19 @@ class WebviewSurface {
     }
   }
 
-  private async controllerEntry(id: string, callContext: BridgeCallContext): Promise<WebviewEntry> {
-    this.assertCallActive(callContext);
+  private async controllerEntry(
+    id: string,
+    callContext: BridgeCallContext | undefined,
+  ): Promise<WebviewEntry> {
     const entry = this.entries.get(id);
     if (!entry) {
       throw new Error(`Unknown WebView controller '${id}'`);
     }
+    if (callContext === undefined) {
+      await entry.waitForController(() => {});
+      return entry;
+    }
+    this.assertCallActive(callContext);
     await entry.waitForController(callContext.onCancel);
     this.assertCallActive(callContext);
     return entry;
@@ -1130,6 +1394,52 @@ class WebviewPlugin implements AsyncBridgePlugin {
         throw new Error("set-background-color.color must not be empty");
       }
       accepted = surface.setBackgroundColor(controllerPayload.id, controllerPayload.color);
+    } else if (action === "set-bounds") {
+      const bounds = parseBoundsPayload(payload);
+      const boundsSlotId = bounds.slotId || DEFAULT_PLUGIN_NODE_SLOT;
+      accepted = WebviewSurfaceRegistry.get(this.pluginContext, boundsSlotId).setBounds(
+        bounds.id,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+      );
+    } else if (action === "set-cookie") {
+      const cookie = parseCookiePayload(payload);
+      const cookieSlotId = cookie.slotId || DEFAULT_PLUGIN_NODE_SLOT;
+      accepted = WebviewSurfaceRegistry.get(this.pluginContext, cookieSlotId).setCookie(
+        cookie.id,
+        cookie.url,
+        cookie.value,
+      );
+    } else if (action === "snapshot") {
+      const snapshotRequest = parseSnapshotPayload(payload);
+      const snapshotSlotId = snapshotRequest.slotId || DEFAULT_PLUGIN_NODE_SLOT;
+      const snapshot = await WebviewSurfaceRegistry.get(
+        this.pluginContext,
+        snapshotSlotId,
+      ).snapshot(snapshotRequest.id, context);
+      return { typeName: SNAPSHOT_RESPONSE_TYPE, value: snapshot };
+    } else if (action === "set-debugging-access") {
+      const debugRequest = parseBoolPayload(payload);
+      if (typeof debugRequest.enabled !== "boolean") {
+        throw new Error("set-debugging-access.enabled must be a boolean");
+      }
+      accepted = surface.setDebuggingAccess(debugRequest.enabled);
+    } else if (action === "is-debugging-access") {
+      parseBoolPayload(payload);
+      return {
+        typeName: BOOL_RESPONSE_TYPE,
+        value: new WebviewBoolResponse(surface.isDebuggingAccess()),
+      };
+    } else if (action === "create-pdf") {
+      const pdfRequest = parsePdfPayload(payload);
+      const pdfSlotId = pdfRequest.slotId || DEFAULT_PLUGIN_NODE_SLOT;
+      accepted = await WebviewSurfaceRegistry.get(this.pluginContext, pdfSlotId).createPdf(
+        pdfRequest.id,
+        pdfRequest.path,
+        pdfRequest.config ?? null,
+      );
     } else if (action === "remove") {
       accepted = surface.remove(controllerPayload.id);
     } else {

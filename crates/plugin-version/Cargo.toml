@@ -1,0 +1,11 @@
+[package]
+name = "openharmony-ability-plugin-version"
+version = "0.3.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "version bridge plugin facade for openharmony-ability"
+
+[dependencies]
+openharmony-ability = { workspace = true }
+napi-ohos = { workspace = true }
+napi-derive-ohos = { workspace = true }

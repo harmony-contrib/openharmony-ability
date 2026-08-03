@@ -48,6 +48,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d85363c37faeca707aef026efa9f3b34d077bce547e48f770770625c6013679e"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
+
+[[package]]
 name = "ctor"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -70,14 +85,22 @@ dependencies = [
  "futures-channel",
  "futures-executor",
  "http",
+ "log",
  "napi-build-ohos",
  "napi-derive-ohos",
  "napi-ohos",
  "ohos-hilog-binding",
  "openharmony-ability",
  "openharmony-ability-derive",
+ "openharmony-ability-plugin-app-control",
+ "openharmony-ability-plugin-clipboard",
+ "openharmony-ability-plugin-menu",
  "openharmony-ability-plugin-permission",
+ "openharmony-ability-plugin-statusbar",
+ "openharmony-ability-plugin-updater",
+ "openharmony-ability-plugin-version",
  "openharmony-ability-plugin-webview",
+ "openharmony-ability-plugin-window",
 ]
 
 [[package]]
@@ -208,6 +231,12 @@ dependencies = [
  "cfg-if",
  "windows-link",
 ]
+
+[[package]]
+name = "log"
+version = "0.4.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "memchr"
@@ -468,10 +497,12 @@ dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
  "ohos-arkui-binding",
+ "ohos-arkui-sys",
  "ohos-display-binding",
  "ohos-ime-binding",
  "ohos-resource-manager-binding",
  "ohos-xcomponent-binding",
+ "ohos-xcomponent-sys",
 ]
 
 [[package]]
@@ -493,7 +524,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "openharmony-ability-plugin-clipboard"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-menu"
+version = "0.3.0"
+dependencies = [
+ "crossbeam-channel",
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
 name = "openharmony-ability-plugin-permission"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-statusbar"
+version = "0.3.0"
+dependencies = [
+ "crossbeam-channel",
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-updater"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-version"
 version = "0.3.0"
 dependencies = [
  "napi-derive-ohos",

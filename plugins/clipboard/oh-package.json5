@@ -1,0 +1,10 @@
+{
+  "name": "@ohos-rs/plugin-clipboard",
+  "version": "1.0.0",
+  "description": "clipboard capability plugin for @ohos-rs/ability",
+  "main": "index.ets",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@ohos-rs/ability": "file:../../native_ability",
+  },
+}

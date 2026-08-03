@@ -11,6 +11,7 @@ mod memory;
 mod render;
 mod resource;
 mod stage;
+pub mod version;
 mod waker;
 
 pub use app::*;
@@ -26,6 +27,7 @@ pub use memory::*;
 pub use render::*;
 pub use resource::*;
 pub use stage::*;
+pub use version::*;
 pub use waker::*;
 
 /// Re-exported for [`impl_bridge_napi_type!`](crate::impl_bridge_napi_type) expansions in

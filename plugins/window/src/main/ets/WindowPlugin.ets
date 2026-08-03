@@ -9,9 +9,67 @@ import {
 
 const AVOID_AREA_REQUEST_TYPE = "ohos.window.AvoidAreaRequest";
 const AVOID_AREA_RESPONSE_TYPE = "ohos.window.AvoidAreaResponse";
+const CREATE_REQUEST_TYPE = "ohos.window.CreateRequest";
+const CREATE_RESPONSE_TYPE = "ohos.window.CreateResponse";
+const WINDOW_ID_REQUEST_TYPE = "ohos.window.WindowIdRequest";
+const DECORATIONS_REQUEST_TYPE = "ohos.window.DecorationsRequest";
+const COLOR_REQUEST_TYPE = "ohos.window.ColorRequest";
+const BLUR_REQUEST_TYPE = "ohos.window.BlurRequest";
+const MOVE_REQUEST_TYPE = "ohos.window.MoveRequest";
+const RESIZE_REQUEST_TYPE = "ohos.window.ResizeRequest";
+const FOCUSABLE_REQUEST_TYPE = "ohos.window.FocusableRequest";
+const ACKNOWLEDGEMENT_TYPE = "ohos.window.Acknowledgement";
+const STATE_RESPONSE_TYPE = "ohos.window.StateResponse";
 
 interface AvoidAreaRequest {
   areaType: number;
+}
+
+interface WindowCreateRequest {
+  name: string;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  decorations: boolean;
+  transparent: boolean;
+  backgroundColor?: number | null;
+}
+
+interface WindowIdRequest {
+  windowId: number;
+}
+
+interface WindowDecorationsRequest {
+  windowId: number;
+  decorations: boolean;
+}
+
+interface WindowColorRequest {
+  windowId: number;
+  color: number;
+}
+
+interface WindowBlurRequest {
+  windowId: number;
+  radius: number;
+}
+
+interface WindowMoveRequest {
+  windowId: number;
+  x: number;
+  y: number;
+}
+
+interface WindowResizeRequest {
+  windowId: number;
+  width: number;
+  height: number;
+}
+
+interface WindowFocusableRequest {
+  windowId: number;
+  focusable: boolean;
 }
 
 class AvoidAreaRectResponse {
@@ -52,6 +110,30 @@ class AvoidAreaResponse {
   }
 }
 
+class WindowCreateResponse {
+  readonly windowId: number;
+
+  constructor(windowId: number) {
+    this.windowId = windowId;
+  }
+}
+
+class WindowAcknowledgement {
+  readonly accepted: boolean;
+
+  constructor(accepted: boolean) {
+    this.accepted = accepted;
+  }
+}
+
+class WindowStateResponse {
+  readonly value: boolean;
+
+  constructor(value: boolean) {
+    this.value = value;
+  }
+}
+
 function parseAvoidAreaRequest(payload: BridgeTypedValue): AvoidAreaRequest {
   if (payload.typeName !== AVOID_AREA_REQUEST_TYPE || typeof payload.value !== "object") {
     throw new Error(`ohos.window.get-avoid-area requires bridge type ${AVOID_AREA_REQUEST_TYPE}`);
@@ -63,29 +145,305 @@ function parseAvoidAreaRequest(payload: BridgeTypedValue): AvoidAreaRequest {
   return request;
 }
 
+function parseCreateRequest(payload: BridgeTypedValue): WindowCreateRequest {
+  if (payload.typeName !== CREATE_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window.create-os-window requires bridge type ${CREATE_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowCreateRequest;
+  if (!request.name?.trim()) {
+    throw new Error("create-os-window.name must not be empty");
+  }
+  if (request.width <= 0 || request.height <= 0) {
+    throw new Error("create-os-window.width and height must be positive");
+  }
+  return request;
+}
+
+function parseWindowIdRequest(payload: BridgeTypedValue): WindowIdRequest {
+  if (payload.typeName !== WINDOW_ID_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window requires bridge type ${WINDOW_ID_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowIdRequest;
+  if (!Number.isInteger(request?.windowId)) {
+    throw new Error("windowId must be an integer");
+  }
+  return request;
+}
+
+function parseDecorationsRequest(payload: BridgeTypedValue): WindowDecorationsRequest {
+  if (payload.typeName !== DECORATIONS_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window.set-decorations requires bridge type ${DECORATIONS_REQUEST_TYPE}`);
+  }
+  return payload.value as WindowDecorationsRequest;
+}
+
+function parseColorRequest(payload: BridgeTypedValue): WindowColorRequest {
+  if (payload.typeName !== COLOR_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window.set-background-color requires bridge type ${COLOR_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowColorRequest;
+  if (!Number.isInteger(request?.color)) {
+    throw new Error("color must be an integer in 0xAARRGGBB format");
+  }
+  return request;
+}
+
+function parseBlurRequest(payload: BridgeTypedValue): WindowBlurRequest {
+  if (payload.typeName !== BLUR_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window.set-blur requires bridge type ${BLUR_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowBlurRequest;
+  if (
+    typeof request.radius !== "number" ||
+    !Number.isFinite(request.radius) ||
+    request.radius < 0
+  ) {
+    throw new Error("set-blur.radius must be a non-negative finite number");
+  }
+  return request;
+}
+
+function parseMoveRequest(payload: BridgeTypedValue): WindowMoveRequest {
+  if (payload.typeName !== MOVE_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window.move-to requires bridge type ${MOVE_REQUEST_TYPE}`);
+  }
+  return payload.value as WindowMoveRequest;
+}
+
+function parseResizeRequest(payload: BridgeTypedValue): WindowResizeRequest {
+  if (payload.typeName !== RESIZE_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window.resize requires bridge type ${RESIZE_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowResizeRequest;
+  if (request.width <= 0 || request.height <= 0) {
+    throw new Error("resize.width and height must be positive");
+  }
+  return request;
+}
+
+function parseFocusableRequest(payload: BridgeTypedValue): WindowFocusableRequest {
+  if (payload.typeName !== FOCUSABLE_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window.set-focusable requires bridge type ${FOCUSABLE_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowFocusableRequest;
+  if (typeof request.focusable !== "boolean") {
+    throw new Error("set-focusable.focusable must be a boolean");
+  }
+  return request;
+}
+
+/** Per-session registry of OS sub-windows created through this plugin. */
+class SubWindowRegistry {
+  private static readonly windows: Map<string, window.Window> = new Map();
+
+  static put(sessionId: string, windowId: number, win: window.Window): void {
+    SubWindowRegistry.windows.set(`${sessionId}:${windowId}`, win);
+  }
+
+  static get(sessionId: string, windowId: number): window.Window {
+    const win = SubWindowRegistry.windows.get(`${sessionId}:${windowId}`);
+    if (!win) {
+      throw new Error(`Unknown OS sub-window '${windowId}' for session '${sessionId}'`);
+    }
+    return win;
+  }
+
+  static remove(sessionId: string, windowId: number): void {
+    SubWindowRegistry.windows.delete(`${sessionId}:${windowId}`);
+  }
+}
+
 class WindowPlugin implements MainThreadSyncBridgePlugin {
   readonly id = "ohos.window";
   readonly version = 1;
-  readonly execution: "sync-main-thread" = "sync-main-thread";
-  readonly requires: ["window-stage"] = ["window-stage"];
+  readonly execution = "sync-main-thread" as const;
+  readonly requires = ["window-stage"] as const;
+  private readonly pluginContext: BridgePluginContext;
+
+  constructor(pluginContext: BridgePluginContext) {
+    this.pluginContext = pluginContext;
+  }
 
   invokeSync(
     action: string,
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): BridgeTypedValue {
-    if (action !== "get-avoid-area") {
-      throw new Error(`Unsupported ohos.window action '${action}'`);
+    if (action === "get-avoid-area") {
+      const request = parseAvoidAreaRequest(payload);
+      try {
+        const mainWindow = context.getWindowStage().getMainWindowSync();
+        const areaType = request.areaType as window.AvoidAreaType;
+        const response = new AvoidAreaResponse(mainWindow.getWindowAvoidArea(areaType));
+        return { typeName: AVOID_AREA_RESPONSE_TYPE, value: response };
+      } catch (error) {
+        throw new Error(`Unable to get window avoid area: ${String(error)}`);
+      }
     }
-    const request = parseAvoidAreaRequest(payload);
+
+    if (action === "create-os-window") {
+      const request = parseCreateRequest(payload);
+      const windowStage = context.getWindowStage();
+      const windowId = WindowPlugin.nextWindowId();
+      try {
+        // OHOS createSubWindow() creates the window; decorations/content are applied by the
+        // business page through the returned id.
+        const config: window.WindowOptions = {
+          name: request.name,
+          windowType: window.WindowType.TYPE_APP,
+        };
+        const created = windowStage.createSubWindow(config.name);
+        SubWindowRegistry.put(this.pluginContext.sessionId, windowId, created);
+        return { typeName: CREATE_RESPONSE_TYPE, value: new WindowCreateResponse(windowId) };
+      } catch (error) {
+        throw new Error(`createSubWindow failed: ${String(error)}`);
+      }
+    }
+
+    if (action === "set-decorations") {
+      const request = parseDecorationsRequest(payload);
+      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      try {
+        // Decorations are rendered by the business page; the registry entry keeps the
+        // window alive across calls. No-op beyond validation on this platform.
+        void win;
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      } catch (error) {
+        throw new Error(`set-decorations failed: ${String(error)}`);
+      }
+    }
+
+    if (action === "set-background-color") {
+      const request = parseColorRequest(payload);
+      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      try {
+        win.setWindowBackgroundColor(`#${request.color.toString(16).padStart(8, "0")}`);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      } catch (error) {
+        throw new Error(`setWindowBackgroundColor failed: ${String(error)}`);
+      }
+    }
+
+    if (action === "set-blur") {
+      const request = parseBlurRequest(payload);
+      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      try {
+        win.setBlur(request.radius);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      } catch (error) {
+        throw new Error(`setBlur failed: ${String(error)}`);
+      }
+    }
+
+    if (action === "focus") {
+      const request = parseWindowIdRequest(payload);
+      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      try {
+        win.focus();
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      } catch (error) {
+        throw new Error(`focus failed: ${String(error)}`);
+      }
+    }
+
+    if (action === "set-focusable") {
+      const request = parseFocusableRequest(payload);
+      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      try {
+        win.setFocusable(request.focusable);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      } catch (error) {
+        throw new Error(`setFocusable failed: ${String(error)}`);
+      }
+    }
+
+    if (action === "move-to") {
+      const request = parseMoveRequest(payload);
+      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      try {
+        win.moveWindowTo(request.x, request.y);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      } catch (error) {
+        throw new Error(`moveWindowTo failed: ${String(error)}`);
+      }
+    }
+
+    if (action === "resize") {
+      const request = parseResizeRequest(payload);
+      const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+      try {
+        win.resize(request.width, request.height);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      } catch (error) {
+        throw new Error(`resize failed: ${String(error)}`);
+      }
+    }
+
+    if (action === "minimize") {
+      return this.windowCommand(context, "minimize", payload);
+    }
+    if (action === "maximize") {
+      return this.windowCommand(context, "maximize", payload);
+    }
+    if (action === "restore") {
+      return this.windowCommand(context, "restore", payload);
+    }
+    if (action === "recover") {
+      return this.windowCommand(context, "recover", payload);
+    }
+    if (action === "show") {
+      return this.windowCommand(context, "show", payload);
+    }
+    if (action === "is-maximized") {
+      return this.windowState(context, "is-maximized", payload);
+    }
+    if (action === "is-minimized") {
+      return this.windowState(context, "is-minimized", payload);
+    }
+
+    throw new Error(`Unsupported ohos.window action '${action}'`);
+  }
+
+  private windowCommand(
+    context: BridgeCallContext,
+    action: string,
+    payload: BridgeTypedValue,
+  ): BridgeTypedValue {
+    const request = parseWindowIdRequest(payload);
+    const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
     try {
-      const mainWindow = context.getWindowStage().getMainWindowSync();
-      const areaType = request.areaType as window.AvoidAreaType;
-      const response = new AvoidAreaResponse(mainWindow.getWindowAvoidArea(areaType));
-      return { typeName: AVOID_AREA_RESPONSE_TYPE, value: response };
+      if (action === "minimize") {
+        win.minimize();
+      } else if (action === "maximize") {
+        win.maximize();
+      } else if (action === "restore") {
+        win.restore();
+      } else if (action === "recover" || action === "show") {
+        win.showWindow();
+      }
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
     } catch (error) {
-      throw new Error(`Unable to get window avoid area: ${String(error)}`);
+      throw new Error(`${action} failed: ${String(error)}`);
     }
+  }
+
+  private windowState(
+    context: BridgeCallContext,
+    action: string,
+    payload: BridgeTypedValue,
+  ): BridgeTypedValue {
+    const request = parseWindowIdRequest(payload);
+    const win = SubWindowRegistry.get(this.pluginContext.sessionId, request.windowId);
+    try {
+      const value = action === "is-maximized" ? win.isMaximized() : win.isMinimized();
+      return { typeName: STATE_RESPONSE_TYPE, value: new WindowStateResponse(value) };
+    } catch (error) {
+      throw new Error(`${action} failed: ${String(error)}`);
+    }
+  }
+
+  private static nextWindowId(): number {
+    return Date.now() % 0x7fffffff;
   }
 }
 
@@ -95,6 +453,6 @@ export function createWindowPlugin(): BridgePluginFactory {
     version: 1,
     execution: "sync-main-thread",
     requires: ["window-stage"],
-    create: (_context: BridgePluginContext): MainThreadSyncBridgePlugin => new WindowPlugin(),
+    create: (context: BridgePluginContext): MainThreadSyncBridgePlugin => new WindowPlugin(context),
   };
 }

@@ -6,7 +6,12 @@ resolver = "2"
 openharmony-ability-derive = { version = "0.3.0", path = "crates/derive" }
 openharmony-ability = { version = "0.3.0", path = "crates/ability" }
 openharmony-ability-plugin-app-control = { version = "0.3.0", path = "crates/plugin-app-control" }
+openharmony-ability-plugin-clipboard = { version = "0.3.0", path = "crates/plugin-clipboard" }
+openharmony-ability-plugin-menu = { version = "0.3.0", path = "crates/plugin-menu" }
 openharmony-ability-plugin-permission = { version = "0.3.0", path = "crates/plugin-permission" }
+openharmony-ability-plugin-statusbar = { version = "0.3.0", path = "crates/plugin-statusbar" }
+openharmony-ability-plugin-updater = { version = "0.3.0", path = "crates/plugin-updater" }
+openharmony-ability-plugin-version = { version = "0.3.0", path = "crates/plugin-version" }
 openharmony-ability-plugin-webview = { version = "0.3.0", path = "crates/plugin-webview" }
 openharmony-ability-plugin-window = { version = "0.3.0", path = "crates/plugin-window" }
 
@@ -20,12 +25,15 @@ quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
 ohos-arkui-binding = { version = "0.1" }
+ohos-arkui-sys = { version = "0.0.1" }
 ohos-xcomponent-binding = { version = "0.2" }
+ohos-xcomponent-sys = { version = "0.0.2" }
 ohos-ime-binding = { version = "0.1" }
 ohos-display-binding = { version = "0.0.1" }
 ohos-resource-manager-binding = { version = "0.2" }
 
 # Bridge runtime and examples use these without pinning versions in member manifests.
+crossbeam-channel = { version = "0.5" }
 futures-channel = { version = "0.3" }
 futures-executor = { version = "0.3" }
 http = { version = "1" }

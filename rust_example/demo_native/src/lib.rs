@@ -18,7 +18,19 @@ use napi_ohos::{Env, Error, Result};
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{Event, InputEvent, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
+use openharmony_ability_plugin_app_control::AppControlExt;
+use openharmony_ability_plugin_clipboard::ClipboardExt;
+use openharmony_ability_plugin_menu::{
+    item_kind, MenuExt, MenuItemData,
+};
 use openharmony_ability_plugin_permission::PermissionExt;
+use openharmony_ability_plugin_statusbar::{
+    QuickOperationData, StatusBarExt, StatusBarIconData, StatusBarItemData,
+    StatusBarMenuItemData, StatusBarMenuActionData,
+};
+use openharmony_ability_plugin_updater::UpdaterExt;
+use openharmony_ability_plugin_version::VersionExt;
+use openharmony_ability_plugin_window::WindowExtMulti;
 use openharmony_ability_plugin_webview::{
     WebviewBridgePlugin, WebviewCallbacksBuilder, WebviewClient, WebviewCreateRequest,
     WebviewDownloadStartResponse, WebviewExt, WebviewJavascriptProxyBuilder, WebviewProtocol,
@@ -268,6 +280,24 @@ fn openharmony_app(app: OpenHarmonyApp) {
     }
     app.register_plugin(WebviewBridgePlugin)
         .expect("demo WebView facade must be registered");
+    if let Err(error) = app.register_plugin(openharmony_ability_plugin_menu::MenuBridgePlugin) {
+        hilog_info!(format!("failed to register menu facade: {error}").as_str());
+    }
+    if let Err(error) =
+        app.register_plugin(openharmony_ability_plugin_statusbar::StatusBarBridgePlugin)
+    {
+        hilog_info!(format!("failed to register statusbar facade: {error}").as_str());
+    }
+    if let Err(error) =
+        app.register_plugin(openharmony_ability_plugin_updater::UpdaterBridgePlugin)
+    {
+        hilog_info!(format!("failed to register updater facade: {error}").as_str());
+    }
+    if let Err(error) =
+        app.register_plugin(openharmony_ability_plugin_clipboard::ClipboardBridgePlugin)
+    {
+        hilog_info!(format!("failed to register clipboard facade: {error}").as_str());
+    }
     hilog_info!(format!(
         "init context => module={:?}, base={:?}, pref={:?}, locales={:?}",
         app.module_name(),
@@ -322,4 +352,134 @@ fn openharmony_app(app: OpenHarmonyApp) {
             hilog_info!(format!("ohos-rs: {}", event.as_str()).as_str());
         }
     });
+}
+
+/// PR #63 capability demo: menu system (menubar + popup) through `ohos.menu`.
+#[napi]
+pub async fn demo_menu_set_menubar() -> Result<()> {
+    let file_menu = MenuItemData::new("demo.file", item_kind::SUBMENU)
+        .text("File")
+        .submenu(vec![
+            MenuItemData::new("demo.file.open", item_kind::NORMAL).text("Open"),
+            MenuItemData::new("demo.file.sep", item_kind::SEPARATOR),
+            MenuItemData::new("demo.file.quit", item_kind::PREDEFINED)
+                .predefined("quit")
+                .accelerator("Ctrl+Q"),
+        ]);
+    let edit_menu = MenuItemData::new("demo.edit", item_kind::SUBMENU)
+        .text("Edit")
+        .submenu(vec![
+            MenuItemData::new("demo.edit.copy", item_kind::PREDEFINED)
+                .predefined("copy")
+                .accelerator("Ctrl+C"),
+            MenuItemData::new("demo.edit.paste", item_kind::PREDEFINED)
+                .predefined("paste")
+                .accelerator("Ctrl+V"),
+        ]);
+    current_app()?
+        .set_menubar("main", vec![file_menu, edit_menu])
+        .await
+}
+
+/// PR #63 capability demo: context popup menu at given coordinates.
+#[napi]
+pub async fn demo_menu_popup(x: f64, y: f64) -> Result<()> {
+    let items = vec![
+        MenuItemData::new("demo.popup.refresh", item_kind::NORMAL).text("Refresh"),
+        MenuItemData::new("demo.popup.sep", item_kind::SEPARATOR),
+        MenuItemData::new("demo.popup.inspect", item_kind::NORMAL).text("Inspect"),
+    ];
+    current_app()?.popup("main", Some(x), Some(y), items).await
+}
+
+/// PR #63 capability demo: system tray item with menu groups.
+#[napi]
+pub async fn demo_statusbar_add() -> Result<()> {
+    // 16x16 RGBA white icon.
+    let rgba: Vec<u8> = vec![255u8; 16 * 16 * 4];
+    let item = StatusBarItemData {
+        icons: StatusBarIconData {
+            white_rgba: Some(rgba),
+            black_rgba: None,
+            size: 16,
+        },
+        quick_operation: QuickOperationData {
+            ability_name: "EntryAbility".to_owned(),
+            title: "demo app".to_owned(),
+            height: 200,
+            module_name: None,
+            loading_status: None,
+        },
+        status_bar_group_menu: Some(vec![vec![StatusBarMenuItemData {
+            title: "Open demo".to_owned(),
+            menu_code: Some("demo.open".to_owned()),
+            sub_menu: None,
+            menu_action: Some(StatusBarMenuActionData {
+                ability_name: "EntryAbility".to_owned(),
+                module_name: None,
+                menu_code: None,
+                notify_only: Some(true),
+            }),
+            selected: None,
+            icon_rgba: None,
+            icon_width: None,
+            icon_height: None,
+        }]]),
+        hover_tips: Some("demo tray".to_owned()),
+    };
+    current_app()?.add_to_status_bar(item).await
+}
+
+/// PR #63 capability demo: device version + capability queries.
+#[napi]
+pub fn demo_version_info(env: &Env) -> Result<String> {
+    let app = current_app()?;
+    let sdk = app.sdk_api_version(env)?;
+    let dist = app.distribution_api_version(env)?;
+    let desktop = app.is_desktop_device(env)?;
+    let can_use = app.can_i_use(env, "SystemCapability.Window.SessionManager")?;
+    Ok(format!("sdk={sdk}, dist={dist}, desktop={desktop}, window-session={can_use}"))
+}
+
+/// PR #63 capability demo: clipboard image write.
+#[napi]
+pub async fn demo_clipboard_write_image() -> Result<()> {
+    // 2x2 opaque white RGBA block.
+    let rgba = vec![255u8; 2 * 2 * 4];
+    current_app()?.write_image(rgba, 2, 2).await
+}
+
+/// PR #63 capability demo: AppGallery update check.
+#[napi]
+pub async fn demo_updater_check() -> Result<Option<String>> {
+    let result = current_app()?.check().await?;
+    Ok(result.map(|r| format!("{} -> {}", r.current_version, r.version)))
+}
+
+/// PR #63 capability demo: create an OS sub-window through `ohos.window`.
+#[napi]
+pub fn demo_create_os_window(env: &Env) -> Result<i64> {
+    let request = openharmony_ability_plugin_window::WindowCreateRequest {
+        name: "demo_sub".to_owned(),
+        width: 480,
+        height: 320,
+        x: 200,
+        y: 200,
+        decorations: true,
+        transparent: false,
+        background_color: None,
+    };
+    current_app()?.create_os_window(env, request)
+}
+
+/// PR #63 capability demo: restart the app (cooldown 3s).
+#[napi]
+pub fn demo_restart(env: &Env) -> Result<()> {
+    current_app()?.restart(env)
+}
+
+/// PR #63 capability demo: switch color mode (0 dark / 1 light / 2 system).
+#[napi]
+pub fn demo_set_color_mode(env: &Env, mode: i32) -> Result<()> {
+    current_app()?.set_color_mode(env, mode)
 }
