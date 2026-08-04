@@ -9,13 +9,10 @@
 package/src/main/ets
 package/libs
 dist
-<<<<<<< HEAD
 .omc
 .idea
 .hvigor
 .sisyphus
 Cargo.lock
-=======
 oh_modules
 build/
->>>>>>> feat/pluginized-bridge

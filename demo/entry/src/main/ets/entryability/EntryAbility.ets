@@ -1,4 +1,4 @@
-import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { EagerPlugin, LazyPlugin, NativeAbility } from "@ohos-rs/ability";
 import Want from "@ohos.app.ability.Want";
 import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
@@ -7,6 +7,7 @@ import { ClipboardPlugin } from "@ohos-rs/plugin-clipboard";
 import { FilesPlugin } from "@ohos-rs/plugin-files";
 import { MenuPlugin } from "@ohos-rs/plugin-menu";
 import { PermissionPlugin } from "@ohos-rs/plugin-permission";
+import { ResourcePlugin } from "@ohos-rs/plugin-resource";
 import { StatusBarPlugin } from "@ohos-rs/plugin-statusbar";
 import { UpdaterPlugin } from "@ohos-rs/plugin-updater";
 import { UrlPlugin } from "@ohos-rs/plugin-url";
@@ -29,6 +30,7 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => new AppControlPlugin()),
     new LazyPlugin(() => new ClipboardPlugin()),
     new LazyPlugin(() => new FilesPlugin()),
+    new EagerPlugin(new ResourcePlugin()),
     new LazyPlugin(() => new WindowPlugin()),
     new LazyPlugin(() => new WebviewPlugin()),
     new LazyPlugin(() => new UrlPlugin()),

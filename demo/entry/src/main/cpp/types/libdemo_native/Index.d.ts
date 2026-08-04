@@ -211,6 +211,18 @@ export declare function demoFileDialogOpen(): Promise<Array<string>>;
 /** PR #65: save-file dialog through `ohos.files` with a PDF filter. */
 export declare function demoFileDialogSave(): Promise<Array<string>>;
 
+/**
+ * `ohos.resource` plugin demo: whether the ArkTS wrapper has pushed the native resource manager
+ * on `ability-create` (installed through the inbound `resource-manager-ready` event).
+ */
+export declare function demoResourceManagerReady(): boolean;
+
+/**
+ * `ohos.resource` plugin demo: top-level raw file directory entry count read through the native
+ * resource manager, or -1 before the wrapper has pushed.
+ */
+export declare function demoResourceRawDirCount(): number;
+
 export declare function demoRequestPermissionFromMainThread(): Promise<Array<number>>;
 
 /**

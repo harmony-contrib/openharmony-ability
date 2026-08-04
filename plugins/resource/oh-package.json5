@@ -1,0 +1,10 @@
+{
+  "name": "@ohos-rs/plugin-resource",
+  "version": "1.0.0",
+  "description": "Resource manager wrapper plugin for @ohos-rs/ability",
+  "main": "index.ets",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@ohos-rs/ability": "file:../../native_ability",
+  },
+}

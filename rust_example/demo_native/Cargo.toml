@@ -18,6 +18,7 @@ openharmony-ability-plugin-clipboard = { workspace = true }
 openharmony-ability-plugin-files = { workspace = true }
 openharmony-ability-plugin-menu = { workspace = true }
 openharmony-ability-plugin-permission = { workspace = true }
+openharmony-ability-plugin-resource = { workspace = true }
 openharmony-ability-plugin-statusbar = { workspace = true }
 openharmony-ability-plugin-updater = { workspace = true }
 openharmony-ability-plugin-url = { workspace = true }

@@ -16,14 +16,9 @@ use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
-    bridge::MainThreadBridgeEndpoint,
-    resource::{
-        resource_manager as global_resource_manager,
-        set_resource_manager as set_global_resource_manager,
-    },
-    AvoidArea, AvoidAreaType, BridgeMainThread, BridgeMainThreadEvent, BridgePlugin,
-    BridgePluginRegistry, BridgeRuntime, Configuration, Event, MainThreadScheduler,
-    OpenHarmonyWaker, PluginLifecycleEvent, Rect, ResourceManager, WAKER,
+    bridge::MainThreadBridgeEndpoint, AvoidArea, AvoidAreaType, BridgeMainThread,
+    BridgeMainThreadEvent, BridgePlugin, BridgePluginRegistry, BridgeRuntime, Configuration, Event,
+    MainThreadScheduler, OpenHarmonyWaker, PluginLifecycleEvent, Rect, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -196,14 +191,6 @@ impl OpenHarmonyAppInner {
     pub fn set_init_context(&mut self, context: AbilityInitContext) {
         self.init_context = context;
     }
-
-    pub fn resource_manager(&self) -> Option<ResourceManager> {
-        global_resource_manager()
-    }
-
-    pub fn set_resource_manager(&mut self, resource_manager: Option<ResourceManager>) {
-        set_global_resource_manager(resource_manager);
-    }
 }
 
 type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>;
@@ -315,10 +302,6 @@ impl OpenHarmonyApp {
         self.init_context().preferred_locales
     }
 
-    pub fn resource_manager(&self) -> Option<ResourceManager> {
-        global_resource_manager()
-    }
-
     /// Returns the generic ArkTS bridge for this native module.
     ///
     /// The runtime is initialized when the module is rendered. Calls can be made from a worker
@@ -401,14 +384,6 @@ impl OpenHarmonyApp {
         if let Ok(mut guard) = self.bridge_main_thread.write() {
             guard.replace(main_thread_endpoint);
         }
-    }
-
-    #[doc(hidden)]
-    pub fn set_resource_manager(&self, resource_manager: Option<ResourceManager>) {
-        self.inner
-            .write()
-            .unwrap()
-            .set_resource_manager(resource_manager);
     }
 
     pub fn show_keyboard(&self) {

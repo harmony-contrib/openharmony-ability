@@ -25,6 +25,7 @@ use openharmony_ability_plugin_files::{
 };
 use openharmony_ability_plugin_menu::{item_kind, MenuExt, MenuItemData};
 use openharmony_ability_plugin_permission::PermissionExt;
+use openharmony_ability_plugin_resource::{ResourceBridgePlugin, ResourceExt};
 use openharmony_ability_plugin_statusbar::{
     QuickOperationData, StatusBarExt, StatusBarIconData, StatusBarItemData,
     StatusBarMenuActionData, StatusBarMenuItemData,
@@ -126,6 +127,28 @@ fn ensure_demo_webview_bindings(client: &WebviewClient) -> Result<()> {
         bindings.protocol = true;
     }
     Ok(())
+}
+
+/// Demo: reports whether the `ohos.resource` wrapper has pushed the native resource manager
+/// (it is installed on `ui-context-ready` after the native module is rendered).
+#[napi]
+pub fn demo_resource_manager_ready() -> bool {
+    current_app()
+        .map(|app| app.resource_manager().is_some())
+        .unwrap_or(false)
+}
+
+/// Demo: reads the top-level raw file directory through the native resource manager. Returns
+/// the number of entries, or -1 when the `ohos.resource` plugin has not installed yet.
+#[napi]
+pub fn demo_resource_raw_dir_count() -> i32 {
+    match current_app().ok().and_then(|app| app.resource_manager()) {
+        Some(manager) => manager
+            .open_dir("", false)
+            .map(|dir| dir.files.len() as i32)
+            .unwrap_or(-1),
+        None => -1,
+    }
 }
 
 #[napi]
@@ -304,6 +327,9 @@ fn openharmony_app(app: OpenHarmonyApp) {
     }
     if let Err(error) = app.register_plugin(openharmony_ability_plugin_files::FilesBridgePlugin) {
         hilog_info!(format!("failed to register files facade: {error}").as_str());
+    }
+    if let Err(error) = app.register_plugin(ResourceBridgePlugin) {
+        hilog_info!(format!("failed to register resource facade: {error}").as_str());
     }
     hilog_info!(format!(
         "init context => module={:?}, base={:?}, pref={:?}, locales={:?}",

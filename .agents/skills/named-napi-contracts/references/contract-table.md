@@ -25,6 +25,7 @@
 | `ohos.webview` / `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`clear-all-browsing-data` | `ohos.webview.ControllerRequest` → `{ id, slotId, visible, color, url, html, headers, zoom }` | `ohos.webview.Acknowledgement` → `{ accepted }` | async / `ui-context` |
 | `ohos.webview` / `get-url`、`cookies-with-url` | `ohos.webview.ControllerRequest` → `{ id, slotId, url }` | `ohos.webview.StringResponse` → `{ value }` | async / `ui-context` |
 | `ohos.webview` / `evaluate-script` | `ohos.webview.ScriptRequest` → `{ id, slotId, script }` | `ohos.webview.ScriptResponse` → `{ result }` | async / `ui-context` |
+| `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象） | `ohos.resource.ResourceManagerReadyResponse` → `{ accepted }` | 入站事件 / `ability` |
 | `ohos.webview` / `set-bounds`、`set-cookie`、`snapshot`、`create-pdf`、`set-debugging-access`、`is-debugging-access` | `ohos.webview.BoundsRequest` / `CookieRequest` / `SnapshotRequest` / `PdfRequest`（`PdfConfig`） / `BoolRequest` | `ohos.webview.Acknowledgement` / `SnapshotResponse` → `{ rgba, width, height }` / `BoolResponse` → `{ value }` | async / `ui-context` |
 | `ohos.clipboard` / `write-image` | `ohos.clipboard.ImageRequest` → `{ rgba, width, height }` | `ohos.clipboard.Acknowledgement` → `{ accepted }` | async / `ability` |
 | `ohos.updater` / `check`、`download-and-install` | `ohos.updater.CheckRequest` | `ohos.updater.CheckResponse` → `{ result }`（`CheckResult`）/ `Acknowledgement` | async / `ability` |
@@ -47,6 +48,7 @@
 | menu | `crates/plugin-menu/src/lib.rs` | `plugins/menu/src/main/ets/MenuPlugin.ets` |
 | statusbar | `crates/plugin-statusbar/src/lib.rs` | `plugins/statusbar/src/main/ets/StatusBarPlugin.ets` |
 | version | `crates/plugin-version/src/lib.rs`（core `crates/ability/src/version.rs` 提供 init/getters） | `plugins/version/src/main/ets/VersionPlugin.ets` |
+| resource | `crates/plugin-resource/src/lib.rs` | `plugins/resource/src/main/ets/ResourcePlugin.ets` |
 | webview 自定义协议 | `crates/plugin-webview/src/protocol.rs` | —（纯 native，ArkTS 只触发 `before-engine-init`/`engine-initialized` 事件） |
 | webview JS proxy | `crates/plugin-webview/src/js_proxy.rs` | —（纯 native，依赖 `controller-attached` 事件） |
 

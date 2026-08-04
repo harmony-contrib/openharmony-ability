@@ -305,3 +305,26 @@ export class LazyPlugin implements BridgePluginFactory {
     return this.createFn();
   }
 }
+
+/**
+ * Eager plugin registration entry: shares one caller-constructed plugin instance across every
+ * native module and Ability session, and optionally filters by native module.
+ *
+ * Use this for plugins that own process-wide global state (for example a singleton native
+ * wrapper) where per-session instances would be redundant or lossy. The instance receives
+ * `attachContext` for every module/session it is installed into and must tolerate repeated
+ * lifecycle and dispose notifications.
+ */
+export class EagerPlugin implements BridgePluginFactory {
+  readonly modules?: string[];
+  private readonly instance: BridgePlugin;
+
+  constructor(instance: BridgePlugin, modules?: string[]) {
+    this.instance = instance;
+    this.modules = modules;
+  }
+
+  create(): BridgePlugin {
+    return this.instance;
+  }
+}
