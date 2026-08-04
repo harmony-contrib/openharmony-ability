@@ -24,6 +24,7 @@
 | `ohos.webview` / `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`clear-all-browsing-data` | `ohos.webview.ControllerRequest` → `{ id, slotId, visible, color, url, html, headers, zoom }` | `ohos.webview.Acknowledgement` → `{ accepted }` | async / `ui-context` |
 | `ohos.webview` / `get-url`、`cookies-with-url` | `ohos.webview.ControllerRequest` → `{ id, slotId, url }` | `ohos.webview.StringResponse` → `{ value }` | async / `ui-context` |
 | `ohos.webview` / `evaluate-script` | `ohos.webview.ScriptRequest` → `{ id, slotId, script }` | `ohos.webview.ScriptResponse` → `{ result }` | async / `ui-context` |
+| `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象） | `ohos.resource.ResourceManagerReadyResponse` → `{ accepted }` | 入站事件 / `ability` |
 
 ## 代码位置
 
@@ -33,6 +34,7 @@
 | app-control | `crates/plugin-app-control/src/lib.rs` | `plugins/app-control/src/main/ets/AppControlPlugin.ets` |
 | window | `crates/plugin-window/src/lib.rs` | `plugins/window/src/main/ets/WindowPlugin.ets` |
 | webview | `crates/plugin-webview/src/lib.rs` | `plugins/webview/src/main/ets/WebviewPlugin.ets` |
+| resource | `crates/plugin-resource/src/lib.rs` | `plugins/resource/src/main/ets/ResourcePlugin.ets` |
 | webview 自定义协议 | `crates/plugin-webview/src/protocol.rs` | —（纯 native，ArkTS 只触发 `before-engine-init`/`engine-initialized` 事件） |
 | webview JS proxy | `crates/plugin-webview/src/js_proxy.rs` | —（纯 native，依赖 `controller-attached` 事件） |
 

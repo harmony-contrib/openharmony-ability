@@ -8,6 +8,7 @@ openharmony-ability = { version = "0.3.0", path = "crates/ability" }
 openharmony-ability-plugin-app-control = { version = "0.3.0", path = "crates/plugin-app-control" }
 openharmony-ability-plugin-files = { version = "0.3.0", path = "crates/plugin-files" }
 openharmony-ability-plugin-permission = { version = "0.3.0", path = "crates/plugin-permission" }
+openharmony-ability-plugin-resource = { version = "0.3.0", path = "crates/plugin-resource" }
 openharmony-ability-plugin-url = { version = "0.3.0", path = "crates/plugin-url" }
 openharmony-ability-plugin-webview = { version = "0.3.0", path = "crates/plugin-webview" }
 openharmony-ability-plugin-window = { version = "0.3.0", path = "crates/plugin-window" }
@@ -27,6 +28,7 @@ ohos-ime-binding = { version = "0.2" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
 ohos-resource-manager-binding = { version = "0.3" }
+ohos-resource-manager-sys = { version = "0.3" }
 ohos-hilog-binding = { version = "0.2" }
 
 # Bridge runtime and examples use these without pinning versions in member manifests.

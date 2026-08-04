@@ -25,5 +25,7 @@ it through `openharmony-ability-plugin-webview::WebviewProtocol` and
 
 The generated `init(context)` forwards ArkTS init data into native code. Read it through
 `app.init_context()`, `app.module_name()`, `app.base_path()`, `app.pref_path()`, and
-`app.preferred_locales()`. The resource manager is available through
-`openharmony_ability::resource_manager()` or `app.resource_manager()`.
+`app.preferred_locales()`. The resource manager is a plugin capability: register
+`openharmony_ability_plugin_resource::ResourceBridgePlugin` in the `#[ability]` initializer and
+read it via the `ResourceExt` trait (`app.resource_manager()`); the ArkTS side must install
+`@ohos-rs/plugin-resource` (typically as `new EagerPlugin(new ResourcePlugin())`).

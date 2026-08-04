@@ -59,6 +59,7 @@ dependencies = [
  "openharmony-ability-derive",
  "openharmony-ability-plugin-files",
  "openharmony-ability-plugin-permission",
+ "openharmony-ability-plugin-resource",
  "openharmony-ability-plugin-url",
  "openharmony-ability-plugin-webview",
 ]
@@ -479,7 +480,6 @@ dependencies = [
  "ohos-arkui-binding",
  "ohos-display-binding",
  "ohos-ime-binding",
- "ohos-resource-manager-binding",
  "ohos-xcomponent-binding",
 ]
 
@@ -516,6 +516,17 @@ version = "0.3.0"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-resource"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "ohos-resource-manager-binding",
+ "ohos-resource-manager-sys",
  "openharmony-ability",
 ]
 

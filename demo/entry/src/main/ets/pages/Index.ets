@@ -16,6 +16,8 @@ import {
   demoOpenUrl,
   demoFileDialogOpen,
   demoFileDialogSave,
+  demoResourceManagerReady,
+  demoResourceRawDirCount,
   setBackgroundColor,
   setVisible,
   toggleBackPressIntercept,
@@ -38,6 +40,8 @@ struct Index {
   @State webviewScriptResult: string = "JavaScript not called";
   @State urlResult: string = "not called";
   @State fileDialogResult: string = "not called";
+  @State resourceManagerResult: string = "not inspected";
+  @State resourceRawDirResult: string = "not inspected";
 
   async handlePermissionDemo() {
     const result: number[] = await demoRequestPermissionFromMainThread();
@@ -155,6 +159,18 @@ struct Index {
     } catch (error) {
       this.fileDialogResult = `save dialog failed: ${String(error)}`;
     }
+  }
+
+  handleResourceManagerReady() {
+    this.resourceManagerResult = demoResourceManagerReady()
+      ? "installed: wrapper pushed resourceManager on ability-create"
+      : "NOT installed yet (plugin missing or push failed)";
+  }
+
+  handleResourceRawDir() {
+    const count = demoResourceRawDirCount();
+    this.resourceRawDirResult =
+      count >= 0 ? `raw dir entries: ${count}` : "not installed yet (returned -1)";
   }
 
   @Builder
@@ -286,6 +302,33 @@ struct Index {
     .scrollable(ScrollDirection.Vertical);
   }
 
+  @Builder
+  ResourceDemo() {
+    Scroll() {
+      Column({ space: 12 }) {
+        Text("ohos.resource plugin (ArkTS wrapper -> native pointer)")
+          .fontSize(14)
+          .fontColor("#333")
+        Button("check resource manager installed")
+          .onClick(() => this.handleResourceManagerReady())
+        Text(this.resourceManagerResult)
+        Button("count raw file dir entries")
+          .onClick(() => this.handleResourceRawDir())
+        Text(this.resourceRawDirResult)
+        Text(
+          "The wrapper pushes resourceManager on ability-create; reads run through ohos-resource-manager-binding (C API), no ArkTS round-trip.",
+        )
+          .fontSize(12)
+          .fontColor("#888")
+      }
+      .width("100%")
+      .padding(8)
+    }
+    .width("100%")
+    .height("100%")
+    .scrollable(ScrollDirection.Vertical);
+  }
+
   build() {
     Column({ space: 16 }) {
       Flex({
@@ -295,6 +338,7 @@ struct Index {
         this.DemoSwitcher("XComponent demo", 0)
         this.DemoSwitcher("WebView + slot demo", 1)
         this.DemoSwitcher("Platform services demo", 2)
+        this.DemoSwitcher("Resource demo", 3)
       }.width("100%")
       if (this.currentDemo === 0) {
         this.XComponentDemo();
@@ -304,6 +348,9 @@ struct Index {
       }
       if (this.currentDemo === 2) {
         this.PlatformServicesDemo();
+      }
+      if (this.currentDemo === 3) {
+        this.ResourceDemo();
       }
     }
     .width("100%")

@@ -63,6 +63,10 @@
       "srcPath": "../plugins/permission",
     },
     {
+      "name": "plugin_resource",
+      "srcPath": "../plugins/resource",
+    },
+    {
       "name": "plugin_webview",
       "srcPath": "../plugins/webview",
     },

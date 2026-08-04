@@ -9,7 +9,6 @@ mod input;
 mod lifecycle;
 mod memory;
 mod render;
-mod resource;
 mod stage;
 mod waker;
 
@@ -24,7 +23,6 @@ pub use input::*;
 pub use lifecycle::*;
 pub use memory::*;
 pub use render::*;
-pub use resource::*;
 pub use stage::*;
 pub use waker::*;
 
@@ -36,5 +34,4 @@ pub use napi_ohos;
 // re-export arkui and avoid the need to import it in the lib.rs
 pub use ohos_arkui_binding as arkui;
 pub use ohos_ime_binding as ime;
-pub use ohos_resource_manager_binding as resource_manager;
 pub use ohos_xcomponent_binding as xcomponent;

@@ -214,6 +214,16 @@ export function createLoginPlugin(): BridgePluginFactory {
 | `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | sync / `window-stage` |
 | `ohos.webview` / `create` | `ohos.webview.CreateRequest` → `ohos.webview.CreateResponse { id, slotId }` | async / `ui-context` |
 | `ohos.webview` / 控制器 action | `ohos.webview.ControllerRequest` → `ohos.webview.Acknowledgement` / `StringResponse` / `ScriptResponse` | async / `ui-context` |
+| `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` | 入站事件 / `ability` |
+
+`resource` 是纯入站插件：ArkTS wrapper 在 `ability-create` 时经 `invokeNativeSync` 推送平台
+对象，Rust 在 `on_main_thread_event` 解码的同一 N-API callback 内把它转成 native 指针；对象
+引用不得跨线程保留。该插件没有出站 action。
+
+入站事件 sink 在 `NativeAbility.onCreate` 中 `module.init` 之后立即 attach（`attachBridgeEventSink`），
+不依赖 UI 渲染；因此只依赖 `ability` 的插件可以在 `ability-create` 就推送事件，无需等到
+`ui-context-ready`。`DefaultXComponent.aboutToAppear` 中的 attach 保留为同一 module 对象的幂等
+兜底。
 
 `permission` 的结果顺序和失败码 `-1`、`window` 的四个避让区、`app-control` 的主线程同步退出、
 WebView 的 controller ID 与命名 slot 都是既有语义，迁移为插件后不得丢失。
@@ -485,6 +495,11 @@ export default class EntryAbility extends NativeAbility {
 
 factory 可以用 `modules` 限制适用的 native module。未装配、版本不匹配、模式不匹配和类型不匹配
 都应在桥接边界确定性报错，不得悄悄回退到 helper 或 JSON 兼容路径。
+
+`LazyPlugin`（默认）在 `BridgeHost.install` 时为每个 native module 和 Ability session 创建独立
+实例；`EagerPlugin` 共享一个调用方构造的实例，用于持有进程级全局状态的插件（例如只做一次
+native wrapper 推送的 `ohos.resource`）。共享实例会被重复 `attachContext`，必须容忍重复的
+lifecycle 通知与 dispose。
 
 ## 9. 实现、Demo 与验收
 

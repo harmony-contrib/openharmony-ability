@@ -11,6 +11,7 @@
     "@ohos-rs/ability": "file:../../native_ability",
     "@ohos-rs/plugin-app-control": "file:../../plugins/app-control",
     "@ohos-rs/plugin-permission": "file:../../plugins/permission",
+    "@ohos-rs/plugin-resource": "file:../../plugins/resource",
     "@ohos-rs/plugin-webview": "file:../../plugins/webview",
     "@ohos-rs/plugin-window": "file:../../plugins/window",
     "@ohos-rs/plugin-url": "file:../../plugins/url",
