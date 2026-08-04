@@ -80,6 +80,9 @@ export struct DefaultXComponent {
 
     const nativeModule = await NativeModuleLoader.load(moduleName, this.loadMode);
     this.nativeModule = nativeModule;
+    // Idempotent fallback: NativeAbility.onCreate already attached the sink right after
+    // module.init (same cached Module instance), so `ability`-only plugins can emit inbound
+    // events on `ability-create`. Re-attaching here covers modules loaded without onCreate.
     BridgeHostRegistry.attachEventSink(
       this.bridgeSessionId,
       moduleName,

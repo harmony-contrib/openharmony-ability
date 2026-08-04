@@ -75,6 +75,34 @@ export class NativeAbility extends UIAbility {
     };
   }
 
+  /**
+   * Wires the ArkTS -> Rust main-thread event sink for one native module. Called right after
+   * `module.init` in onCreate so plugins that only require `ability` can emit inbound events on
+   * `ability-create`; the render-time attach in DefaultXComponent overrides it with the same
+   * module object (idempotent, NativeModuleLoader caches instances).
+   */
+  private attachBridgeEventSink(moduleName: string, module: Module): void {
+    if (this.bridgeSessionId === undefined) {
+      return;
+    }
+    if (typeof module.onBridgeSyncEvent !== "function") {
+      return;
+    }
+    BridgeHostRegistry.attachEventSink(
+      this.bridgeSessionId,
+      moduleName,
+      (
+        pluginId: string,
+        event: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+      ): ESObject => {
+        return module.onBridgeSyncEvent!(pluginId, event, requestTypeName, responseTypeName, value);
+      },
+    );
+  }
+
   protected async notifyBridgeLifecycle(event: BridgeLifecycleEvent): Promise<void> {
     if (!this.bridgeSessionId) {
       return;
@@ -154,6 +182,13 @@ export class NativeAbility extends UIAbility {
       try {
         const lifecycle: ApplicationLifecycle = module.init(this.createInitContext(moduleName));
         this.lifecycles.push(lifecycle);
+
+        // Attach the inbound event sink right after init, not at UI render time: the native
+        // module is loaded and the Rust app (plus its registered plugins) exists from here on.
+        // Plugins that only require `ability` can therefore push ArkTS -> Rust main-thread
+        // events on `ability-create` instead of waiting for `ui-context-ready`. The render-time
+        // attach in DefaultXComponent remains as an idempotent fallback for the same module.
+        this.attachBridgeEventSink(moduleName, module);
 
         const restoredState = restoredStateMap[moduleName] ?? state;
         try {

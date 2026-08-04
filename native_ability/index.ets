@@ -1,6 +1,7 @@
 export { NativeAbility } from "./src/main/ets/ability/NativeAbility";
 export {
   AsyncPluginBase,
+  EagerPlugin,
   LazyPlugin,
   BridgeAbilityCreateLifecyclePayload,
   BridgeEmptyLifecyclePayload,
