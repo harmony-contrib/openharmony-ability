@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    cell::RefCell,
     collections::HashMap,
     rc::Rc,
     sync::{Arc, Mutex},
@@ -59,7 +60,9 @@ pub struct WebViewInitData<'a> {
 #[derive(Clone)]
 pub struct Webview {
     tag: String,
-    inner: Rc<ObjectRef>,
+    /// N-API reference to the ArkTS WebView controller. `None` once the
+    /// reference has been released (dispose or last clone drop).
+    inner: Rc<RefCell<Option<ObjectRef>>>,
     web_view_native: Rc<Web>,
 }
 
@@ -67,14 +70,27 @@ impl Webview {
     pub fn new(tag: String, inner: ObjectRef) -> Result<Self> {
         let native_instance = Web::new(tag.clone());
         Ok(Self {
-            inner: Rc::new(inner),
+            inner: Rc::new(RefCell::new(Some(inner))),
             web_view_native: Rc::new(native_instance),
             tag,
         })
     }
 
-    pub fn inner(&self) -> Rc<ObjectRef> {
-        self.inner.clone()
+    /// Borrow the live N-API object reference.
+    fn object_ref(&self) -> Result<std::cell::Ref<'_, ObjectRef>> {
+        std::cell::Ref::filter_map(self.inner.borrow(), |inner| inner.as_ref())
+            .map_err(|_| Error::from_reason("webview reference already released"))
+    }
+
+    /// Release the N-API reference. Only the last clone may actually unref;
+    /// earlier clones simply mark the shared slot empty so a later drop is a
+    /// no-op.
+    fn release_native_ref(&self) {
+        if let Some(object_ref) = self.inner.borrow_mut().take() {
+            if let Some(env) = get_main_thread_env().borrow().as_ref() {
+                let _ = object_ref.unref(env);
+            }
+        }
     }
 
     pub fn tag(&self) -> String {
@@ -85,7 +101,7 @@ impl Webview {
     pub fn url(&self) -> Result<String> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let url_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, (), String>>("getUrl")?;
             url_js_function.call(())
@@ -97,7 +113,7 @@ impl Webview {
     /// Load a url in the webview
     pub fn load_url(&self, url: &str) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
-            let load_url_js_function = self.inner.get_value(env)?.get_named_property::<Function<
+            let load_url_js_function = self.object_ref()?.get_value(env)?.get_named_property::<Function<
                 '_,
                 FnArgs<(String, Option<HashMap<String, String>>)>,
                 (),
@@ -114,7 +130,7 @@ impl Webview {
     pub fn load_url_with_headers(&self, url: &str, headers: http::HeaderMap) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let load_url_with_headers_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, FnArgs<(String, HashMap<String, String>)>, ()>>(
                     "loadUrl",
@@ -135,7 +151,7 @@ impl Webview {
     pub fn load_html(&self, html: &str) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let load_html_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, String, ()>>("loadHtml")?;
             load_html_js_function.call(html.to_string())?;
@@ -149,7 +165,7 @@ impl Webview {
     pub fn set_zoom(&self, zoom: f64) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let set_zoom_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, f64, ()>>("zoom")?;
             set_zoom_js_function.call(zoom)?;
@@ -163,7 +179,7 @@ impl Webview {
     pub fn reload(&self) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let reload_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, (), ()>>("refresh")?;
             reload_js_function.call(())?;
@@ -177,7 +193,7 @@ impl Webview {
     pub fn focus(&self) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let focus_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, (), ()>>("requestFocus")?;
             focus_js_function.call(())?;
@@ -198,7 +214,7 @@ impl Webview {
     ) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let evaluate_js_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, FnArgs<(String, Function<'_, String, ()>)>, ()>>(
                     "runJavaScript",
@@ -226,7 +242,7 @@ impl Webview {
     pub fn cookies_with_url(&self, url: &str) -> Result<String> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let cookies_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, String, String>>("getCookies")?;
             cookies_js_function.call(url.to_string())
@@ -238,7 +254,7 @@ impl Webview {
     pub fn set_background_color(&self, color: &str) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let set_background_color_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, String, ()>>("setBackgroundColor")?;
             set_background_color_js_function.call(color.to_string())?;
@@ -251,7 +267,7 @@ impl Webview {
     pub fn set_visible(&self, visible: bool) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let set_visible_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, bool, ()>>("setVisible")?;
             set_visible_js_function.call(visible)?;
@@ -262,12 +278,20 @@ impl Webview {
     }
 
     pub fn dispose(&self) -> Result<()> {
-        if let Some(env) = get_main_thread_env().borrow().as_ref() {
+        let disposed = if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let dispose_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, (), ()>>("dispose")?;
-            dispose_js_function.call(())?;
+            dispose_js_function.call(()).is_ok()
+        } else {
+            false
+        };
+        // Release the N-API reference regardless of ArkTS dispose outcome:
+        // an unreachable or half-disposed controller must not stay pinned
+        // forever. Subsequent calls are no-ops.
+        self.release_native_ref();
+        if disposed {
             Ok(())
         } else {
             Err(Error::from_reason("Failed to get main thread env"))
@@ -277,7 +301,7 @@ impl Webview {
     pub fn clear_all_browsing_data(&self) -> Result<()> {
         if let Some(env) = get_main_thread_env().borrow().as_ref() {
             let clear_all_browsing_data_js_function = self
-                .inner
+                .object_ref()?
                 .get_value(env)?
                 .get_named_property::<Function<'_, (), ()>>("clearAllBrowsingData")?;
             clear_all_browsing_data_js_function.call(())?;
@@ -479,5 +503,18 @@ impl CustomProtocolResponder {
     pub fn respond<T: Into<Cow<'static, [u8]>>>(self, response: Response<T>) {
         let (parts, body) = response.into_parts();
         (self.responder)(Response::from_parts(parts, body.into()))
+    }
+}
+
+impl Drop for Webview {
+    fn drop(&mut self) {
+        // Last-resort N-API reference release for clones that were never
+        // explicitly disposed. Only the last clone may release the shared
+        // slot: ephemeral clones are created for every native call (snapshot
+        // pattern) and dropped immediately, so releasing from any clone would
+        // invalidate the controller after the first call.
+        if Rc::strong_count(&self.inner) == 1 {
+            self.release_native_ref();
+        }
     }
 }
