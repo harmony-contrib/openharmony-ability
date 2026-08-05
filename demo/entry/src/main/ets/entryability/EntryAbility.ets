@@ -2,13 +2,13 @@ import { EagerPlugin, LazyPlugin, NativeAbility } from "@ohos-rs/ability";
 import Want from "@ohos.app.ability.Want";
 import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
-import { AppControlPlugin } from "@ohos-rs/plugin-app-control";
-import { FilesPlugin } from "@ohos-rs/plugin-files";
-import { PermissionPlugin } from "@ohos-rs/plugin-permission";
-import { ResourcePlugin } from "@ohos-rs/plugin-resource";
-import { UrlPlugin } from "@ohos-rs/plugin-url";
-import { WebviewPlugin } from "@ohos-rs/plugin-webview";
-import { WindowPlugin } from "@ohos-rs/plugin-window";
+import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
+import { FilesPlugin } from "@ohos-rs/ability-plugin-files";
+import { PermissionPlugin } from "@ohos-rs/ability-plugin-permission";
+import { ResourcePlugin } from "@ohos-rs/ability-plugin-resource";
+import { UrlPlugin } from "@ohos-rs/ability-plugin-url";
+import { WebviewPlugin } from "@ohos-rs/ability-plugin-webview";
+import { WindowPlugin } from "@ohos-rs/ability-plugin-window";
 import {
   DemoLoginPlugin,
   DemoIdentityProvider,

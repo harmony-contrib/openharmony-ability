@@ -1,7 +1,7 @@
 # openharmony-ability-plugin-resource
 
 `openharmony-ability-plugin-resource` 是 HarmonyOS `resourceManager` 能力的 Rust facade。它与
-ArkTS HAR `@ohos-rs/plugin-resource` 成对使用：ArkTS wrapper 持有平台对象并在 `ui-context-ready`
+ArkTS HAR `@ohos-rs/ability-plugin-resource` 成对使用：ArkTS wrapper 持有平台对象并在 `ui-context-ready`
 时经入站事件推送给 Rust，Rust 在同一 N-API callback 内把对象转成 native 指针存全局；之后所有
 读取（raw file、media、drawable 等）通过 `ohos-resource-manager-binding` 直连 OpenHarmony C API，
 不经过 ArkTS。
@@ -11,7 +11,7 @@ ArkTS HAR `@ohos-rs/plugin-resource` 成对使用：ArkTS wrapper 持有平台�
 | 项目 | 值 |
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-resource` |
-| ArkTS HAR | `@ohos-rs/plugin-resource` |
+| ArkTS HAR | `@ohos-rs/ability-plugin-resource` |
 | 插件 ID / bridge 版本 | `ohos.resource` / `1` |
 | 执行模式 | 异步（`AsyncBridge` / `invokeAsync`，无出站 action） |
 | 前置 context | `ability` |
@@ -41,7 +41,7 @@ ArkTS 对象引用跨线程。
 
    ```ts
    import { EagerPlugin } from "@ohos-rs/ability";
-   import { ResourcePlugin } from "@ohos-rs/plugin-resource";
+   import { ResourcePlugin } from "@ohos-rs/ability-plugin-resource";
 
    // in NativeAbility subclass:
    public bridgePlugins = [

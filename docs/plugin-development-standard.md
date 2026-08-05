@@ -505,11 +505,11 @@ fn configure_ability(app: OpenHarmonyApp) {
 ArkTS HAR 导出唯一 factory，应用通过 `NativeAbility.bridgePlugins` 显式装配：
 
 ```ts
-import { createAppControlPlugin } from "@ohos-rs/plugin-app-control";
-import { createLoginPlugin } from "@ohos-rs/plugin-login";
-import { createPermissionPlugin } from "@ohos-rs/plugin-permission";
-import { createWebviewPlugin } from "@ohos-rs/plugin-webview";
-import { createWindowPlugin } from "@ohos-rs/plugin-window";
+import { createAppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
+import { createLoginPlugin } from "@ohos-rs/ability-plugin-login";
+import { createPermissionPlugin } from "@ohos-rs/ability-plugin-permission";
+import { createWebviewPlugin } from "@ohos-rs/ability-plugin-webview";
+import { createWindowPlugin } from "@ohos-rs/ability-plugin-window";
 
 export default class EntryAbility extends NativeAbility {
   bridgePlugins = [

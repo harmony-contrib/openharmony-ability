@@ -1,14 +1,14 @@
 # openharmony-ability-plugin-app-control
 
 `openharmony-ability-plugin-app-control` 提供应用进程控制的 Rust facade。目前公开能力为以指定退出码
-结束进程。它与 ArkTS HAR `@ohos-rs/plugin-app-control` 成对使用，并且是严格的主线程同步插件。
+结束进程。它与 ArkTS HAR `@ohos-rs/ability-plugin-app-control` 成对使用，并且是严格的主线程同步插件。
 
 ## 契约
 
 | 项目 | 值 |
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-app-control` |
-| ArkTS HAR | `@ohos-rs/plugin-app-control` |
+| ArkTS HAR | `@ohos-rs/ability-plugin-app-control` |
 | 插件 ID / bridge 版本 | `ohos.app-control` / `1` |
 | 执行模式 | 主线程同步：`MainThreadSyncBridge` / `invokeSync` |
 | 前置 context | `ability` |
@@ -33,14 +33,14 @@ fn configure_ability(app: OpenHarmonyApp) {
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import { createAppControlPlugin } from "@ohos-rs/plugin-app-control";
+import { createAppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
 
 export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [createAppControlPlugin()];
 }
 ```
 
-同时在应用 `oh-package.json5` 添加 `@ohos-rs/plugin-app-control`。HAR 的具体依赖和 factory 说明见
+同时在应用 `oh-package.json5` 添加 `@ohos-rs/ability-plugin-app-control`。HAR 的具体依赖和 factory 说明见
 [ArkTS README](../../plugins/app-control/README.md)。
 
 ## Rust 使用方式

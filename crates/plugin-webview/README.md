@@ -1,7 +1,7 @@
 # openharmony-ability-plugin-webview
 
 `openharmony-ability-plugin-webview` 是 ArkWeb/WebView 的 Rust facade。它与
-`@ohos-rs/plugin-webview` HAR 成对工作：ArkTS 持有 `WebviewController`、ArkUI `FrameNode` 和
+`@ohos-rs/ability-plugin-webview` HAR 成对工作：ArkTS 持有 `WebviewController`、ArkUI `FrameNode` 和
 ArkWeb delegate；Rust 只持有 controller ID、具名 N-API 数据及 Rust-owned callback/protocol closure。
 
 插件不把 WebView 写进 framework 的 `DefaultXComponent`。默认情况下它挂载到通用
@@ -13,7 +13,7 @@ XComponent 和自定义 ArkUI 节点的混合布局。
 | 项目 | 值 |
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-webview` |
-| ArkTS HAR | `@ohos-rs/plugin-webview` |
+| ArkTS HAR | `@ohos-rs/ability-plugin-webview` |
 | 插件 ID / bridge 版本 | `ohos.webview` / `1` |
 | 执行模式 | 异步：`AsyncBridge` / `invokeAsync` |
 | 前置 context | `ui-context` |
@@ -44,11 +44,11 @@ fn configure_ability(app: OpenHarmonyApp) {
 }
 ```
 
-应用侧在 `oh-package.json5` 添加 `@ohos-rs/plugin-webview`，并在 `NativeAbility` 中显式装配 factory：
+应用侧在 `oh-package.json5` 添加 `@ohos-rs/ability-plugin-webview`，并在 `NativeAbility` 中显式装配 factory：
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import { createWebviewPlugin } from "@ohos-rs/plugin-webview";
+import { createWebviewPlugin } from "@ohos-rs/ability-plugin-webview";
 
 export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [createWebviewPlugin()];
