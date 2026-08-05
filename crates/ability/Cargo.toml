@@ -7,7 +7,6 @@ description = "Binding Rust application on Harmony with Ability"
 
 [features]
 default = []
-log = []
 
 [dependencies]
 # common dependencies

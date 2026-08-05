@@ -28,4 +28,4 @@ The generated `init(context)` forwards ArkTS init data into native code. Read it
 `app.preferred_locales()`. The resource manager is a plugin capability: register
 `openharmony_ability_plugin_resource::ResourceBridgePlugin` in the `#[ability]` initializer and
 read it via the `ResourceExt` trait (`app.resource_manager()`); the ArkTS side must install
-`@ohos-rs/plugin-resource` (typically as `new EagerPlugin(new ResourcePlugin())`).
+`@ohos-rs/ability-plugin-resource` (typically as `new EagerPlugin(new ResourcePlugin())`).

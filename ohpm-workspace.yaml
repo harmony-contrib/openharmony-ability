@@ -1,0 +1,17 @@
+### ohpm workspace configuration
+### Members are the source packages that participate in file: dependency
+### resolution and version management (see ohpm-rs workspace mode).
+
+packages:
+  - "native_ability" # @ohos-rs/ability source package
+  - "plugins/*" # @ohos-rs/ability-plugin-* capability plugins
+
+exclude:
+  - "package" # publish staging dir; duplicate @ohos-rs/ability name
+  - "demo/.hvigor/**" # hvigor-generated dependencyMap manifests
+  - "**/src/main/cpp/types/**" # generated NAPI .so type-stub packages
+  - "demo/*" # demo entry module(s)
+
+### versioning policy: each package keeps its own version
+version:
+  mode: independent

@@ -1,4 +1,4 @@
-//! Typed Rust facade for the ArkTS `@ohos-rs/plugin-permission` HAR.
+//! Typed Rust facade for the ArkTS `@ohos-rs/ability-plugin-permission` HAR.
 //!
 //! This crate deliberately depends on the bridge core; the core does not depend on this crate.
 

@@ -1,7 +1,7 @@
 # openharmony-ability-plugin-permission
 
 `openharmony-ability-plugin-permission` 是 OpenHarmony 运行时权限能力的 Rust facade。它与
-ArkTS HAR `@ohos-rs/plugin-permission` 成对使用：Rust 发起强类型异步请求，ArkTS 使用
+ArkTS HAR `@ohos-rs/ability-plugin-permission` 成对使用：Rust 发起强类型异步请求，ArkTS 使用
 `abilityAccessCtrl` 展示系统授权界面并返回结果。
 
 ## 契约
@@ -9,7 +9,7 @@ ArkTS HAR `@ohos-rs/plugin-permission` 成对使用：Rust 发起强类型异步
 | 项目 | 值 |
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-permission` |
-| ArkTS HAR | `@ohos-rs/plugin-permission` |
+| ArkTS HAR | `@ohos-rs/ability-plugin-permission` |
 | 插件 ID / bridge 版本 | `ohos.permission` / `1` |
 | 执行模式 | 异步：`AsyncBridge` / `invokeAsync` |
 | 前置 context | `ability` |
@@ -35,12 +35,12 @@ ArkTS HAR `@ohos-rs/plugin-permission` 成对使用：Rust 发起强类型异步
    }
    ```
 
-2. 在应用的 `oh-package.json5` 中加入 `@ohos-rs/plugin-permission`，并在继承
+2. 在应用的 `oh-package.json5` 中加入 `@ohos-rs/ability-plugin-permission`，并在继承
    `NativeAbility` 的入口显式装配 `createPermissionPlugin()`：
 
    ```ts
    import { NativeAbility } from "@ohos-rs/ability";
-   import { createPermissionPlugin } from "@ohos-rs/plugin-permission";
+   import { createPermissionPlugin } from "@ohos-rs/ability-plugin-permission";
 
    export default class EntryAbility extends NativeAbility {
      public bridgePlugins = [createPermissionPlugin()];

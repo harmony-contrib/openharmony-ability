@@ -41,7 +41,8 @@ impl BridgePlugin for DemoMainThreadPlugin {
 }
 
 /// This requires `Env`, so it can only be called from an exported N-API callback on the main
-/// thread. There is intentionally no cloneable `BridgeRuntime` equivalent for this plugin.
+/// thread. Workers invoke the same plugin through `BridgeRuntime::call_sync_from_worker`
+/// (see `tsfn_sync_bridge.rs`).
 pub fn inspect_from_napi_main_thread(app: &OpenHarmonyApp, env: &Env) -> Result<String> {
     app.with_main_thread_bridge(env, |bridge| {
         let response = bridge

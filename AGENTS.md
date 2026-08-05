@@ -40,7 +40,7 @@ ArkTS UI (UIAbility / DefaultXComponent / BridgeNodeHost)
    │  WebviewController, FrameNodes, lifecycle listeners
    ▼
 NativeAbility (BridgeHost, BridgeNodeSlot, BridgePluginFactory registry)
-   │  async via TSFN (Promise→future), sync/events inside active napi_env
+   │  async via TSFN (Promise→future); worker→main sync via TSFN; events inside active napi_env
    │  transport: named N-API values only (typeName-validated at the boundary)
    ▼
 crates/ability bridge (BridgeRuntime / BridgeMainThread / PluginLifecycleEvent)
@@ -78,7 +78,7 @@ Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` tha
 - **`BridgePlugin` trait** (`crates/ability/src/bridge/mod.rs`) — the stable Rust contract: `type Mode = AsyncBridge | MainThreadSyncBridge`, `const ID`, `const VERSION`, `REQUIRED_CONTEXTS` (`ability` | `window-stage` | `ui-context`). `Mode` is a closed trait, not a runtime flag.
 - **`impl_bridge_napi_type!(T, "ohos.<plugin>.<TypeName>")`** — pins a stable ABI typeName for `#[napi(object)]` structs; ArkTS validates the same string at parse and backfills it on response.
 - **Async mode** — Rust worker calls `BridgeRuntime::call_async::<P, Req, Resp>("action", req, options)`; data must be `Send + 'static`; the TSFN turns the ArkTS Promise into a future.
-- **Sync mode** — only inside an active N-API callback: `app.with_main_thread_bridge(env, |b| b.call_sync::<P, Req, Resp>(…))`. `BridgeMainThread` is `!Send + !Sync`, never cached.
+- **Sync mode** — main thread: inside an active N-API callback, `app.with_main_thread_bridge(env, |b| b.call_sync::<P, Req, Resp>(…))`; workers: `BridgeRuntime::call_sync_from_worker` (TSFN, execution still on the main thread, must not be called from the N-API main thread). `BridgeMainThread` is `!Send + !Sync`, never cached.
 - **Platform callbacks** — ArkTS calls `context.invokeNativeSync(event, reqTypeName, respTypeName, value)`; Rust answers in `BridgePlugin::on_main_thread_event` within the same callback. Fail-open (navigation) vs fail-closed (download) per event.
 - **`BridgeNodeSlot`** — node mounting keyed `(sessionId, moduleName, slotId)`; default slot `xcomponent-overlay`, business named slots via `BridgeNodeHost`. Waiters honor `context.onCancel`; no timers/polling for readiness.
 

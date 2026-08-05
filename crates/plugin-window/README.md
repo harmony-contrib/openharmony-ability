@@ -1,14 +1,14 @@
 # openharmony-ability-plugin-window
 
 `openharmony-ability-plugin-window` 是窗口能力的 Rust facade。当前提供同步查询窗口避让区
-(`AvoidArea`) 的能力，对应 ArkTS HAR 为 `@ohos-rs/plugin-window`。
+(`AvoidArea`) 的能力，对应 ArkTS HAR 为 `@ohos-rs/ability-plugin-window`。
 
 ## 契约
 
 | 项目 | 值 |
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-window` |
-| ArkTS HAR | `@ohos-rs/plugin-window` |
+| ArkTS HAR | `@ohos-rs/ability-plugin-window` |
 | 插件 ID / bridge 版本 | `ohos.window` / `1` |
 | 执行模式 | 主线程同步：`MainThreadSyncBridge` / `invokeSync` |
 | 前置 context | `window-stage` |
@@ -34,14 +34,14 @@ fn configure_ability(app: OpenHarmonyApp) {
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import { createWindowPlugin } from "@ohos-rs/plugin-window";
+import { createWindowPlugin } from "@ohos-rs/ability-plugin-window";
 
 export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [createWindowPlugin()];
 }
 ```
 
-应用还需在 `oh-package.json5` 中添加 `@ohos-rs/plugin-window`。ArkTS factory 的说明见
+应用还需在 `oh-package.json5` 中添加 `@ohos-rs/ability-plugin-window`。ArkTS factory 的说明见
 [对应 HAR README](../../plugins/window/README.md)。
 
 ## Rust 使用方式

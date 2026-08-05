@@ -1,4 +1,4 @@
-# @ohos-rs/plugin-webview
+# @ohos-rs/ability-plugin-webview
 
 这是 `openharmony-ability-plugin-webview` 的 ArkTS HAR。它创建 ArkWeb `Web` / `WebviewController`、
 把自己的 `FrameNode` 挂到通用 `BridgeNodeSlot`，并把所有 controller 操作和 ArkWeb callback 转换为
@@ -7,20 +7,26 @@
 业务不直接保存 controller，也不应把 WebView 接口重新写回 `DefaultXComponent`。Rust facade 使用
 controller ID 操作 WebView；布局始终由业务页面和 `BridgeNodeHost` 决定。
 
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-webview
+```
+
 ## 装配
 
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "file:<path-to-native_ability>",
-    "@ohos-rs/plugin-webview": "file:<path-to-plugin-webview>"
+    "@ohos-rs/ability": "1.0.0-beta.0",
+    "@ohos-rs/ability-plugin-webview": "1.0.0-beta.0"
   }
 }
 ```
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import { createWebviewPlugin } from "@ohos-rs/plugin-webview";
+import { createWebviewPlugin } from "@ohos-rs/ability-plugin-webview";
 
 export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [createWebviewPlugin()];

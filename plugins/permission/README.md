@@ -1,18 +1,24 @@
-# @ohos-rs/plugin-permission
+# @ohos-rs/ability-plugin-permission
 
 这是 `openharmony-ability-plugin-permission` 的 ArkTS 实现包。它在 `NativeAbility` 所属的
 Ability context 中调用 `abilityAccessCtrl.requestPermissionsFromUser`；业务 Rust 代码通过配对的
 Rust facade 发起请求，不直接调用本 HAR 的内部 action。
 
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-permission
+```
+
 ## 装配
 
-在应用 `oh-package.json5` 中添加该 HAR（本仓库 demo 使用本地路径，发布场景替换为实际版本）：
+在应用 `oh-package.json5` 中添加该 HAR：
 
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "file:<path-to-native_ability>",
-    "@ohos-rs/plugin-permission": "file:<path-to-plugin-permission>"
+    "@ohos-rs/ability": "1.0.0-beta.0",
+    "@ohos-rs/ability-plugin-permission": "1.0.0-beta.0"
   }
 }
 ```
@@ -21,7 +27,7 @@ Rust facade 发起请求，不直接调用本 HAR 的内部 action。
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import { createPermissionPlugin } from "@ohos-rs/plugin-permission";
+import { createPermissionPlugin } from "@ohos-rs/ability-plugin-permission";
 
 export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [createPermissionPlugin()];

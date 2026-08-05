@@ -2,18 +2,18 @@ import { EagerPlugin, LazyPlugin, NativeAbility } from "@ohos-rs/ability";
 import Want from "@ohos.app.ability.Want";
 import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
-import { AppControlPlugin } from "@ohos-rs/plugin-app-control";
-import { ClipboardPlugin } from "@ohos-rs/plugin-clipboard";
-import { FilesPlugin } from "@ohos-rs/plugin-files";
-import { MenuPlugin } from "@ohos-rs/plugin-menu";
-import { PermissionPlugin } from "@ohos-rs/plugin-permission";
-import { ResourcePlugin } from "@ohos-rs/plugin-resource";
-import { StatusBarPlugin } from "@ohos-rs/plugin-statusbar";
-import { UpdaterPlugin } from "@ohos-rs/plugin-updater";
-import { UrlPlugin } from "@ohos-rs/plugin-url";
-import { VersionPlugin } from "@ohos-rs/plugin-version";
-import { WebviewPlugin } from "@ohos-rs/plugin-webview";
-import { WindowPlugin } from "@ohos-rs/plugin-window";
+import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
+import { ClipboardPlugin } from "@ohos-rs/ability-plugin-clipboard";
+import { FilesPlugin } from "@ohos-rs/ability-plugin-files";
+import { MenuPlugin } from "@ohos-rs/ability-plugin-menu";
+import { PermissionPlugin } from "@ohos-rs/ability-plugin-permission";
+import { ResourcePlugin } from "@ohos-rs/ability-plugin-resource";
+import { StatusBarPlugin } from "@ohos-rs/ability-plugin-statusbar";
+import { UpdaterPlugin } from "@ohos-rs/ability-plugin-updater";
+import { UrlPlugin } from "@ohos-rs/ability-plugin-url";
+import { VersionPlugin } from "@ohos-rs/ability-plugin-version";
+import { WebviewPlugin } from "@ohos-rs/ability-plugin-webview";
+import { WindowPlugin } from "@ohos-rs/ability-plugin-window";
 import {
   DemoLoginPlugin,
   DemoIdentityProvider,

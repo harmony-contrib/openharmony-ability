@@ -1,22 +1,28 @@
-# @ohos-rs/plugin-window
+# @ohos-rs/ability-plugin-window
 
 这是窗口避让区能力的 ArkTS HAR，对应 Rust crate `openharmony-ability-plugin-window`。它在当前
 `WindowStage` 的主窗口上同步调用 `getWindowAvoidArea`，并将完整结果返回 Rust。
+
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-window
+```
 
 ## 装配
 
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "file:<path-to-native_ability>",
-    "@ohos-rs/plugin-window": "file:<path-to-plugin-window>"
+    "@ohos-rs/ability": "1.0.0-beta.0",
+    "@ohos-rs/ability-plugin-window": "1.0.0-beta.0"
   }
 }
 ```
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import { createWindowPlugin } from "@ohos-rs/plugin-window";
+import { createWindowPlugin } from "@ohos-rs/ability-plugin-window";
 
 export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [createWindowPlugin()];

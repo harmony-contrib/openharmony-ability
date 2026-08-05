@@ -1,3 +1,11 @@
+# 1.0.0-beta.0
+- Pluginized bridge: typed `BridgePlugin` contract (async / main-thread sync), `BridgeRuntime` / `BridgeMainThread` capabilities, named N-API values only (no JSON transport).
+- Support worker-originated synchronous plugin calls through TSFN (`BridgeRuntime::call_sync_from_worker`).
+- Add `EagerPlugin` / `LazyPlugin` factory model and attach the inbound event sink at ability create.
+- Pluginize platform capabilities: app-control, files, permission, resource, url, webview, window.
+- Fix WebView controller references released safely on dispose / last clone drop.
+
+--- 
 # 0.4.0-beta.7
 - Fix onBackPressIntercept ran failed.
 
