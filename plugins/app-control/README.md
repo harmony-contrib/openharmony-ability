@@ -1,23 +1,29 @@
-# @ohos-rs/plugin-app-control
+# @ohos-rs/ability-plugin-app-control
 
 这是应用进程控制的 ArkTS HAR，对应 Rust crate
 `openharmony-ability-plugin-app-control`。它实现主线程同步的 `terminate` action，并通过
 `@ohos.process` 的 `ProcessManager.exit(code)` 结束应用进程。
+
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-app-control
+```
 
 ## 装配
 
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "file:<path-to-native_ability>",
-    "@ohos-rs/plugin-app-control": "file:<path-to-plugin-app-control>"
+    "@ohos-rs/ability": "1.0.0-beta.0",
+    "@ohos-rs/ability-plugin-app-control": "1.0.0-beta.0"
   }
 }
 ```
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import { createAppControlPlugin } from "@ohos-rs/plugin-app-control";
+import { createAppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
 
 export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [createAppControlPlugin()];

@@ -1,7 +1,13 @@
-# @ohos-rs/plugin-resource
+# @ohos-rs/ability-plugin-resource
 
-`@ohos-rs/plugin-resource` 是 HarmonyOS `resourceManager` 的 ArkTS wrapper 插件，与 Rust crate
+`@ohos-rs/ability-plugin-resource` 是 HarmonyOS `resourceManager` 的 ArkTS wrapper 插件，与 Rust crate
 `openharmony-ability-plugin-resource` 成对使用。
+
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-resource
+```
 
 ## 职责
 
@@ -15,7 +21,7 @@
 
 ```ts
 import { EagerPlugin } from "@ohos-rs/ability";
-import { ResourcePlugin } from "@ohos-rs/plugin-resource";
+import { ResourcePlugin } from "@ohos-rs/ability-plugin-resource";
 
 // in NativeAbility subclass:
 public bridgePlugins = [
