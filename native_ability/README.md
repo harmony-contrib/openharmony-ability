@@ -1,95 +1,156 @@
-# OpenHarmony Ability
+# @ohos-rs/ability
 
-> This project is in progress, and the API is not stable.
+`@ohos-rs/ability` provides the ArkTS-side runtime for loading native modules, forwarding
+OpenHarmony lifecycle events, and hosting generic bridge plugins. Concrete capabilities live in
+separate HAR packages; the core package does not contain permission, window, exit, or WebView
+helpers.
 
-`openharmony-ability` is the native integration layer for OpenHarmony applications. It combines Rust-side runtime crates with ArkTS-side entry helpers such as `NativeAbility`, similar in spirit to [android-activity](https://github.com/rust-mobile/android-activity).
+## Install
 
-## Architecture
+```bash
+ohpm install @ohos-rs/ability
+```
 
-The architecture of OpenHarmony is similar to Node.js, where we need to manage the application's lifecycle via callbacks. Hence, there are a few key points to keep in mind.
+## API
 
-1. Don't block the main thread as it can lead to application freezing and crashing.
-2. openharmony-ability's run_loop doesn't retain the resource and ownership, so if you create a new resource, you should leak it to prevent NULL pointer.
+### `NativeAbility`
 
-![Architecture](/fixtures/openharmony-ability.png)
+`NativeAbility` wraps `UIAbility` and initializes one or more native modules.
 
-We provide packages and crates to help you build OpenHarmony applications with native code, including Rust integrations and shared ArkTS entry helpers for C/SDL-style modules.
+```ts
+import { NativeAbility } from "@ohos-rs/ability";
 
-### ArkTS
+export default class EntryAbility extends NativeAbility {
+  public moduleName: string = "demo_native";
 
-We need a entry-point to start the application, and we use ArkTS to manage the application's lifecycle.
+  onCreate() {
+    super.onCreate();
+  }
+}
+```
 
-- [@ohos-rs/ability](../package/README.md)  
-  All of ability need to extend `NativeAbility` and all lifecycle need to call `super.xx` to make sure the ability can work normally.
+Notes:
 
-### Rust Runtime
+1. Every lifecycle override should call the `super` implementation first.
+2. `moduleName` is the bare module name; the runtime resolves it to `lib<moduleName>.so`.
+3. `moduleName` can also be `string[]` when one ability needs multiple native modules.
 
-- [openharmony-ability](../crates/ability/README.md)  
-  Basic crate to manage the application's lifecycle.
+### `loadMode`
 
-- [openharmony-ability-derive](../crates/derive/README.md)  
-  Macro to generate the ability's implementation.
+Controls how the native module is loaded.
 
-## Usage
+- `async` — uses dynamic import and is the default
+- `sync` — uses `loadNativeModule`
 
-1. use `ohrs` to init project and add `openharmony-ability` dependencies.
+When using `sync`, add the corresponding library to `build-profile.json5` runtime packages.
 
-   ```bash
-   ohrs init hello
+### `DefaultXComponent`
 
-   cargo add openharmony-ability
-   cargo add openharmony-ability-derive
-   ```
+`DefaultXComponent` loads the native module and binds the default native rendering surface. It
+also exposes the generic `xcomponent-overlay` node slot for capability plugins.
 
-2. Add the follow code to `lib.rs`.
+```ts
+import { DefaultXComponent } from "@ohos-rs/ability";
 
-   ```rust
-   use ohos_hilog_binding::hilog_info;
-   use openharmony_ability::App;
-   use openharmony_ability_derive::ability;
+@Entry
+@Component
+struct Index {
+  build() {
+    Row() {
+      Column() {
+        DefaultXComponent({ moduleName: "demo_native" })
+      }
+      .width("100%")
+    }
+    .height("100%")
+  }
+}
+```
 
-   #[ability]
-   fn openharmony_app(app: App) {
-       app.run_loop(|types| {
-           hilog_info!(format!("ohos-rs macro: {:?}", types.as_str()).as_str());
-       });
-   }
-   ```
+### Plugins and node slots
 
-   > Note: `ohos_hilog_binding` is a optional dependency and you can add or remove it.
+Compose ArkTS plugin factories explicitly in `NativeAbility.bridgePlugins`. A capability that
+needs UI nodes mounts a `FrameNode` into a generic slot; the framework never embeds a WebView
+special case.
 
-3. Add `@ohos-rs/ability` to your `OpenHarmony/HarmonyNext` project.
+```ts
+import { BridgeNodeHost, DefaultXComponent, NativeAbility } from "@ohos-rs/ability";
+import { createWebviewPlugin } from "@ohos-rs/ability-plugin-webview";
 
-   ```bash
-   ohpm install @ohos-rs/ability
-   ```
+export default class EntryAbility extends NativeAbility {
+  public moduleName = "demo_native";
+  public bridgePlugins = [createWebviewPlugin()];
+}
 
-4. change the `EntryAbility.ets` file to the follow code:
+@Entry
+@Component
+struct Page {
+  @Builder BusinessOverlay() {
+    Text("business overlay")
+  }
 
-   ```ts
-   import { NativeAbility } from "@ohos-rs/ability";
-   import Want from "@ohos.app.ability.Want";
-   import { AbilityConstant } from "@kit.AbilityKit";
+  build() {
+    Stack() {
+      DefaultXComponent({ moduleName: "demo_native" })
+      BridgeNodeHost({
+        moduleName: "demo_native",
+        slotId: "webview-panel",
+        foreground: this.BusinessOverlay,
+      })
+    }
+  }
+}
+```
 
-   export default class EntryAbility extends NativeAbility {
-     public moduleName: string = "example";
+### Typed bridge values
 
-     async onCreate(
-       want: Want,
-       launchParam: AbilityConstant.LaunchParam
-     ): Promise<void> {
-       // Note: you should call super.onCreate to make sure the ability can work normally.
-       super.onCreate(want, launchParam);
-     }
-   }
-   ```
+ArkTS plugins receive a real N-API value with a stable type name, rather than a mandatory JSON
+envelope. Check the name at the capability boundary and return the declared response name.
 
-5. Set `moduleName` to the bare module name, for example `hello`. The framework will load `libhello.so` internally. You can also pass `string[]` when one ability needs to initialize multiple native modules.
+```ts
+import type { AsyncBridgePlugin, BridgeTypedValue } from "@ohos-rs/ability";
 
-6. Build your native project and copy the dynamic library to your (Open-)Harmony(Next) project. The example below uses Rust, but the ArkTS `NativeAbility` entry is also reusable for C/SDL-style native modules that expose the same contract.
+class ProfilePlugin implements AsyncBridgePlugin {
+  // id/version/execution omitted
+  async invokeAsync(_action: string, request: BridgeTypedValue): Promise<BridgeTypedValue> {
+    if (request.typeName !== "account.Profile") {
+      throw new Error("unexpected bridge type");
+    }
+    const profile = request.value as { userId: string; visits: number };
+    return {
+      typeName: "account.Profile",
+      value: { userId: profile.userId, visits: profile.visits + 1 } as ESObject,
+    };
+  }
+}
+```
 
-7. Now, you can enjoy it.
+`std.string` and `std.bytes` are built-in names; application-owned `#[napi(object)]` structs use
+an explicit Rust `impl_bridge_napi_type!(Type, "name")` contract. The bridge deliberately has no
+JSON transport type.
 
-## Example
+### Custom Page Example
 
-- Unified native example: `../rust_example/demo_native/src/lib.rs`
+```ts
+import { NativeAbility } from "@ohos-rs/ability";
+import Want from "@ohos.app.ability.Want";
+import { AbilityConstant } from "@kit.AbilityKit";
+import window from "@ohos.window";
+
+export default class EntryAbility extends NativeAbility {
+  public moduleName: string = "demo_native";
+  public defaultPage: boolean = false;
+
+  async onCreate(
+    want: Want,
+    launchParam: AbilityConstant.LaunchParam
+  ): Promise<void> {
+    super.onCreate(want, launchParam);
+  }
+
+  async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
+    super.onWindowStageCreate(windowStage);
+    await windowStage.loadContent("pages/Index");
+  }
+}
+```
