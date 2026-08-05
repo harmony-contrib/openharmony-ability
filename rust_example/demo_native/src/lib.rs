@@ -9,13 +9,10 @@ use std::{
 };
 
 use napi_derive_ohos::napi;
-use napi_ohos::{
-    bindgen_prelude::{Function, JsObjectValue, Object},
-    Env, Error, Result,
-};
+use napi_ohos::{Env, Error, Result};
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{
-    native_web::WebProxyBuilder, Event, InputEvent, OpenHarmonyApp, WebViewBuilder,
+    native_web::WebProxyBuilder, Event, InputEvent, OpenHarmonyApp, WebViewBuilder, Webview,
 };
 use openharmony_ability_derive::ability;
 
@@ -26,7 +23,7 @@ static BACK_PRESS_INTERCEPT_ENABLED: AtomicBool = AtomicBool::new(true);
 
 thread_local! {
     #[allow(clippy::missing_const_for_thread_local)]
-    static WEBVIEW_ID: RefCell<Option<Object<'static>>> = RefCell::new(None);
+    static WEBVIEW: RefCell<Option<Webview>> = RefCell::new(None);
 }
 
 const WEB_TAG: &str = "demo_webview";
@@ -70,7 +67,7 @@ pub fn toggle_back_press_intercept() -> bool {
 }
 
 #[napi]
-pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
+pub fn handle_change(_env: &Env) -> napi_ohos::Result<()> {
     let web_tag = String::from(WEB_TAG);
 
     let webview = WebViewBuilder::new()
@@ -105,11 +102,8 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
         hilog_info!("ohos-rs macro on_page_end");
     });
 
-    let ret: Object<'static> = unsafe {
-        std::mem::transmute::<Object<'_>, Object<'static>>(webview.inner().get_value(env)?)
-    };
-    WEBVIEW_ID.with(|w| {
-        w.replace(Some(ret));
+    WEBVIEW.with(|slot| {
+        slot.replace(Some(webview));
     });
 
     Ok(())
@@ -117,28 +111,20 @@ pub fn handle_change(env: &Env) -> napi_ohos::Result<()> {
 
 #[napi]
 pub fn set_background_color(_env: &Env, color: String) -> napi_ohos::Result<()> {
-    WEBVIEW_ID.with(|w| {
-        if let Some(webview) = w.borrow().as_ref() {
-            let set_background_color_js_function = webview
-                .get_named_property::<Function<'_, String, ()>>("setBackgroundColor")
-                .unwrap();
-            set_background_color_js_function.call(color).unwrap();
-        }
-    });
-    Ok(())
+    WEBVIEW.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map_or(Ok(()), |webview| webview.set_background_color(&color))
+    })
 }
 
 #[napi]
 pub fn set_visible(_env: &Env, visible: bool) -> napi_ohos::Result<()> {
-    WEBVIEW_ID.with(|w| {
-        if let Some(webview) = w.borrow().as_ref() {
-            let set_visible_js_function = webview
-                .get_named_property::<Function<'_, bool, ()>>("setVisible")
-                .unwrap();
-            set_visible_js_function.call(visible).unwrap();
-        }
-    });
-    Ok(())
+    WEBVIEW.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map_or(Ok(()), |webview| webview.set_visible(visible))
+    })
 }
 
 #[ability(webview, protocol = "wry,custom,other")]
