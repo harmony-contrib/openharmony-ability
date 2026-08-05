@@ -3,6 +3,7 @@
 mod login_bridge;
 mod main_thread_bridge;
 mod raw_bridge;
+mod tsfn_sync_bridge;
 
 use std::{
     borrow::Cow,
@@ -188,6 +189,29 @@ pub async fn demo_plugin_login() -> Result<String> {
 #[napi]
 pub fn demo_plugin_sync_context(env: &Env) -> Result<String> {
     main_thread_bridge::inspect_from_napi_main_thread(&current_app()?, env)
+}
+
+/// Worker -> TSFN -> ArkTS sync plugin -> Rust future. The same `demo.main-thread` plugin is
+/// invoked from a Rust worker; execution still happens on the ArkTS main thread and the named
+/// response is marshalled back over TSFN.
+#[napi]
+pub async fn demo_plugin_sync_from_worker() -> Result<String> {
+    let bridge = current_app()?.bridge()?;
+    let (sender, receiver) = oneshot::channel::<std::result::Result<String, String>>();
+
+    std::thread::Builder::new()
+        .name("bridge-sync-worker".to_owned())
+        .spawn(move || {
+            let result = futures_executor::block_on(tsfn_sync_bridge::inspect_from_worker(&bridge))
+                .map_err(|error| error.to_string());
+            let _ = sender.send(result);
+        })
+        .map_err(|error| Error::from_reason(format!("Failed to start sync worker: {error}")))?;
+
+    receiver
+        .await
+        .map_err(|_| Error::from_reason("Sync worker stopped before returning a result"))?
+        .map_err(Error::from_reason)
 }
 
 /// `String` travels as the named `std.string` N-API type, without JSON serialization.

@@ -559,6 +559,19 @@ struct BridgeRequest {
     timeout_ms: u32,
 }
 
+/// A worker-originated request to invoke a synchronous ArkTS plugin on the main thread.
+///
+/// Unlike [`BridgeRequest`] there is no timeout: the ArkTS `invokeSync` side is synchronous
+/// and must return promptly. The encoder is consumed on the ArkTS/N-API callback thread.
+struct SyncFromWorkerRequest {
+    plugin_id: String,
+    plugin_version: u32,
+    action: String,
+    request_type_name: String,
+    response_type_name: String,
+    value: Box<dyn BridgeValueEncoder>,
+}
+
 trait BridgeValueEncoder: Send {
     fn encode(self: Box<Self>, env: &Env) -> Result<sys::napi_value>;
 }
@@ -593,14 +606,24 @@ type AsyncBridgeFunction<'env> = Function<'env, AsyncBridgeArgs, Unknown<'env>>;
 type SyncBridgeFunction<'env> = Function<'env, SyncBridgeArgs, Unknown<'env>>;
 type BridgeInvokeTsfn =
     ThreadsafeFunction<BridgeRequest, Unknown<'static>, AsyncBridgeArgs, Status, false>;
+/// Worker → main-thread synchronous transport. The TSFN is built from the same `bridgeInvokeSync`
+/// function the main-thread path uses, so the ArkTS host is agnostic to the caller's thread.
+type SyncFromWorkerTsfn =
+    ThreadsafeFunction<SyncFromWorkerRequest, Unknown<'static>, SyncBridgeArgs, Status, false>;
 
 type BridgeWireResult = std::result::Result<Box<dyn Any + Send>, String>;
 type BridgeSender = oneshot::Sender<BridgeWireResult>;
 
 /// Cloneable client used by asynchronous plugins from the N-API main thread or a Rust worker.
+///
+/// Also carries the worker → main-thread synchronous transport
+/// ([`BridgeClient::call_sync_from_worker`]); the guard thread id lets the same client reject an
+/// accidental main-thread call that would otherwise deadlock against its own TSFN queue.
 #[derive(Clone)]
 pub struct BridgeClient {
     invoke: Arc<BridgeInvokeTsfn>,
+    invoke_sync_from_worker: Arc<SyncFromWorkerTsfn>,
+    main_thread_id: std::thread::ThreadId,
 }
 
 impl BridgeClient {
@@ -688,6 +711,112 @@ impl BridgeClient {
             .map_err(|_| {
                 Error::from_reason(format!(
                     "Bridge response type dispatch failed for '{}'",
+                    Response::TYPE_NAME
+                ))
+            })
+    }
+
+    /// Calls a synchronous, main-thread-only ArkTS plugin from a Rust worker.
+    ///
+    /// The request is encoded and the response decoded on the ArkTS/N-API main thread through a
+    /// `ThreadsafeFunction`; the worker awaits the decoded Rust-owned result. Execution still
+    /// happens on the main thread, exactly as with [`BridgeMainThread::call_sync`], so the same
+    /// `MainThreadSyncBridge` contract applies. This must be called from a worker thread — the
+    /// N-API main thread would deadlock awaiting its own TSFN queue, so such a call is rejected
+    /// immediately.
+    pub async fn call_sync_from_worker<P, Request, Response>(
+        &self,
+        action: impl AsRef<str>,
+        request: Request,
+    ) -> Result<Response>
+    where
+        P: BridgePlugin<Mode = MainThreadSyncBridge>,
+        Request: BridgeNapiType,
+        Response: BridgeNapiType,
+    {
+        if std::thread::current().id() == self.main_thread_id {
+            return Err(Error::from_reason(
+                "call_sync_from_worker must run on a Rust worker; the N-API main thread would \
+                 deadlock awaiting its own ThreadsafeFunction queue",
+            ));
+        }
+        validate_plugin_contract::<P>()?;
+        self.call_sync_from_worker_raw::<Request, Response>(
+            P::ID,
+            P::VERSION,
+            action.as_ref(),
+            request,
+        )
+        .await
+    }
+
+    async fn call_sync_from_worker_raw<Request, Response>(
+        &self,
+        plugin_id: &str,
+        plugin_version: u32,
+        action: &str,
+        request: Request,
+    ) -> Result<Response>
+    where
+        Request: BridgeNapiType,
+        Response: BridgeNapiType,
+    {
+        validate_wire_call(
+            plugin_id,
+            plugin_version,
+            action,
+            Request::TYPE_NAME,
+            Response::TYPE_NAME,
+        )?;
+
+        let request = SyncFromWorkerRequest {
+            plugin_id: plugin_id.to_owned(),
+            plugin_version,
+            action: action.to_owned(),
+            request_type_name: Request::TYPE_NAME.to_owned(),
+            response_type_name: Response::TYPE_NAME.to_owned(),
+            value: Box::new(request),
+        };
+        let response_decoder: Box<dyn BridgeResponseDecoder> =
+            Box::new(TypedBridgeResponse::<Response>(PhantomData));
+        let (sender, receiver) = oneshot::channel::<BridgeWireResult>();
+
+        let status = self.invoke_sync_from_worker.call_with_return_value(
+            request,
+            ThreadsafeFunctionCallMode::NonBlocking,
+            move |result, _env| {
+                match result {
+                    Ok(value) => {
+                        send_once(
+                            sender,
+                            response_decoder.decode(value).map_err(|e| e.to_string()),
+                        );
+                    }
+                    Err(error) => send_once(sender, Err(error.to_string())),
+                }
+                // The ArkTS `bridgeInvokeSync` call is synchronous; the response is decoded on
+                // this main-thread callback and returned over the oneshot, never as an uncaught
+                // N-API exception.
+                Ok(())
+            },
+        );
+
+        if status != Status::Ok {
+            return Err(Error::from_reason(format!(
+                "Sync-from-worker TSFN dispatch failed with status: {status:?}"
+            )));
+        }
+
+        let response = receiver
+            .await
+            .map_err(|_| Error::from_reason("Bridge sync-from-worker channel was cancelled"))?
+            .map_err(Error::from_reason)?;
+        response
+            .downcast::<Response>()
+            .map(|response| *response)
+            .map_err(|_| {
+                Error::from_reason(format!(
+                    "Bridge sync-from-worker response type dispatch failed for '{}'",
                     Response::TYPE_NAME
                 ))
             })
@@ -908,6 +1037,10 @@ impl BridgeRuntime {
             bindings.get_named_property("bridgeInvokeSync")?;
         let dispatch: Function<'_, (), ()> = bindings.get_named_property("bridgeDispatch")?;
 
+        // Keep a main-thread borrow for the sync path before consuming the function to build the
+        // worker transport.
+        let invoke_sync_ref = invoke_sync.create_ref()?;
+
         let invoke = invoke
             .build_threadsafe_function::<BridgeRequest>()
             .callee_handled::<false>()
@@ -927,6 +1060,26 @@ impl BridgeRuntime {
                 })
             })?;
 
+        // Worker → main-thread synchronous transport: the TSFN invokes the same `bridgeInvokeSync`
+        // function the main-thread path uses, so ArkTS is agnostic to the caller's thread.
+        let invoke_sync_from_worker = invoke_sync
+            .build_threadsafe_function::<SyncFromWorkerRequest>()
+            .callee_handled::<false>()
+            .build_callback(|context: ThreadsafeCallContext<SyncFromWorkerRequest>| {
+                let request = context.value;
+                let value = request.value.encode(&context.env)?;
+                Ok(FnArgs {
+                    data: (
+                        request.plugin_id,
+                        request.plugin_version,
+                        request.action,
+                        request.request_type_name,
+                        request.response_type_name,
+                        value,
+                    ),
+                })
+            })?;
+
         let dispatch = dispatch
             .build_threadsafe_function::<MainThreadTask>()
             .callee_handled::<false>()
@@ -939,6 +1092,9 @@ impl BridgeRuntime {
             runtime: Self {
                 client: BridgeClient {
                     invoke: Arc::new(invoke),
+                    invoke_sync_from_worker: Arc::new(invoke_sync_from_worker),
+                    // The bindings are built on the ArkTS/N-API main thread.
+                    main_thread_id: std::thread::current().id(),
                 },
                 main_thread: MainThreadScheduler {
                     dispatch: Arc::new(dispatch),
@@ -946,7 +1102,7 @@ impl BridgeRuntime {
             },
             main_thread_endpoint: MainThreadBridgeEndpoint {
                 owner_env: env.raw() as usize,
-                invoke_sync: invoke_sync.create_ref()?,
+                invoke_sync: invoke_sync_ref,
             },
         })
     }
@@ -972,6 +1128,23 @@ impl BridgeRuntime {
     {
         self.client
             .call_async::<P, Request, Response>(action, request, options)
+            .await
+    }
+
+    /// Invokes a synchronous ArkTS plugin from a Rust worker through a `ThreadsafeFunction`.
+    /// See [`BridgeClient::call_sync_from_worker`] for the thread-safety contract.
+    pub async fn call_sync_from_worker<P, Request, Response>(
+        &self,
+        action: impl AsRef<str>,
+        request: Request,
+    ) -> Result<Response>
+    where
+        P: BridgePlugin<Mode = MainThreadSyncBridge>,
+        Request: BridgeNapiType,
+        Response: BridgeNapiType,
+    {
+        self.client
+            .call_sync_from_worker::<P, Request, Response>(action, request)
             .await
     }
 }
@@ -1036,7 +1209,7 @@ mod tests {
     use super::{
         validate_identifier, validate_wire_call, AsyncBridge, BridgeCallOptions,
         BridgeContextRequirement, BridgeNapiType, BridgePlugin, BridgePluginRegistry,
-        PluginLifecycleEvent, MAX_TIMEOUT_MS,
+        PluginLifecycleEvent, SyncFromWorkerRequest, MAX_TIMEOUT_MS,
     };
 
     struct TestPlugin;
@@ -1082,6 +1255,12 @@ mod tests {
         assert_eq!(<String as BridgeNapiType>::TYPE_NAME, "std.string");
         assert_eq!(<Vec<u8> as BridgeNapiType>::TYPE_NAME, "std.bytes");
         assert!(validate_wire_call("test.plugin", 1, "echo", "std.string", "demo.Profile").is_ok());
+    }
+
+    #[test]
+    fn sync_from_worker_payload_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<SyncFromWorkerRequest>();
     }
 
     #[test]

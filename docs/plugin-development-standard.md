@@ -71,8 +71,10 @@ ID、action 和 type name 只能使用 `A-Za-z0-9._-`；action 使用 kebab-case
 
 其中 `value` 是当前 `napi_env` 中的真实 N-API value；`requestType` 与 `responseType` 是稳定 ABI 名。
 异步出站由 TSFN 将 ArkTS Promise 转成 Rust future：请求只在 ArkTS callback 中编码，响应也在该处
-解码为 Rust 所有权数据后才回到 worker。同步出站和入站事件都只能在当前活跃的 N-API callback 内
-完成。
+解码为 Rust 所有权数据后才回到 worker。同步出站 `bridgeInvokeSync` 默认只在当前活跃 N-API callback
+内使用（`with_main_thread_bridge(...).call_sync`）；Rust worker 也可经 `call_sync_from_worker`
+TSFN 通道调用同一函数，执行仍发生在 ArkTS 主线程（见 4.1）。入站事件只能在当前活跃的 N-API
+callback 内完成。
 
 C++ N-API 实现也必须使用上述同一边界，且只能在当前 `napi_env` 内创建、读取或返回
 `napi_value`。禁止把 `napi_env`、`napi_value`、`napi_ref`、ArkTS object 或 function 放入 worker、
@@ -236,7 +238,7 @@ WebView 的 controller ID 与命名 slot 都是既有语义，迁移为插件后
 | 模式 | Rust 标记与入口 | ArkTS 实现 | 适用场景 | 禁止事项 |
 | --- | --- | --- | --- | --- |
 | 异步 | `type Mode = AsyncBridge`；`BridgeClient::call_async` / `BridgeRuntime::call_async` | `AsyncBridgePlugin.invokeAsync` | 登录、权限、网络、WebView 控制器、等待生命周期或节点 | 保存 `Env`、`napi_value`、ArkTS object、`UIContext` 或 `FrameNode` 到 worker |
-| 主线程同步 | `type Mode = MainThreadSyncBridge`；仅在导出的 N-API callback 持有 `Env` 时经 `with_main_thread_bridge(...).call_sync` | `MainThreadSyncBridgePlugin.invokeSync` | 需要立即返回的平台决定，例如退出、同步窗口查询、同步拦截决策 | `await`、返回 Promise、阻塞等待、投递后再取结果、从 Rust worker 调用 |
+| 主线程同步 | `type Mode = MainThreadSyncBridge`；主线程在导出的 N-API callback 持有 `Env` 时经 `with_main_thread_bridge(...).call_sync`；Rust worker 经 `BridgeRuntime::call_sync_from_worker`（TSFN，执行仍在主线程） | `MainThreadSyncBridgePlugin.invokeSync` | 需要立即返回的平台决定，例如退出、同步窗口查询、同步拦截决策 | `await`、返回 Promise、阻塞等待、投递后再取结果；worker 不能直接用 `call_sync`（无 `Env`），必须走 `call_sync_from_worker` TSFN 通道，且该通道不能从 N-API 主线程调用（会死锁） |
 
 异步 facade 可被 Rust worker 调用，但它传入和拿回的必须都是 `Send + 'static` 的 Rust 所有权数据：
 
@@ -266,6 +268,33 @@ app.with_main_thread_bridge(env, |bridge| {
     )
 })?;
 ```
+
+#### 4.1 子线程同步调用（TSFN）
+
+同一 `MainThreadSyncBridge` 插件还可在 **Rust worker** 中调用，执行仍发生在 ArkTS 主线程。子线程
+没有 `Env`，无法直接触碰 `bridgeInvokeSync` 的函数引用，唯一正确路径是 TSFN：worker 把具名
+request 投递到主线程，主线程调用同步插件并解码具名 response，再经 oneshot 把 Rust 所有权数据
+送回 worker：
+
+```rust
+// 必须从 Rust worker 线程调用；N-API 主线程会死锁，框架会立即报错拒绝。
+let response = bridge
+    .call_sync_from_worker::<AppControlBridgePlugin, TerminateRequest, TerminateResponse>(
+        "terminate",
+        TerminateRequest { code: 0 },
+    )
+    .await?;
+```
+
+约束：
+
+- 只能从 worker 调用；从 N-API 主线程调用 `call_sync_from_worker` 会立即返回错误（await 自己的
+  TSFN 队列会死锁）。
+- 同步插件仍在 ArkTS 主线程同步执行，必须立即返回，不能反过来等待调用方 worker。
+- request/response 必须是 `Send + 'static` 的 Rust 所有权数据；编码与解码都在主线程 callback 内
+  完成，worker 只收到解码后的具名 response，不接触任何 N-API/ArkTS 对象。
+- 该通道复用 `bridgeInvokeSync` 线格式，ArkTS 侧无感知；与主线程 `call_sync` 使用同一份
+  ID/version/action/typeName 契约。
 
 ArkTS 平台回调进入 Rust 的 `on_main_thread_event` 是**入站 scoped callback**，不是第三种
 执行模式。它也必须在当前 N-API callback 内完成；如果需要做耗时工作，只能先复制已解码的 Rust
@@ -509,7 +538,8 @@ lifecycle 通知与 dispose。
 | 场景 | 必须验证的结果 |
 | --- | --- |
 | 异步 action | Rust worker 可以发起调用；ArkTS Promise 完成后 Rust 收到具名 response，不存在 JSON encode/decode |
-| 主线程同步 action（如有） | 在 `#[napi]` callback 的 `Env` 内成功；从 worker 调用被明确拒绝；没有 Promise 或阻塞等待 |
+| 主线程同步 action（如有） | 在 `#[napi]` callback 的 `Env` 内成功；`call_sync` 不能从 worker 直接调用（无 `Env`）；没有 Promise 或阻塞等待 |
+| 子线程同步 action（TSFN，如有） | 从 Rust worker 调用 `call_sync_from_worker` 成功拿到具名 response；从 N-API 主线程调用被立即拒绝（防死锁） |
 | context 延迟 | async 调用会等待真正的 context/slot attach；sync 调用在未就绪时立即失败 |
 | 生命周期销毁 | timeout、Ability/session destroy 会取消调用；UI/WindowStage detach 会触发生命周期 cleanup，临时节点、delegate、waiter 和映射被释放或失效 |
 | 原生节点（如有） | 默认 `xcomponent-overlay` 与业务命名 `BridgeNodeHost` 都能挂载，业务 underlay/foreground 行为不变 |
@@ -525,7 +555,8 @@ lifecycle 通知与 dispose。
 - [ ] Rust `BridgePlugin` 与 ArkTS factory 的 ID、VERSION、Mode、requires 完全一致。
 - [ ] 每个 request/response 都是具名 N-API 类型；ArkTS 输入校验 `typeName` 和字段，输出填写
   正确的 `typeName`；不存在 JSON 桥接代码。
-- [ ] 同步 facade 只接受当前回调的 `Env`；异步 facade 和 callback 不保存任何 N-API/ArkTS 对象。
+- [ ] 同步 facade 支持主线程 `Env` 调用与（如提供）worker `call_sync_from_worker` 两条路径，两条
+  路径都不保存任何 N-API/ArkTS 对象；异步 facade 和 callback 不保存任何 N-API/ArkTS 对象。
 - [ ] 需要生命周期或 context 的插件声明 requirements，覆盖 delayed activation、destroy、dispose
   和调用取消；没有 timer 轮询。
 - [ ] 需要 UI 的插件通过 `BridgeNodeSlot` 接入，覆盖默认 XComponent slot、业务命名 slot、detach

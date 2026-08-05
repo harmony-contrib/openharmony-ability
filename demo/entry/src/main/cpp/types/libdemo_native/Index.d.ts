@@ -202,6 +202,13 @@ export declare function demoPluginString(): Promise<string>;
 /** Synchronous plugins remain scoped to the N-API main-thread `Env`. */
 export declare function demoPluginSyncContext(): string;
 
+/**
+ * Worker -> TSFN -> ArkTS sync plugin. The same `demo.main-thread` plugin is invoked from a
+ * Rust worker; execution still happens on the ArkTS main thread and the named response is
+ * marshalled back over TSFN.
+ */
+export declare function demoPluginSyncFromWorker(): Promise<string>;
+
 /** PR #65: opens an external URL through `ohos.url` / `context.openLink`. */
 export declare function demoOpenUrl(): Promise<void>;
 
