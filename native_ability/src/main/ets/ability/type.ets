@@ -1,5 +1,6 @@
 import { NodeContent } from "@kit.ArkUI";
 import common from "@ohos.app.ability.common";
+import { FrameNode } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import resourceManager from "@ohos.resourceManager";
 import window from "@ohos.window";
@@ -142,9 +143,30 @@ export interface BridgeLifecycleEvent {
 }
 
 /**
+ * Window-scoped node surface. Each `DefaultXComponent` instance (one per window) owns its own
+ * root FrameNode; the default window key is `"main"`. Plugins mount into a window scope so
+ * sub-window plugin trees never overwrite the main window's.
+ */
+export interface BridgeWindowScope {
+  /** The window key this scope is bound to (`"main"` for the default window). */
+  windowKey: string;
+  getUIContext: () => UIContext;
+  getRootFrameNode: () => FrameNode;
+  appendChild: (key: string, node: FrameNode, cleanup?: () => void) => void;
+  removeChild: (key: string) => void;
+  getFrameNode: (handle: number) => FrameNode;
+}
+
+/**
  * Context is intentionally ArkTS-only. It is scoped to one native module and one Ability
  * session; Rust gets lifecycle notifications and direct named N-API events, not retained ArkTS
  * object references.
+ *
+ * Every plugin shares one root FrameNode per window (owned by `DefaultXComponent`). There are no
+ * named slots, registries or readiness waiters: the main window root exists before
+ * `ui-context-ready`, so plugins can mount nodes during `onInstall`. `appendChild`/`removeChild`
+ * use a caller-chosen key as the plugin's own cleanup credential; handle-based composition
+ * (`getFrameNode`) is the Rust-facing surface of the built-in `ohos.node` plugin.
  */
 export interface BridgePluginContext {
   pluginId: string;
@@ -154,6 +176,30 @@ export interface BridgePluginContext {
   isActive: () => boolean;
   getWindowStage: () => window.WindowStage;
   getUIContext: () => UIContext;
+  /**
+   * Returns the session root FrameNode that `DefaultXComponent` attaches before
+   * `ui-context-ready`. Plugins mount their own nodes here.
+   */
+  getRootFrameNode: () => FrameNode;
+  /**
+   * Appends a FrameNode to the session root. `key` must be unique per plugin (prefix it with the
+   * plugin id) and is the cleanup credential for `removeChild`. An optional `cleanup` runs when
+   * the node is removed or the bridge session disposes.
+   */
+  appendChild: (key: string, node: FrameNode, cleanup?: () => void) => void;
+  /** Removes the node previously appended under `key` and runs its cleanup. */
+  removeChild: (key: string) => void;
+  /**
+   * Resolves an opaque node handle issued by the built-in `ohos.node` plugin (for example a
+   * container created from Rust) into its ArkTS FrameNode.
+   */
+  getFrameNode: (handle: number) => FrameNode;
+  /**
+   * Returns a window-scoped node surface. The default context methods operate on the `"main"`
+   * window; sub-window `DefaultXComponent` instances register under their own `windowKey` and
+   * plugins use this method to mount into them.
+   */
+  windowScope: (windowKey: string) => BridgeWindowScope;
   /**
    * Makes an immediate, named N-API request to the matching Rust plugin. It is valid only while
    * the current ArkTS/N-API callback is active; do not retain the input or result.

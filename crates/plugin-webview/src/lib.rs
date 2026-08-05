@@ -1,8 +1,8 @@
 //! WebView plugin facade.
 //!
 //! The plugin is intentionally named-N-API-value/controller-ID based. Rust never keeps an ArkTS
-//! `WebviewController` or `ObjectRef`; the ArkTS HAR mounts its own `FrameNode` into a generic
-//! `BridgeNodeSlot`.
+//! `WebviewController` or `ObjectRef`; the ArkTS HAR mounts its own `FrameNode` into the session
+//! root, or under a caller-provided `ohos.node` container handle.
 
 use std::collections::BTreeMap;
 
@@ -24,8 +24,6 @@ pub use protocol::{
     bind_custom_protocol, bind_custom_protocol_async, WebviewProtocol, WebviewProtocolOptions,
     WebviewProtocolRequest, WebviewProtocolResponder, WebviewProtocolResponse,
 };
-
-pub const DEFAULT_WEBVIEW_SLOT: &str = "xcomponent-overlay";
 
 pub struct WebviewBridgePlugin;
 
@@ -126,6 +124,13 @@ fn webview_id_from_controller_event(event: WebviewControllerEvent) -> Result<Str
 pub struct WebviewStyle {
     pub x: Option<Either<f64, String>>,
     pub y: Option<Either<f64, String>>,
+    /// Optional width override. Defaults to the full container size; numbers are vp, strings are
+    /// ArkUI length expressions (for example "30%").
+    pub width: Option<Either<f64, String>>,
+    /// Optional height override. Defaults to the full container size; numbers are vp, strings are
+    /// ArkUI length expressions. Combined with `y` (for example y = "70%", height = "30%") a
+    /// WebView can be rendered in a corner or along one edge instead of full-screen.
+    pub height: Option<Either<f64, String>>,
     pub visible: Option<bool>,
     pub background_color: Option<String>,
 }
@@ -176,7 +181,14 @@ pub struct WebviewInitializationScript {
 #[derive(Clone, Debug)]
 pub struct WebviewCreateRequest {
     pub id: String,
-    pub slot_id: String,
+    /// Optional window surface key the WebView mounts into. Defaults to `"main"` (the default
+    /// window's `DefaultXComponent`); sub-window instances register under their own `windowKey`.
+    pub window_key: Option<String>,
+    /// Optional opaque container handle issued by the built-in `ohos.node` plugin. When provided,
+    /// the ArkTS host appends the WebView FrameNode under that container instead of the window
+    /// root, so an RS-layer node tree can adopt WebViews as children. Absent = full-bleed window
+    /// root mount.
+    pub parent_handle: Option<u32>,
     pub url: Option<String>,
     pub html: Option<String>,
     pub style: WebviewStyle,
@@ -199,7 +211,8 @@ impl WebviewCreateRequest {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            slot_id: DEFAULT_WEBVIEW_SLOT.to_owned(),
+            window_key: None,
+            parent_handle: None,
             url: None,
             html: None,
             style: WebviewStyle::default(),
@@ -214,8 +227,16 @@ impl WebviewCreateRequest {
         }
     }
 
-    pub fn slot_id(mut self, slot_id: impl Into<String>) -> Self {
-        self.slot_id = slot_id.into();
+    /// Mounts the WebView FrameNode under the given `ohos.node` container handle instead of the
+    /// window root, so an RS-layer node tree can adopt WebViews as children.
+    pub fn parent_node(mut self, handle: u32) -> Self {
+        self.parent_handle = Some(handle);
+        self
+    }
+
+    /// Mounts into the window surface registered under `window_key` instead of the `"main"` one.
+    pub fn window_key(mut self, window_key: impl Into<String>) -> Self {
+        self.window_key = Some(window_key.into());
         self
     }
 
@@ -252,8 +273,10 @@ impl WebviewCreateRequest {
         if self.id.trim().is_empty() {
             return Err(Error::from_reason("WebView id must not be empty"));
         }
-        if self.slot_id.trim().is_empty() {
-            return Err(Error::from_reason("WebView slotId must not be empty"));
+        if let Some(window_key) = &self.window_key {
+            if window_key.is_empty() {
+                return Err(Error::from_reason("WebView windowKey must not be empty"));
+            }
         }
         if self.url.is_some() == self.html.is_some() {
             return Err(Error::from_reason(
@@ -377,9 +400,8 @@ impl WebviewClient {
         // named create request so ArkTS can bind ArkWeb hooks without retaining Rust closures.
         request.event_options = callbacks::options_for(&request.id)?;
         let request_id = request.id.clone();
-        let request_slot_id = request.slot_id.clone();
         let response: WebviewCreateResponse = self.call("create", request).await?;
-        if response.id != request_id || response.slot_id != request_slot_id {
+        if response.id != request_id {
             return Err(Error::from_reason(
                 "WebView plugin returned a mismatched controller ID",
             ));
@@ -387,16 +409,14 @@ impl WebviewClient {
         Ok(WebviewHandle {
             client: self.clone(),
             id: response.id,
-            slot_id: response.slot_id,
         })
     }
 
     /// Reopens a controller-ID facade for a WebView already created in this module/session.
-    pub fn handle(&self, id: impl Into<String>, slot_id: impl Into<String>) -> WebviewHandle {
+    pub fn handle(&self, id: impl Into<String>) -> WebviewHandle {
         WebviewHandle {
             client: self.clone(),
             id: id.into(),
-            slot_id: slot_id.into(),
         }
     }
 
@@ -464,7 +484,6 @@ impl WebviewExt for OpenHarmonyApp {
 pub struct WebviewHandle {
     client: WebviewClient,
     id: String,
-    slot_id: String,
 }
 
 impl WebviewHandle {
@@ -472,14 +491,9 @@ impl WebviewHandle {
         &self.id
     }
 
-    pub fn slot_id(&self) -> &str {
-        &self.slot_id
-    }
-
     fn controller_request(&self) -> WebviewControllerRequest {
         WebviewControllerRequest {
             id: self.id.clone(),
-            slot_id: self.slot_id.clone(),
             visible: None,
             color: None,
             url: None,
@@ -709,7 +723,6 @@ impl WebviewHandle {
                 "evaluate-script",
                 WebviewScriptRequest {
                     id: self.id.clone(),
-                    slot_id: self.slot_id.clone(),
                     script: script.into(),
                 },
             )
@@ -735,7 +748,6 @@ impl WebviewHandle {
 #[derive(Clone, Debug)]
 pub struct WebviewCreateResponse {
     pub id: String,
-    pub slot_id: String,
 }
 
 impl_bridge_napi_type!(WebviewCreateResponse, "ohos.webview.CreateResponse");
@@ -744,7 +756,6 @@ impl_bridge_napi_type!(WebviewCreateResponse, "ohos.webview.CreateResponse");
 #[derive(Clone, Debug)]
 pub struct WebviewScriptRequest {
     pub id: String,
-    pub slot_id: String,
     pub script: String,
 }
 
@@ -762,7 +773,6 @@ impl_bridge_napi_type!(WebviewScriptResponse, "ohos.webview.ScriptResponse");
 #[derive(Clone, Debug)]
 pub struct WebviewControllerRequest {
     pub id: String,
-    pub slot_id: String,
     pub visible: Option<bool>,
     pub color: Option<String>,
     pub url: Option<String>,
@@ -809,14 +819,23 @@ mod tests {
     #[test]
     fn create_request_retains_optional_value_semantics() {
         let request = WebviewCreateRequest::new("webview")
+            .parent_node(7)
+            .window_key("float")
             .transparent(true)
             .url("https://example.test");
         assert_eq!(request.id, "webview");
-        assert_eq!(request.slot_id, DEFAULT_WEBVIEW_SLOT);
+        assert_eq!(request.parent_handle, Some(7));
+        assert_eq!(request.window_key.as_deref(), Some("float"));
         assert_eq!(request.url.as_deref(), Some("https://example.test"));
         assert!(request.html.is_none());
         assert!(request.headers.is_none());
         assert_eq!(request.transparent, Some(true));
+    }
+
+    #[test]
+    fn create_request_defaults_to_session_root_mount() {
+        let request = WebviewCreateRequest::new("webview").html("<p>hi</p>");
+        assert!(request.parent_handle.is_none());
     }
 
     #[test]

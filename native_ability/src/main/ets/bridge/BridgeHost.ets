@@ -1,4 +1,5 @@
 import common from "@ohos.app.ability.common";
+import { FrameNode } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import window from "@ohos.window";
 import {
@@ -12,6 +13,7 @@ import {
   BridgePlugin,
   BridgePluginContext,
   BridgePluginFactory,
+  BridgeWindowScope,
 } from "../ability/type";
 
 const MAX_TIMEOUT_MS = 60_000;
@@ -31,6 +33,153 @@ interface HostedPlugin {
   plugin: BridgePlugin;
   installed: boolean;
   installing?: Promise<void>;
+}
+
+interface MountedChild {
+  node: FrameNode;
+  cleanup?: () => void;
+}
+
+/**
+ * Per-window node surface state. Every `DefaultXComponent` instance (one per window) attaches its
+ * own root FrameNode, so sub-window plugin trees never overwrite the main window's.
+ */
+interface HostWindowState {
+  uiContext?: UIContext;
+  rootFrameNode?: FrameNode;
+  mountedChildren: Map<string, MountedChild>;
+  nodeHandles: Map<number, FrameNode>;
+  nodeParents: Map<number, FrameNode>;
+  nextNodeHandle: number;
+}
+
+const NODE_SURFACE_PLUGIN_ID = "ohos.node";
+export const MAIN_WINDOW_KEY = "main";
+
+/**
+ * Built-in session-surface plugin. It is installed by every BridgeHost before business plugins
+ * and exposes opaque FrameNode handles to Rust (`create-container` / `append-child` /
+ * `mount-into-root` / `dispose`), so an RS-layer node tree can be composed and mounted without
+ * FrameNode values crossing the N-API boundary.
+ */
+class NodeSurfacePlugin implements AsyncBridgePlugin {
+  readonly id = NODE_SURFACE_PLUGIN_ID;
+  readonly version = 1;
+  readonly requires: BridgeContextRequirement[] = ["ui-context"];
+  readonly execution: "async" = "async";
+  private readonly host: BridgeHost;
+
+  constructor(host: BridgeHost) {
+    this.host = host;
+  }
+
+  async invokeAsync(
+    action: string,
+    request: BridgeTypedValue,
+    _context: BridgeCallContext,
+  ): Promise<BridgeTypedValue> {
+    if (action === "create-container") {
+      const payload = this.expectRequest<NodeCreateContainerPayload>(
+        request,
+        "ohos.node.CreateContainerRequest",
+        action,
+      );
+      return {
+        typeName: "ohos.node.HandleResponse",
+        value: new NodeHandleResponse(
+          this.host.createContainerNode(payload.windowKey ?? MAIN_WINDOW_KEY),
+        ),
+      };
+    }
+    if (action === "append-child") {
+      const payload = this.expectRequest<NodeAppendChildPayload>(
+        request,
+        "ohos.node.AppendChildRequest",
+        action,
+      );
+      this.host.appendChildByHandle(
+        payload.windowKey ?? MAIN_WINDOW_KEY,
+        payload.parentHandle,
+        payload.childHandle,
+      );
+      return {
+        typeName: "ohos.node.Acknowledgement",
+        value: new NodeAcknowledgement(true),
+      };
+    }
+    if (action === "mount-into-root") {
+      const payload = this.expectRequest<NodeMountIntoRootPayload>(
+        request,
+        "ohos.node.MountIntoRootRequest",
+        action,
+      );
+      this.host.mountIntoRoot(payload.windowKey ?? MAIN_WINDOW_KEY, payload.handle);
+      return {
+        typeName: "ohos.node.Acknowledgement",
+        value: new NodeAcknowledgement(true),
+      };
+    }
+    if (action === "dispose") {
+      const payload = this.expectRequest<NodeDisposePayload>(
+        request,
+        "ohos.node.DisposeRequest",
+        action,
+      );
+      this.host.disposeNode(payload.windowKey ?? MAIN_WINDOW_KEY, payload.handle);
+      return {
+        typeName: "ohos.node.Acknowledgement",
+        value: new NodeAcknowledgement(true),
+      };
+    }
+    throw new Error(`Unsupported ohos.node action '${action}'`);
+  }
+
+  private expectRequest<T>(request: BridgeTypedValue, typeName: string, action: string): T {
+    if (
+      request.typeName !== typeName ||
+      request.value === null ||
+      typeof request.value !== "object"
+    ) {
+      throw new Error(`ohos.node.${action} requires bridge type ${typeName}`);
+    }
+    return request.value as T;
+  }
+}
+
+interface NodeCreateContainerPayload {
+  windowKey?: string | null;
+}
+
+interface NodeAppendChildPayload {
+  parentHandle: number;
+  childHandle: number;
+  windowKey?: string | null;
+}
+
+interface NodeMountIntoRootPayload {
+  handle: number;
+  windowKey?: string | null;
+}
+
+interface NodeDisposePayload {
+  handle: number;
+  windowKey?: string | null;
+}
+
+class NodeHandleResponse {
+  readonly handle: number;
+
+  constructor(handle: number) {
+    this.handle = handle;
+  }
+}
+
+class NodeAcknowledgement {
+  readonly accepted: boolean;
+
+  constructor(accepted: boolean) {
+    this.accepted = accepted;
+  }
 }
 
 interface BridgeCallState {
@@ -68,11 +217,15 @@ class BridgeHost {
   private readonly activeCalls: BridgeCallState[] = [];
   private mainThreadEventSink?: BridgeMainThreadEventSink;
   private windowStage?: window.WindowStage;
-  private uiContext?: UIContext;
   private disposed: boolean = false;
   private readonly sessionId: string;
   private readonly moduleName: string;
   private readonly abilityContext: common.UIAbilityContext;
+  // Per-window node surfaces: every `DefaultXComponent` instance (one per window) registers its
+  // own root FrameNode under its `windowKey` (`"main"` by default), so sub-window plugin trees
+  // never overwrite the main window's. Each window owns its keyed mounts and the opaque handle
+  // table of the built-in ohos.node plugin.
+  private readonly windows: Map<string, HostWindowState> = new Map();
 
   constructor(sessionId: string, moduleName: string, abilityContext: common.UIAbilityContext) {
     this.sessionId = sessionId;
@@ -81,6 +234,7 @@ class BridgeHost {
   }
 
   async install(factories: BridgePluginFactory[]): Promise<void> {
+    this.installNodeSurfacePlugin();
     for (const factory of factories) {
       const modules = factory.modules;
       if (modules && modules.length > 0 && modules.indexOf(this.moduleName) < 0) {
@@ -101,6 +255,234 @@ class BridgeHost {
     await this.activateReadyPlugins();
   }
 
+  /**
+   * Installs the built-in `ohos.node` surface plugin ahead of business plugins. It closes over
+   * this host so its actions operate on the session root and handle table directly.
+   */
+  private installNodeSurfacePlugin(): void {
+    const plugin = new NodeSurfacePlugin(this);
+    this.plugins.set(plugin.id, {
+      factory: { create: (): BridgePlugin => plugin },
+      plugin,
+      installed: false,
+    });
+  }
+
+  /**
+   * Registers one window's node surface. `DefaultXComponent` calls this from `aboutToAppear`
+   * after creating its root. Attaching the `"main"` window emits `ui-context-ready` (and wakes
+   * context waiters); sub-window attachments only register state.
+   */
+  attachWindow(windowKey: string, uiContext: UIContext, root: FrameNode): void {
+    this.assertActive();
+    this.assertWindowKey(windowKey);
+    if (this.windows.has(windowKey)) {
+      throw new Error(
+        `Bridge window '${windowKey}' is already attached for '${this.moduleName}'; each DefaultXComponent needs a unique windowKey`,
+      );
+    }
+    this.windows.set(windowKey, {
+      uiContext,
+      rootFrameNode: root,
+      mountedChildren: new Map(),
+      nodeHandles: new Map(),
+      nodeParents: new Map(),
+      nextNodeHandle: 1,
+    });
+    if (windowKey === MAIN_WINDOW_KEY) {
+      this.notifyContextChanged();
+      void this.emitLifecycle({
+        kind: "ui-context-ready",
+        payload: new BridgeEmptyLifecyclePayload(),
+      });
+    }
+  }
+
+  /**
+   * Unregisters one window's node surface, unmounting its keyed children and disposing its
+   * handle-owned nodes. The root FrameNode itself is disposed by its owner
+   * (`DefaultXComponent`). Detaching the `"main"` window emits `ui-context-destroy`.
+   */
+  async detachWindow(windowKey: string): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
+    const state = this.windows.get(windowKey);
+    if (state === undefined) {
+      return;
+    }
+    if (windowKey === MAIN_WINDOW_KEY) {
+      await this.emitLifecycle({
+        kind: "ui-context-destroy",
+        payload: new BridgeEmptyLifecyclePayload(),
+      });
+    }
+    this.disposeWindowState(state);
+    this.windows.delete(windowKey);
+  }
+
+  /** Creates an empty container FrameNode in `windowKey` and returns its opaque handle (ohos.node). */
+  createContainerNode(windowKey: string): number {
+    const state = this.requireWindow(windowKey);
+    const node = new FrameNode(this.requireUiContext(state));
+    const handle = state.nextNodeHandle++;
+    state.nodeHandles.set(handle, node);
+    return handle;
+  }
+
+  /** Appends the node of `childHandle` under the node of `parentHandle` (ohos.node). */
+  appendChildByHandle(windowKey: string, parentHandle: number, childHandle: number): void {
+    const state = this.requireWindow(windowKey);
+    const parent = this.lookupNodeHandle(state, parentHandle, "append-child parent");
+    const child = this.lookupNodeHandle(state, childHandle, "append-child child");
+    parent.appendChild(child);
+    state.nodeParents.set(childHandle, parent);
+  }
+
+  /** Appends a handle-owned node to the `windowKey` root (ohos.node). */
+  mountIntoRoot(windowKey: string, handle: number): void {
+    const state = this.requireWindow(windowKey);
+    const node = this.lookupNodeHandle(state, handle, "mount-into-root");
+    const root = this.requireRootFrameNode(state);
+    root.appendChild(node);
+    state.nodeParents.set(handle, root);
+  }
+
+  /** Disposes a handle-owned node: detaches it from its recorded parent and frees the handle. */
+  disposeNode(windowKey: string, handle: number): void {
+    const state = this.windows.get(windowKey);
+    if (state === undefined) {
+      return;
+    }
+    const node = state.nodeHandles.get(handle);
+    if (!node) {
+      return;
+    }
+    state.nodeHandles.delete(handle);
+    const parent = state.nodeParents.get(handle);
+    state.nodeParents.delete(handle);
+    if (parent !== undefined) {
+      try {
+        parent.removeChild(node);
+      } catch {}
+    }
+    try {
+      node.dispose();
+    } catch {}
+  }
+
+  private lookupNodeHandle(state: HostWindowState, handle: number, role: string): FrameNode {
+    const node = state.nodeHandles.get(handle);
+    if (!node) {
+      throw new Error(`Unknown ohos.node handle '${handle}' for ${role}`);
+    }
+    return node;
+  }
+
+  private requireRootFrameNode(state: HostWindowState): FrameNode {
+    const root = state.rootFrameNode;
+    if (root === undefined) {
+      throw new Error(`Bridge root FrameNode is not attached for '${this.moduleName}'`);
+    }
+    return root;
+  }
+
+  private requireUiContext(state: HostWindowState): UIContext {
+    const uiContext = state.uiContext;
+    if (uiContext === undefined) {
+      throw new Error(`Bridge session '${this.sessionId}' has no UIContext`);
+    }
+    return uiContext;
+  }
+
+  private requireWindow(windowKey: string): HostWindowState {
+    this.assertWindowKey(windowKey);
+    const state = this.windows.get(windowKey);
+    if (state === undefined) {
+      throw new Error(
+        `Bridge window '${windowKey}' is not attached for '${this.moduleName}'; place DefaultXComponent with a matching windowKey before invoking this plugin`,
+      );
+    }
+    return state;
+  }
+
+  /** Returns a window-scoped node surface used by `BridgePluginContext.windowScope`. */
+  windowScope(windowKey: string): BridgeWindowScope {
+    this.assertWindowKey(windowKey);
+    return {
+      windowKey,
+      getUIContext: (): UIContext => this.requireUiContext(this.requireWindow(windowKey)),
+      getRootFrameNode: (): FrameNode => this.requireRootFrameNode(this.requireWindow(windowKey)),
+      appendChild: (key: string, node: FrameNode, cleanup?: () => void): void =>
+        this.appendChild(windowKey, key, node, cleanup),
+      removeChild: (key: string): void => this.removeChild(windowKey, key),
+      getFrameNode: (handle: number): FrameNode =>
+        this.lookupNodeHandle(this.requireWindow(windowKey), handle, "context"),
+    };
+  }
+
+  /** Plugin-context mount: appends an arbitrary FrameNode under the `windowKey` root. */
+  appendChild(windowKey: string, key: string, node: FrameNode, cleanup?: () => void): void {
+    this.assertActive();
+    if (!isBridgeIdentifier(key)) {
+      throw new Error("Bridge node mount key must contain only letters, digits, '.', '_' or '-'");
+    }
+    this.removeChild(windowKey, key);
+    const state = this.requireWindow(windowKey);
+    this.requireRootFrameNode(state).appendChild(node);
+    state.mountedChildren.set(key, { node, cleanup });
+  }
+
+  /** Plugin-context unmount: removes the node mounted under `key` in `windowKey` and runs its cleanup. */
+  removeChild(windowKey: string, key: string): void {
+    const state = this.windows.get(windowKey);
+    if (state === undefined) {
+      return;
+    }
+    const mounted = state.mountedChildren.get(key);
+    if (!mounted) {
+      return;
+    }
+    state.mountedChildren.delete(key);
+    try {
+      state.rootFrameNode?.removeChild(mounted.node);
+    } catch {}
+    try {
+      mounted.cleanup?.();
+    } catch {}
+  }
+
+  private disposeWindowState(state: HostWindowState): void {
+    const mountedKeys = Array.from(state.mountedChildren.keys());
+    for (const key of mountedKeys) {
+      const mounted = state.mountedChildren.get(key);
+      if (mounted === undefined) {
+        continue;
+      }
+      state.mountedChildren.delete(key);
+      try {
+        state.rootFrameNode?.removeChild(mounted.node);
+      } catch {}
+      try {
+        mounted.cleanup?.();
+      } catch {}
+    }
+    const handleNodes = Array.from(state.nodeHandles.values());
+    for (const node of handleNodes) {
+      try {
+        node.dispose();
+      } catch {}
+    }
+    state.nodeHandles.clear();
+    state.nodeParents.clear();
+  }
+
+  private assertWindowKey(windowKey: string): void {
+    if (!isBridgeIdentifier(windowKey)) {
+      throw new Error("Bridge windowKey must contain only letters, digits, '.', '_' or '-'");
+    }
+  }
+
   async setWindowStage(windowStage: window.WindowStage): Promise<void> {
     this.assertActive();
     this.windowStage = windowStage;
@@ -115,39 +497,17 @@ class BridgeHost {
     if (this.disposed) {
       return;
     }
-    if (this.uiContext !== undefined) {
-      await this.emitLifecycle({
-        kind: "ui-context-destroy",
-        payload: new BridgeEmptyLifecyclePayload(),
-      });
-      this.uiContext = undefined;
+    // The WindowStage belongs to the Ability (main window). Detach every registered window
+    // surface; only the main window emits `ui-context-destroy`.
+    const windowKeys = Array.from(this.windows.keys());
+    for (const windowKey of windowKeys) {
+      await this.detachWindow(windowKey);
     }
     await this.emitLifecycle({
       kind: "window-stage-destroy",
       payload: new BridgeEmptyLifecyclePayload(),
     });
     this.windowStage = undefined;
-  }
-
-  async setUiContext(uiContext: UIContext): Promise<void> {
-    this.assertActive();
-    this.uiContext = uiContext;
-    this.notifyContextChanged();
-    await this.emitLifecycle({
-      kind: "ui-context-ready",
-      payload: new BridgeEmptyLifecyclePayload(),
-    });
-  }
-
-  async clearUiContext(): Promise<void> {
-    if (this.disposed || this.uiContext === undefined) {
-      return;
-    }
-    await this.emitLifecycle({
-      kind: "ui-context-destroy",
-      payload: new BridgeEmptyLifecyclePayload(),
-    });
-    this.uiContext = undefined;
   }
 
   async emitLifecycle(event: BridgeLifecycleEvent): Promise<void> {
@@ -317,6 +677,16 @@ class BridgeHost {
     }
     this.plugins.clear();
     this.mainThreadEventSink = undefined;
+    // Release every window surface: keyed mounts first, then handle-owned nodes. The root
+    // FrameNodes themselves are owned and disposed by their DefaultXComponent instances.
+    const windowKeys = Array.from(this.windows.keys());
+    for (const windowKey of windowKeys) {
+      const state = this.windows.get(windowKey);
+      if (state !== undefined) {
+        this.disposeWindowState(state);
+      }
+    }
+    this.windows.clear();
   }
 
   private async ensureActive(entry: HostedPlugin, callState?: BridgeCallState): Promise<void> {
@@ -380,7 +750,7 @@ class BridgeHost {
       if (requirement === "window-stage" && this.windowStage === undefined) {
         missing.push(requirement);
       }
-      if (requirement === "ui-context" && this.uiContext === undefined) {
+      if (requirement === "ui-context" && !this.windows.has(MAIN_WINDOW_KEY)) {
         missing.push(requirement);
       }
     }
@@ -388,6 +758,7 @@ class BridgeHost {
   }
 
   private pluginContext(pluginId: string): BridgePluginContext {
+    const mainScope = this.windowScope(MAIN_WINDOW_KEY);
     return {
       pluginId,
       moduleName: this.moduleName,
@@ -400,12 +771,13 @@ class BridgeHost {
         }
         return this.windowStage;
       },
-      getUIContext: (): UIContext => {
-        if (this.uiContext === undefined) {
-          throw new Error(`Bridge plugin '${pluginId}' requires a UIContext that is not ready`);
-        }
-        return this.uiContext;
-      },
+      getUIContext: (): UIContext => mainScope.getUIContext(),
+      getRootFrameNode: (): FrameNode => mainScope.getRootFrameNode(),
+      appendChild: (key: string, node: FrameNode, cleanup?: () => void): void =>
+        mainScope.appendChild(key, node, cleanup),
+      removeChild: (key: string): void => mainScope.removeChild(key),
+      getFrameNode: (handle: number): FrameNode => mainScope.getFrameNode(handle),
+      windowScope: (windowKey: string): BridgeWindowScope => this.windowScope(windowKey),
       invokeNativeSync: (
         event: string,
         requestTypeName: string,
@@ -422,6 +794,7 @@ class BridgeHost {
     timeoutMs: number,
     callState: BridgeCallState,
   ): BridgeCallContext {
+    const context = this.pluginContext(pluginId);
     return {
       pluginId,
       moduleName: this.moduleName,
@@ -433,8 +806,14 @@ class BridgeHost {
       isCancelled: (): boolean => this.disposed || callState.cancelled,
       onCancel: (listener: () => void): (() => void) =>
         this.subscribeCancellation(callState, listener),
-      getWindowStage: (): window.WindowStage => this.pluginContext(pluginId).getWindowStage(),
-      getUIContext: (): UIContext => this.pluginContext(pluginId).getUIContext(),
+      getWindowStage: (): window.WindowStage => context.getWindowStage(),
+      getUIContext: (): UIContext => context.getUIContext(),
+      getRootFrameNode: (): FrameNode => context.getRootFrameNode(),
+      appendChild: (key: string, node: FrameNode, cleanup?: () => void): void =>
+        context.appendChild(key, node, cleanup),
+      removeChild: (key: string): void => context.removeChild(key),
+      getFrameNode: (handle: number): FrameNode => context.getFrameNode(handle),
+      windowScope: (windowKey: string): BridgeWindowScope => context.windowScope(windowKey),
       invokeNativeSync: (
         event: string,
         requestTypeName: string,
@@ -741,16 +1120,29 @@ export class BridgeHostRegistry {
     await BridgeHostRegistry.host(sessionId, moduleName).clearWindowStage();
   }
 
-  static async setUiContext(
+  /**
+   * Registers one window's node surface (`windowKey` defaults to `"main"`). Attaching the main
+   * window emits `ui-context-ready`, so plugins can mount nodes during `onInstall` without any
+   * waiting; sub-window attachments only register state.
+   */
+  static attachWindow(
     sessionId: string,
     moduleName: string,
+    windowKey: string,
     uiContext: UIContext,
-  ): Promise<void> {
-    await BridgeHostRegistry.host(sessionId, moduleName).setUiContext(uiContext);
+    root: FrameNode,
+  ): void {
+    BridgeHostRegistry.host(sessionId, moduleName).attachWindow(windowKey, uiContext, root);
   }
 
-  static async clearUiContext(sessionId: string, moduleName: string): Promise<void> {
-    await BridgeHostRegistry.host(sessionId, moduleName).clearUiContext();
+  /** Unregisters one window's node surface. The root node itself is disposed by its owner. */
+  static async detachWindow(
+    sessionId: string,
+    moduleName: string,
+    windowKey: string,
+  ): Promise<void> {
+    const host = BridgeHostRegistry.sessions.get(sessionId)?.get(moduleName);
+    await host?.detachWindow(windowKey);
   }
 
   static async emitLifecycle(

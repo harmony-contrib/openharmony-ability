@@ -8,7 +8,7 @@
 
 插件是对某一项平台能力的成对封装：Rust 提供业务可调用、强类型的 facade；ArkTS HAR
 持有 HarmonyOS 平台对象并实现真正的平台调用。框架 core 只提供通用的桥接 transport、线程
-约束、生命周期和 ArkUI 节点插槽，**不得认识任何具体业务能力**。
+约束、生命周期和 ArkUI 节点树挂载，**不得认识任何具体业务能力**。
 
 一个插件从创建到交付必须按以下顺序完成：
 
@@ -214,7 +214,11 @@ export function createLoginPlugin(): BridgePluginFactory {
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | sync / `window-stage` |
-| `ohos.webview` / `create` | `ohos.webview.CreateRequest` → `ohos.webview.CreateResponse { id, slotId }` | async / `ui-context` |
+| `ohos.webview` / `create` | `ohos.webview.CreateRequest { id, parentHandle? }` → `ohos.webview.CreateResponse { id }` | async / `ui-context` |
+| `ohos.node`（内置） / `create-container` | `ohos.node.CreateContainerRequest` → `ohos.node.HandleResponse { handle }` | async / `ui-context` |
+| `ohos.node`（内置） / `append-child` | `ohos.node.AppendChildRequest { parentHandle, childHandle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
+| `ohos.node`（内置） / `mount-into-root` | `ohos.node.MountIntoRootRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
+| `ohos.node`（内置） / `dispose` | `ohos.node.DisposeRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
 | `ohos.webview` / 控制器 action | `ohos.webview.ControllerRequest` → `ohos.webview.Acknowledgement` / `StringResponse` / `ScriptResponse` | async / `ui-context` |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` | 入站事件 / `ability` |
 
@@ -228,7 +232,8 @@ export function createLoginPlugin(): BridgePluginFactory {
 兜底。
 
 `permission` 的结果顺序和失败码 `-1`、`window` 的四个避让区、`app-control` 的主线程同步退出、
-WebView 的 controller ID 与命名 slot 都是既有语义，迁移为插件后不得丢失。
+WebView 的 controller ID 都是既有语义，迁移为插件后不得丢失；WebView 的命名 slot 语义已被
+"一棵树 + `parentHandle` 组合"归一化取代。
 
 ## 4. 执行模式由 trait 限制
 
@@ -311,7 +316,7 @@ ArkTS 平台回调进入 Rust 的 `on_main_thread_event` 是**入站 scoped call
 | --- | --- | --- |
 | `ability` | `NativeAbility.onCreate` 已建立 Ability context | 权限、应用控制、登录会话 |
 | `window-stage` | `NativeAbility.onWindowStageCreate` | 窗口与避让区 |
-| `ui-context` | `DefaultXComponent.aboutToAppear` 已建立 UI context；业务 `BridgeNodeHost` 仅负责附加命名 slot | WebView、任意 ArkUI/FrameNode 插件 |
+| `ui-context` | `DefaultXComponent.aboutToAppear` 已建立 UI context 并注入 session 根 `FrameNode` | WebView、任意 ArkUI/FrameNode 插件 |
 
 `BridgeHost` 只会在 requirements 都就绪后调用 `onInstall`，并向延迟激活的插件重放有限的生命周期
 历史。插件如需监听销毁、配置或内存事件，应在 ArkTS `onLifecycle` 或 Rust
@@ -324,15 +329,19 @@ callback 替换掉：
    `ability-create`。
 2. `NativeAbility.onWindowStageCreate` 先提供 `WindowStage`，再发出 `window-stage-create`；窗口事件
    仍要同时转发给原 native module lifecycle。
-3. `DefaultXComponent.aboutToAppear` 先挂接 native event sink 和默认节点 slot，再通知 Rust
-   `ui-context-ready` 并设置 `UIContext`。这样 plugin `onInstall` 期间已经可以安全发起 scoped
-   回调或挂载默认节点。
-4. UI 消失时，先发出 `ui-context-destroy`，再 detach slot 和 event sink；WindowStage 销毁时再发出
-   `window-stage-destroy`；Ability 销毁时发出 `ability-destroy` 并 dispose 整个 session。
+3. `DefaultXComponent.aboutToAppear` 先挂接 native event sink，再按 `windowKey` 注册窗口表面
+   （UIContext + 根 `FrameNode`，根先于 `ui-context-ready` 存在）；`"main"` 窗口注册后通知 Rust
+   `ui-context-ready`。这样 plugin `onInstall` 期间已经可以安全发起 scoped 回调或挂载节点，无需
+   任何等待。子窗口实例（唯一 `windowKey`）只登记自己的表面，不重发 ready。
+4. UI 消失时，`detachWindow` 先发出 `ui-context-destroy`（仅 `"main"`），再卸载该窗口的 keyed
+   节点与句柄节点并 detach event sink（仅 `"main"`）；WindowStage 销毁时 detach 所有窗口并发出
+   `window-stage-destroy`；Ability 销毁时发出 `ability-destroy` 并 dispose 整个 session（session
+   销毁时由 `BridgeHost` 级联卸载全部窗口的节点，根 `FrameNode` 本身由各 `DefaultXComponent`
+   销毁）。
 5. `configuration-updated`、`memory-level`、window-stage event 等保持由 `NativeAbility` 原有链路
    分发，同时作为受控 lifecycle event 交给已安装插件。
 
-ArkTS context 是 module + session 范围的。插件不得假设多个 module 共用一个 controller、slot 或
+ArkTS context 是 module + session 范围的。插件不得假设多个 module 共用一个 controller、根节点或
 状态表；所有跨页面状态键必须至少包含 `sessionId` 与 `moduleName`。
 
 规则如下：
@@ -345,62 +354,64 @@ ArkTS context 是 module + session 范围的。插件不得假设多个 module �
 - `onDispose` 必须幂等，负责移除平台 delegate、取消订阅、卸载节点、清空 controller/tag 映射。
   单个插件释放失败不能阻断其余插件释放。
 - 禁止用 `setTimeout`、轮询或固定延迟猜测页面、controller 或 context 是否已经就绪。等待条件必须由
-  生命周期、attach 事件或真正的平台完成事件驱动。
+  生命周期或真正的平台完成事件驱动。
+- 节点挂载无需等待：session 根在 `ui-context-ready` 之前已注入，`onInstall` 内即可挂载。创建到
+  挂载之间的取消（调用超时 / session dispose）仍必须让 mount 的失败可见，不能在已销毁的根上重建节点。
 
-下面是取消感知等待的标准形态。`onCancel` 返回的取消订阅必须在 resolve、reject 和 cleanup 任一路径
-解除，避免页面销毁后留下 waiter：
+ArkTS 插件挂载节点的标准形态：
 
 ```ts
-const slot = await BridgeNodeSlotRegistry.waitFor(
-  context.sessionId,
-  context.moduleName,
-  slotId,
-  context.onCancel,
+context.appendChild(
+  "account.login.surface",
+  node,
+  () => node.dispose(),
 );
-if (!context.isActive()) {
-  throw new Error("Bridge call was cancelled before node mount");
-}
-slot.mount("account.login.surface", node, () => node.dispose());
 ```
 
-## 6. ArkUI 节点与插槽
+## 6. ArkUI 节点树与挂载（一棵树模型）
 
-需要渲染原生内容的插件（WebView、地图、相机、视频、渲染根节点等）必须通过通用
-`BridgeNodeSlot` 挂载自己的 `FrameNode`，不能把具体能力写进 `DefaultXComponent`。
+需要渲染内容的插件（WebView、地图、相机、视频等）都是 **FrameNode 提供者**：它们把节点挂进
+session 唯一一棵根树，不写进 `DefaultXComponent`，也没有 WebView 专用插槽。
 
-一个 slot 的唯一键是 `(sessionId, moduleName, slotId)`。它的生命周期只有：`attach` → `active` →
-`detach/dispose`。异步 waiter 的终态也只有三种：slot attach 后 resolve、桥接调用取消后 reject、
-Ability/session 销毁后 reject；不存在“页面 3 秒内未渲染即失败”之类的独立计时器。
-
-- `DefaultXComponent` 固定提供默认 slot `xcomponent-overlay`，并保留既有 Stack、尺寸和透明
-  hit-test 行为。
-- 业务需要决定位置、层级或混合内容时，应在页面显式放置 `BridgeNodeHost`，使用
-  `moduleName + slotId` 指定命名 slot；业务拥有 underlay/foreground/layout，插件只拥有中性
-  `NodeContainer` 中自己的节点。
-- 同步插件只能使用 `BridgeNodeSlotRegistry.require(...)`，拿不到 slot 立即失败；异步插件使用
-  `waitFor(sessionId, moduleName, slotId, context.onCancel)` 等待 attach 或取消。
-- mount key 必须以插件 ID 为前缀且在插件内唯一。插件只能卸载自己的 key，并在 `onDispose`、节点
-  detach 或创建中途取消时执行 cleanup。
-- slot 返回后仍可能在 mount 前失效；插件必须让 `mount` 的 active 校验失败可见，不能在已销毁的
-  `NodeController` 上重建节点。
-
-业务页面应按自己的布局显式放置 `BridgeNodeHost`。下面的 `underlay` 与 `foreground` 始终属于业务，
-插件拿到的只是中间中性的 `NodeContainer`：
+- 每个 module/session 只有一棵根树。`DefaultXComponent` 在 `aboutToAppear` 中先创建根
+  `FrameNode` 并注入 `BridgeHost`，再发出 `ui-context-ready`；因此插件在 `onInstall` 里可以直接
+  `context.appendChild(...)`，**不存在命名插槽、注册表、waitFor/require 或就绪计时器**。
+- `context.appendChild(key, node, cleanup)` / `context.removeChild(key)`：key 必须以插件 ID 为前缀
+  且在插件内唯一，是插件的清理凭证。session dispose 时 `BridgeHost` 级联卸载并执行 cleanup。
+- 根 `FrameNode` 归 `DefaultXComponent` 所有（`NodeController` 内部状态），UI 消失时由它整树销毁。
+- Rust 通过内置 `ohos.node` 插件以**不透明 u32 句柄**组树（`create-container` / `append-child` /
+  `mount-into-root` / `dispose`）；`FrameNode` 值本身不跨 N-API 边界。Rust 可用
+  `app.node()?.create_container()` 建容器，把 WebView 等插件节点作为子节点挂进去，再
+  `mount_into_root` 整体挂载——旧的"webview 模式 vs 自定义节点模式"二分法被归一化为同一操作。
+- WebView 插件：`CreateRequest` 不带 `parentHandle` 时全屏挂根（默认行为）；带
+  `parentHandle`（`ohos.node` 容器句柄）时挂到调用方树上。
+- 业务层级 = 页面 `Stack` 声明顺序。业务内容放在 `DefaultXComponent` 前/后即得到下/上层级：
 
 ```ts
 Stack() {
+  this.BusinessUnderlay()                    // 插件树之下
   DefaultXComponent({ moduleName: "demo_native" })
-  BridgeNodeHost({
-    moduleName: "demo_native",
-    slotId: "webview-panel",
-    underlay: this.BusinessUnderlay,
-    foreground: this.BusinessForeground,
-  })
+  this.BusinessOverlay()                     // 插件树之上
 }
 ```
 
-这套规则同时保留 WebView 与 XComponent 的混合接入，并允许任意插件接入其他 node 节点；没有
-WebView 专用插槽或对业务布局的隐式所有权。
+这套规则同时保留 WebView 与 XComponent 的混合接入，并允许任意插件（以及 Rust 组树）接入 node
+节点；没有命名插槽、注册表或对业务布局的隐式所有权。
+
+### 6.1 多窗口
+
+每个窗口各有一个 `DefaultXComponent` 实例，各自持有独立的节点树。`DefaultXComponent` 通过
+`windowKey` 属性（缺省 `"main"`）注册窗口表面；`BridgeHost` 按窗口键分桶持有 UIContext、根节点、
+挂载表与 `ohos.node` 句柄表，互不覆盖。
+
+- 只有 `"main"` 窗口的注册会发出 `ui-context-ready` / `ui-context-destroy`（插件安装与 session
+  生命周期仍以主窗口为准）；子窗口注册只登记状态。
+- 插件默认操作 `"main"` 窗口；子窗口内容用 `context.windowScope(windowKey)` 获取窗口作用域：
+  `getUIContext()` / `getRootFrameNode()` / `appendChild` / `removeChild` / `getFrameNode`。
+- Rust 侧：`ohos.node` 的四个 action 与 `WebviewCreateRequest` 都支持 `window_key` 字段（缺省
+  `main`）。`app.node()?.create_container_in_window(Some("float"), ...)` 在子窗口建容器。
+- 子窗口页面放置第二个 `DefaultXComponent` 时必须传唯一 `windowKey`（如 `windowId` 字符串），
+  否则 `attachWindow` 拒绝重复注册。
 
 ## 7. 平台回调与 WebView 特例
 
@@ -540,9 +551,9 @@ lifecycle 通知与 dispose。
 | 异步 action | Rust worker 可以发起调用；ArkTS Promise 完成后 Rust 收到具名 response，不存在 JSON encode/decode |
 | 主线程同步 action（如有） | 在 `#[napi]` callback 的 `Env` 内成功；`call_sync` 不能从 worker 直接调用（无 `Env`）；没有 Promise 或阻塞等待 |
 | 子线程同步 action（TSFN，如有） | 从 Rust worker 调用 `call_sync_from_worker` 成功拿到具名 response；从 N-API 主线程调用被立即拒绝（防死锁） |
-| context 延迟 | async 调用会等待真正的 context/slot attach；sync 调用在未就绪时立即失败 |
+| context 延迟 | async 调用会等待真正的 context/根节点就绪；sync 调用在未就绪时立即失败 |
 | 生命周期销毁 | timeout、Ability/session destroy 会取消调用；UI/WindowStage detach 会触发生命周期 cleanup，临时节点、delegate、waiter 和映射被释放或失效 |
-| 原生节点（如有） | 默认 `xcomponent-overlay` 与业务命名 `BridgeNodeHost` 都能挂载，业务 underlay/foreground 行为不变 |
+| 原生节点（如有） | 插件能 `appendChild` 到 session 根或经 `ohos.node` 句柄组合子树；业务 underlay/foreground 由页面 `Stack` 声明顺序决定，行为不变 |
 | 平台回调（如有） | 在当前回调栈完成 Rust 决策，并覆盖明确的 fail-open/fail-closed 语义 |
 | WebView（如有） | custom scheme、首次导航前安装、透明背景、导航、下载、标题和 JS script/proxy 均覆盖 |
 
@@ -559,8 +570,9 @@ lifecycle 通知与 dispose。
   路径都不保存任何 N-API/ArkTS 对象；异步 facade 和 callback 不保存任何 N-API/ArkTS 对象。
 - [ ] 需要生命周期或 context 的插件声明 requirements，覆盖 delayed activation、destroy、dispose
   和调用取消；没有 timer 轮询。
-- [ ] 需要 UI 的插件通过 `BridgeNodeSlot` 接入，覆盖默认 XComponent slot、业务命名 slot、detach
-  和中途取消 cleanup；未改坏默认 XComponent 的既有行为。
+- [ ] 需要 UI 的插件通过 `context.appendChild(key, node, cleanup)` / `removeChild(key)` 挂载
+  session 根节点，或经 `ohos.node` 句柄组合子树；覆盖 session 销毁级联卸载和中途取消 cleanup；
+  未改坏默认 XComponent 的既有行为。
 - [ ] 平台回调通过 `invokeNativeSync` + `on_main_thread_event`，明确同步时限和失败策略。
 - [ ] WebView（如涉及）覆盖 engine 初始化、custom protocol、首次导航、delegate 安装、透明背景和
   所有已支持回调。
@@ -587,6 +599,6 @@ ArkTS/HAP 编译和真机验证也属于合入条件；仅 Rust 单测通过不�
 1. core 是否仍然不知道该插件的具体能力、平台类型和业务语义？
 2. Rust 与 ArkTS 是否对 ID、版本、模式、context、action 和 typeName 使用同一份契约？
 3. 是否能证明同步路径不会 `await`，异步路径不会保存 Env/ArkTS 对象？
-4. 插件依赖的生命周期、slot attach、取消和 dispose 是否都有明确的事件驱动路径？
-5. 若插件为 WebView 或其他原生节点，业务是否仍拥有布局和内容插槽？
+4. 插件依赖的生命周期、根节点就绪、取消和 dispose 是否都有明确的事件驱动路径？
+5. 若插件为 WebView 或其他原生节点，业务是否仍拥有布局层级（页面 `Stack` 声明顺序）？
 6. request/response 与反向平台回调是否完全没有 JSON transport？

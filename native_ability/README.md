@@ -46,8 +46,9 @@ When using `sync`, add the corresponding library to `build-profile.json5` runtim
 
 ### `DefaultXComponent`
 
-`DefaultXComponent` loads the native module and binds the default native rendering surface. It
-also exposes the generic `xcomponent-overlay` node slot for capability plugins.
+`DefaultXComponent` loads the native module, binds the default native rendering surface, and owns
+the single session node tree that capability plugins mount into. The tree exists before
+`ui-context-ready`, so plugins can mount during `onInstall` without slots, registries or waiters.
 
 ```ts
 import { DefaultXComponent } from "@ohos-rs/ability";
@@ -67,14 +68,15 @@ struct Index {
 }
 ```
 
-### Plugins and node slots
+### Plugins and the single node tree
 
 Compose ArkTS plugin factories explicitly in `NativeAbility.bridgePlugins`. A capability that
-needs UI nodes mounts a `FrameNode` into a generic slot; the framework never embeds a WebView
-special case.
+needs UI nodes mounts a `FrameNode` into the session root tree (`context.appendChild`); the
+framework never embeds a WebView special case. Rust composes trees through opaque `ohos.node`
+handles; `FrameNode` values never cross the N-API boundary.
 
 ```ts
-import { BridgeNodeHost, DefaultXComponent, NativeAbility } from "@ohos-rs/ability";
+import { DefaultXComponent, NativeAbility } from "@ohos-rs/ability";
 import { createWebviewPlugin } from "@ohos-rs/ability-plugin-webview";
 
 export default class EntryAbility extends NativeAbility {
@@ -91,12 +93,10 @@ struct Page {
 
   build() {
     Stack() {
+      // Layer order is declaration order: business content below and above the single session
+      // node tree. There is no BridgeNodeHost or named slot.
       DefaultXComponent({ moduleName: "demo_native" })
-      BridgeNodeHost({
-        moduleName: "demo_native",
-        slotId: "webview-panel",
-        foreground: this.BusinessOverlay,
-      })
+      this.BusinessOverlay()
     }
   }
 }
@@ -141,10 +141,7 @@ export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
   public defaultPage: boolean = false;
 
-  async onCreate(
-    want: Want,
-    launchParam: AbilityConstant.LaunchParam
-  ): Promise<void> {
+  async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     super.onCreate(want, launchParam);
   }
 
