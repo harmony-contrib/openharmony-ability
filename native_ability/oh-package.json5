@@ -1,11 +1,14 @@
 {
-  "name": "@ohos-rs/ability",
-  "version": "0.0.1",
-  "description": "Adaptor for OpenHarmony/HarmonyNext native abilities",
-  "main": "index.ets",
-  "author": "richerfu",
-  "license": "Apache-2.0",
-  "dependencies": {
-    "libnative_ability.so": "file:./src/main/cpp/types/libnative_ability",
+  "author": {
+    "name": "richerfu",
+    "email": "southorange0929@foxmail.com",
   },
+  "dependencies": {},
+  "description": "Adaptor for OpenHarmony/HarmonyNext native abilities",
+  "keywords": ["ohos-rs", "NAPI", "Rust", "node-addon", "openharmony", "harmonynext"],
+  "license": "MIT OR Apache-2.0",
+  "main": "index.ets",
+  "name": "@ohos-rs/ability",
+  "repository": "https://github.com/harmony-contrib/openharmony-ability.git",
+  "version": "1.0.0-beta.0",
 }

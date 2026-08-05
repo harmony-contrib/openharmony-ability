@@ -48,13 +48,20 @@ checksum = "fb22e947478ccf9dc44d8922042c677a63fbb88f2cb468521d1145816e5087cb"
 name = "demo_native"
 version = "0.1.0"
 dependencies = [
+ "futures-channel",
  "futures-executor",
+ "http",
  "napi-build-ohos",
  "napi-derive-ohos",
  "napi-ohos",
  "ohos-hilog-binding",
  "openharmony-ability",
  "openharmony-ability-derive",
+ "openharmony-ability-plugin-files",
+ "openharmony-ability-plugin-permission",
+ "openharmony-ability-plugin-resource",
+ "openharmony-ability-plugin-url",
+ "openharmony-ability-plugin-webview",
 ]
 
 [[package]]
@@ -468,14 +475,11 @@ name = "openharmony-ability"
 version = "0.3.0"
 dependencies = [
  "futures-channel",
- "http",
  "napi-derive-ohos",
  "napi-ohos",
  "ohos-arkui-binding",
  "ohos-display-binding",
  "ohos-ime-binding",
- "ohos-resource-manager-binding",
- "ohos-web-binding",
  "ohos-xcomponent-binding",
 ]
 
@@ -486,6 +490,73 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-app-control"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-files"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-permission"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-resource"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "ohos-resource-manager-binding",
+ "ohos-resource-manager-sys",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-url"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-webview"
+version = "0.3.0"
+dependencies = [
+ "http",
+ "napi-derive-ohos",
+ "napi-ohos",
+ "ohos-web-binding",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-window"
+version = "0.3.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
 ]
 
 [[package]]

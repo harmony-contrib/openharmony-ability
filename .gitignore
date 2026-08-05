@@ -9,3 +9,5 @@
 package/src/main/ets
 package/libs
 dist
+oh_modules
+build/

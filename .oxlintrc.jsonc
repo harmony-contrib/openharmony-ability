@@ -2,6 +2,8 @@
   "$schema": "./node_modules/@ohos-rs/oxk/configuration_schema.json",
   "plugins": ["unicorn", "typescript", "oxc", "arkts"],
   "rules": {
+    // ArkTS compiler rejects `as const` (arkts-no-as-const); keep literal type annotations.
+    "typescript/prefer-as-const": "off",
     "arkts/system-api-version": [
       "error",
       {

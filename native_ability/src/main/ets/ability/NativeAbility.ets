@@ -1,24 +1,36 @@
 import { AbilityConstant, Configuration, UIAbility, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
-import webview from "@ohos.web.webview";
 import * as Entry from "../components/MainPage";
-import { AbilityInitContext, ApplicationLifecycle, Module } from "./type";
-import { Loadable } from "../helper/loadable";
+import { BridgeHostRegistry } from "../bridge/BridgeHost";
+import {
+  AbilityInitContext,
+  ApplicationLifecycle,
+  BridgeAbilityCreateLifecyclePayload,
+  BridgeEmptyLifecyclePayload,
+  BridgeLifecycleEvent,
+  BridgeMemoryLevelLifecyclePayload,
+  BridgePluginFactory,
+  BridgeWindowStageEventLifecyclePayload,
+  Module,
+} from "./type";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";
 
 export class NativeAbility extends UIAbility {
   public moduleName: string | string[] = "";
   public defaultPage: boolean = true;
-  public mode: "xcomponent" | "webview" = "xcomponent";
   public loadMode: "async" | "sync" = "async";
+  /** Application-provided capability plugins. NativeAbility itself has no concrete plugin imports. */
+  public bridgePlugins: BridgePluginFactory[] = [];
   private nativeModules: Module[] = [];
   private lifecycles: ApplicationLifecycle[] = [];
   private loadedModuleNames: string[] = [];
+  private bridgeSessionId: string = "";
 
   protected resolveModuleNames(): string[] {
-    const moduleNames = Loadable.resolveModuleNames(this.moduleName);
+    const moduleNames = NativeModuleLoader.resolveModuleNames(this.moduleName);
     if (moduleNames.length === 0) {
       throw new Error("moduleName must contain at least one module");
     }
@@ -29,7 +41,7 @@ export class NativeAbility extends UIAbility {
     for (const lifecycle of this.lifecycles) {
       try {
         handler(lifecycle);
-      } catch (_) {}
+      } catch {}
     }
   }
 
@@ -39,7 +51,7 @@ export class NativeAbility extends UIAbility {
     }
 
     try {
-      const parsed = JSON.parse(rawState) as Record<string, Object>;
+      const parsed = JSON.parse(rawState) as Record<string, object>;
       const mapped: Record<string, string> = {};
       const keys = Object.keys(parsed);
       for (const key of keys) {
@@ -47,7 +59,7 @@ export class NativeAbility extends UIAbility {
         mapped[key] = typeof value === "string" ? value : String(value);
       }
       return mapped;
-    } catch (_) {
+    } catch {
       return {};
     }
   }
@@ -63,52 +75,143 @@ export class NativeAbility extends UIAbility {
     };
   }
 
-  async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
+  /**
+   * Wires the ArkTS -> Rust main-thread event sink for one native module. Called right after
+   * `module.init` in onCreate so plugins that only require `ability` can emit inbound events on
+   * `ability-create`; the render-time attach in DefaultXComponent overrides it with the same
+   * module object (idempotent, NativeModuleLoader caches instances).
+   */
+  private attachBridgeEventSink(moduleName: string, module: Module): void {
+    if (this.bridgeSessionId === undefined) {
+      return;
+    }
+    if (typeof module.onBridgeSyncEvent !== "function") {
+      return;
+    }
+    BridgeHostRegistry.attachEventSink(
+      this.bridgeSessionId,
+      moduleName,
+      (
+        pluginId: string,
+        event: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+      ): ESObject => {
+        return module.onBridgeSyncEvent!(pluginId, event, requestTypeName, responseTypeName, value);
+      },
+    );
+  }
+
+  protected async notifyBridgeLifecycle(event: BridgeLifecycleEvent): Promise<void> {
+    if (!this.bridgeSessionId) {
+      return;
+    }
+    for (const moduleName of this.loadedModuleNames) {
+      await BridgeHostRegistry.emitLifecycle(this.bridgeSessionId, moduleName, event);
+    }
+  }
+
+  protected async setBridgeWindowStage(windowStage: window.WindowStage): Promise<void> {
+    if (!this.bridgeSessionId) {
+      return;
+    }
+    for (const moduleName of this.loadedModuleNames) {
+      await BridgeHostRegistry.setWindowStage(this.bridgeSessionId, moduleName, windowStage);
+    }
+  }
+
+  protected async clearBridgeWindowStage(): Promise<void> {
+    if (!this.bridgeSessionId) {
+      return;
+    }
+    for (const moduleName of this.loadedModuleNames) {
+      await BridgeHostRegistry.clearWindowStage(this.bridgeSessionId, moduleName);
+    }
+  }
+
+  async onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): Promise<void> {
     const isRestore: boolean =
       (want.parameters?.["ohos.ability.params.abilityRecoveryRestart"] as boolean) ?? false;
-    const state = isRestore ? ((want.parameters?.[STATE_KEY] as string) ?? "") : "";
+    const savedState = want.parameters?.[STATE_KEY];
+    const state = isRestore && savedState !== undefined ? savedState.toString() : "";
 
     AppStorage.setOrCreate("moduleName", this.moduleName);
     AppStorage.setOrCreate("loadMode", this.loadMode);
 
     const requestedModules: string[] = this.resolveModuleNames();
     const restoredStateMap: Record<string, string> = this.parseSavedStateMap(state);
-    let webEngineRequired = false;
+    if (this.bridgeSessionId) {
+      await BridgeHostRegistry.dispose(this.bridgeSessionId);
+    }
+    try {
+      this.bridgeSessionId = await BridgeHostRegistry.open(
+        requestedModules,
+        this.context as common.UIAbilityContext,
+        this.bridgePlugins,
+      );
+    } catch (error) {
+      // A plugin factory/install failure here aborts onCreate before module.init runs,
+      // which later surfaces as "OpenHarmony app not initialized" from every napi call.
+      console.error(`[NativeAbility] BridgeHostRegistry.open failed: ${String(error)}`);
+    }
+    AppStorage.setOrCreate("bridgeSessionId", this.bridgeSessionId);
 
     this.nativeModules = [];
     this.lifecycles = [];
     this.loadedModuleNames = [];
 
     for (const moduleName of requestedModules) {
-      const module: Module = await Loadable.load(moduleName, this.loadMode);
-      this.nativeModules.push(module);
-      this.loadedModuleNames.push(moduleName);
-
-      if (typeof module.registerCustomProtocol === "function") {
-        module.registerCustomProtocol();
-        webEngineRequired = true;
+      try {
+        const module: Module = await NativeModuleLoader.load(moduleName, this.loadMode);
+        this.nativeModules.push(module);
+        this.loadedModuleNames.push(moduleName);
+      } catch (error) {
+        // A dynamic import failure aborts onCreate before module.init runs; the Rust-side
+        // INNER_APP is then never set and every napi call reports "OpenHarmony app not
+        // initialized". A stale/incompatible .so is the usual cause.
+        console.error(
+          `[NativeAbility] failed to load native module ${moduleName}: ${String(error)}`,
+        );
       }
-    }
-
-    if (webEngineRequired) {
-      webview.WebviewController.initializeWebEngine();
     }
 
     for (let i = 0; i < this.nativeModules.length; i++) {
       const module: Module = this.nativeModules[i];
       const moduleName: string = this.loadedModuleNames[i];
-      const lifecycle: ApplicationLifecycle = module.init(this.createInitContext(moduleName));
-
-      this.lifecycles.push(lifecycle);
-
-      const restoredState = restoredStateMap[moduleName] ?? state;
       try {
-        lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
-      } catch (_) {}
+        const lifecycle: ApplicationLifecycle = module.init(this.createInitContext(moduleName));
+        this.lifecycles.push(lifecycle);
+
+        // Attach the inbound event sink right after init, not at UI render time: the native
+        // module is loaded and the Rust app (plus its registered plugins) exists from here on.
+        // Plugins that only require `ability` can therefore push ArkTS -> Rust main-thread
+        // events on `ability-create` instead of waiting for `ui-context-ready`. The render-time
+        // attach in DefaultXComponent remains as an idempotent fallback for the same module.
+        this.attachBridgeEventSink(moduleName, module);
+
+        const restoredState = restoredStateMap[moduleName] ?? state;
+        try {
+          lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
+        } catch {}
+      } catch (error) {
+        // `#[ability] init` sets the Rust-side INNER_APP; when it fails, every later
+        // napi call reports "OpenHarmony app not initialized". Log the exact failure
+        // so the root cause (stale .so, context mismatch, bridge open failure) is visible.
+        console.error(`[NativeAbility] module.init failed for ${moduleName}: ${String(error)}`);
+      }
+    }
+
+    for (const moduleName of requestedModules) {
+      await BridgeHostRegistry.emitLifecycle(this.bridgeSessionId, moduleName, {
+        kind: "ability-create",
+        payload: new BridgeAbilityCreateLifecyclePayload(restoredStateMap[moduleName] ?? state),
+      });
     }
   }
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
+    await this.setBridgeWindowStage(windowStage);
     this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageCreate());
 
     try {
@@ -116,13 +219,17 @@ export class NativeAbility extends UIAbility {
         this.forEachLifecycle((lifecycle) =>
           lifecycle.windowStageEventCallback.onWindowStageEvent(event),
         );
+        this.notifyBridgeLifecycle({
+          kind: "window-stage-event",
+          payload: new BridgeWindowStageEventLifecyclePayload(event),
+        }).catch(() => {});
       });
-    } catch (_) {}
+    } catch {}
 
     let win: window.Window | null = null;
     try {
       win = await windowStage.getMainWindow();
-    } catch (_) {
+    } catch {
       win = null;
     }
 
@@ -148,33 +255,53 @@ export class NativeAbility extends UIAbility {
             lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
           );
         });
-      } catch (_) {}
+      } catch {}
     }
 
     if (this.defaultPage) {
       try {
         await windowStage.loadContentByName(Entry.RouteName);
-      } catch (_) {}
+      } catch {}
     }
+  }
+
+  async onWindowStageDestroy(): Promise<void> {
+    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy());
+    await this.clearBridgeWindowStage();
   }
 
   onMemoryLevel(level: AbilityConstant.MemoryLevel): void {
     this.forEachLifecycle((lifecycle) => lifecycle.environmentCallback.onMemoryLevel(level));
+    this.notifyBridgeLifecycle({
+      kind: "memory-level",
+      payload: new BridgeMemoryLevelLifecyclePayload(level),
+    }).catch(() => {});
   }
 
-  onDestroy(): void | Promise<void> {
+  async onDestroy(): Promise<void> {
+    await this.notifyBridgeLifecycle({
+      kind: "ability-destroy",
+      payload: new BridgeEmptyLifecyclePayload(),
+    });
     this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onAbilityDestroy());
+    const bridgeSessionId = this.bridgeSessionId;
+    this.bridgeSessionId = "";
+    await BridgeHostRegistry.dispose(bridgeSessionId);
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {
     this.forEachLifecycle((lifecycle) =>
       lifecycle.environmentCallback.onConfigurationUpdated(newConfig),
     );
+    this.notifyBridgeLifecycle({
+      kind: "configuration-updated",
+      payload: new BridgeEmptyLifecyclePayload(),
+    }).catch(() => {});
   }
 
   onSaveState(
     reason: AbilityConstant.StateType,
-    wantParam: Record<string, Object>,
+    wantParam: Record<string, object>,
   ): AbilityConstant.OnSaveResult {
     const stateMap: Record<string, string> = {};
 
@@ -187,17 +314,17 @@ export class NativeAbility extends UIAbility {
 
       try {
         stateMap[moduleName] = lifecycle.windowStageEventCallback.onAbilitySaveState() ?? "";
-      } catch (_) {}
+      } catch {}
     }
 
     const stateValues = Object.values(stateMap);
+    let stateToSave: string = "";
     if (stateValues.length === 1) {
-      wantParam[STATE_KEY] = stateValues[0];
+      stateToSave = stateValues[0];
     } else if (stateValues.length > 1) {
-      wantParam[STATE_KEY] = JSON.stringify(stateMap);
-    } else {
-      wantParam[STATE_KEY] = "";
+      stateToSave = JSON.stringify(stateMap);
     }
+    wantParam[STATE_KEY] = new String(stateToSave);
 
     return AbilityConstant.OnSaveResult.RECOVERY_AGREE;
   }

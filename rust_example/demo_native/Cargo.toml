@@ -11,10 +11,17 @@ crate-type = ["cdylib"]
 napi-ohos = { workspace = true, features = ["tokio_rt"] }
 napi-derive-ohos = { workspace = true }
 
-openharmony-ability = { workspace = true, features = ["webview"] }
+openharmony-ability = { workspace = true }
 openharmony-ability-derive = { workspace = true }
+openharmony-ability-plugin-files = { workspace = true }
+openharmony-ability-plugin-permission = { workspace = true }
+openharmony-ability-plugin-resource = { workspace = true }
+openharmony-ability-plugin-url = { workspace = true }
+openharmony-ability-plugin-webview = { workspace = true }
 ohos-hilog-binding = { workspace = true }
+futures-channel = { workspace = true }
 futures-executor = "0.3"
+http = { workspace = true }
 
 [build-dependencies]
 napi-build-ohos = { workspace = true }

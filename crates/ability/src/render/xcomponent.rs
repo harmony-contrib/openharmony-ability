@@ -3,23 +3,23 @@ use napi_ohos::{bindgen_prelude::ObjectRef, Env, Error, Result};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
-use crate::{
-    create_permission_request_tsfn, input, set_helper, set_main_thread_env, Event, InputEvent,
-    IntervalInfo, OpenHarmonyApp, Rect, Size,
-};
+use crate::{input, BridgeRuntime, Event, InputEvent, IntervalInfo, OpenHarmonyApp, Rect, Size};
 
 /// create lifecycle object and return to arkts
 pub fn render(
     env: &Env,
-    helper: ObjectRef,
+    bindings: ObjectRef,
     slot: ArkUIHandle,
     app: OpenHarmonyApp,
 ) -> Result<RootNode> {
-    set_helper(helper);
-    set_main_thread_env(*env);
-
-    // Initialize permission request threadsafe function
-    let _ = create_permission_request_tsfn(env);
+    // Worker transport owns only TSFNs. The separate synchronous endpoint is a FunctionRef that
+    // is borrowed only by an Env-scoped main-thread call; no worker receives it or an ArkTS
+    // ObjectRef/Env handle.
+    let bridge_bindings = BridgeRuntime::from_bindings(env, &bindings)?;
+    app.set_bridge_bindings(
+        bridge_bindings.runtime,
+        bridge_bindings.main_thread_endpoint,
+    );
 
     let mut root = RootNode::new(slot);
     let xcomponent_native =

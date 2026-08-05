@@ -1,44 +1,37 @@
 mod app;
 mod area;
+mod bridge;
 mod configuration;
 mod draw;
 mod error;
 mod event;
-mod helper;
 mod input;
 mod lifecycle;
 mod memory;
 mod render;
-mod resource;
 mod stage;
 mod waker;
 
-#[cfg(feature = "webview")]
-mod webview;
-
 pub use app::*;
 pub use area::*;
+pub use bridge::*;
 pub use configuration::*;
 pub use draw::*;
 pub use error::*;
 pub use event::*;
-pub use helper::*;
 pub use input::*;
 pub use lifecycle::*;
 pub use memory::*;
 pub use render::*;
-pub use resource::*;
 pub use stage::*;
 pub use waker::*;
 
-#[cfg(feature = "webview")]
-pub use webview::*;
+/// Re-exported for [`impl_bridge_napi_type!`](crate::impl_bridge_napi_type) expansions in
+/// application/plugin crates.
+#[doc(hidden)]
+pub use napi_ohos;
 
 // re-export arkui and avoid the need to import it in the lib.rs
 pub use ohos_arkui_binding as arkui;
 pub use ohos_ime_binding as ime;
-pub use ohos_resource_manager_binding as resource_manager;
 pub use ohos_xcomponent_binding as xcomponent;
-
-#[cfg(feature = "webview")]
-pub use ohos_web_binding as native_web;
