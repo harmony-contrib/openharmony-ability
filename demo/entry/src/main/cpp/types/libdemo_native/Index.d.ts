@@ -32,7 +32,6 @@ export interface WebviewControllerEvent {
 
 export interface WebviewControllerRequest {
   id: string;
-  slotId: string;
   visible?: boolean;
   color?: string;
   url?: string;
@@ -43,7 +42,16 @@ export interface WebviewControllerRequest {
 
 export interface WebviewCreateRequest {
   id: string;
-  slotId: string;
+  /**
+   * Optional window surface key the WebView mounts into. Defaults to "main" (the default
+   * window's DefaultXComponent); sub-window instances register under their own windowKey.
+   */
+  windowKey?: string;
+  /**
+   * Optional opaque container handle issued by the built-in ohos.node plugin. When provided the
+   * WebView FrameNode is appended under that container instead of the window root.
+   */
+  parentHandle?: number;
   url?: string;
   html?: string;
   style: WebviewStyle;
@@ -63,7 +71,6 @@ export interface WebviewCreateRequest {
 
 export interface WebviewCreateResponse {
   id: string;
-  slotId: string;
 }
 
 /** Completion notification delivered directly through a named N-API callback. */
@@ -116,7 +123,6 @@ export interface WebviewNavigationResponse {
 
 export interface WebviewScriptRequest {
   id: string;
-  slotId: string;
   script: string;
 }
 
@@ -131,6 +137,10 @@ export interface WebviewStringResponse {
 export interface WebviewStyle {
   x?: number | string;
   y?: number | string;
+  /** Optional width override; defaults to the full container. Numbers are vp, strings are ArkUI lengths. */
+  width?: number | string;
+  /** Optional height override; defaults to the full container. Numbers are vp, strings are ArkUI lengths. */
+  height?: number | string;
   visible?: boolean;
   backgroundColor?: string;
 }
@@ -179,10 +189,29 @@ export interface MainThreadInspectResponse {
 }
 
 /**
- * Creates a WebView through the WebView plugin. The ArkTS plugin mounts only into the named
- * business-owned BridgeNodeHost slot; it does not touch DefaultXComponent internals.
+ * Creates a WebView through the WebView plugin. The ArkTS plugin mounts the WebView FrameNode
+ * into the session root (full-bleed default).
  */
 export declare function createDemoWebview(): Promise<void>;
+
+/**
+ * Creates a WebView under an ohos.node container and mounts the container tree into the session
+ * root, demonstrating the normalized composition model (Rust composes the node tree by handle).
+ */
+export declare function createComposedDemoWebview(): Promise<void>;
+
+/**
+ * Creates a WebView pinned to the bottom edge (style y = "70%", height = "30%") instead of
+ * full-screen, proving the caller owns WebView layout in the normalized model.
+ */
+export declare function createBottomDemoWebview(): Promise<void>;
+
+/**
+ * Creates a WebView inside the sub-window surface (windowKey = "sub"). The sub window page
+ * places a second DefaultXComponent({ windowKey: "sub" }) and this WebView mounts into that
+ * window's own node tree, proving per-window plugin surfaces.
+ */
+export declare function createSubWindowWebview(): Promise<void>;
 
 /** Bytes travel through the bridge as a Uint8Array, not a JSON number array or Base64 string. */
 export declare function demoPluginBytes(): Promise<Array<number>>;

@@ -1,9 +1,9 @@
+import { DefaultXComponent, invokeNativeBackPressInterceptor } from "@ohos-rs/ability";
+import { demoWindowStage } from "../entryability/EntryAbility";
+import { SUB_WINDOW_KEY, SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
-  BridgeNodeHost,
-  DefaultXComponent,
-  invokeNativeBackPressInterceptor,
-} from "@ohos-rs/ability";
-import {
+  createBottomDemoWebview,
+  createComposedDemoWebview,
   createDemoWebview,
   demoRequestPermissionFromMainThread,
   evaluateDemoWebviewScript,
@@ -25,7 +25,6 @@ import {
 import { DemoButton, DemoCard } from "../components/DemoCard";
 
 const MODULE_NAME = "demo_native";
-const WEBVIEW_SLOT = "webview-panel";
 
 @Entry
 @Component
@@ -162,7 +161,64 @@ struct Index {
     this.webviewStatus = "";
     try {
       await createDemoWebview();
-      this.webviewStatus = "✓ WebView mounted in business slot";
+      this.webviewStatus = "✓ WebView mounted into the session root";
+    } catch (error) {
+      this.webviewStatus = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleCreateComposedWebview() {
+    this.busyKey = "webview";
+    this.webviewStatus = "";
+    try {
+      await createComposedDemoWebview();
+      this.webviewStatus = "✓ WebView mounted under an ohos.node container tree";
+    } catch (error) {
+      this.webviewStatus = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleCreateBottomWebview() {
+    this.busyKey = "webview";
+    this.webviewStatus = "";
+    try {
+      await createBottomDemoWebview();
+      this.webviewStatus = "✓ WebView pinned to the bottom edge (y=70%, height=30%)";
+    } catch (error) {
+      this.webviewStatus = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleOpenSubWindow() {
+    this.busyKey = "webview";
+    this.webviewStatus = "";
+    try {
+      const stage = demoWindowStage;
+      if (stage === null) {
+        throw new Error("WindowStage is not ready");
+      }
+      const subWindow = await stage.createSubWindow(SUB_WINDOW_NAME);
+      // Size the sub window against the main window and park it on the right side, so it is
+      // large enough to use and does not cover the demo controls on the left.
+      const mainWindow = stage.getMainWindowSync();
+      const mainRect = mainWindow.getWindowProperties().windowRect;
+      const width = Math.min(760, Math.floor(mainRect.width * 0.7));
+      const height = Math.min(1100, Math.floor(mainRect.height * 0.85));
+      await subWindow.resize(width, height);
+      await subWindow.moveWindowTo(
+        mainRect.width - width - 16,
+        Math.max(24, Math.floor((mainRect.height - height) / 2)),
+      );
+      await subWindow.setUIContent("pages/SubWindowPage");
+      await subWindow.show();
+      this.webviewStatus =
+        '✓ sub window opened: it owns its own node tree (windowKey="' + SUB_WINDOW_KEY + '")';
     } catch (error) {
       this.webviewStatus = `✗ ${String(error)}`;
     } finally {
@@ -444,6 +500,15 @@ struct Index {
           new DemoButton("create webview", (): void => {
             this.handleCreateWebview();
           }),
+          new DemoButton("create composed webview", (): void => {
+            this.handleCreateComposedWebview();
+          }),
+          new DemoButton("create bottom webview", (): void => {
+            this.handleCreateBottomWebview();
+          }),
+          new DemoButton("open sub window", (): void => {
+            this.handleOpenSubWindow();
+          }),
           new DemoButton("background red", (): void => {
             this.handleWebviewBackground();
           }),
@@ -456,13 +521,12 @@ struct Index {
         ],
       })
       Stack() {
+        // Layer order is declaration order: business content below and above the single session
+        // node tree. The WebView plugin (and any other plugin) mounts its FrameNode into that
+        // tree; there is no BridgeNodeHost or named slot anymore.
+        this.WebviewUnderlay()
         DefaultXComponent({ moduleName: MODULE_NAME })
-        BridgeNodeHost({
-          moduleName: MODULE_NAME,
-          slotId: WEBVIEW_SLOT,
-          underlay: this.WebviewUnderlay,
-          foreground: this.WebviewOverlay,
-        })
+        this.WebviewOverlay()
       }
       .layoutWeight(1)
       .width("100%")
@@ -549,7 +613,7 @@ struct Index {
   @Builder
   WebviewUnderlay() {
     Column() {
-      Text("Business-owned content below the plugin node slot.")
+      Text("Business-owned content below the session node tree.")
         .fontSize(14)
         .fontColor("#666")
     }

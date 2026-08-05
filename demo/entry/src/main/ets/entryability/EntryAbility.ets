@@ -17,6 +17,9 @@ import {
 import { DemoNodePlugin } from "../bridge/DemoNodePlugin";
 import { DemoTypedPlugin } from "../bridge/DemoRawPlugin";
 
+/** The main WindowStage, shared with the demo pages so the Index page can open a sub window. */
+export let demoWindowStage: window.WindowStage | null = null;
+
 export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
   public defaultPage: boolean = false;
@@ -40,12 +43,19 @@ export default class EntryAbility extends NativeAbility {
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
     try {
+      demoWindowStage = windowStage;
       const mainWindow = windowStage.getMainWindowSync();
-      await mainWindow.setWindowLayoutFullScreen(false);
+      // 全屏布局：内容延伸到状态栏下方（状态栏变透明），避免顶部出现系统绘制的黑色状态栏条。
+      await mainWindow.setWindowLayoutFullScreen(true);
       super.onWindowStageCreate(windowStage);
       await windowStage.loadContent("pages/Index");
     } catch (error) {
       throw new Error(`Unable to initialize the demo window: ${String(error)}`);
     }
+  }
+
+  async onWindowStageDestroy(): Promise<void> {
+    demoWindowStage = null;
+    await super.onWindowStageDestroy();
   }
 }

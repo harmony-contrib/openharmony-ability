@@ -80,7 +80,7 @@ Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` tha
 - **Async mode** — Rust worker calls `BridgeRuntime::call_async::<P, Req, Resp>("action", req, options)`; data must be `Send + 'static`; the TSFN turns the ArkTS Promise into a future.
 - **Sync mode** — main thread: inside an active N-API callback, `app.with_main_thread_bridge(env, |b| b.call_sync::<P, Req, Resp>(…))`; workers: `BridgeRuntime::call_sync_from_worker` (TSFN, execution still on the main thread, must not be called from the N-API main thread). `BridgeMainThread` is `!Send + !Sync`, never cached.
 - **Platform callbacks** — ArkTS calls `context.invokeNativeSync(event, reqTypeName, respTypeName, value)`; Rust answers in `BridgePlugin::on_main_thread_event` within the same callback. Fail-open (navigation) vs fail-closed (download) per event.
-- **`BridgeNodeSlot`** — node mounting keyed `(sessionId, moduleName, slotId)`; default slot `xcomponent-overlay`, business named slots via `BridgeNodeHost`. Waiters honor `context.onCancel`; no timers/polling for readiness.
+- **One session node tree** — `DefaultXComponent` owns a single root `FrameNode`, injected before `ui-context-ready`; plugins mount via `context.appendChild(key, node, cleanup)` / `removeChild(key)`. Built-in `ohos.node` plugin (`create-container` / `append-child` / `mount-into-root` / `dispose`) gives Rust opaque u32 handles to compose trees; `FrameNode` values never cross N-API. No slots, registries, or readiness waiters.
 
 ## Plugin Contract Rules
 

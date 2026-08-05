@@ -1,27 +1,28 @@
 import { NodeContent } from "@kit.ArkUI";
+import { FrameNode, NodeController } from "@ohos.arkui.node";
+import { UIContext } from "@ohos.arkui.UIContext";
 import { BridgeBindings, Module } from "../ability/type";
-import { BridgeHostRegistry } from "../bridge/BridgeHost";
-import {
-  BridgeNodeSlot,
-  BridgeNodeSlotController,
-  BridgeNodeSlotRegistry,
-  DEFAULT_PLUGIN_NODE_SLOT,
-} from "../bridge/BridgeNodeSlot";
+import { BridgeHostRegistry, MAIN_WINDOW_KEY } from "../bridge/BridgeHost";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 
 export const RouteName = "NativeAbility";
 
 /**
  * Mounts only the Rust XComponent and generic bridge bindings. Platform capabilities deliberately
- * do not live here: a capability that needs ArkUI content (for example WebView) owns a separate
- * HAR host component and the application places that component in its own layout.
+ * do not live here: a capability that needs ArkUI content (for example WebView) owns a plugin
+ * and mounts its own FrameNode into the session root this component provides.
+ *
+ * Multi-window: each instance registers its own window surface under `windowKey` (`"main"` by
+ * default). Sub-window pages place another `DefaultXComponent` with a unique `windowKey` (for
+ * example `windowId`), and plugins address it through `BridgePluginContext.windowScope`.
  */
 @Component
 export struct DefaultXComponent {
   moduleName: string = "";
+  /** Unique key of the window surface this instance owns; `"main"` is the default window. */
+  @Prop windowKey: string = MAIN_WINDOW_KEY;
   private rootSlot = new NodeContent();
-  private pluginNodeController = new BridgeNodeSlotController(this.getUIContext());
-  private pluginNodeSlot?: BridgeNodeSlot;
+  private nodeController = new BridgeRootNodeController(this.getUIContext());
   private nativeModule?: Module;
   @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
@@ -111,49 +112,55 @@ export struct DefaultXComponent {
     );
     nativeModule.render(this.bindings, this.rootSlot);
 
-    // Attach the neutral node layer before UI-context activation. A plugin that needs an ArkUI
-    // surface can therefore mount its own FrameNode during onInstall without DefaultXComponent
-    // gaining any WebView- or capability-specific code.
-    this.pluginNodeSlot = BridgeNodeSlotRegistry.attach(
+    // Create the window root eagerly (NodeContainer asks the controller lazily) so it exists
+    // before `ui-context-ready`. Every plugin then mounts into this one tree without slots,
+    // registries or readiness waiters. Attaching the `"main"` window emits `ui-context-ready`;
+    // sub-window instances (unique `windowKey`) only register their own surface.
+    const root = this.nodeController.makeNode(this.getUIContext());
+    BridgeHostRegistry.attachWindow(
       this.bridgeSessionId,
       moduleName,
-      DEFAULT_PLUGIN_NODE_SLOT,
+      this.windowKey,
       this.getUIContext(),
-      this.pluginNodeController,
+      root,
     );
 
     // Rust must observe readiness before ArkTS plugin installation can emit an event.
-    nativeModule.onBridgeLifecycle?.("ui-context-ready");
-    await BridgeHostRegistry.setUiContext(this.bridgeSessionId, moduleName, this.getUIContext());
+    if (this.windowKey === MAIN_WINDOW_KEY) {
+      nativeModule.onBridgeLifecycle?.("ui-context-ready");
+    }
   }
 
   aboutToDisappear(): void {
     const moduleName = this.moduleName.trim();
     if (this.bridgeSessionId && moduleName) {
       const nativeModule = this.nativeModule;
-      const pluginNodeSlot = this.pluginNodeSlot;
-      this.pluginNodeSlot = undefined;
-      BridgeHostRegistry.clearUiContext(this.bridgeSessionId, moduleName)
-        .then(() => nativeModule?.onBridgeLifecycle?.("ui-context-destroy"))
+      const windowKey = this.windowKey;
+      BridgeHostRegistry.detachWindow(this.bridgeSessionId, moduleName, windowKey)
+        .then(() => {
+          if (windowKey === MAIN_WINDOW_KEY) {
+            nativeModule?.onBridgeLifecycle?.("ui-context-destroy");
+          }
+        })
         .catch(() => {})
         .finally(() => {
-          if (pluginNodeSlot) {
-            BridgeNodeSlotRegistry.detach(pluginNodeSlot);
+          this.nodeController.disposeRoot();
+          if (windowKey === MAIN_WINDOW_KEY) {
+            BridgeHostRegistry.detachEventSink(this.bridgeSessionId, moduleName);
           }
-          BridgeHostRegistry.detachEventSink(this.bridgeSessionId, moduleName);
         });
     }
   }
 
   build() {
     Stack() {
+      // ContentSlot stays below the plugin tree exactly as before: the XComponent/RS render root
+      // is the base layer, and the session plugin tree overlays it with the legacy transparent
+      // hit-test policy.
       ContentSlot(this.rootSlot)
-      // Keep the legacy overlay tree and its transparent hit-test policy intact.  Plugins only
-      // replace the old WebView-specific controller with a neutral FrameNode mount point, so an
-      // existing XComponent keeps its sizing, stacking, and input behaviour.
       Row() {
         Column() {
-          NodeContainer(this.pluginNodeController)
+          NodeContainer(this.nodeController)
             .height("100%")
             .width("100%")
         }.width("100%")
@@ -161,5 +168,31 @@ export struct DefaultXComponent {
       .height("100%")
       .hitTestBehavior(HitTestMode.Transparent)
     };
+  }
+}
+
+/**
+ * Owns the single session root FrameNode. Plugins never touch this controller directly; they
+ * receive the root through `BridgePluginContext.getRootFrameNode()`.
+ */
+class BridgeRootNodeController extends NodeController {
+  private root: FrameNode | null = null;
+  private readonly uiContext: UIContext;
+
+  constructor(uiContext: UIContext) {
+    super();
+    this.uiContext = uiContext;
+  }
+
+  makeNode(uiContext: UIContext): FrameNode {
+    if (this.root === null) {
+      this.root = new FrameNode(uiContext);
+    }
+    return this.root;
+  }
+
+  disposeRoot(): void {
+    this.root?.dispose();
+    this.root = null;
   }
 }

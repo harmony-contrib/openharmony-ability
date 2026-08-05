@@ -23,13 +23,8 @@ export type {
   BridgePluginContext,
   BridgePluginExecution,
   BridgePluginFactory,
+  BridgeWindowScope,
   MainThreadSyncBridgePlugin,
 } from "./src/main/ets/ability/type";
 export { DefaultXComponent } from "./src/main/ets/components/DefaultXComponent";
 export { invokeNativeBackPressInterceptor } from "./src/main/ets/runtime/BackPress";
-export {
-  BridgeNodeHost,
-  BridgeNodeSlot,
-  BridgeNodeSlotRegistry,
-  DEFAULT_PLUGIN_NODE_SLOT,
-} from "./src/main/ets/bridge/BridgeNodeSlot";

@@ -15,9 +15,9 @@ use std::{
 
 use futures_channel::oneshot;
 use napi_derive_ohos::napi;
-use napi_ohos::{Env, Error, Result};
+use napi_ohos::{Either, Env, Error, Result};
 use ohos_hilog_binding::hilog_info;
-use openharmony_ability::{Event, InputEvent, OpenHarmonyApp};
+use openharmony_ability::{Event, InputEvent, NodeExt, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
 use openharmony_ability_plugin_files::{
     dialog_type, FileDialogFilter, FileDialogOptions, FilesExt,
@@ -28,7 +28,7 @@ use openharmony_ability_plugin_url::UrlExt;
 use openharmony_ability_plugin_webview::{
     WebviewBridgePlugin, WebviewCallbacksBuilder, WebviewClient, WebviewCreateRequest,
     WebviewDownloadStartResponse, WebviewExt, WebviewJavascriptProxyBuilder, WebviewProtocol,
-    WebviewProtocolOptions,
+    WebviewProtocolOptions, WebviewStyle,
 };
 
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
@@ -47,7 +47,9 @@ static WEBVIEW_BINDINGS: LazyLock<Mutex<DemoWebviewBindings>> =
     LazyLock::new(|| Mutex::new(DemoWebviewBindings::default()));
 
 const WEB_TAG: &str = "demo_webview";
-const WEBVIEW_SLOT: &str = "webview-panel";
+const COMPOSED_WEB_TAG: &str = "demo_composed_webview";
+const BOTTOM_WEB_TAG: &str = "demo_bottom_webview";
+const SUB_WINDOW_WEB_TAG: &str = "demo_sub_window_webview";
 const WEB_SCHEME: &str = "demoweb";
 const WEB_URL: &str = "demoweb://index";
 const INDEX: &str = include_str!("index.html");
@@ -249,8 +251,9 @@ pub fn toggle_back_press_intercept() -> bool {
     next
 }
 
-/// Creates a WebView through the WebView plugin. The ArkTS plugin mounts only into the named
-/// business-owned BridgeNodeHost slot; it does not touch DefaultXComponent internals.
+/// Creates a WebView through the WebView plugin. Without a parent container handle the ArkTS
+/// host mounts the WebView FrameNode into the session root (full-bleed default); it never touches
+/// DefaultXComponent internals.
 #[napi]
 pub async fn create_demo_webview() -> Result<()> {
     let client = current_app()?.webview()?;
@@ -258,7 +261,72 @@ pub async fn create_demo_webview() -> Result<()> {
     client
         .create(
             WebviewCreateRequest::new(WEB_TAG)
-                .slot_id(WEBVIEW_SLOT)
+                .transparent(true)
+                .url(WEB_URL),
+        )
+        .await?;
+    Ok(())
+}
+
+/// Demonstrates the normalized composition model: an RS-layer container node is created through
+/// the built-in ohos.node plugin, the WebView FrameNode is attached under it via
+/// `parent_node(...)`, and the whole tree is mounted into the session root.
+#[napi]
+pub async fn create_composed_demo_webview() -> Result<()> {
+    let client = current_app()?.webview()?;
+    ensure_demo_webview_bindings(&client)?;
+    let node_surface = current_app()?.node()?;
+    let container = node_surface.create_container().await?;
+    client
+        .create(
+            WebviewCreateRequest::new(COMPOSED_WEB_TAG)
+                .parent_node(container)
+                .transparent(true)
+                .url(WEB_URL),
+        )
+        .await?;
+    node_surface.mount_into_root(container).await?;
+    hilog_info!(format!(
+        "composed WebView mounted: container handle {container}, tag {COMPOSED_WEB_TAG}"
+    )
+    .as_str());
+    Ok(())
+}
+
+/// Renders a WebView pinned to the bottom edge of the session surface instead of full-screen:
+/// `y = "70%"` + `height = "30%"` keeps the full-bleed default intact for WebViews without an
+/// explicit style. This proves the normalized model gives the caller full layout control.
+#[napi]
+pub async fn create_bottom_demo_webview() -> Result<()> {
+    let client = current_app()?.webview()?;
+    ensure_demo_webview_bindings(&client)?;
+    client
+        .create(
+            WebviewCreateRequest::new(BOTTOM_WEB_TAG)
+                .style(WebviewStyle {
+                    x: None,
+                    y: Some(Either::B("70%".to_owned())),
+                    width: None,
+                    height: Some(Either::B("30%".to_owned())),
+                    visible: None,
+                    background_color: Some("#00000000".to_owned()),
+                })
+                .url(WEB_URL),
+        )
+        .await?;
+    Ok(())
+}
+
+/// Creates a WebView inside the sub-window surface (`window_key = "sub"`). The sub window page
+/// places a second `DefaultXComponent({ windowKey: "sub" })`, and this WebView mounts into that
+/// window's own node tree instead of the main window's.
+#[napi]
+pub async fn create_sub_window_webview() -> Result<()> {
+    let client = current_app()?.webview()?;
+    client
+        .create(
+            WebviewCreateRequest::new(SUB_WINDOW_WEB_TAG)
+                .window_key("sub")
                 .transparent(true)
                 .url(WEB_URL),
         )
@@ -272,7 +340,7 @@ pub async fn create_demo_webview() -> Result<()> {
 pub async fn evaluate_demo_webview_script() -> Result<String> {
     current_app()?
         .webview()?
-        .handle(WEB_TAG, WEBVIEW_SLOT)
+        .handle(WEB_TAG)
         .evaluate_script("document.title")
         .await?
         .ok_or_else(|| Error::from_reason("WebView JavaScript returned no value"))
@@ -282,7 +350,7 @@ pub async fn evaluate_demo_webview_script() -> Result<String> {
 pub async fn set_background_color(color: String) -> Result<()> {
     current_app()?
         .webview()?
-        .handle(WEB_TAG, WEBVIEW_SLOT)
+        .handle(WEB_TAG)
         .set_background_color(color)
         .await
 }
@@ -291,7 +359,7 @@ pub async fn set_background_color(color: String) -> Result<()> {
 pub async fn set_visible(visible: bool) -> Result<()> {
     current_app()?
         .webview()?
-        .handle(WEB_TAG, WEBVIEW_SLOT)
+        .handle(WEB_TAG)
         .set_visible(visible)
         .await
 }

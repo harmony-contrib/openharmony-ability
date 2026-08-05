@@ -4,9 +4,9 @@
 `@ohos-rs/ability-plugin-webview` HAR 成对工作：ArkTS 持有 `WebviewController`、ArkUI `FrameNode` 和
 ArkWeb delegate；Rust 只持有 controller ID、具名 N-API 数据及 Rust-owned callback/protocol closure。
 
-插件不把 WebView 写进 framework 的 `DefaultXComponent`。默认情况下它挂载到通用
-`xcomponent-overlay` slot；业务也可用 `BridgeNodeHost` 提供任意命名 slot，从而保留 WebView、
-XComponent 和自定义 ArkUI 节点的混合布局。
+插件不把 WebView 写进 framework 的 `DefaultXComponent`。默认情况下 WebView 的 `FrameNode` 挂进
+session 根树（全屏）；需要组合时，`WebviewCreateRequest::parent_node(handle)` 把它挂到
+`ohos.node` 容器句柄之下，从而保留 WebView、XComponent 和自定义 ArkUI 节点的混合布局。
 
 ## 契约
 
@@ -17,11 +17,11 @@ XComponent 和自定义 ArkUI 节点的混合布局。
 | 插件 ID / bridge 版本 | `ohos.webview` / `1` |
 | 执行模式 | 异步：`AsyncBridge` / `invokeAsync` |
 | 前置 context | `ui-context` |
-| 默认 slot | `xcomponent-overlay` |
+| 挂载 | session 根树（默认全屏）；可选 `parentHandle` 挂到 `ohos.node` 容器 |
 | 核心 action | `create`、控制器操作、`evaluate-script` |
 
 所有出站 action 和所有 ArkWeb 反向事件都是具名 N-API 契约，不使用 JSON。`create` 返回 controller
-ID 和 slot ID；之后通过 `WebviewHandle` 操作控制器，而不是跨线程保存 ArkTS controller/object。
+ID；之后通过 `WebviewHandle` 操作控制器，而不是跨线程保存 ArkTS controller/object。
 
 ## 接入与注册
 
@@ -55,7 +55,7 @@ export default class EntryAbility extends NativeAbility {
 }
 ```
 
-HAR 的 ArkTS 运行时、slot 和 delegate 说明见 [ArkTS README](../../plugins/webview/README.md)。
+HAR 的 ArkTS 运行时、挂载和 delegate 说明见 [ArkTS README](../../plugins/webview/README.md)。
 
 ## 创建与控制 WebView
 
@@ -69,7 +69,6 @@ async fn open_article(app: &OpenHarmonyApp) -> Result<()> {
     let handle = client
         .create(
             WebviewCreateRequest::new("article")
-                .slot_id("webview-panel")
                 .transparent(true)
                 .url("https://example.com"),
         )
@@ -82,20 +81,40 @@ async fn open_article(app: &OpenHarmonyApp) -> Result<()> {
 }
 ```
 
-`WebviewCreateRequest` 支持 URL/HTML、slot、样式、JavaScript 开关、devtools、user agent、autoplay、
-document-start initialization scripts、headers 和 `transparent`。`transparent(true)` 是创建时语义：若
-没有显式 background color，ArkTS 使用透明背景；显式颜色优先。
+组合到 RS 层节点树：先用内置 `ohos.node` 插件建容器，把 WebView 作为子节点挂进去，再整体挂根：
+
+```rust
+use openharmony_ability::{NodeExt, OpenHarmonyApp};
+use openharmony_ability_plugin_webview::{WebviewCreateRequest, WebviewExt};
+
+async fn composed_webview(app: &OpenHarmonyApp) -> Result<()> {
+    let container = app.node()?.create_container().await?;
+    app.webview()?
+        .create(
+            WebviewCreateRequest::new("article")
+                .parent_node(container)
+                .url("https://example.com"),
+        )
+        .await?;
+    app.node()?.mount_into_root(container).await?;
+    Ok(())
+}
+```
+
+`WebviewCreateRequest` 支持 URL/HTML、`parent_node` 组合、样式、JavaScript 开关、devtools、
+user agent、autoplay、document-start initialization scripts、headers 和 `transparent`。
+`transparent(true)` 是创建时语义：若没有显式 background color，ArkTS 使用透明背景；显式颜色优先。
 
 `WebviewHandle` 提供 `set_visible`、`set_background_color`、`load_url`、
 `load_url_with_headers`、`load_html`、`url`、`set_zoom`、`reload`、`focus`、`cookies_with_url`、
 `clear_all_browsing_data`、`remove`/`dispose` 和 `evaluate_script`。这些都是异步控制器 action。
 
-## slot 与生命周期
+## 挂载与生命周期
 
-- `DefaultXComponent` 已提供默认 slot；需要业务自定义位置时，在页面使用
-  `BridgeNodeHost({ moduleName, slotId, underlay, foreground })`，并把同一 `slotId` 写入 create request。
-- 异步 `create` 可以等待 slot attach、controller attach 和首次导航启动；等待由 lifecycle/cancel
-  驱动，不使用固定 timer 轮询。
+- 默认全屏挂入 session 根树；需要组合时用 `parent_node(container)` 把 WebView 挂到
+  `ohos.node` 容器之下（容器最终也由 Rust 决定挂不挂根）。
+- 异步 `create` 等待 controller attach 和首次导航启动；等待由 lifecycle/cancel 驱动，不使用
+  固定 timer 轮询。
 - UI/Ability 销毁、调用超时或取消时，ArkTS 必须卸载临时节点和 controller 映射；Rust 不保存
   `UIContext`、`FrameNode`、`WebviewController` 或 ArkTS function。
 
@@ -153,5 +172,5 @@ WebviewJavascriptProxyBuilder::new("article", "native")
 前声明；controller attach 后插件会先安装 protocol/proxy/delegate，再开始首次导航。需要异步回复
 custom protocol 时使用 `custom_protocol_async` / `WebviewProtocolResponder`。
 
-完整的 typeName、反向事件、线程、slot 和验收规则见
+完整的 typeName、反向事件、线程、挂载和验收规则见
 [插件开发规范](../../docs/plugin-development-standard.md)。
