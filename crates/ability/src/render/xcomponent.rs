@@ -1,5 +1,6 @@
 use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
 use napi_ohos::{bindgen_prelude::ObjectRef, Env, Error, Result};
+use ohos_arkui_binding::component::attribute::ArkUICommonAttribute;
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
@@ -24,6 +25,9 @@ pub fn render(
     let mut root = RootNode::new(slot);
     let xcomponent_native =
         XComponent::new().map_err(|e| Error::from_reason(e.reason.to_string()))?;
+    xcomponent_native
+        .background_color(0x0000_0000)
+        .map_err(|e| Error::from_reason(e.reason.to_string()))?;
 
     {
         let mut inner = app.inner.write().unwrap();
