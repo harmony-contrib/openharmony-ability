@@ -20,7 +20,10 @@ OpenHarmony applications are driven by callbacks, so there are two important con
 - `native_ability` — ArkTS package source shared by Rust and C/SDL native modules
 - `package` — packaged ohpm artifact source
 - `demo` — unified Harmony demo project
-- `rust_example/demo_native` — unified native demo implementation
+- `rust_example/demo_native` — unified native demo implementation (Rust)
+- `c_module` — pure C framework (`c_module/ability`) + pure C demo module
+  (`c_module/example/demo_native`); SDL-style integration for business C code. See
+  `c_module/README.md`.
 
 ## Usage
 
@@ -79,7 +82,17 @@ ohrs build --arch arm64
 
 - Harmony demo project: `demo`
 - Native demo module (Rust example): `rust_example/demo_native/src/lib.rs`
+- Native demo module (pure C example): `c_module/example/demo_native/src/main.c`
 - ArkTS package source: `native_ability`
+
+## Pure C Integration
+
+Business code in C99 can use the same ArkTS host and plugin set without Rust: `c_module/ability`
+implements the native module contract (`init`/`render`/`onBackPressIntercept`/
+`onBridgeSyncEvent`/`onBridgeLifecycle`) and offers an SDL-style application model
+(`OHAbility_StartApp` with AppInit/AppEvent/AppIterate/AppQuit), the three bridge call modes
+(async/sync/worker-sync), C plugin registration, and the full event surface. Build the C demo
+module with `scripts/build-c-demo.sh` (optionally `--install` to swap it into the demo app).
 
 ## License
 
