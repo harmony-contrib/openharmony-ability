@@ -7,6 +7,7 @@ import {
   BridgePluginContext,
   AsyncPluginBase,
   BridgeContextRequirement,
+  BridgeLifecycleEvent,
 } from "@ohos-rs/ability";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
@@ -917,21 +918,23 @@ class WebviewSurface {
     }
   }
 
-  remove(id: string, expected?: WebviewEntry): boolean {
+  remove(id: string, expected?: WebviewEntry, detachNode: boolean = true): boolean {
     const entry = this.entries.get(id);
     if (!entry || (expected !== undefined && entry !== expected)) {
       return false;
     }
     this.entries.delete(id);
     entry.failController(`WebView '${id}' was removed before its controller attached`);
-    const scope = this.pluginContext.windowScope(entry.data.windowKey);
-    const parentHandle = entry.data.mountParentHandle;
-    if (parentHandle !== null) {
-      try {
-        scope.getFrameNode(parentHandle).removeChild(entry.node.getFrameNode());
-      } catch {}
-    } else {
-      scope.removeChild(mountKeyOf(id));
+    if (detachNode) {
+      const scope = this.pluginContext.windowScope(entry.data.windowKey);
+      const parentHandle = entry.data.mountParentHandle;
+      if (parentHandle !== null) {
+        try {
+          scope.getFrameNode(parentHandle).removeChild(entry.node.getFrameNode());
+        } catch {}
+      } else {
+        scope.removeChild(mountKeyOf(id));
+      }
     }
     try {
       notifyNative(
@@ -959,13 +962,13 @@ class WebviewSurface {
     }
   }
 
-  dispose(): void {
+  dispose(detachNodes: boolean = true): void {
     if (this.disposed) {
       return;
     }
     this.disposed = true;
     for (const id of Array.from(this.entries.keys())) {
-      this.remove(id);
+      this.remove(id, undefined, detachNodes);
     }
   }
 
@@ -1002,6 +1005,21 @@ export class WebviewPlugin extends AsyncPluginBase {
   override onInstall(context: BridgePluginContext): void {
     ensureWebEngineInitialized(context);
     this.surface = new WebviewSurface(context);
+  }
+
+  override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginContext): void {
+    if (event.kind === "ui-context-destroy") {
+      const surface = this.surface;
+      this.surface = undefined;
+      // BridgeHost already detached the old window from its lookup table and owns the old node
+      // tree cleanup. Release controllers/waiters without accidentally addressing a newly
+      // attached main-window root.
+      surface?.dispose(false);
+      return;
+    }
+    if (event.kind === "ui-context-ready" && this.surface === undefined) {
+      this.surface = new WebviewSurface(context);
+    }
   }
 
   async invokeAsync(

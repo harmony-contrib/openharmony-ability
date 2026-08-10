@@ -5,6 +5,7 @@ import {
   BridgePluginContext,
   AsyncPluginBase,
   BridgeContextRequirement,
+  BridgeLifecycleEvent,
 } from "@ohos-rs/ability";
 
 interface BadgeData {
@@ -35,6 +36,20 @@ export class DemoNodePlugin extends AsyncPluginBase {
   private mounted = false;
 
   onInstall(context: BridgePluginContext): void {
+    this.mount(context);
+  }
+
+  override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginContext): void {
+    if (event.kind === "ui-context-destroy") {
+      // BridgeHost owns the detached tree and runs its cleanup; do not address a replacement
+      // window through this plugin's session-scoped context.
+      this.mounted = false;
+    } else if (event.kind === "ui-context-ready" && !this.mounted) {
+      this.mount(context);
+    }
+  }
+
+  private mount(context: BridgePluginContext): void {
     // The session root is guaranteed to exist before ui-context-ready, so plugins mount their
     // nodes directly without slots, registries or readiness waiters.
     const node = new BuilderNode<[BadgeData]>(context.getUIContext());

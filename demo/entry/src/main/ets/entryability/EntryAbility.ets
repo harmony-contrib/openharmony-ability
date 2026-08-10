@@ -1,6 +1,4 @@
 import { EagerPlugin, LazyPlugin, NativeAbility } from "@ohos-rs/ability";
-import Want from "@ohos.app.ability.Want";
-import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
 import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
 import { FilesPlugin } from "@ohos-rs/ability-plugin-files";
@@ -37,25 +35,19 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => new DemoNodePlugin()),
   ];
 
-  async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
-    super.onCreate(want, launchParam);
-  }
-
-  async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-    try {
-      demoWindowStage = windowStage;
+  onWindowStageCreate(windowStage: window.WindowStage): void {
+    demoWindowStage = windowStage;
+    super.onWindowStageCreate(windowStage);
+    void this.enqueueLifecycleOperation("demo-window-content", async (): Promise<void> => {
       const mainWindow = windowStage.getMainWindowSync();
       // 全屏布局：内容延伸到状态栏下方（状态栏变透明），避免顶部出现系统绘制的黑色状态栏条。
       await mainWindow.setWindowLayoutFullScreen(true);
-      super.onWindowStageCreate(windowStage);
       await windowStage.loadContent("pages/Index");
-    } catch (error) {
-      throw new Error(`Unable to initialize the demo window: ${String(error)}`);
-    }
+    });
   }
 
-  async onWindowStageDestroy(): Promise<void> {
+  onWindowStageDestroy(): void {
     demoWindowStage = null;
-    await super.onWindowStageDestroy();
+    super.onWindowStageDestroy();
   }
 }

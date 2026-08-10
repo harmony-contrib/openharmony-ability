@@ -325,6 +325,13 @@ ArkTS 平台回调进入 Rust 的 `on_main_thread_event` 是**入站 scoped call
 生命周期的调用顺序必须保留为下列链路；插件只能订阅它，不能把原 native module 的 lifecycle
 callback 替换掉：
 
+OpenHarmony SDK 中 `UIAbility.onCreate`、`onWindowStageCreate` 和 `onWindowStageDestroy` 是同步
+`void` 回调，平台不会等待它们返回的 Promise；只有 `onDestroy` 允许返回 Promise。因此这些系统入口
+必须同步捕获参数并把异步工作放入同一个 Ability 级 FIFO，不能把 `async onCreate` 等方法本身当作
+生命周期屏障。BridgeHost 内部也必须按 module/session 串行生命周期任务，使配置、内存、WindowStage、
+UIContext 和销毁事件不能相互穿插。单个插件的 lifecycle/onDispose 失败只能记录，不能中断后续插件；
+session 开始关闭后必须拒绝新调用并取消未完成调用。
+
 1. `NativeAbility.onCreate` 打开 module/session 对应的 `BridgeHost`，创建 factory，并发出
    `ability-create`。
 2. `NativeAbility.onWindowStageCreate` 先提供 `WindowStage`，再发出 `window-stage-create`；窗口事件
@@ -340,6 +347,11 @@ callback 替换掉：
    销毁）。
 5. `configuration-updated`、`memory-level`、window-stage event 等保持由 `NativeAbility` 原有链路
    分发，同时作为受控 lifecycle event 交给已安装插件。
+
+Rust 侧插件在一个 Ability session 中首次满足 requirements 后视为已激活：即使 UIContext 或
+WindowStage 已先销毁，它仍必须收到该 session 后续的 `ui-context-destroy`、
+`window-stage-destroy` 和 `ability-destroy`。下一次 `ability-create` 必须清空上一 session 的 readiness
+和 lifecycle history，再从新会话开始重放，禁止把旧 Ability 事件带入新实例。
 
 ArkTS context 是 module + session 范围的。插件不得假设多个 module 共用一个 controller、根节点或
 状态表；所有跨页面状态键必须至少包含 `sessionId` 与 `moduleName`。
@@ -512,6 +524,11 @@ fn configure_ability(app: OpenHarmonyApp) {
         .expect("login Rust facade must be registered exactly once");
 }
 ```
+
+native module 可能跨越多个 UIAbility 实例继续存活，因此 `#[ability]` 初始化器对同一 module 的
+进程级 `OpenHarmonyApp` 只执行一次；每次 Ability 重建仍会刷新 `AbilityInitContext` 并创建新的
+lifecycle handle。初始化器应只做插件、protocol 和 run loop 等进程级配置，session 资源必须通过
+lifecycle 创建与释放，不能依赖重复执行初始化器。
 
 ArkTS HAR 导出唯一 factory，应用通过 `NativeAbility.bridgePlugins` 显式装配：
 

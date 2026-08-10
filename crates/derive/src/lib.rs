@@ -43,6 +43,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
                 std::sync::LazyLock::new(openharmony_ability::OpenHarmonyApp::new);
+            static APP_CONFIGURED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
             thread_local! {
                 pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
@@ -61,8 +62,11 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             ) -> napi_ohos::Result<openharmony_ability::ApplicationLifecycle<'a>> {
                 let init_context = openharmony_ability::AbilityInitContext::from_object(context.as_ref())?;
                 (*APP).set_init_context(init_context);
+                // A native module can outlive one UIAbility instance. Configure its process-wide
+                // Rust plugin registry exactly once, while still refreshing the per-session init
+                // context and lifecycle handle on every Ability recreation.
+                APP_CONFIGURED.get_or_init(|| #fn_name((*APP).clone()));
                 let lifecycle_handle = openharmony_ability::create_lifecycle_handle(env, (*APP).clone())?;
-                #fn_name((*APP).clone());
                 Ok(lifecycle_handle)
             }
 

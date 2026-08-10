@@ -3,6 +3,8 @@ import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import * as Entry from "../components/MainPage";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
+import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import {
   AbilityInitContext,
   ApplicationLifecycle,
@@ -14,9 +16,17 @@ import {
   BridgeWindowStageEventLifecyclePayload,
   Module,
 } from "./type";
-import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 
 export const STATE_KEY = "ohos.rs.ability.application.state";
+
+interface LoadedNativeModule {
+  moduleName: string;
+  module: Module;
+}
+
+interface NativeModuleRuntime extends LoadedNativeModule {
+  lifecycle: ApplicationLifecycle;
+}
 
 export class NativeAbility extends UIAbility {
   public moduleName: string | string[] = "";
@@ -24,10 +34,14 @@ export class NativeAbility extends UIAbility {
   public loadMode: "async" | "sync" = "async";
   /** Application-provided capability plugins. NativeAbility itself has no concrete plugin imports. */
   public bridgePlugins: BridgePluginFactory[] = [];
-  private nativeModules: Module[] = [];
-  private lifecycles: ApplicationLifecycle[] = [];
-  private loadedModuleNames: string[] = [];
+
+  private moduleRuntimes: NativeModuleRuntime[] = [];
   private bridgeSessionId: string = "";
+  private readonly lifecycleQueue = new SerialTaskQueue((label: string, error: Error): void => {
+    console.error(`[NativeAbility] lifecycle operation '${label}' failed: ${String(error)}`);
+  });
+  private acceptingLifecycle: boolean = false;
+  private windowStageActive: boolean = false;
 
   protected resolveModuleNames(): string[] {
     const moduleNames = NativeModuleLoader.resolveModuleNames(this.moduleName);
@@ -38,11 +52,24 @@ export class NativeAbility extends UIAbility {
   }
 
   protected forEachLifecycle(handler: (lifecycle: ApplicationLifecycle) => void): void {
-    for (const lifecycle of this.lifecycles) {
+    for (const runtime of this.moduleRuntimes) {
       try {
-        handler(lifecycle);
+        handler(runtime.lifecycle);
       } catch {}
     }
+  }
+
+  /**
+   * Adds framework or subclass work to the one Ability-scoped lifecycle queue. OpenHarmony does
+   * not await onCreate/onWindowStageCreate/onWindowStageDestroy, so those callbacks only capture
+   * their arguments synchronously; this queue is the actual ordering barrier.
+   */
+  protected enqueueLifecycleOperation(
+    label: string,
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    void this.lifecycleQueue.enqueue(label, operation);
+    return this.lifecycleQueue.settled();
   }
 
   protected parseSavedStateMap(rawState: string): Record<string, string> {
@@ -53,8 +80,7 @@ export class NativeAbility extends UIAbility {
     try {
       const parsed = JSON.parse(rawState) as Record<string, object>;
       const mapped: Record<string, string> = {};
-      const keys = Object.keys(parsed);
-      for (const key of keys) {
+      for (const key of Object.keys(parsed)) {
         const value = parsed[key];
         mapped[key] = typeof value === "string" ? value : String(value);
       }
@@ -75,228 +101,299 @@ export class NativeAbility extends UIAbility {
     };
   }
 
+  private updateAppStorage<T>(key: string, value: T): void {
+    AppStorage.setOrCreate(key, value);
+    AppStorage.set(key, value);
+  }
+
   /**
-   * Wires the ArkTS -> Rust main-thread event sink for one native module. Called right after
-   * `module.init` in onCreate so plugins that only require `ability` can emit inbound events on
-   * `ability-create`; the render-time attach in DefaultXComponent overrides it with the same
-   * module object (idempotent, NativeModuleLoader caches instances).
+   * Wires both scoped ArkTS -> Rust ports immediately after module.init. The lifecycle sink lets
+   * BridgeHost serialize UI readiness with ArkTS plugin installation instead of relying on
+   * Promise microtask timing in DefaultXComponent.
    */
-  private attachBridgeEventSink(moduleName: string, module: Module): void {
-    if (this.bridgeSessionId === undefined) {
-      return;
-    }
-    if (typeof module.onBridgeSyncEvent !== "function") {
-      return;
-    }
-    BridgeHostRegistry.attachEventSink(
-      this.bridgeSessionId,
-      moduleName,
-      (
-        pluginId: string,
-        event: string,
-        requestTypeName: string,
-        responseTypeName: string,
-        value: ESObject,
-      ): ESObject => {
-        return module.onBridgeSyncEvent!(pluginId, event, requestTypeName, responseTypeName, value);
-      },
-    );
+  private attachBridgeSinks(sessionId: string, moduleName: string, module: Module): void {
+    const mainThreadSink =
+      typeof module.onBridgeSyncEvent === "function"
+        ? (
+            pluginId: string,
+            event: string,
+            requestTypeName: string,
+            responseTypeName: string,
+            value: ESObject,
+          ): ESObject =>
+            module.onBridgeSyncEvent!(pluginId, event, requestTypeName, responseTypeName, value)
+        : undefined;
+    const lifecycleSink =
+      typeof module.onBridgeLifecycle === "function"
+        ? (kind: string): void => module.onBridgeLifecycle!(kind)
+        : undefined;
+    BridgeHostRegistry.attachEventSink(sessionId, moduleName, mainThreadSink, lifecycleSink);
   }
 
   protected async notifyBridgeLifecycle(event: BridgeLifecycleEvent): Promise<void> {
-    if (!this.bridgeSessionId) {
+    const sessionId = this.bridgeSessionId;
+    if (!sessionId) {
       return;
     }
-    for (const moduleName of this.loadedModuleNames) {
-      await BridgeHostRegistry.emitLifecycle(this.bridgeSessionId, moduleName, event);
+    for (const runtime of this.moduleRuntimes) {
+      try {
+        await BridgeHostRegistry.emitLifecycle(sessionId, runtime.moduleName, event);
+      } catch (error) {
+        console.error(
+          `[NativeAbility] bridge lifecycle '${event.kind}' failed for ${runtime.moduleName}: ${String(error)}`,
+        );
+      }
     }
   }
 
-  protected async setBridgeWindowStage(windowStage: window.WindowStage): Promise<void> {
-    if (!this.bridgeSessionId) {
-      return;
+  private async initializeSession(
+    requestedModules: string[],
+    restoredStateMap: Record<string, string>,
+    fallbackState: string,
+  ): Promise<void> {
+    const previousSessionId = this.bridgeSessionId;
+    if (previousSessionId) {
+      BridgeHostRegistry.beginClosing(previousSessionId);
+      await BridgeHostRegistry.dispose(previousSessionId);
     }
-    for (const moduleName of this.loadedModuleNames) {
-      await BridgeHostRegistry.setWindowStage(this.bridgeSessionId, moduleName, windowStage);
+    this.bridgeSessionId = "";
+    this.moduleRuntimes = [];
+    this.windowStageActive = false;
+    this.updateAppStorage("bridgeSessionId", "");
+
+    const sessionId = await BridgeHostRegistry.open(
+      requestedModules,
+      this.context as common.UIAbilityContext,
+      this.bridgePlugins,
+    );
+    this.bridgeSessionId = sessionId;
+    this.updateAppStorage("bridgeSessionId", sessionId);
+
+    const loadedModules: LoadedNativeModule[] = [];
+    const initializedRuntimes: NativeModuleRuntime[] = [];
+    try {
+      // Loading is transactional. Parallel arrays and partial "continue after error" states made
+      // a module name point at the wrong lifecycle object after one dynamic import failed.
+      for (const moduleName of requestedModules) {
+        const module = await NativeModuleLoader.load(moduleName, this.loadMode);
+        loadedModules.push({ moduleName, module });
+      }
+
+      for (const loaded of loadedModules) {
+        const lifecycle = loaded.module.init(this.createInitContext(loaded.moduleName));
+        const runtime: NativeModuleRuntime = {
+          moduleName: loaded.moduleName,
+          module: loaded.module,
+          lifecycle,
+        };
+        initializedRuntimes.push(runtime);
+        this.attachBridgeSinks(sessionId, loaded.moduleName, loaded.module);
+
+        const restoredState = restoredStateMap[loaded.moduleName] ?? fallbackState;
+        try {
+          lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
+        } catch (error) {
+          console.error(
+            `[NativeAbility] Rust ability-create failed for ${loaded.moduleName}: ${String(error)}`,
+          );
+        }
+      }
+
+      this.moduleRuntimes = initializedRuntimes;
+      for (const runtime of initializedRuntimes) {
+        await BridgeHostRegistry.emitLifecycle(sessionId, runtime.moduleName, {
+          kind: "ability-create",
+          payload: new BridgeAbilityCreateLifecyclePayload(
+            restoredStateMap[runtime.moduleName] ?? fallbackState,
+          ),
+        });
+      }
+    } catch (error) {
+      for (const runtime of initializedRuntimes.slice().reverse()) {
+        try {
+          runtime.lifecycle.windowStageEventCallback.onAbilityDestroy();
+        } catch {}
+      }
+      BridgeHostRegistry.beginClosing(sessionId);
+      await BridgeHostRegistry.dispose(sessionId);
+      if (this.bridgeSessionId === sessionId) {
+        this.bridgeSessionId = "";
+        this.moduleRuntimes = [];
+        this.updateAppStorage("bridgeSessionId", "");
+      }
+      throw new Error(`Unable to initialize native Ability session: ${String(error)}`);
     }
   }
 
-  protected async clearBridgeWindowStage(): Promise<void> {
-    if (!this.bridgeSessionId) {
-      return;
-    }
-    for (const moduleName of this.loadedModuleNames) {
-      await BridgeHostRegistry.clearWindowStage(this.bridgeSessionId, moduleName);
-    }
-  }
-
-  async onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): Promise<void> {
+  onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     const isRestore: boolean =
       (want.parameters?.["ohos.ability.params.abilityRecoveryRestart"] as boolean) ?? false;
     const savedState = want.parameters?.[STATE_KEY];
     const state = isRestore && savedState !== undefined ? savedState.toString() : "";
+    const requestedModules = this.resolveModuleNames();
+    const restoredStateMap = this.parseSavedStateMap(state);
 
-    AppStorage.setOrCreate("moduleName", this.moduleName);
-    AppStorage.setOrCreate("loadMode", this.loadMode);
+    this.acceptingLifecycle = true;
+    this.updateAppStorage("moduleName", this.moduleName);
+    this.updateAppStorage("loadMode", this.loadMode);
+    void this.enqueueLifecycleOperation("ability-create", async (): Promise<void> => {
+      await this.initializeSession(requestedModules, restoredStateMap, state);
+    });
+  }
 
-    const requestedModules: string[] = this.resolveModuleNames();
-    const restoredStateMap: Record<string, string> = this.parseSavedStateMap(state);
-    if (this.bridgeSessionId) {
-      await BridgeHostRegistry.dispose(this.bridgeSessionId);
+  onWindowStageCreate(windowStage: window.WindowStage): void {
+    if (!this.acceptingLifecycle) {
+      return;
     }
-    try {
-      this.bridgeSessionId = await BridgeHostRegistry.open(
-        requestedModules,
-        this.context as common.UIAbilityContext,
-        this.bridgePlugins,
+    void this.enqueueLifecycleOperation("window-stage-create", async (): Promise<void> => {
+      const sessionId = this.bridgeSessionId;
+      if (!sessionId) {
+        throw new Error("Bridge session is unavailable during window-stage-create");
+      }
+
+      // First inject the ArkTS WindowStage object. Rust readiness is then advanced before ArkTS
+      // plugin installation/lifecycle delivery can emit a synchronous event back into Rust.
+      for (const runtime of this.moduleRuntimes) {
+        await BridgeHostRegistry.setWindowStage(sessionId, runtime.moduleName, windowStage);
+      }
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onWindowStageCreate(),
       );
-    } catch (error) {
-      // A plugin factory/install failure here aborts onCreate before module.init runs,
-      // which later surfaces as "OpenHarmony app not initialized" from every napi call.
-      console.error(`[NativeAbility] BridgeHostRegistry.open failed: ${String(error)}`);
-    }
-    AppStorage.setOrCreate("bridgeSessionId", this.bridgeSessionId);
+      this.windowStageActive = true;
+      await this.notifyBridgeLifecycle({
+        kind: "window-stage-create",
+        payload: new BridgeEmptyLifecyclePayload(),
+      });
 
-    this.nativeModules = [];
-    this.lifecycles = [];
-    this.loadedModuleNames = [];
-
-    for (const moduleName of requestedModules) {
       try {
-        const module: Module = await NativeModuleLoader.load(moduleName, this.loadMode);
-        this.nativeModules.push(module);
-        this.loadedModuleNames.push(moduleName);
-      } catch (error) {
-        // A dynamic import failure aborts onCreate before module.init runs; the Rust-side
-        // INNER_APP is then never set and every napi call reports "OpenHarmony app not
-        // initialized". A stale/incompatible .so is the usual cause.
-        console.error(
-          `[NativeAbility] failed to load native module ${moduleName}: ${String(error)}`,
-        );
+        windowStage.on("windowStageEvent", (event: window.WindowStageEventType) => {
+          if (!this.acceptingLifecycle) {
+            return;
+          }
+          void this.enqueueLifecycleOperation("window-stage-event", async (): Promise<void> => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.windowStageEventCallback.onWindowStageEvent(event),
+            );
+            await this.notifyBridgeLifecycle({
+              kind: "window-stage-event",
+              payload: new BridgeWindowStageEventLifecyclePayload(event),
+            });
+          });
+        });
+      } catch {}
+
+      let win: window.Window | null = null;
+      try {
+        win = await windowStage.getMainWindow();
+      } catch {
+        win = null;
       }
-    }
 
-    for (let i = 0; i < this.nativeModules.length; i++) {
-      const module: Module = this.nativeModules[i];
-      const moduleName: string = this.loadedModuleNames[i];
-      try {
-        const lifecycle: ApplicationLifecycle = module.init(this.createInitContext(moduleName));
-        this.lifecycles.push(lifecycle);
-
-        // Attach the inbound event sink right after init, not at UI render time: the native
-        // module is loaded and the Rust app (plus its registered plugins) exists from here on.
-        // Plugins that only require `ability` can therefore push ArkTS -> Rust main-thread
-        // events on `ability-create` instead of waiting for `ui-context-ready`. The render-time
-        // attach in DefaultXComponent remains as an idempotent fallback for the same module.
-        this.attachBridgeEventSink(moduleName, module);
-
-        const restoredState = restoredStateMap[moduleName] ?? state;
+      if (win) {
         try {
-          lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
+          win.on("windowSizeChange", (size: window.Size) => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.windowStageEventCallback.onWindowSizeChange(size),
+            );
+          });
+          win.on("windowRectChange", (options: window.RectChangeOptions) => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.windowStageEventCallback.onWindowRectChange(options),
+            );
+          });
+          win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.windowStageEventCallback.onAvoidAreaChange(options),
+            );
+          });
+          win.on("keyboardHeightChange", (height) => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
+            );
+          });
         } catch {}
-      } catch (error) {
-        // `#[ability] init` sets the Rust-side INNER_APP; when it fails, every later
-        // napi call reports "OpenHarmony app not initialized". Log the exact failure
-        // so the root cause (stale .so, context mismatch, bridge open failure) is visible.
-        console.error(`[NativeAbility] module.init failed for ${moduleName}: ${String(error)}`);
+      }
+
+      if (this.defaultPage) {
+        await windowStage.loadContentByName(Entry.RouteName);
+      }
+    });
+  }
+
+  onWindowStageDestroy(): void {
+    if (!this.acceptingLifecycle) {
+      return;
+    }
+    void this.enqueueLifecycleOperation("window-stage-destroy", async (): Promise<void> => {
+      await this.destroyWindowStageIfActive();
+    });
+  }
+
+  private async destroyWindowStageIfActive(): Promise<void> {
+    if (!this.windowStageActive) {
+      return;
+    }
+    this.windowStageActive = false;
+    const sessionId = this.bridgeSessionId;
+    if (sessionId) {
+      for (const runtime of this.moduleRuntimes) {
+        await BridgeHostRegistry.clearWindowStage(sessionId, runtime.moduleName);
       }
     }
-
-    for (const moduleName of requestedModules) {
-      await BridgeHostRegistry.emitLifecycle(this.bridgeSessionId, moduleName, {
-        kind: "ability-create",
-        payload: new BridgeAbilityCreateLifecyclePayload(restoredStateMap[moduleName] ?? state),
-      });
-    }
-  }
-
-  async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-    await this.setBridgeWindowStage(windowStage);
-    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageCreate());
-
-    try {
-      windowStage.on("windowStageEvent", (event: window.WindowStageEventType) => {
-        this.forEachLifecycle((lifecycle) =>
-          lifecycle.windowStageEventCallback.onWindowStageEvent(event),
-        );
-        this.notifyBridgeLifecycle({
-          kind: "window-stage-event",
-          payload: new BridgeWindowStageEventLifecyclePayload(event),
-        }).catch(() => {});
-      });
-    } catch {}
-
-    let win: window.Window | null = null;
-    try {
-      win = await windowStage.getMainWindow();
-    } catch {
-      win = null;
-    }
-
-    if (win) {
-      try {
-        win.on("windowSizeChange", (size: window.Size) => {
-          this.forEachLifecycle((lifecycle) =>
-            lifecycle.windowStageEventCallback.onWindowSizeChange(size),
-          );
-        });
-        win.on("windowRectChange", (options: window.RectChangeOptions) => {
-          this.forEachLifecycle((lifecycle) =>
-            lifecycle.windowStageEventCallback.onWindowRectChange(options),
-          );
-        });
-        win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
-          this.forEachLifecycle((lifecycle) =>
-            lifecycle.windowStageEventCallback.onAvoidAreaChange(options),
-          );
-        });
-        win.on("keyboardHeightChange", (height) => {
-          this.forEachLifecycle((lifecycle) =>
-            lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
-          );
-        });
-      } catch {}
-    }
-
-    if (this.defaultPage) {
-      try {
-        await windowStage.loadContentByName(Entry.RouteName);
-      } catch {}
-    }
-  }
-
-  async onWindowStageDestroy(): Promise<void> {
     this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy());
-    await this.clearBridgeWindowStage();
   }
 
   onMemoryLevel(level: AbilityConstant.MemoryLevel): void {
-    this.forEachLifecycle((lifecycle) => lifecycle.environmentCallback.onMemoryLevel(level));
-    this.notifyBridgeLifecycle({
-      kind: "memory-level",
-      payload: new BridgeMemoryLevelLifecyclePayload(level),
-    }).catch(() => {});
+    if (!this.acceptingLifecycle) {
+      return;
+    }
+    void this.enqueueLifecycleOperation("memory-level", async (): Promise<void> => {
+      this.forEachLifecycle((lifecycle) => lifecycle.environmentCallback.onMemoryLevel(level));
+      await this.notifyBridgeLifecycle({
+        kind: "memory-level",
+        payload: new BridgeMemoryLevelLifecyclePayload(level),
+      });
+    });
   }
 
-  async onDestroy(): Promise<void> {
-    await this.notifyBridgeLifecycle({
-      kind: "ability-destroy",
-      payload: new BridgeEmptyLifecyclePayload(),
+  onDestroy(): Promise<void> {
+    this.acceptingLifecycle = false;
+    return this.enqueueLifecycleOperation("ability-destroy", async (): Promise<void> => {
+      const sessionId = this.bridgeSessionId;
+      if (!sessionId) {
+        return;
+      }
+      BridgeHostRegistry.beginClosing(sessionId);
+      try {
+        await this.destroyWindowStageIfActive();
+        await this.notifyBridgeLifecycle({
+          kind: "ability-destroy",
+          payload: new BridgeEmptyLifecyclePayload(),
+        });
+        this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onAbilityDestroy());
+      } finally {
+        this.bridgeSessionId = "";
+        this.moduleRuntimes = [];
+        this.windowStageActive = false;
+        this.updateAppStorage("bridgeSessionId", "");
+        await BridgeHostRegistry.dispose(sessionId);
+      }
     });
-    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onAbilityDestroy());
-    const bridgeSessionId = this.bridgeSessionId;
-    this.bridgeSessionId = "";
-    await BridgeHostRegistry.dispose(bridgeSessionId);
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {
-    this.forEachLifecycle((lifecycle) =>
-      lifecycle.environmentCallback.onConfigurationUpdated(newConfig),
-    );
-    this.notifyBridgeLifecycle({
-      kind: "configuration-updated",
-      payload: new BridgeEmptyLifecyclePayload(),
-    }).catch(() => {});
+    if (!this.acceptingLifecycle) {
+      return;
+    }
+    void this.enqueueLifecycleOperation("configuration-updated", async (): Promise<void> => {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.environmentCallback.onConfigurationUpdated(newConfig),
+      );
+      await this.notifyBridgeLifecycle({
+        kind: "configuration-updated",
+        payload: new BridgeEmptyLifecyclePayload(),
+      });
+    });
   }
 
   onSaveState(
@@ -305,15 +402,10 @@ export class NativeAbility extends UIAbility {
   ): AbilityConstant.OnSaveResult {
     const stateMap: Record<string, string> = {};
 
-    for (let i = 0; i < this.lifecycles.length; i++) {
-      const lifecycle = this.lifecycles[i];
-      const moduleName = this.loadedModuleNames[i];
-      if (!moduleName) {
-        continue;
-      }
-
+    for (const runtime of this.moduleRuntimes) {
       try {
-        stateMap[moduleName] = lifecycle.windowStageEventCallback.onAbilitySaveState() ?? "";
+        stateMap[runtime.moduleName] =
+          runtime.lifecycle.windowStageEventCallback.onAbilitySaveState() ?? "";
       } catch {}
     }
 

@@ -15,6 +15,7 @@ import {
   BridgePluginFactory,
   BridgeWindowScope,
 } from "../ability/type";
+import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 
 const MAX_TIMEOUT_MS = 60_000;
 const MAX_PAYLOAD_BYTES = 512 * 1024;
@@ -28,10 +29,14 @@ type BridgeMainThreadEventSink = (
   value: ESObject,
 ) => ESObject;
 
+type BridgeLifecycleSink = (kind: string) => void;
+
 interface HostedPlugin {
   factory: BridgePluginFactory;
   plugin: BridgePlugin;
   installed: boolean;
+  installAttempted: boolean;
+  installError?: string;
   installing?: Promise<void>;
 }
 
@@ -183,9 +188,15 @@ class NodeAcknowledgement {
 }
 
 interface BridgeCallState {
+  pluginId: string;
   cancelled: boolean;
   cancelListeners: Array<() => void>;
   rejectCancellation?: (reason: Error) => void;
+}
+
+interface PendingWindowAttachment {
+  state: HostWindowState;
+  cancelled: boolean;
 }
 
 function isBridgeIdentifier(value: string): boolean {
@@ -216,8 +227,19 @@ class BridgeHost {
   // collection implementation for a handful of in-flight bridge calls.
   private readonly activeCalls: BridgeCallState[] = [];
   private mainThreadEventSink?: BridgeMainThreadEventSink;
+  private lifecycleSink?: BridgeLifecycleSink;
+  private eventSinkToken: number = 0;
   private windowStage?: window.WindowStage;
+  private windowStageReady: boolean = false;
+  private uiContextReady: boolean = false;
+  private closing: boolean = false;
   private disposed: boolean = false;
+  private disposePromise?: Promise<void>;
+  private readonly lifecycleQueue = new SerialTaskQueue((label: string, error: Error): void => {
+    console.error(
+      `[BridgeHost:${this.moduleName}] lifecycle operation '${label}' failed: ${String(error)}`,
+    );
+  });
   private readonly sessionId: string;
   private readonly moduleName: string;
   private readonly abilityContext: common.UIAbilityContext;
@@ -226,6 +248,7 @@ class BridgeHost {
   // never overwrite the main window's. Each window owns its keyed mounts and the opaque handle
   // table of the built-in ohos.node plugin.
   private readonly windows: Map<string, HostWindowState> = new Map();
+  private readonly pendingWindows: Map<string, PendingWindowAttachment> = new Map();
 
   constructor(sessionId: string, moduleName: string, abilityContext: common.UIAbilityContext) {
     this.sessionId = sessionId;
@@ -250,7 +273,12 @@ class BridgeHost {
         throw new Error(`Duplicate bridge plugin '${plugin.id}' in module ${this.moduleName}`);
       }
       plugin.attachContext?.(this.pluginContext(plugin.id));
-      this.plugins.set(plugin.id, { factory, plugin, installed: false });
+      this.plugins.set(plugin.id, {
+        factory,
+        plugin,
+        installed: false,
+        installAttempted: false,
+      });
     }
     await this.activateReadyPlugins();
   }
@@ -265,6 +293,7 @@ class BridgeHost {
       factory: { create: (): BridgePlugin => plugin },
       plugin,
       installed: false,
+      installAttempted: false,
     });
   }
 
@@ -273,29 +302,53 @@ class BridgeHost {
    * after creating its root. Attaching the `"main"` window emits `ui-context-ready` (and wakes
    * context waiters); sub-window attachments only register state.
    */
-  attachWindow(windowKey: string, uiContext: UIContext, root: FrameNode): void {
+  attachWindow(windowKey: string, uiContext: UIContext, root: FrameNode): Promise<void> {
     this.assertActive();
     this.assertWindowKey(windowKey);
-    if (this.windows.has(windowKey)) {
+    if (this.windows.has(windowKey) || this.pendingWindows.has(windowKey)) {
       throw new Error(
         `Bridge window '${windowKey}' is already attached for '${this.moduleName}'; each DefaultXComponent needs a unique windowKey`,
       );
     }
-    this.windows.set(windowKey, {
-      uiContext,
-      rootFrameNode: root,
-      mountedChildren: new Map(),
-      nodeHandles: new Map(),
-      nodeParents: new Map(),
-      nextNodeHandle: 1,
-    });
-    if (windowKey === MAIN_WINDOW_KEY) {
+    const pending: PendingWindowAttachment = {
+      state: {
+        uiContext,
+        rootFrameNode: root,
+        mountedChildren: new Map(),
+        nodeHandles: new Map(),
+        nodeParents: new Map(),
+        nextNodeHandle: 1,
+      },
+      cancelled: false,
+    };
+    this.pendingWindows.set(windowKey, pending);
+
+    return this.enqueueLifecycle(`attach window '${windowKey}'`, async (): Promise<void> => {
+      this.pendingWindows.delete(windowKey);
+      if (pending.cancelled) {
+        return;
+      }
+      this.assertActive();
+      if (windowKey === MAIN_WINDOW_KEY && !this.windowStageReady) {
+        throw new Error(
+          `Bridge main window cannot attach without an active WindowStage for '${this.moduleName}'`,
+        );
+      }
+      this.windows.set(windowKey, pending.state);
+      if (windowKey !== MAIN_WINDOW_KEY) {
+        return;
+      }
+
+      this.uiContextReady = true;
       this.notifyContextChanged();
-      void this.emitLifecycle({
+      // Rust readiness must be visible before an ArkTS plugin's onInstall can synchronously emit
+      // a typed platform event back into Rust.
+      this.notifyRustLifecycle("ui-context-ready");
+      await this.deliverLifecycle({
         kind: "ui-context-ready",
         payload: new BridgeEmptyLifecyclePayload(),
       });
-    }
+    });
   }
 
   /**
@@ -307,18 +360,38 @@ class BridgeHost {
     if (this.disposed) {
       return;
     }
+    const pending = this.pendingWindows.get(windowKey);
+    if (pending !== undefined) {
+      pending.cancelled = true;
+      this.pendingWindows.delete(windowKey);
+      await this.enqueueLifecycle(`cancel window attachment '${windowKey}'`, async () => {});
+      return;
+    }
     const state = this.windows.get(windowKey);
     if (state === undefined) {
       return;
     }
-    if (windowKey === MAIN_WINDOW_KEY) {
-      await this.emitLifecycle({
-        kind: "ui-context-destroy",
-        payload: new BridgeEmptyLifecyclePayload(),
-      });
-    }
-    this.disposeWindowState(state);
     this.windows.delete(windowKey);
+    if (windowKey === MAIN_WINDOW_KEY) {
+      // Make new calls fail immediately. The queued lifecycle hook still owns the old state and
+      // releases it before a later attachment can become ready.
+      this.uiContextReady = false;
+      this.cancelCallsWithMissingContext();
+      this.notifyContextChanged();
+    }
+
+    await this.enqueueLifecycle(`detach window '${windowKey}'`, async (): Promise<void> => {
+      if (windowKey === MAIN_WINDOW_KEY) {
+        await this.deliverLifecycle({
+          kind: "ui-context-destroy",
+          payload: new BridgeEmptyLifecyclePayload(),
+        });
+      }
+      this.disposeWindowState(state);
+      if (windowKey === MAIN_WINDOW_KEY) {
+        this.notifyRustLifecycle("ui-context-destroy");
+      }
+    });
   }
 
   /** Creates an empty container FrameNode in `windowKey` and returns its opaque handle (ohos.node). */
@@ -485,11 +558,11 @@ class BridgeHost {
 
   async setWindowStage(windowStage: window.WindowStage): Promise<void> {
     this.assertActive();
-    this.windowStage = windowStage;
-    this.notifyContextChanged();
-    await this.emitLifecycle({
-      kind: "window-stage-create",
-      payload: new BridgeEmptyLifecyclePayload(),
+    await this.enqueueLifecycle("window-stage-create", async (): Promise<void> => {
+      this.assertActive();
+      this.windowStage = windowStage;
+      this.windowStageReady = true;
+      this.notifyContextChanged();
     });
   }
 
@@ -497,31 +570,66 @@ class BridgeHost {
     if (this.disposed) {
       return;
     }
-    // The WindowStage belongs to the Ability (main window). Detach every registered window
-    // surface; only the main window emits `ui-context-destroy`.
-    const windowKeys = Array.from(this.windows.keys());
-    for (const windowKey of windowKeys) {
-      await this.detachWindow(windowKey);
-    }
-    await this.emitLifecycle({
-      kind: "window-stage-destroy",
-      payload: new BridgeEmptyLifecyclePayload(),
+    this.windowStageReady = false;
+    this.cancelCallsWithMissingContext();
+    this.notifyContextChanged();
+    await this.enqueueLifecycle("window-stage-destroy", async (): Promise<void> => {
+      this.windowStageReady = false;
+      // The WindowStage belongs to the Ability (main window). Detach every registered window
+      // surface; only the main window emits `ui-context-destroy`.
+      const windowEntries = Array.from(this.windows.entries());
+      this.windows.clear();
+      if (this.uiContextReady) {
+        this.uiContextReady = false;
+        this.cancelCallsWithMissingContext();
+        this.notifyContextChanged();
+      }
+      for (const [windowKey, state] of windowEntries) {
+        if (windowKey === MAIN_WINDOW_KEY) {
+          await this.deliverLifecycle({
+            kind: "ui-context-destroy",
+            payload: new BridgeEmptyLifecyclePayload(),
+          });
+        }
+        this.disposeWindowState(state);
+        if (windowKey === MAIN_WINDOW_KEY) {
+          this.notifyRustLifecycle("ui-context-destroy");
+        }
+      }
+      await this.deliverLifecycle({
+        kind: "window-stage-destroy",
+        payload: new BridgeEmptyLifecyclePayload(),
+      });
+      this.windowStage = undefined;
     });
-    this.windowStage = undefined;
   }
 
   async emitLifecycle(event: BridgeLifecycleEvent): Promise<void> {
     if (this.disposed) {
       return;
     }
-    await this.activateReadyPlugins();
+    await this.enqueueLifecycle(event.kind, async (): Promise<void> => {
+      await this.deliverLifecycle(event);
+    });
+  }
+
+  private async deliverLifecycle(event: BridgeLifecycleEvent): Promise<void> {
+    if (!this.closing) {
+      await this.activateReadyPlugins(false);
+    }
     this.recordLifecycle(event);
     const entries = Array.from(this.plugins.values());
     for (const entry of entries) {
       if (!entry.installed || !entry.plugin.onLifecycle) {
         continue;
       }
-      await entry.plugin.onLifecycle(event, this.pluginContext(entry.plugin.id));
+      try {
+        await entry.plugin.onLifecycle(event, this.pluginContext(entry.plugin.id));
+      } catch (error) {
+        console.error(
+          `[BridgeHost:${this.moduleName}] plugin '${entry.plugin.id}' failed lifecycle '${event.kind}': ${String(error)}`,
+        );
+      }
     }
   }
 
@@ -545,7 +653,7 @@ class BridgeHost {
 
     const asyncPlugin: AsyncBridgePlugin = entry.plugin as AsyncBridgePlugin;
     const boundedTimeoutMs = clampTimeout(timeoutMs);
-    const callState: BridgeCallState = { cancelled: false, cancelListeners: [] };
+    const callState: BridgeCallState = { pluginId, cancelled: false, cancelListeners: [] };
     const cancellation = new Promise<BridgeTypedValue>((_resolve, reject) => {
       callState.rejectCancellation = reject;
     });
@@ -607,7 +715,11 @@ class BridgeHost {
     }
 
     const syncPlugin: MainThreadSyncBridgePlugin = entry.plugin as MainThreadSyncBridgePlugin;
-    const syncCallState: BridgeCallState = { cancelled: false, cancelListeners: [] };
+    const syncCallState: BridgeCallState = {
+      pluginId,
+      cancelled: false,
+      cancelListeners: [],
+    };
     const result = syncPlugin.invokeSync(
       action,
       request,
@@ -643,50 +755,82 @@ class BridgeHost {
     return sink(pluginId, event, requestTypeName, responseTypeName, value);
   }
 
-  attachEventSink(mainThreadSink: BridgeMainThreadEventSink): void {
+  attachEventSink(
+    mainThreadSink: BridgeMainThreadEventSink | undefined,
+    lifecycleSink: BridgeLifecycleSink | undefined,
+  ): number {
     this.assertActive();
     this.mainThreadEventSink = mainThreadSink;
+    this.lifecycleSink = lifecycleSink;
+    this.eventSinkToken += 1;
+    return this.eventSinkToken;
   }
 
-  detachEventSink(): void {
-    this.mainThreadEventSink = undefined;
-  }
-
-  async dispose(): Promise<void> {
-    if (this.disposed) {
+  detachEventSink(token?: number): void {
+    if (token !== undefined && token !== this.eventSinkToken) {
       return;
     }
-    this.disposed = true;
+    this.mainThreadEventSink = undefined;
+    this.lifecycleSink = undefined;
+  }
+
+  beginClosing(): void {
+    if (this.closing || this.disposed) {
+      return;
+    }
+    this.closing = true;
     const activeCalls = this.activeCalls.splice(0, this.activeCalls.length);
     for (const callState of activeCalls) {
       this.cancelCall(
         callState,
-        new Error(`Bridge session '${this.sessionId}' was disposed while a call was pending`),
+        new Error(`Bridge session '${this.sessionId}' is closing while a call is pending`),
       );
     }
     this.notifyContextChanged();
-    const entries = Array.from(this.plugins.values());
-    for (const entry of entries) {
-      try {
-        if (entry.installed && entry.plugin.onDispose) {
-          await entry.plugin.onDispose(this.pluginContext(entry.plugin.id));
-        }
-      } catch {
-        // Teardown must not prevent another plugin from releasing its resources.
-      }
+  }
+
+  async dispose(): Promise<void> {
+    if (this.disposePromise !== undefined) {
+      await this.disposePromise;
+      return;
     }
-    this.plugins.clear();
-    this.mainThreadEventSink = undefined;
-    // Release every window surface: keyed mounts first, then handle-owned nodes. The root
-    // FrameNodes themselves are owned and disposed by their DefaultXComponent instances.
-    const windowKeys = Array.from(this.windows.keys());
-    for (const windowKey of windowKeys) {
-      const state = this.windows.get(windowKey);
-      if (state !== undefined) {
+    this.beginClosing();
+    this.disposePromise = this.enqueueLifecycle("dispose", async (): Promise<void> => {
+      const entries = Array.from(this.plugins.values());
+      for (const entry of entries) {
+        try {
+          if (entry.installing !== undefined) {
+            try {
+              await entry.installing;
+            } catch {}
+          }
+          if (entry.installAttempted && entry.plugin.onDispose) {
+            await entry.plugin.onDispose(this.pluginContext(entry.plugin.id));
+          }
+        } catch {
+          // Teardown must not prevent another plugin from releasing its resources.
+        }
+      }
+      this.plugins.clear();
+      this.mainThreadEventSink = undefined;
+      this.lifecycleSink = undefined;
+      for (const pending of this.pendingWindows.values()) {
+        pending.cancelled = true;
+      }
+      this.pendingWindows.clear();
+      // Release every window surface: keyed mounts first, then handle-owned nodes. The root
+      // FrameNodes themselves are owned and disposed by their DefaultXComponent instances.
+      for (const state of this.windows.values()) {
         this.disposeWindowState(state);
       }
-    }
-    this.windows.clear();
+      this.windows.clear();
+      this.uiContextReady = false;
+      this.windowStage = undefined;
+      this.windowStageReady = false;
+      this.disposed = true;
+      this.notifyContextChanged();
+    });
+    await this.disposePromise;
   }
 
   private async ensureActive(entry: HostedPlugin, callState?: BridgeCallState): Promise<void> {
@@ -699,11 +843,20 @@ class BridgeHost {
     this.assertCallStateActive(callState);
   }
 
-  private async activateReadyPlugins(): Promise<void> {
+  private async activateReadyPlugins(failFast: boolean = true): Promise<void> {
     const entries = Array.from(this.plugins.values());
     for (const entry of entries) {
       if (this.requirementsReady(entry)) {
-        await this.activate(entry);
+        try {
+          await this.activate(entry);
+        } catch (error) {
+          if (failFast) {
+            throw error;
+          }
+          console.error(
+            `[BridgeHost:${this.moduleName}] plugin '${entry.plugin.id}' failed to install: ${String(error)}`,
+          );
+        }
       }
     }
   }
@@ -715,14 +868,25 @@ class BridgeHost {
     if (!this.requirementsReady(entry)) {
       return;
     }
+    if (entry.installError !== undefined) {
+      throw new Error(entry.installError);
+    }
     if (!entry.installing) {
       entry.installing = Promise.resolve()
         .then(async () => {
-          if (entry.plugin.onInstall) {
-            await entry.plugin.onInstall(this.pluginContext(entry.plugin.id));
+          entry.installAttempted = true;
+          try {
+            if (entry.plugin.onInstall) {
+              await entry.plugin.onInstall(this.pluginContext(entry.plugin.id));
+            }
+            entry.installed = true;
+            await this.replayLifecycle(entry);
+          } catch (error) {
+            if (!entry.installed) {
+              entry.installError = `Bridge plugin '${entry.plugin.id}' install failed: ${String(error)}`;
+            }
+            throw error;
           }
-          entry.installed = true;
-          await this.replayLifecycle(entry);
         })
         .finally(() => {
           entry.installing = undefined;
@@ -736,7 +900,13 @@ class BridgeHost {
       return;
     }
     for (const event of this.lifecycleHistory) {
-      await entry.plugin.onLifecycle(event, this.pluginContext(entry.plugin.id));
+      try {
+        await entry.plugin.onLifecycle(event, this.pluginContext(entry.plugin.id));
+      } catch (error) {
+        console.error(
+          `[BridgeHost:${this.moduleName}] plugin '${entry.plugin.id}' failed replay lifecycle '${event.kind}': ${String(error)}`,
+        );
+      }
     }
   }
 
@@ -747,10 +917,10 @@ class BridgeHost {
   private missingRequirements(entry: HostedPlugin): BridgeContextRequirement[] {
     const missing: BridgeContextRequirement[] = [];
     for (const requirement of normalizedRequirements(entry.plugin.requires)) {
-      if (requirement === "window-stage" && this.windowStage === undefined) {
+      if (requirement === "window-stage" && !this.windowStageReady) {
         missing.push(requirement);
       }
-      if (requirement === "ui-context" && !this.windows.has(MAIN_WINDOW_KEY)) {
+      if (requirement === "ui-context" && !this.uiContextReady) {
         missing.push(requirement);
       }
     }
@@ -764,7 +934,7 @@ class BridgeHost {
       moduleName: this.moduleName,
       sessionId: this.sessionId,
       abilityContext: this.abilityContext,
-      isActive: (): boolean => !this.disposed,
+      isActive: (): boolean => !this.closing && !this.disposed,
       getWindowStage: (): window.WindowStage => {
         if (this.windowStage === undefined) {
           throw new Error(`Bridge plugin '${pluginId}' requires a WindowStage that is not ready`);
@@ -802,8 +972,12 @@ class BridgeHost {
       abilityContext: this.abilityContext,
       action,
       timeoutMs,
-      isActive: (): boolean => !this.disposed && !callState.cancelled,
-      isCancelled: (): boolean => this.disposed || callState.cancelled,
+      isActive: (): boolean =>
+        !this.closing &&
+        !this.disposed &&
+        !callState.cancelled &&
+        this.pluginRequirementsReady(pluginId),
+      isCancelled: (): boolean => this.closing || this.disposed || callState.cancelled,
       onCancel: (listener: () => void): (() => void) =>
         this.subscribeCancellation(callState, listener),
       getWindowStage: (): window.WindowStage => context.getWindowStage(),
@@ -838,6 +1012,43 @@ class BridgeHost {
     }
   }
 
+  private enqueueLifecycle(label: string, operation: () => Promise<void>): Promise<void> {
+    return this.lifecycleQueue.enqueue(label, operation);
+  }
+
+  private notifyRustLifecycle(kind: string): void {
+    const sink = this.lifecycleSink;
+    if (sink === undefined) {
+      return;
+    }
+    try {
+      sink(kind);
+    } catch (error) {
+      console.error(
+        `[BridgeHost:${this.moduleName}] Rust lifecycle '${kind}' failed: ${String(error)}`,
+      );
+    }
+  }
+
+  private pluginRequirementsReady(pluginId: string): boolean {
+    const entry = this.plugins.get(pluginId);
+    return entry !== undefined && this.requirementsReady(entry);
+  }
+
+  private cancelCallsWithMissingContext(): void {
+    for (const callState of this.activeCalls.slice()) {
+      if (this.pluginRequirementsReady(callState.pluginId)) {
+        continue;
+      }
+      this.cancelCall(
+        callState,
+        new Error(
+          `Bridge plugin '${callState.pluginId}' lost its required context while a call was pending`,
+        ),
+      );
+    }
+  }
+
   private async waitForContextChange(callState?: BridgeCallState): Promise<void> {
     await new Promise<void>((resolve) => {
       let settled = false;
@@ -862,8 +1073,8 @@ class BridgeHost {
   }
 
   private assertCallStateActive(callState?: BridgeCallState): void {
-    if (this.disposed) {
-      throw new Error(`Bridge session '${this.sessionId}' is already disposed`);
+    if (this.closing || this.disposed) {
+      throw new Error(`Bridge session '${this.sessionId}' is closing or already disposed`);
     }
     if (callState?.cancelled) {
       throw new Error(`Bridge call for session '${this.sessionId}' was cancelled`);
@@ -876,7 +1087,12 @@ class BridgeHost {
     callState: BridgeCallState,
     phase: string,
   ): void {
-    if (this.disposed || callState.cancelled) {
+    if (
+      this.closing ||
+      this.disposed ||
+      callState.cancelled ||
+      !this.pluginRequirementsReady(pluginId)
+    ) {
       throw new Error(`Bridge call '${pluginId}.${action}' was cancelled ${phase}`);
     }
   }
@@ -902,7 +1118,7 @@ class BridgeHost {
   }
 
   private subscribeCancellation(callState: BridgeCallState, listener: () => void): () => void {
-    if (callState.cancelled || this.disposed) {
+    if (callState.cancelled || this.closing || this.disposed) {
       listener();
       return (): void => {};
     }
@@ -984,8 +1200,8 @@ class BridgeHost {
   }
 
   private assertActive(): void {
-    if (this.disposed) {
-      throw new Error(`Bridge session '${this.sessionId}' is already disposed`);
+    if (this.closing || this.disposed) {
+      throw new Error(`Bridge session '${this.sessionId}' is closing or already disposed`);
     }
   }
 
@@ -1125,14 +1341,14 @@ export class BridgeHostRegistry {
    * window emits `ui-context-ready`, so plugins can mount nodes during `onInstall` without any
    * waiting; sub-window attachments only register state.
    */
-  static attachWindow(
+  static async attachWindow(
     sessionId: string,
     moduleName: string,
     windowKey: string,
     uiContext: UIContext,
     root: FrameNode,
-  ): void {
-    BridgeHostRegistry.host(sessionId, moduleName).attachWindow(windowKey, uiContext, root);
+  ): Promise<void> {
+    await BridgeHostRegistry.host(sessionId, moduleName).attachWindow(windowKey, uiContext, root);
   }
 
   /** Unregisters one window's node surface. The root node itself is disposed by its owner. */
@@ -1156,14 +1372,28 @@ export class BridgeHostRegistry {
   static attachEventSink(
     sessionId: string,
     moduleName: string,
-    mainThreadSink: BridgeMainThreadEventSink,
-  ): void {
-    BridgeHostRegistry.host(sessionId, moduleName).attachEventSink(mainThreadSink);
+    mainThreadSink: BridgeMainThreadEventSink | undefined,
+    lifecycleSink?: BridgeLifecycleSink,
+  ): number {
+    return BridgeHostRegistry.host(sessionId, moduleName).attachEventSink(
+      mainThreadSink,
+      lifecycleSink,
+    );
   }
 
-  static detachEventSink(sessionId: string, moduleName: string): void {
+  static detachEventSink(sessionId: string, moduleName: string, token?: number): void {
     const host = BridgeHostRegistry.sessions.get(sessionId)?.get(moduleName);
-    host?.detachEventSink();
+    host?.detachEventSink(token);
+  }
+
+  static beginClosing(sessionId: string): void {
+    const hosts = BridgeHostRegistry.sessions.get(sessionId);
+    if (hosts === undefined) {
+      return;
+    }
+    for (const host of hosts.values()) {
+      host.beginClosing();
+    }
   }
 
   static async dispose(sessionId: string): Promise<void> {

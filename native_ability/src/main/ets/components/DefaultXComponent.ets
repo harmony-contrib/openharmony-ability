@@ -1,7 +1,7 @@
 import { NodeContent } from "@kit.ArkUI";
 import { FrameNode, NodeController } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
-import { BridgeBindings, Module } from "../ability/type";
+import { BridgeBindings } from "../ability/type";
 import { BridgeHostRegistry, MAIN_WINDOW_KEY } from "../bridge/BridgeHost";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 
@@ -23,7 +23,6 @@ export struct DefaultXComponent {
   @Prop windowKey: string = MAIN_WINDOW_KEY;
   private rootSlot = new NodeContent();
   private nodeController = new BridgeRootNodeController(this.getUIContext());
-  private nativeModule?: Module;
   @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
 
@@ -80,7 +79,6 @@ export struct DefaultXComponent {
     }
 
     const nativeModule = await NativeModuleLoader.load(moduleName, this.loadMode);
-    this.nativeModule = nativeModule;
     // Idempotent fallback: NativeAbility.onCreate already attached the sink right after
     // module.init (same cached Module instance), so `ability`-only plugins can emit inbound
     // events on `ability-create`. Re-attaching here covers modules loaded without onCreate.
@@ -94,20 +92,19 @@ export struct DefaultXComponent {
         responseTypeName: string,
         value: ESObject,
       ): ESObject => {
-        const nativeModuleForSyncEvent = this.nativeModule;
-        if (
-          nativeModuleForSyncEvent === undefined ||
-          typeof nativeModuleForSyncEvent.onBridgeSyncEvent !== "function"
-        ) {
+        if (typeof nativeModule.onBridgeSyncEvent !== "function") {
           throw new Error("Native module does not export onBridgeSyncEvent");
         }
-        return nativeModuleForSyncEvent.onBridgeSyncEvent(
+        return nativeModule.onBridgeSyncEvent(
           pluginId,
           event,
           requestTypeName,
           responseTypeName,
           value,
         );
+      },
+      (kind: string): void => {
+        nativeModule.onBridgeLifecycle?.(kind);
       },
     );
     nativeModule.render(this.bindings, this.rootSlot);
@@ -117,39 +114,28 @@ export struct DefaultXComponent {
     // registries or readiness waiters. Attaching the `"main"` window emits `ui-context-ready`;
     // sub-window instances (unique `windowKey`) only register their own surface.
     const root = this.nodeController.makeNode(this.getUIContext());
-    BridgeHostRegistry.attachWindow(
+    await BridgeHostRegistry.attachWindow(
       this.bridgeSessionId,
       moduleName,
       this.windowKey,
       this.getUIContext(),
       root,
     );
-
-    // Rust must observe readiness before ArkTS plugin installation can emit an event.
-    if (this.windowKey === MAIN_WINDOW_KEY) {
-      nativeModule.onBridgeLifecycle?.("ui-context-ready");
-    }
   }
 
   aboutToDisappear(): void {
     const moduleName = this.moduleName.trim();
     if (this.bridgeSessionId && moduleName) {
-      const nativeModule = this.nativeModule;
+      const sessionId = this.bridgeSessionId;
       const windowKey = this.windowKey;
-      BridgeHostRegistry.detachWindow(this.bridgeSessionId, moduleName, windowKey)
-        .then(() => {
-          if (windowKey === MAIN_WINDOW_KEY) {
-            nativeModule?.onBridgeLifecycle?.("ui-context-destroy");
-          }
-        })
+      BridgeHostRegistry.detachWindow(sessionId, moduleName, windowKey)
         .catch(() => {})
         .finally(() => {
           this.nodeController.disposeRoot();
-          if (windowKey === MAIN_WINDOW_KEY) {
-            BridgeHostRegistry.detachEventSink(this.bridgeSessionId, moduleName);
-          }
         });
+      return;
     }
+    this.nodeController.disposeRoot();
   }
 
   build() {
