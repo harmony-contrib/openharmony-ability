@@ -1,11 +1,25 @@
 import { DefaultXComponent, invokeNativeBackPressInterceptor } from "@ohos-rs/ability";
+import { MenuBarComponent, MenuPopupComponent } from "@ohos-rs/ability-plugin-menu";
 import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/EntryAbility";
 import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
   createBottomDemoWebview,
   createComposedDemoWebview,
   createDemoWebview,
+  demoAutostartIsEnabled,
+  demoAutostartOpenSettings,
+  demoClipboardWriteImage,
+  demoCreateOsWindow,
+  demoDestroyOsWindow,
+  demoMenuPopup,
+  demoMenuSetMenubar,
   demoRequestPermissionFromMainThread,
+  demoRestart,
+  demoSetColorMode,
+  demoStatusbarAdd,
+  demoStatusbarRemove,
+  demoUpdaterCheck,
+  demoVersionInfo,
   evaluateDemoWebviewScript,
   demoPluginLogin,
   demoPluginBytes,
@@ -43,7 +57,16 @@ struct Index {
   @State webviewStatus: string = "";
   @State urlResult: string = "";
   @State fileDialogResult: string = "";
+  @State clipboardResult: string = "";
+  @State updaterResult: string = "";
+  @State menuResult: string = "";
+  @State statusbarResult: string = "";
+  @State versionResult: string = "";
+  @State windowResult: string = "";
+  @State appControlResult: string = "";
+  @State autostartResult: string = "";
   @State resourceStatus: string = "";
+  private osWindowId: number = -1;
 
   private tabs: string[] = ["XComponent", "WebView", "Platform", "Resource"];
 
@@ -305,6 +328,178 @@ struct Index {
     }
   }
 
+  async handleClipboardWrite() {
+    this.busyKey = "clipboard";
+    this.clipboardResult = "";
+    try {
+      await demoClipboardWriteImage();
+      this.clipboardResult = "✓ wrote a 2×2 RGBA PixelMap to the system clipboard";
+    } catch (error) {
+      this.clipboardResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleAutostartStatus() {
+    this.busyKey = "autostart";
+    this.autostartResult = "";
+    try {
+      const enabled = await demoAutostartIsEnabled();
+      this.autostartResult = `✓ autostart enabled=${enabled}`;
+    } catch (error) {
+      this.autostartResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleAutostartSettings() {
+    this.busyKey = "autostart";
+    this.autostartResult = "";
+    try {
+      await demoAutostartOpenSettings();
+      this.autostartResult = "✓ opened app-launch management settings";
+    } catch (error) {
+      this.autostartResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleUpdaterCheck() {
+    this.busyKey = "updater";
+    this.updaterResult = "";
+    try {
+      const update: string | null = await demoUpdaterCheck();
+      this.updaterResult = update === null ? "✓ no later version" : `✓ ${update}`;
+    } catch (error) {
+      this.updaterResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleMenuSet() {
+    this.busyKey = "menu";
+    this.menuResult = "";
+    try {
+      await demoMenuSetMenubar();
+      this.menuResult = "✓ menubar published for business windowId=main";
+    } catch (error) {
+      this.menuResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleMenuPopup() {
+    this.busyKey = "menu";
+    this.menuResult = "";
+    try {
+      await demoMenuPopup(24, 180);
+      this.menuResult = "✓ popup published at (24, 180)";
+    } catch (error) {
+      this.menuResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleStatusbarAdd() {
+    this.busyKey = "statusbar";
+    this.statusbarResult = "";
+    try {
+      await demoStatusbarAdd();
+      this.statusbarResult = "✓ process status bar owner claimed by this plugin instance";
+    } catch (error) {
+      this.statusbarResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleStatusbarRemove() {
+    this.busyKey = "statusbar";
+    this.statusbarResult = "";
+    try {
+      await demoStatusbarRemove();
+      this.statusbarResult = "✓ status bar item removed";
+    } catch (error) {
+      this.statusbarResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  handleVersionInfo() {
+    this.busyKey = "version";
+    this.versionResult = "";
+    try {
+      this.versionResult = `✓ ${demoVersionInfo()}`;
+    } catch (error) {
+      this.versionResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleCreateOsWindow() {
+    this.busyKey = "window";
+    this.windowResult = "";
+    try {
+      this.osWindowId = await demoCreateOsWindow();
+      this.windowResult = `✓ created platform window id=${this.osWindowId}`;
+    } catch (error) {
+      this.windowResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleDestroyOsWindow() {
+    this.busyKey = "window";
+    this.windowResult = "";
+    try {
+      if (this.osWindowId < 0) {
+        throw new Error("create a platform window first");
+      }
+      await demoDestroyOsWindow(this.osWindowId);
+      this.windowResult = `✓ destroyed platform window id=${this.osWindowId}`;
+      this.osWindowId = -1;
+    } catch (error) {
+      this.windowResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  handleSetColorMode(mode: number) {
+    this.busyKey = "app-control";
+    this.appControlResult = "";
+    try {
+      demoSetColorMode(mode);
+      this.appControlResult = `✓ color mode=${mode}`;
+    } catch (error) {
+      this.appControlResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  handleRestart() {
+    this.busyKey = "app-control";
+    this.appControlResult = "";
+    try {
+      demoRestart();
+      this.appControlResult = "✓ restart requested";
+    } catch (error) {
+      this.appControlResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
   handleResourceManagerReady() {
     this.busyKey = "resource";
     this.resourceStatus = "";
@@ -538,41 +733,162 @@ struct Index {
 
   @Builder
   PlatformServicesDemo() {
-    Scroll() {
-      Column({ space: 12 }) {
-        DemoCard({
-          title: "Open external URL",
-          hint: "ohos.url / context.openLink",
-          statusText: this.statusTextOf("url", this.urlResult),
-          statusColor: this.statusColorOf("url", this.urlResult),
-          busy: this.busyKey === "url",
-          buttons: [
-            new DemoButton("open external URL", (): void => {
-              this.handleOpenUrl();
-            }),
-          ],
-        })
-        DemoCard({
-          title: "File dialogs",
-          hint: "structured DialogOptions, not JSON",
-          statusText: this.statusTextOf("files", this.fileDialogResult),
-          statusColor: this.statusColorOf("files", this.fileDialogResult),
-          busy: this.busyKey === "files",
-          buttons: [
-            new DemoButton("open (multi-select)", (): void => {
-              this.handleFileDialogOpen();
-            }),
-            new DemoButton("save (PDF)", (): void => {
-              this.handleFileDialogSave();
-            }),
-          ],
-        })
+    Stack() {
+      Scroll() {
+        Column({ space: 12 }) {
+          MenuBarComponent({ windowId: "main" })
+          DemoCard({
+            title: "Menu",
+            hint: "context-free plugin state keyed by session + business windowId",
+            statusText: this.statusTextOf("menu", this.menuResult),
+            statusColor: this.statusColorOf("menu", this.menuResult),
+            busy: this.busyKey === "menu",
+            buttons: [
+              new DemoButton("publish menubar", (): void => {
+                this.handleMenuSet();
+              }),
+              new DemoButton("show popup", (): void => {
+                this.handleMenuPopup();
+              }),
+            ],
+          })
+          DemoCard({
+            title: "System status bar",
+            hint: "process-level platform owner; latest successful mutation receives callbacks",
+            statusText: this.statusTextOf("statusbar", this.statusbarResult),
+            statusColor: this.statusColorOf("statusbar", this.statusbarResult),
+            busy: this.busyKey === "statusbar",
+            buttons: [
+              new DemoButton("add item", (): void => {
+                this.handleStatusbarAdd();
+              }),
+              new DemoButton("remove item", (): void => {
+                this.handleStatusbarRemove();
+              }),
+            ],
+          })
+          DemoCard({
+            title: "OS sub-window",
+            hint: "async create/destroy; platform Window remains inside the plugin instance",
+            statusText: this.statusTextOf("window", this.windowResult),
+            statusColor: this.statusColorOf("window", this.windowResult),
+            busy: this.busyKey === "window",
+            buttons: [
+              new DemoButton("create window", (): void => {
+                this.handleCreateOsWindow();
+              }),
+              new DemoButton("destroy window", (): void => {
+                this.handleDestroyOsWindow();
+              }),
+            ],
+          })
+          DemoCard({
+            title: "Clipboard",
+            hint: "requires=[]; system pasteboard does not need an Ability platform object",
+            statusText: this.statusTextOf("clipboard", this.clipboardResult),
+            statusColor: this.statusColorOf("clipboard", this.clipboardResult),
+            busy: this.busyKey === "clipboard",
+            buttons: [
+              new DemoButton("write RGBA image", (): void => {
+                this.handleClipboardWrite();
+              }),
+            ],
+          })
+          DemoCard({
+            title: "Version and syscap",
+            hint: "sync requires=[]; deviceInfo + global canIUse",
+            statusText: this.statusTextOf("version", this.versionResult),
+            statusColor: this.statusColorOf("version", this.versionResult),
+            busy: this.busyKey === "version",
+            buttons: [
+              new DemoButton("query", (): void => {
+                this.handleVersionInfo();
+              }),
+            ],
+          })
+          DemoCard({
+            title: "AppGallery updater",
+            hint: "ability-scoped async check",
+            statusText: this.statusTextOf("updater", this.updaterResult),
+            statusColor: this.statusColorOf("updater", this.updaterResult),
+            busy: this.busyKey === "updater",
+            buttons: [
+              new DemoButton("check update", (): void => {
+                this.handleUpdaterCheck();
+              }),
+            ],
+          })
+          DemoCard({
+            title: "Autostart",
+            hint: "ability-scoped; query API 21+ or open system app-launch settings",
+            statusText: this.statusTextOf("autostart", this.autostartResult),
+            statusColor: this.statusColorOf("autostart", this.autostartResult),
+            busy: this.busyKey === "autostart",
+            buttons: [
+              new DemoButton("query status", (): void => {
+                this.handleAutostartStatus();
+              }),
+              new DemoButton("open settings", (): void => {
+                this.handleAutostartSettings();
+              }),
+            ],
+          })
+          DemoCard({
+            title: "Application control",
+            hint: "sync main-thread plugin; restart is process-global with a 3s cooldown",
+            statusText: this.statusTextOf("app-control", this.appControlResult),
+            statusColor: this.statusColorOf("app-control", this.appControlResult),
+            busy: this.busyKey === "app-control",
+            buttons: [
+              new DemoButton("dark", (): void => this.handleSetColorMode(0)),
+              new DemoButton("light", (): void => this.handleSetColorMode(1)),
+              new DemoButton("system", (): void => this.handleSetColorMode(2)),
+              new DemoButton("restart app", (): void => this.handleRestart()),
+            ],
+          })
+          DemoCard({
+            title: "Open external URL",
+            hint: "ohos.url / context.openLink",
+            statusText: this.statusTextOf("url", this.urlResult),
+            statusColor: this.statusColorOf("url", this.urlResult),
+            busy: this.busyKey === "url",
+            buttons: [
+              new DemoButton("open external URL", (): void => {
+                this.handleOpenUrl();
+              }),
+            ],
+          })
+          DemoCard({
+            title: "File dialogs",
+            hint: "structured DialogOptions, not JSON",
+            statusText: this.statusTextOf("files", this.fileDialogResult),
+            statusColor: this.statusColorOf("files", this.fileDialogResult),
+            busy: this.busyKey === "files",
+            buttons: [
+              new DemoButton("open (multi-select)", (): void => {
+                this.handleFileDialogOpen();
+              }),
+              new DemoButton("save (PDF)", (): void => {
+                this.handleFileDialogSave();
+              }),
+            ],
+          })
+          // This tab exercises the ui-context-gated Window plugin. The component is distinct
+          // from the components on other tabs because only one tab is mounted at a time.
+          DefaultXComponent({ moduleName: MODULE_NAME })
+            .width(1)
+            .height(1)
+            .opacity(0)
+        }
+        .width("100%")
+        .padding({ top: 4, bottom: 16 })
       }
+      .scrollable(ScrollDirection.Vertical)
+      .scrollBar(BarState.Off)
       .width("100%")
-      .padding({ top: 4, bottom: 16 })
+      .height("100%")
+      MenuPopupComponent({ windowId: "main" })
     }
-    .scrollable(ScrollDirection.Vertical)
-    .scrollBar(BarState.Off)
     .width("100%")
     .height("100%");
   }

@@ -26,7 +26,11 @@ class ClipboardAcknowledgement {
 }
 
 function parseImageRequest(payload: BridgeTypedValue): ClipboardImageRequest {
-  if (payload.typeName !== IMAGE_REQUEST_TYPE || typeof payload.value !== "object") {
+  if (
+    payload.typeName !== IMAGE_REQUEST_TYPE ||
+    typeof payload.value !== "object" ||
+    payload.value === null
+  ) {
     throw new Error(`ohos.clipboard.write-image requires bridge type ${IMAGE_REQUEST_TYPE}`);
   }
   const request = payload.value as ClipboardImageRequest;
@@ -42,6 +46,9 @@ function parseImageRequest(payload: BridgeTypedValue): ClipboardImageRequest {
     throw new Error("write-image.width and height must be positive integers");
   }
   const expected = request.width * request.height * 4;
+  if (!Number.isSafeInteger(expected)) {
+    throw new Error("write-image dimensions overflow");
+  }
   if (request.rgba.length !== expected) {
     throw new Error(
       `write-image rgba len ${request.rgba.length} != expected ${expected} (${request.width}x${request.height}x4)`,
@@ -82,8 +89,7 @@ async function writeImageToClipboard(
 
 export class ClipboardPlugin extends AsyncPluginBase {
   readonly id = "ohos.clipboard";
-  readonly version = 1;
-  readonly requires: BridgeContextRequirement[] = ["ability"];
+  readonly requires: BridgeContextRequirement[] = [];
 
   async invokeAsync(
     action: string,

@@ -1,19 +1,19 @@
-//! Main-thread window plugin facade.
+//! Asynchronous window plugin facade.
 //!
 //! Capabilities: `get-avoid-area` and multi-window operations (create OS sub-windows,
-//! decorations, focus, move/resize/minimize/maximize, background color and blur).
+//! decorations, focus, move/resize/minimize/maximize, background color, blur and destruction).
 
 use napi_derive_ohos::napi;
-use napi_ohos::{Env, Error, Result};
+use napi_ohos::{Error, Result};
 use openharmony_ability::{
-    impl_bridge_napi_type, AvoidArea, AvoidAreaType, BridgeContextRequirement, BridgePlugin,
-    MainThreadSyncBridge, OpenHarmonyApp, Rect,
+    impl_bridge_napi_type, AsyncBridge, AvoidArea, AvoidAreaType, BridgeCallOptions,
+    BridgeContextRequirement, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp, Rect,
 };
 
 pub struct WindowBridgePlugin;
 
 impl BridgePlugin for WindowBridgePlugin {
-    type Mode = MainThreadSyncBridge;
+    type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.window";
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
@@ -75,26 +75,6 @@ impl From<RawAvoidArea> for AvoidArea {
             right_rect: area.right_rect.into(),
             bottom_rect: area.bottom_rect.into(),
         }
-    }
-}
-
-/// Queries platform window state synchronously and therefore requires a main-thread N-API `Env`.
-pub trait WindowExt {
-    fn query_avoid_area(&self, env: &Env, area_type: AvoidAreaType) -> Result<AvoidArea>;
-}
-
-impl WindowExt for OpenHarmonyApp {
-    fn query_avoid_area(&self, env: &Env, area_type: AvoidAreaType) -> Result<AvoidArea> {
-        self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge
-                .call_sync::<WindowBridgePlugin, AvoidAreaRequest, AvoidAreaResponse>(
-                    "get-avoid-area",
-                    AvoidAreaRequest {
-                        area_type: area_type.into(),
-                    },
-                )?;
-            Ok(response.area.into())
-        })
     }
 }
 
@@ -232,211 +212,232 @@ pub struct WindowStateResponse {
 
 impl_bridge_napi_type!(WindowStateResponse, "ohos.window.StateResponse");
 
-/// Multi-window extension trait (synchronous, `window-stage` context).
-pub trait WindowExtMulti {
-    /// Creates an OS-level sub-window; returns its globally unique id.
-    fn create_os_window(&self, env: &Env, request: WindowCreateRequest) -> Result<i64>;
-    /// Sets window decorations (title bar visibility) at runtime.
-    fn set_window_decorations(&self, env: &Env, window_id: i64, decorations: bool) -> Result<()>;
-    /// Sets the window background color (0xAARRGGBB).
-    fn set_window_background_color(&self, env: &Env, window_id: i64, color: u32) -> Result<()>;
-    /// Sets the window backdrop blur radius (vibrancy).
-    fn set_window_blur(&self, env: &Env, window_id: i64, radius: f64) -> Result<()>;
-    /// Requests keyboard focus for the window.
-    fn focus_window(&self, env: &Env, window_id: i64) -> Result<()>;
-    /// Sets whether the window can receive focus.
-    fn set_window_focusable(&self, env: &Env, window_id: i64, focusable: bool) -> Result<()>;
-    /// Moves the window to absolute screen coordinates.
-    fn move_window_to(&self, env: &Env, window_id: i64, x: i64, y: i64) -> Result<()>;
-    /// Resizes the window.
-    fn resize_window(&self, env: &Env, window_id: i64, width: i64, height: i64) -> Result<()>;
-    /// Minimizes the window.
-    fn minimize_window(&self, env: &Env, window_id: i64) -> Result<()>;
-    /// Maximizes the window.
-    fn maximize_window(&self, env: &Env, window_id: i64) -> Result<()>;
-    /// Restores a minimized/maximized window.
-    fn restore_window(&self, env: &Env, window_id: i64) -> Result<()>;
-    /// Recovers a hidden window (show + restore).
-    fn recover_window(&self, env: &Env, window_id: i64) -> Result<()>;
-    /// Shows the window.
-    fn show_window(&self, env: &Env, window_id: i64) -> Result<()>;
-    /// Queries whether the window is maximized.
-    fn is_window_maximized(&self, env: &Env, window_id: i64) -> Result<bool>;
-    /// Queries whether the window is minimized.
-    fn is_window_minimized(&self, env: &Env, window_id: i64) -> Result<bool>;
+const MAX_SAFE_JAVASCRIPT_INTEGER: i64 = 9_007_199_254_740_991;
+
+fn validate_window_id(window_id: i64) -> Result<()> {
+    if !(0..=MAX_SAFE_JAVASCRIPT_INTEGER).contains(&window_id) {
+        return Err(Error::from_reason(
+            "window id must be a non-negative JavaScript-safe integer",
+        ));
+    }
+    Ok(())
 }
 
-impl WindowExtMulti for OpenHarmonyApp {
-    fn create_os_window(&self, env: &Env, request: WindowCreateRequest) -> Result<i64> {
+fn validate_platform_integer(name: &str, value: i64) -> Result<()> {
+    if !(-MAX_SAFE_JAVASCRIPT_INTEGER..=MAX_SAFE_JAVASCRIPT_INTEGER).contains(&value) {
+        return Err(Error::from_reason(format!(
+            "window {name} must be a JavaScript-safe integer"
+        )));
+    }
+    Ok(())
+}
+
+/// Worker-safe facade for component-window queries and OS sub-window management.
+#[derive(Clone)]
+pub struct WindowClient {
+    bridge: BridgeRuntime,
+}
+
+impl WindowClient {
+    fn new(app: &OpenHarmonyApp) -> Result<Self> {
+        Ok(Self {
+            bridge: app.bridge()?,
+        })
+    }
+
+    async fn call<Request, Response>(&self, action: &str, request: Request) -> Result<Response>
+    where
+        Request: BridgeNapiType,
+        Response: BridgeNapiType,
+    {
+        self.bridge
+            .call_async::<WindowBridgePlugin, Request, Response>(
+                action,
+                request,
+                BridgeCallOptions::default(),
+            )
+            .await
+    }
+
+    /// Queries the avoid area of the Window that owns the attached DefaultXComponent.
+    pub async fn query_avoid_area(&self, area_type: AvoidAreaType) -> Result<AvoidArea> {
+        let response = self
+            .call::<AvoidAreaRequest, AvoidAreaResponse>(
+                "get-avoid-area",
+                AvoidAreaRequest {
+                    area_type: area_type.into(),
+                },
+            )
+            .await?;
+        Ok(response.area.into())
+    }
+
+    /// Creates and fully configures an OS sub-window before returning its platform window id.
+    pub async fn create_os_window(&self, request: WindowCreateRequest) -> Result<i64> {
         request.validate()?;
-        self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge
-                .call_sync::<WindowBridgePlugin, WindowCreateRequest, WindowCreateResponse>(
-                    "create-os-window",
-                    request,
-                )?;
-            Ok(response.window_id)
-        })
+        let window_id = self
+            .call::<WindowCreateRequest, WindowCreateResponse>("create-os-window", request)
+            .await?
+            .window_id;
+        validate_window_id(window_id)?;
+        Ok(window_id)
     }
 
-    fn set_window_decorations(&self, env: &Env, window_id: i64, decorations: bool) -> Result<()> {
-        self.with_main_thread_bridge(env, |bridge| {
-            bridge
-                .call_sync::<WindowBridgePlugin, WindowDecorationsRequest, WindowAcknowledgement>(
-                    "set-decorations",
-                    WindowDecorationsRequest {
-                        window_id,
-                        decorations,
-                    },
-                )?
-                .ensure()
-        })
+    pub async fn set_window_decorations(&self, window_id: i64, decorations: bool) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowDecorationsRequest, WindowAcknowledgement>(
+            "set-decorations",
+            WindowDecorationsRequest {
+                window_id,
+                decorations,
+            },
+        )
+        .await?
+        .ensure()
     }
 
-    fn set_window_background_color(&self, env: &Env, window_id: i64, color: u32) -> Result<()> {
-        self.with_main_thread_bridge(env, |bridge| {
-            bridge
-                .call_sync::<WindowBridgePlugin, WindowColorRequest, WindowAcknowledgement>(
-                    "set-background-color",
-                    WindowColorRequest { window_id, color },
-                )?
-                .ensure()
-        })
+    pub async fn set_window_background_color(&self, window_id: i64, color: u32) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowColorRequest, WindowAcknowledgement>(
+            "set-background-color",
+            WindowColorRequest { window_id, color },
+        )
+        .await?
+        .ensure()
     }
 
-    fn set_window_blur(&self, env: &Env, window_id: i64, radius: f64) -> Result<()> {
+    /// Sets the platform sub-window shadow radius. The ArkTS side rejects unsupported API levels.
+    pub async fn set_window_blur(&self, window_id: i64, radius: f64) -> Result<()> {
+        validate_window_id(window_id)?;
         if !radius.is_finite() || radius < 0.0 {
             return Err(Error::from_reason(
-                "window blur radius must be a non-negative finite number",
+                "window shadow radius must be a non-negative finite number",
             ));
         }
-        self.with_main_thread_bridge(env, |bridge| {
-            bridge
-                .call_sync::<WindowBridgePlugin, WindowBlurRequest, WindowAcknowledgement>(
-                    "set-blur",
-                    WindowBlurRequest { window_id, radius },
-                )?
-                .ensure()
-        })
+        self.call::<WindowBlurRequest, WindowAcknowledgement>(
+            "set-blur",
+            WindowBlurRequest { window_id, radius },
+        )
+        .await?
+        .ensure()
     }
 
-    fn focus_window(&self, env: &Env, window_id: i64) -> Result<()> {
-        self.with_main_thread_bridge(env, |bridge| {
-            bridge
-                .call_sync::<WindowBridgePlugin, WindowIdRequest, WindowAcknowledgement>(
-                    "focus",
-                    WindowIdRequest { window_id },
-                )?
-                .ensure()
-        })
+    pub async fn focus_window(&self, window_id: i64) -> Result<()> {
+        self.window_command("focus", window_id).await
     }
 
-    fn set_window_focusable(&self, env: &Env, window_id: i64, focusable: bool) -> Result<()> {
-        self.with_main_thread_bridge(env, |bridge| {
-            bridge
-                .call_sync::<WindowBridgePlugin, WindowFocusableRequest, WindowAcknowledgement>(
-                    "set-focusable",
-                    WindowFocusableRequest {
-                        window_id,
-                        focusable,
-                    },
-                )?
-                .ensure()
-        })
+    pub async fn set_window_focusable(&self, window_id: i64, focusable: bool) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowFocusableRequest, WindowAcknowledgement>(
+            "set-focusable",
+            WindowFocusableRequest {
+                window_id,
+                focusable,
+            },
+        )
+        .await?
+        .ensure()
     }
 
-    fn move_window_to(&self, env: &Env, window_id: i64, x: i64, y: i64) -> Result<()> {
-        self.with_main_thread_bridge(env, |bridge| {
-            bridge
-                .call_sync::<WindowBridgePlugin, WindowMoveRequest, WindowAcknowledgement>(
-                    "move-to",
-                    WindowMoveRequest { window_id, x, y },
-                )?
-                .ensure()
-        })
+    pub async fn move_window_to(&self, window_id: i64, x: i64, y: i64) -> Result<()> {
+        validate_window_id(window_id)?;
+        validate_platform_integer("x coordinate", x)?;
+        validate_platform_integer("y coordinate", y)?;
+        self.call::<WindowMoveRequest, WindowAcknowledgement>(
+            "move-to",
+            WindowMoveRequest { window_id, x, y },
+        )
+        .await?
+        .ensure()
     }
 
-    fn resize_window(&self, env: &Env, window_id: i64, width: i64, height: i64) -> Result<()> {
+    pub async fn resize_window(&self, window_id: i64, width: i64, height: i64) -> Result<()> {
+        validate_window_id(window_id)?;
         if width <= 0 || height <= 0 {
             return Err(Error::from_reason(
                 "window width and height must be positive",
             ));
         }
-        self.with_main_thread_bridge(env, |bridge| {
-            bridge
-                .call_sync::<WindowBridgePlugin, WindowResizeRequest, WindowAcknowledgement>(
-                    "resize",
-                    WindowResizeRequest {
-                        window_id,
-                        width,
-                        height,
-                    },
-                )?
-                .ensure()
-        })
+        validate_platform_integer("width", width)?;
+        validate_platform_integer("height", height)?;
+        self.call::<WindowResizeRequest, WindowAcknowledgement>(
+            "resize",
+            WindowResizeRequest {
+                window_id,
+                width,
+                height,
+            },
+        )
+        .await?
+        .ensure()
     }
 
-    fn minimize_window(&self, env: &Env, window_id: i64) -> Result<()> {
-        self.window_command(env, "minimize", window_id)
+    pub async fn minimize_window(&self, window_id: i64) -> Result<()> {
+        self.window_command("minimize", window_id).await
     }
 
-    fn maximize_window(&self, env: &Env, window_id: i64) -> Result<()> {
-        self.window_command(env, "maximize", window_id)
+    pub async fn maximize_window(&self, window_id: i64) -> Result<()> {
+        self.window_command("maximize", window_id).await
     }
 
-    fn restore_window(&self, env: &Env, window_id: i64) -> Result<()> {
-        self.window_command(env, "restore", window_id)
+    pub async fn restore_window(&self, window_id: i64) -> Result<()> {
+        self.window_command("restore", window_id).await
     }
 
-    fn recover_window(&self, env: &Env, window_id: i64) -> Result<()> {
-        self.window_command(env, "recover", window_id)
+    pub async fn recover_window(&self, window_id: i64) -> Result<()> {
+        self.window_command("recover", window_id).await
     }
 
-    fn show_window(&self, env: &Env, window_id: i64) -> Result<()> {
-        self.window_command(env, "show", window_id)
+    pub async fn show_window(&self, window_id: i64) -> Result<()> {
+        self.window_command("show", window_id).await
     }
 
-    fn is_window_maximized(&self, env: &Env, window_id: i64) -> Result<bool> {
-        self.window_state(env, "is-maximized", window_id)
+    /// Destroys one OS sub-window and releases its plugin-local handle.
+    pub async fn destroy_window(&self, window_id: i64) -> Result<()> {
+        self.window_command("destroy-window", window_id).await
     }
 
-    fn is_window_minimized(&self, env: &Env, window_id: i64) -> Result<bool> {
-        self.window_state(env, "is-minimized", window_id)
+    pub async fn is_window_maximized(&self, window_id: i64) -> Result<bool> {
+        self.window_state("is-maximized", window_id).await
+    }
+
+    pub async fn is_window_minimized(&self, window_id: i64) -> Result<bool> {
+        self.window_state("is-minimized", window_id).await
+    }
+
+    async fn window_command(&self, action: &str, window_id: i64) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowIdRequest, WindowAcknowledgement>(action, WindowIdRequest { window_id })
+            .await?
+            .ensure()
+    }
+
+    async fn window_state(&self, action: &str, window_id: i64) -> Result<bool> {
+        validate_window_id(window_id)?;
+        Ok(self
+            .call::<WindowIdRequest, WindowStateResponse>(action, WindowIdRequest { window_id })
+            .await?
+            .value)
     }
 }
 
-trait WindowCommandHelper {
-    fn window_command(&self, env: &Env, action: &str, window_id: i64) -> Result<()>;
-    fn window_state(&self, env: &Env, action: &str, window_id: i64) -> Result<bool>;
+/// Extension trait supplied by the capability package, never by framework core.
+pub trait WindowExt {
+    fn window(&self) -> Result<WindowClient>;
 }
 
-impl WindowCommandHelper for OpenHarmonyApp {
-    fn window_command(&self, env: &Env, action: &str, window_id: i64) -> Result<()> {
-        self.with_main_thread_bridge(env, |bridge| {
-            bridge
-                .call_sync::<WindowBridgePlugin, WindowIdRequest, WindowAcknowledgement>(
-                    action,
-                    WindowIdRequest { window_id },
-                )?
-                .ensure()
-        })
-    }
-
-    fn window_state(&self, env: &Env, action: &str, window_id: i64) -> Result<bool> {
-        self.with_main_thread_bridge(env, |bridge| {
-            let response = bridge
-                .call_sync::<WindowBridgePlugin, WindowIdRequest, WindowStateResponse>(
-                    action,
-                    WindowIdRequest { window_id },
-                )?;
-            Ok(response.value)
-        })
+impl WindowExt for OpenHarmonyApp {
+    fn window(&self) -> Result<WindowClient> {
+        WindowClient::new(self)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AvoidAreaRequest, AvoidAreaResponse, RawAvoidArea, RawRect, WindowBridgePlugin};
+    use super::{
+        validate_platform_integer, validate_window_id, AvoidAreaRequest, AvoidAreaResponse,
+        RawAvoidArea, RawRect, WindowBridgePlugin, MAX_SAFE_JAVASCRIPT_INTEGER,
+    };
     use openharmony_ability::{
         AvoidArea, BridgeContextRequirement, BridgeNapiType, BridgePlugin, Rect,
     };
@@ -530,5 +531,15 @@ mod tests {
                 height: 16,
             }
         );
+    }
+
+    #[test]
+    fn window_handles_and_geometry_stay_javascript_safe() {
+        assert!(validate_window_id(0).is_ok());
+        assert!(validate_window_id(MAX_SAFE_JAVASCRIPT_INTEGER).is_ok());
+        assert!(validate_window_id(-1).is_err());
+        assert!(validate_window_id(MAX_SAFE_JAVASCRIPT_INTEGER + 1).is_err());
+        assert!(validate_platform_integer("x", -MAX_SAFE_JAVASCRIPT_INTEGER).is_ok());
+        assert!(validate_platform_integer("x", MAX_SAFE_JAVASCRIPT_INTEGER + 1).is_err());
     }
 }

@@ -11,6 +11,7 @@
     "libdemo_sub_native.so": "file:./src/main/cpp/types/libdemo_sub_native",
     "@ohos-rs/ability": "file:../../native_ability",
     "@ohos-rs/ability-plugin-app-control": "file:../../plugins/app-control",
+    "@ohos-rs/ability-plugin-autostart": "file:../../plugins/autostart",
     "@ohos-rs/ability-plugin-permission": "file:../../plugins/permission",
     "@ohos-rs/ability-plugin-resource": "file:../../plugins/resource",
     "@ohos-rs/ability-plugin-webview": "file:../../plugins/webview",

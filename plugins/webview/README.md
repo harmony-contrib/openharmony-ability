@@ -1,7 +1,7 @@
 # @ohos-rs/ability-plugin-webview
 
 这是 `openharmony-ability-plugin-webview` 的 ArkTS HAR。它创建 ArkWeb `Web` / `WebviewController`、
-把 WebView 的 `FrameNode` 挂进当前 native module 对应组件的根树（或 `ohos.node` 容器），并把所有
+把 WebView 的 `FrameNode` 挂进当前插件 Host 对应组件的根树（或 `ohos.node` 容器），并把所有
 controller 操作和 ArkWeb callback 转换为具名 N-API bridge 调用。
 
 业务不直接保存 controller，也不应把 WebView 接口重新写回 `DefaultXComponent`。Rust facade 使用
@@ -44,7 +44,7 @@ Rust 侧必须在 `#[ability]` 初始化器注册 `WebviewBridgePlugin`；自定
 | `id`             | `ohos.webview`                                                                                                                                                                       |
 | `execution`      | `async`                                                                                                                                                                              |
 | `requires`       | `["ui-context"]`                                                                                                                                                                     |
-| 挂载             | 当前 module/component 根树（默认全屏）；可选 `parentHandle`（`ohos.node` 容器）                                                                                                    |
+| 挂载             | 当前 Host/component 根树（默认全屏）；可选 `parentHandle`（`ohos.node` 容器）                                                                                                      |
 | 创建             | `create`：`CreateRequest { id, parentHandle? }` → `CreateResponse { id }`                                                                                                            |
 | 控制器操作       | `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`get-url`、`cookies-with-url`、`clear-all-browsing-data`、`evaluate-script` |
 
@@ -54,7 +54,7 @@ controller attach、delegate/protocol/proxy 安装和首次 load 启动；它不
 
 ## 挂载与混合布局
 
-WebView 的 `FrameNode` 默认以 host 内部唯一 key 挂进当前 module 的组件根树，
+WebView 的 `FrameNode` 默认以 host 内部唯一 key 挂进当前 Host 的组件根树，
 全屏显示。Rust 需要组合时，先用内置 `ohos.node` 插件创建容器，把容器句柄作为 `parentHandle` 传入
 create request，WebView 节点就会挂到该容器下；容器最终由 Rust `mount-into-root` 整体挂载。
 
@@ -68,12 +68,13 @@ Stack() {
 }
 ```
 
-一个 `DefaultXComponent` 必须使用一个独立 native module；跨窗口组件不能共享 module，也不使用
-`windowKey`/`surfaceKey`。同一 module/component 可按不同 ID 同时持有多个 WebView。WebView ID 是
+framework 仍要求一个 `DefaultXComponent` 使用一个独立 native module；插件本身只接收已绑定的
+Host/context，不读取或配置 module，也不使用 `windowKey`/`surfaceKey`。同一插件实例/component 可按
+不同 ID 同时持有多个 WebView。WebView ID 是
 不透明、facade-local 的业务标识，不会直接拼接成节点 key 或进程级 ArkWeb tag；HAR 会用
 session + 进程计数器生成内部唯一 native tag，因此同一进程的多个插件实例可安全复用同一业务 ID。
 
-节点挂载没有计时等待：module 根在 `ui-context-ready` 前已存在，`onInstall` 后即可挂载。
+节点挂载没有计时等待：Host 根在 `ui-context-ready` 前已存在，`onInstall` 后即可挂载。
 Ability/session dispose 时，HAR 必须卸载自己创建的节点与 controller 状态（`remove` 走
 `context.removeChild` 或从父容器摘除），不能影响业务节点或其他插件。
 

@@ -7,7 +7,13 @@
     "arkts/system-api-version": [
       "error",
       {
-        "minApiVersion": 12
+        "minApiVersion": 12,
+        // AutostartPlugin guards this API-21 call with deviceInfo.sdkApiVersion.
+        "apis": {
+          "@kit.AbilityKit.autoStartupManager.getAutoStartupStatusForSelf": 12,
+          // The API 24 SDK declaration retains @since 9 for this overload.
+          "@ohos.pasteboard.createData": 9
+        }
       }
     ]
   }

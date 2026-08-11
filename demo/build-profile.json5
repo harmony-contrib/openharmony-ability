@@ -59,6 +59,10 @@
       "srcPath": "../plugins/app-control",
     },
     {
+      "name": "plugin_autostart",
+      "srcPath": "../plugins/autostart",
+    },
+    {
       "name": "plugin_permission",
       "srcPath": "../plugins/permission",
     },

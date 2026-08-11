@@ -1,6 +1,6 @@
 import { WebHeader } from "@kit.ArkUI";
-import { BusinessError } from "@kit.BasicServicesKit";
 import { BuilderNode } from "@ohos.arkui.node";
+import fs from "@ohos.file.fs";
 import webview from "@ohos.web.webview";
 import {
   BridgeCallContext,
@@ -48,6 +48,15 @@ interface CookieApi {
   configCookieSync?: (url: string, value: string) => boolean;
 }
 
+/** API-14-only PDF surfaces, resolved dynamically to keep the API 12 package baseline. */
+interface PdfDataApi {
+  pdfArrayBuffer?: () => Uint8Array;
+}
+
+interface PdfControllerApi {
+  createPdf?: (configuration: ESObject) => Promise<PdfDataApi>;
+}
+
 function enableWebDebuggingIfAvailable(): void {
   const debuggingApi = webview.WebviewController as ESObject as WebviewDebuggingApi;
   if (typeof debuggingApi.setWebDebuggingAccess !== "function") {
@@ -84,7 +93,7 @@ interface WebviewCreatePayload {
   id: string;
   /**
    * Optional opaque container handle issued by the built-in ohos.node plugin. When provided the
-   * WebView FrameNode is appended under that container instead of this module's component root,
+   * WebView FrameNode is appended under that container instead of this plugin Host's component root,
    * so an RS-layer node tree can adopt WebViews as children.
    */
   parentHandle?: number | null;
@@ -118,7 +127,7 @@ interface ScriptPayload {
 
 interface ManagedWebview extends WebviewCreatePayload {
   controller: WebviewController;
-  /** Process-unique ArkWeb controller tag; distinct from the module-local public ID. */
+  /** Process-unique ArkWeb controller tag; distinct from the plugin-instance-local public ID. */
   nativeTag: string;
   style: WebviewStyle;
   eventOptions: WebviewEventOptions;
@@ -516,8 +525,8 @@ let nextWebviewNativeTagId = 1;
  */
 function ensureWebEngineInitialized(context: BridgePluginContext): void {
   if (!webEngineInitialized) {
-    // Seal and validate every module's declarations before any module mutates ArkWeb's global
-    // scheme registry.
+    // Seal and validate every active facade's declarations before ArkWeb's global scheme
+    // registry is mutated.
     const sealedSchemes = notifyWebEngineProcessWide(
       context,
       "seal-engine-schemes",
@@ -534,8 +543,8 @@ function ensureWebEngineInitialized(context: BridgePluginContext): void {
     webEngineSchemes = sealedSchemes;
     webEngineInitialized = true;
   }
-  // ArkWeb is process-global, while every native module has independent Rust static state.
-  // Notify every active module, including those whose DefaultXComponent has not appeared yet.
+  // ArkWeb is process-global. Notify every active Rust facade, including those whose UI context
+  // has not appeared yet.
   notifyWebEngineProcessWide(
     context,
     "engine-initialized",
@@ -928,8 +937,8 @@ function BuildWebview(data: ManagedWebview) {
 const webviewBuilder = wrapBuilder<[ManagedWebview]>(BuildWebview);
 
 /**
- * One surface per WebviewPlugin instance (per session and module). It owns no root node of its
- * own: every WebView is mounted either into this module's component root (full-bleed default) or
+ * One surface per WebviewPlugin instance. It owns no root node of its own: every WebView is
+ * mounted either into this Host's component root (full-bleed default) or
  * under a caller-provided container handle from the built-in ohos.node plugin.
  */
 class WebviewSurface {
@@ -1143,43 +1152,49 @@ class WebviewSurface {
   ): Promise<boolean> {
     const entry = await this.controllerEntry(id, callContext);
     try {
-      const pdfConfig: ESObject = {};
-      if (config?.width !== undefined && config?.width !== null) {
-        pdfConfig.width = config.width;
-      }
-      if (config?.height !== undefined && config?.height !== null) {
-        pdfConfig.height = config.height;
-      }
-      if (config?.marginTop !== undefined && config?.marginTop !== null) {
-        pdfConfig.marginTop = config.marginTop;
-      }
-      if (config?.marginBottom !== undefined && config?.marginBottom !== null) {
-        pdfConfig.marginBottom = config.marginBottom;
-      }
-      if (config?.marginLeft !== undefined && config?.marginLeft !== null) {
-        pdfConfig.marginLeft = config.marginLeft;
-      }
-      if (config?.marginRight !== undefined && config?.marginRight !== null) {
-        pdfConfig.marginRight = config.marginRight;
-      }
+      // ArkWeb requires all six page geometry fields. Use its documented A4 example as defaults.
+      const pdfConfig: ESObject = {
+        width: config?.width ?? 8.27,
+        height: config?.height ?? 11.69,
+        marginTop: config?.marginTop ?? 0,
+        marginBottom: config?.marginBottom ?? 0,
+        marginLeft: config?.marginLeft ?? 0,
+        marginRight: config?.marginRight ?? 0,
+      };
       if (config?.scale !== undefined && config?.scale !== null) {
         pdfConfig.scale = config.scale;
       }
       if (config?.shouldPrintBackground !== undefined && config?.shouldPrintBackground !== null) {
         pdfConfig.shouldPrintBackground = config.shouldPrintBackground;
       }
-      await new Promise<void>((resolve, reject) => {
-        (entry.data.controller as ESObject).createPdf(
-          pdfConfig,
-          (error: BusinessError, _data: ESObject): void => {
-            if (error) {
-              reject(new Error(`createPdf failed: code=${error.code} msg=${error.message}`));
-            } else {
-              resolve();
-            }
-          },
-        );
-      });
+      const controller = entry.data.controller as ESObject as PdfControllerApi;
+      if (controller.createPdf === undefined) {
+        throw new Error("PDF export is unavailable on this ArkWeb API level");
+      }
+      const pdfData = await controller.createPdf(pdfConfig);
+      if (!callContext.isActive()) {
+        throw new Error("WebView PDF export was cancelled before file creation");
+      }
+      if (typeof pdfData.pdfArrayBuffer !== "function") {
+        throw new Error("createPdf returned an invalid PDF data object");
+      }
+      const bytes = pdfData.pdfArrayBuffer();
+      if (bytes.byteLength === 0) {
+        throw new Error("createPdf returned an empty PDF document");
+      }
+      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      const file = fs.openSync(
+        path,
+        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC,
+      );
+      try {
+        const written = await fs.write(file.fd, buffer);
+        if (written !== bytes.byteLength) {
+          throw new Error(`PDF file write was incomplete: ${written}/${bytes.byteLength} bytes`);
+        }
+      } finally {
+        fs.closeSync(file);
+      }
       return true;
     } catch (error) {
       throw new Error(`Unable to create WebView PDF: ${String(error)}`);
@@ -1383,7 +1398,7 @@ export class WebviewPlugin extends AsyncPluginBase {
 
   override onLifecycle(event: BridgeLifecycleEvent, _context: BridgePluginHookContext): void {
     if (event.kind === "ui-context-destroy") {
-      // BridgeHost already detached this module's component and owns its node-tree cleanup.
+      // BridgeHost already detached this Host's component and owns its node-tree cleanup.
       this.surface?.dispose(false);
       this.surface = undefined;
       return;

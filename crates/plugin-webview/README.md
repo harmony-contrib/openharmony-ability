@@ -5,7 +5,7 @@
 ArkWeb delegate；Rust 只持有 controller ID、具名 N-API 数据及 Rust-owned callback/protocol closure。
 
 插件不把 WebView 写进 framework 的 `DefaultXComponent`。默认情况下 WebView 的 `FrameNode` 挂进
-当前 native module 唯一组件的根树（全屏）；需要组合时，`parent_node(handle)` 把它挂到
+当前插件 Host 所绑定组件的根树（全屏）；需要组合时，`parent_node(handle)` 把它挂到
 `ohos.node` 容器句柄之下，从而保留 WebView、XComponent 和自定义 ArkUI 节点的混合布局。
 
 ## 契约
@@ -17,7 +17,7 @@ ArkWeb delegate；Rust 只持有 controller ID、具名 N-API 数据及 Rust-own
 | 插件 ID / bridge 版本 | `ohos.webview` / `2` |
 | 执行模式 | 异步：`AsyncBridge` / `invokeAsync` |
 | 前置 context | `ui-context` |
-| 挂载 | 当前 module/component 根树（默认全屏）；可选 `parentHandle` 挂到 `ohos.node` 容器 |
+| 挂载 | 当前 Host/component 根树（默认全屏）；可选 `parentHandle` 挂到 `ohos.node` 容器 |
 | 核心 action | `create`、控制器操作、`evaluate-script` |
 
 所有出站 action 和所有 ArkWeb 反向事件都是具名 N-API 契约，不使用 JSON。`create` 返回 controller
@@ -112,11 +112,11 @@ user agent、autoplay、document-start initialization scripts、headers 和 `tra
 
 ## 挂载与生命周期
 
-- 一个 `DefaultXComponent` 对应一个 native module；跨窗口的第二个组件必须使用另一个 module，
-  `WebviewCreateRequest` 不接受 window/surface key。
-- 同一个 module/component 可用不同 WebView ID 同时创建多个实例；每个实例拥有独立 mount key 和
-  controller，同 ID recreate 才替换旧实例。ID 只在当前 module 内唯一；ArkTS 会生成进程唯一的
-  内部 ArkWeb tag，跨 module 使用相同业务 ID 不会冲突。
+- framework 仍规定一个 `DefaultXComponent` 对应一个 native module；插件契约只接收已经绑定好的
+  Host/context，不接受 module、window 或 surface 路由参数。
+- 同一个插件实例/component 可用不同 WebView ID 同时创建多个实例；每个实例拥有独立 mount key 和
+  controller，同 ID recreate 才替换旧实例。ID 只在当前插件实例内唯一；ArkTS 会生成进程唯一的
+  内部 ArkWeb tag，不同插件实例使用相同业务 ID 不会冲突。
 - 默认全屏挂入当前 component 根树；需要组合时用 `parent_node(container)` 把 WebView 挂到
   `ohos.node` 容器之下（容器最终也由 Rust 决定挂不挂根）。
 - 异步 `create` 等待 controller attach 和首次导航启动；等待由 lifecycle/cancel 驱动，不使用
@@ -126,7 +126,7 @@ user agent、autoplay、document-start initialization scripts、headers 和 `tra
 
 ## WebView 回调
 
-在 `create` 前用 `WebviewCallbacksBuilder` 按 module-local WebView ID 声明回调：
+在 `create` 前用 `WebviewCallbacksBuilder` 按 facade-local WebView ID 声明回调：
 
 ```rust
 use openharmony_ability_plugin_webview::{
@@ -148,7 +148,7 @@ controller；same-ID recreate 前的延迟事件不能命中新实例。所有 c
 运行，应快速返回；耗时工作只能复制数据后投递给 worker。
 
 `ui-context-destroy` / `ability-destroy` 会兜底清空 controller attachment/tag 状态，但保留 callback、
-protocol 和 proxy 声明，供同 module 后续 appearance 重建 controller。该兜底不依赖 closing 阶段还能
+protocol 和 proxy 声明，供同 facade 后续 appearance 重建 controller。该兜底不依赖 closing 阶段还能
 成功执行 ArkTS → Rust 清理通知。
 
 ## 自定义 protocol 与页面 JavaScript
@@ -179,10 +179,10 @@ WebviewJavascriptProxyBuilder::new("article", "native")
     .build()?;
 ```
 
-`WebviewProtocol::register` 的新声明只能在进程级 engine 初始化前调用。不同 native module 拥有
-独立 Rust 状态，但共享 ArkWeb engine；第一个 WebView create 会让所有已激活且装配该插件的 module
+`WebviewProtocol::register` 的新声明只能在进程级 engine 初始化前调用。不同插件 facade 拥有
+独立 Rust 状态，但共享 ArkWeb engine；第一个 WebView create 会让所有已激活的插件 facade
 先 flush 声明，再初始化 engine。Ability 重建时重复相同 scheme + options 是幂等操作；engine 启动
-后才加载的 module 只能复用进程已注册且 options 相同的 scheme，不能再新增 custom scheme。ID handler 和 JS proxy 应优先在 `create`
+后才激活的 facade 只能复用进程已注册且 options 相同的 scheme，不能再新增 custom scheme。ID handler 和 JS proxy 应优先在 `create`
 前声明；controller attach 后插件会先安装 protocol/proxy/delegate，再开始首次导航。需要异步回复
 custom protocol 时使用 `custom_protocol_async` / `WebviewProtocolResponder`。
 

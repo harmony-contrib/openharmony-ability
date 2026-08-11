@@ -1,1 +1,1 @@
-export { MenuPlugin } from "./src/main/ets/MenuPlugin";
+export { MenuBarComponent, MenuPlugin, MenuPopupComponent } from "./src/main/ets/MenuPlugin";

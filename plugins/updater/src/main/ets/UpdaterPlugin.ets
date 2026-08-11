@@ -57,10 +57,18 @@ class UpdaterAcknowledgement {
 }
 
 function parseCheckRequest(payload: BridgeTypedValue): UpdaterCheckRequest {
-  if (payload.typeName !== CHECK_REQUEST_TYPE || typeof payload.value !== "object") {
+  if (
+    payload.typeName !== CHECK_REQUEST_TYPE ||
+    typeof payload.value !== "object" ||
+    payload.value === null
+  ) {
     throw new Error(`ohos.updater requires bridge type ${CHECK_REQUEST_TYPE}`);
   }
-  return payload.value as UpdaterCheckRequest;
+  const request = payload.value as UpdaterCheckRequest;
+  if (request.requested !== true) {
+    throw new Error("ohos.updater.requested must be true");
+  }
+  return request;
 }
 
 async function checkForUpdate(
@@ -111,9 +119,23 @@ async function showUpdateDialog(context: common.UIAbilityContext): Promise<numbe
   return resultCode;
 }
 
+let updateDialogInFlight: Promise<number> | null = null;
+
+function showUpdateDialogOnce(context: common.UIAbilityContext): Promise<number> {
+  if (updateDialogInFlight !== null) {
+    return updateDialogInFlight;
+  }
+  const operation = showUpdateDialog(context).finally((): void => {
+    if (updateDialogInFlight === operation) {
+      updateDialogInFlight = null;
+    }
+  });
+  updateDialogInFlight = operation;
+  return operation;
+}
+
 export class UpdaterPlugin extends AsyncPluginBase {
   readonly id = "ohos.updater";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(
@@ -130,7 +152,7 @@ export class UpdaterPlugin extends AsyncPluginBase {
       return { typeName: CHECK_RESPONSE_TYPE, value: new UpdaterCheckResponse(result) };
     }
     if (action === "download-and-install") {
-      const resultCode = await showUpdateDialog(context.abilityContext);
+      const resultCode = await showUpdateDialogOnce(context.abilityContext);
       if (!context.isActive()) {
         throw new Error("Ability was destroyed while update dialog was pending");
       }

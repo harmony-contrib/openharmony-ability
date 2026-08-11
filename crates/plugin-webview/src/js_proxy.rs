@@ -1,7 +1,7 @@
 //! Web-page JavaScript → Rust proxy support owned by the WebView plugin.
 //!
 //! ArkWeb requires a JavaScript proxy to be registered after its controller has attached. The
-//! public builder therefore queues declarations by module-local WebView ID and
+//! public builder therefore queues declarations by facade-local WebView ID and
 //! `WebviewBridgePlugin` flushes
 //! them when the ArkTS Web component reports `controller-attached`. This keeps the page callback
 //! in native ArkWeb while avoiding an ArkTS object or N-API function reference on a Rust worker.
@@ -42,7 +42,7 @@ static PROXY_STATE: LazyLock<Mutex<ProxyState>> =
 /// Builder for a persistent JavaScript object exposed to a WebView page.
 ///
 /// The registered object is available as `window.<object_name>` and each declared method receives
-/// the module-local business WebView ID plus stringified page arguments. Calling [`Self::build`]
+/// the facade-local business WebView ID plus stringified page arguments. Calling [`Self::build`]
 /// before `create` is the preferred path: the declaration is installed exactly when the
 /// process-unique ArkWeb controller attaches, before the initial document is loaded.
 pub struct WebviewJavascriptProxyBuilder {
@@ -166,7 +166,7 @@ pub(crate) fn on_controller_removed(webview_id: &str, native_tag: &str) -> Resul
 }
 
 /// Clears controller-generation state at component/session teardown. Proxy declarations remain
-/// available for a later controller created with the same module-local business ID.
+/// available for a later controller created with the same facade-local business ID.
 pub(crate) fn clear_attached() -> Result<()> {
     PROXY_STATE
         .lock()

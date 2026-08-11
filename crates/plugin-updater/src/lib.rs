@@ -18,7 +18,6 @@ impl BridgePlugin for UpdaterBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.updater";
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
 }

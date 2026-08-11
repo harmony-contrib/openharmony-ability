@@ -1,6 +1,7 @@
 import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
 import window from "@ohos.window";
 import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
+import { AutostartPlugin } from "@ohos-rs/ability-plugin-autostart";
 import { ClipboardPlugin } from "@ohos-rs/ability-plugin-clipboard";
 import { FilesPlugin } from "@ohos-rs/ability-plugin-files";
 import { MenuPlugin } from "@ohos-rs/ability-plugin-menu";
@@ -33,6 +34,7 @@ export default class EntryAbility extends NativeAbility {
   public bridgePlugins = [
     new LazyPlugin(() => new PermissionPlugin()),
     new LazyPlugin(() => new AppControlPlugin()),
+    new LazyPlugin(() => new AutostartPlugin()),
     new LazyPlugin(() => new ClipboardPlugin()),
     new LazyPlugin(() => new FilesPlugin()),
     new LazyPlugin(() => new ResourcePlugin()),

@@ -10,7 +10,7 @@
 //!
 //! Menu items are structured, named N-API values (`ohos.menu.MenuItemData`), never JSON.
 
-use std::{future::Future, pin::Pin};
+use std::{collections::BTreeSet, future::Future, pin::Pin};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use napi_derive_ohos::napi;
@@ -26,9 +26,7 @@ impl BridgePlugin for MenuBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.menu";
-    const VERSION: u32 = 1;
-    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
-        &[BridgeContextRequirement::Ability];
+    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
 
     fn on_main_thread_event<'env>(
         &self,
@@ -42,7 +40,19 @@ impl BridgePlugin for MenuBridgePlugin {
                         "menu-click event requires a non-empty menu id",
                     ));
                 }
-                let _ = MENU_EVENT_TX.send(request.id);
+                if request
+                    .window_id
+                    .as_ref()
+                    .is_some_and(|window_id| window_id.trim().is_empty())
+                {
+                    return Err(Error::from_reason(
+                        "menu-click event window id must not be empty when provided",
+                    ));
+                }
+                let _ = MENU_EVENT_TX.send(MenuEvent {
+                    id: request.id,
+                    window_id: request.window_id,
+                });
                 event.respond(MenuClickResponse { accepted: true })
             }
             _ => Err(Error::from_reason(format!(
@@ -71,10 +81,18 @@ pub struct MenuClickResponse {
 
 impl_bridge_napi_type!(MenuClickResponse, "ohos.menu.ClickResponse");
 
-static MENU_EVENT_CHANNEL: std::sync::LazyLock<(Sender<String>, Receiver<String>)> =
+/// Rust-owned menu event. `window_id` preserves the originating business window for multi-window
+/// plugin instances; it is not a native module routing key.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MenuEvent {
+    pub id: String,
+    pub window_id: Option<String>,
+}
+
+static MENU_EVENT_CHANNEL: std::sync::LazyLock<(Sender<MenuEvent>, Receiver<MenuEvent>)> =
     std::sync::LazyLock::new(unbounded);
 
-static MENU_EVENT_TX: std::sync::LazyLock<Sender<String>> =
+static MENU_EVENT_TX: std::sync::LazyLock<Sender<MenuEvent>> =
     std::sync::LazyLock::new(|| MENU_EVENT_CHANNEL.0.clone());
 
 /// Menu item kinds, mirroring muda/tauri menu semantics.
@@ -83,8 +101,13 @@ pub mod item_kind {
     pub const SUBMENU: &str = "submenu";
     pub const SEPARATOR: &str = "separator";
     pub const PREDEFINED: &str = "predefined";
+    pub const CHECK: &str = "check";
+    pub const ICON: &str = "icon";
     pub const ABOUT: &str = "about";
 }
+
+const MAX_MENU_ITEMS: usize = 512;
+const MAX_MENU_DEPTH: usize = 16;
 
 /// Optional application metadata for the "about" menu item.
 #[napi(object)]
@@ -92,6 +115,7 @@ pub mod item_kind {
 pub struct AboutMetadataData {
     pub name: Option<String>,
     pub version: Option<String>,
+    pub short_version: Option<String>,
     pub authors: Option<Vec<String>>,
     pub comments: Option<String>,
     pub copyright: Option<String>,
@@ -169,13 +193,52 @@ impl MenuItemData {
         self
     }
 
-    fn validate(&self) -> Result<()> {
+    fn validate(
+        &self,
+        ids: &mut BTreeSet<String>,
+        item_count: &mut usize,
+        depth: usize,
+    ) -> Result<()> {
+        if depth > MAX_MENU_DEPTH {
+            return Err(Error::from_reason(format!(
+                "menu tree exceeds the {MAX_MENU_DEPTH} level depth limit"
+            )));
+        }
+        *item_count = item_count
+            .checked_add(1)
+            .ok_or_else(|| Error::from_reason("menu item count overflow"))?;
+        if *item_count > MAX_MENU_ITEMS {
+            return Err(Error::from_reason(format!(
+                "menu tree exceeds the {MAX_MENU_ITEMS} item limit"
+            )));
+        }
         if self.id.trim().is_empty() {
             return Err(Error::from_reason("menu item id must not be empty"));
         }
+        if !matches!(
+            self.item_type.as_str(),
+            item_kind::NORMAL
+                | item_kind::SUBMENU
+                | item_kind::SEPARATOR
+                | item_kind::PREDEFINED
+                | item_kind::CHECK
+                | item_kind::ICON
+                | item_kind::ABOUT
+        ) {
+            return Err(Error::from_reason(format!(
+                "unsupported menu item type '{}'",
+                self.item_type
+            )));
+        }
+        if !ids.insert(self.id.clone()) {
+            return Err(Error::from_reason(format!(
+                "menu item id '{}' is duplicated",
+                self.id
+            )));
+        }
         if let Some(items) = self.submenu_items.as_ref() {
             for item in items {
-                item.validate()?;
+                item.validate(ids, item_count, depth + 1)?;
             }
         }
         Ok(())
@@ -196,8 +259,10 @@ impl MenuBarRequest {
         if self.window_id.trim().is_empty() {
             return Err(Error::from_reason("menu windowId must not be empty"));
         }
+        let mut ids = BTreeSet::new();
+        let mut item_count = 0;
         for item in &self.items {
-            item.validate()?;
+            item.validate(&mut ids, &mut item_count, 1)?;
         }
         Ok(())
     }
@@ -222,8 +287,17 @@ impl MenuPopupRequest {
         if self.items.is_empty() {
             return Err(Error::from_reason("popup menu requires at least one item"));
         }
+        if self.x.is_some_and(|value| !value.is_finite())
+            || self.y.is_some_and(|value| !value.is_finite())
+        {
+            return Err(Error::from_reason(
+                "popup menu coordinates must be finite numbers",
+            ));
+        }
+        let mut ids = BTreeSet::new();
+        let mut item_count = 0;
         for item in &self.items {
-            item.validate()?;
+            item.validate(&mut ids, &mut item_count, 1)?;
         }
         Ok(())
     }
@@ -237,6 +311,15 @@ pub struct MenuVisibilityRequest {
 }
 
 impl_bridge_napi_type!(MenuVisibilityRequest, "ohos.menu.VisibilityRequest");
+
+impl MenuVisibilityRequest {
+    fn validate(&self) -> Result<()> {
+        if self.window_id.trim().is_empty() {
+            return Err(Error::from_reason("menu windowId must not be empty"));
+        }
+        Ok(())
+    }
+}
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -283,8 +366,8 @@ pub trait MenuExt {
         visible: bool,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 
-    /// Receives menu ids clicked in ArkTS UI. Pairs with [`Self::set_menubar`] item ids.
-    fn menu_event_receiver() -> &'static Receiver<String>;
+    /// Receives menu ids and their originating business window ids from ArkTS UI.
+    fn menu_event_receiver() -> &'static Receiver<MenuEvent>;
 }
 
 impl MenuExt for OpenHarmonyApp {
@@ -347,13 +430,19 @@ impl MenuExt for OpenHarmonyApp {
         window_id: impl Into<String>,
         visible: bool,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
-        let window_id = window_id.into();
+        let request = MenuVisibilityRequest {
+            window_id: window_id.into(),
+            visible,
+        };
+        if let Err(error) = request.validate() {
+            return Box::pin(async move { Err(error) });
+        }
         let bridge = self.bridge();
         Box::pin(async move {
             let response = bridge?
                 .call_async::<MenuBridgePlugin, MenuVisibilityRequest, MenuAcknowledgement>(
                     "set-menubar-visible",
-                    MenuVisibilityRequest { window_id, visible },
+                    request,
                     BridgeCallOptions::default(),
                 )
                 .await?;
@@ -361,15 +450,18 @@ impl MenuExt for OpenHarmonyApp {
         })
     }
 
-    fn menu_event_receiver() -> &'static Receiver<String> {
+    fn menu_event_receiver() -> &'static Receiver<MenuEvent> {
         &MENU_EVENT_CHANNEL.1
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{item_kind, MenuBarRequest, MenuItemData, MenuPopupRequest};
-    use openharmony_ability::BridgeNapiType;
+    use super::{
+        item_kind, MenuBarRequest, MenuBridgePlugin, MenuEvent, MenuItemData, MenuPopupRequest,
+        MenuVisibilityRequest, MAX_MENU_DEPTH,
+    };
+    use openharmony_ability::{BridgeNapiType, BridgePlugin};
 
     #[test]
     fn menu_uses_stable_named_napi_contracts() {
@@ -408,6 +500,40 @@ mod tests {
             items: vec![],
         };
         assert!(empty_window.validate().is_err());
+        assert!(MenuBridgePlugin::REQUIRED_CONTEXTS.is_empty());
+
+        let duplicated = MenuBarRequest {
+            window_id: "main".to_owned(),
+            items: vec![
+                MenuItemData::new("same", item_kind::NORMAL),
+                MenuItemData::new("same", item_kind::NORMAL),
+            ],
+        };
+        assert!(duplicated.validate().is_err());
+
+        let unsupported = MenuBarRequest {
+            window_id: "main".to_owned(),
+            items: vec![MenuItemData::new("unknown", "custom")],
+        };
+        assert!(unsupported.validate().is_err());
+
+        let mut nested = MenuItemData::new("leaf", item_kind::NORMAL);
+        for depth in 0..MAX_MENU_DEPTH {
+            nested = MenuItemData::new(format!("nested.{depth}"), item_kind::SUBMENU)
+                .submenu(vec![nested]);
+        }
+        assert!(MenuBarRequest {
+            window_id: "main".to_owned(),
+            items: vec![nested],
+        }
+        .validate()
+        .is_err());
+
+        let event = MenuEvent {
+            id: "open".to_owned(),
+            window_id: Some("secondary".to_owned()),
+        };
+        assert_eq!(event.window_id.as_deref(), Some("secondary"));
     }
 
     #[test]
@@ -419,5 +545,19 @@ mod tests {
             items: vec![],
         };
         assert!(request.validate().is_err());
+
+        let non_finite = MenuPopupRequest {
+            window_id: "main".to_owned(),
+            x: Some(f64::NAN),
+            y: None,
+            items: vec![MenuItemData::new("open", item_kind::NORMAL)],
+        };
+        assert!(non_finite.validate().is_err());
+
+        let visibility = MenuVisibilityRequest {
+            window_id: " ".to_owned(),
+            visible: true,
+        };
+        assert!(visibility.validate().is_err());
     }
 }

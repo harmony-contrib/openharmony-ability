@@ -117,8 +117,8 @@ impl WebviewProtocol {
         if state.engine_initialized {
             return Ok(());
         }
-        // A native module can be activated after another module initialized ArkWeb. Matching
-        // schemes are already registered process-wide, so this module joins without calling the
+        // A plugin facade can be activated after another facade initialized ArkWeb. Matching
+        // schemes are already registered process-wide, so it joins without calling the
         // pre-init platform API again. New or conflicting schemes were rejected above.
         state.sealed = true;
         state.flushed = true;
@@ -165,7 +165,7 @@ fn ensure_schemes_registered(
             continue;
         }
         return Err(Error::from_reason(format!(
-            "WebView scheme '{scheme}' from this native module was not registered with matching options before the process-global engine initialized"
+            "WebView scheme '{scheme}' from this plugin facade was not registered with matching options before the process-global engine initialized"
         )));
     }
     Ok(())
@@ -182,7 +182,7 @@ fn scheme_registration_needed(
                 "WebView scheme '{scheme}' was already registered with different options"
             )));
         }
-        // Native module statics survive Ability recreation. Repeating the same declaration is a
+        // Facade static state survives Ability recreation. Repeating the same declaration is a
         // no-op even after the process-global engine has started.
         return Ok(false);
     }
@@ -222,7 +222,7 @@ impl WebviewProtocolResponder {
     }
 }
 
-/// Declares a custom-scheme handler for a module-local WebView ID.
+/// Declares a custom-scheme handler for a facade-local WebView ID.
 ///
 /// The declaration may be made before the ArkTS node exists. The handler is attached only when
 /// the Web component reports `controller-attached`, after ArkWeb has created its BrowserContext

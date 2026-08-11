@@ -4,7 +4,7 @@ import {
   BridgePluginHookContext,
   BridgeTypedValue,
   BridgeContextRequirement,
-  SyncPluginBase,
+  AsyncPluginBase,
 } from "@ohos-rs/ability";
 
 const AVOID_AREA_REQUEST_TYPE = "ohos.window.AvoidAreaRequest";
@@ -20,6 +20,16 @@ const RESIZE_REQUEST_TYPE = "ohos.window.ResizeRequest";
 const FOCUSABLE_REQUEST_TYPE = "ohos.window.FocusableRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.window.Acknowledgement";
 const STATE_RESPONSE_TYPE = "ohos.window.StateResponse";
+const MAX_SAFE_INTEGER: number = 9007199254740991;
+const MAX_ARGB_COLOR: number = 0xffffffff;
+
+function isSafeInteger(value: number): boolean {
+  return Number.isInteger(value) && Math.abs(value) <= MAX_SAFE_INTEGER;
+}
+
+function isWindowId(value: number): boolean {
+  return isSafeInteger(value) && value >= 0;
+}
 
 interface AvoidAreaRequest {
   areaType: number;
@@ -153,8 +163,30 @@ function parseCreateRequest(payload: BridgeTypedValue): WindowCreateRequest {
   if (!request.name?.trim()) {
     throw new Error("create-os-window.name must not be empty");
   }
-  if (request.width <= 0 || request.height <= 0) {
+  if (
+    !isSafeInteger(request.width) ||
+    !isSafeInteger(request.height) ||
+    request.width <= 0 ||
+    request.height <= 0
+  ) {
     throw new Error("create-os-window.width and height must be positive");
+  }
+  if (
+    !isSafeInteger(request.x) ||
+    !isSafeInteger(request.y) ||
+    typeof request.decorations !== "boolean" ||
+    typeof request.transparent !== "boolean"
+  ) {
+    throw new Error("create-os-window position and appearance fields are invalid");
+  }
+  if (
+    request.backgroundColor !== undefined &&
+    request.backgroundColor !== null &&
+    (!Number.isInteger(request.backgroundColor) ||
+      request.backgroundColor < 0 ||
+      request.backgroundColor > MAX_ARGB_COLOR)
+  ) {
+    throw new Error("create-os-window.backgroundColor must be an integer in 0xAARRGGBB format");
   }
   return request;
 }
@@ -164,8 +196,8 @@ function parseWindowIdRequest(payload: BridgeTypedValue): WindowIdRequest {
     throw new Error(`ohos.window requires bridge type ${WINDOW_ID_REQUEST_TYPE}`);
   }
   const request = payload.value as WindowIdRequest;
-  if (!Number.isInteger(request?.windowId)) {
-    throw new Error("windowId must be an integer");
+  if (!isWindowId(request?.windowId)) {
+    throw new Error("windowId must be a non-negative integer");
   }
   return request;
 }
@@ -174,7 +206,11 @@ function parseDecorationsRequest(payload: BridgeTypedValue): WindowDecorationsRe
   if (payload.typeName !== DECORATIONS_REQUEST_TYPE || typeof payload.value !== "object") {
     throw new Error(`ohos.window.set-decorations requires bridge type ${DECORATIONS_REQUEST_TYPE}`);
   }
-  return payload.value as WindowDecorationsRequest;
+  const request = payload.value as WindowDecorationsRequest;
+  if (!isWindowId(request?.windowId) || typeof request.decorations !== "boolean") {
+    throw new Error("set-decorations requires a valid windowId and boolean decorations");
+  }
+  return request;
 }
 
 function parseColorRequest(payload: BridgeTypedValue): WindowColorRequest {
@@ -182,8 +218,13 @@ function parseColorRequest(payload: BridgeTypedValue): WindowColorRequest {
     throw new Error(`ohos.window.set-background-color requires bridge type ${COLOR_REQUEST_TYPE}`);
   }
   const request = payload.value as WindowColorRequest;
-  if (!Number.isInteger(request?.color)) {
-    throw new Error("color must be an integer in 0xAARRGGBB format");
+  if (
+    !isWindowId(request?.windowId) ||
+    !Number.isInteger(request.color) ||
+    request.color < 0 ||
+    request.color > MAX_ARGB_COLOR
+  ) {
+    throw new Error("set-background-color requires a valid windowId and integer color");
   }
   return request;
 }
@@ -194,6 +235,7 @@ function parseBlurRequest(payload: BridgeTypedValue): WindowBlurRequest {
   }
   const request = payload.value as WindowBlurRequest;
   if (
+    !isWindowId(request?.windowId) ||
     typeof request.radius !== "number" ||
     !Number.isFinite(request.radius) ||
     request.radius < 0
@@ -207,7 +249,11 @@ function parseMoveRequest(payload: BridgeTypedValue): WindowMoveRequest {
   if (payload.typeName !== MOVE_REQUEST_TYPE || typeof payload.value !== "object") {
     throw new Error(`ohos.window.move-to requires bridge type ${MOVE_REQUEST_TYPE}`);
   }
-  return payload.value as WindowMoveRequest;
+  const request = payload.value as WindowMoveRequest;
+  if (!isWindowId(request?.windowId) || !isSafeInteger(request.x) || !isSafeInteger(request.y)) {
+    throw new Error("move-to requires a valid windowId and finite coordinates");
+  }
+  return request;
 }
 
 function parseResizeRequest(payload: BridgeTypedValue): WindowResizeRequest {
@@ -215,7 +261,13 @@ function parseResizeRequest(payload: BridgeTypedValue): WindowResizeRequest {
     throw new Error(`ohos.window.resize requires bridge type ${RESIZE_REQUEST_TYPE}`);
   }
   const request = payload.value as WindowResizeRequest;
-  if (request.width <= 0 || request.height <= 0) {
+  if (
+    !isWindowId(request?.windowId) ||
+    !isSafeInteger(request.width) ||
+    !isSafeInteger(request.height) ||
+    request.width <= 0 ||
+    request.height <= 0
+  ) {
     throw new Error("resize.width and height must be positive");
   }
   return request;
@@ -226,56 +278,23 @@ function parseFocusableRequest(payload: BridgeTypedValue): WindowFocusableReques
     throw new Error(`ohos.window.set-focusable requires bridge type ${FOCUSABLE_REQUEST_TYPE}`);
   }
   const request = payload.value as WindowFocusableRequest;
-  if (typeof request.focusable !== "boolean") {
+  if (!isWindowId(request?.windowId) || typeof request.focusable !== "boolean") {
     throw new Error("set-focusable.focusable must be a boolean");
   }
   return request;
 }
 
-/** Per-session registry of OS sub-windows created through this plugin. */
-class SubWindowRegistry {
-  private static readonly windows: Map<string, window.Window> = new Map();
-
-  private static key(sessionId: string, moduleName: string, windowId: number): string {
-    return `${sessionId}:${moduleName}:${windowId}`;
-  }
-
-  static put(sessionId: string, moduleName: string, windowId: number, win: window.Window): void {
-    SubWindowRegistry.windows.set(SubWindowRegistry.key(sessionId, moduleName, windowId), win);
-  }
-
-  static get(sessionId: string, moduleName: string, windowId: number): window.Window {
-    const win = SubWindowRegistry.windows.get(
-      SubWindowRegistry.key(sessionId, moduleName, windowId),
-    );
-    if (!win) {
-      throw new Error(
-        `Unknown OS sub-window '${windowId}' for module '${moduleName}' in session '${sessionId}'`,
-      );
-    }
-    return win;
-  }
-
-  static clear(sessionId: string, moduleName: string): void {
-    const prefix = `${sessionId}:${moduleName}:`;
-    const keys = Array.from(SubWindowRegistry.windows.keys());
-    for (const key of keys) {
-      if (key.startsWith(prefix)) {
-        SubWindowRegistry.windows.delete(key);
-      }
-    }
-  }
-}
-
-export class WindowPlugin extends SyncPluginBase {
+/** One host-scoped implementation. Repeated calls are isolated by the platform window id. */
+export class WindowPlugin extends AsyncPluginBase {
   readonly id = "ohos.window";
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
+  private readonly windows: Map<number, window.Window> = new Map();
 
-  invokeSync(
+  async invokeAsync(
     action: string,
     payload: BridgeTypedValue,
     context: BridgeCallContext,
-  ): BridgeTypedValue {
+  ): Promise<BridgeTypedValue> {
     if (action === "get-avoid-area") {
       const request = parseAvoidAreaRequest(payload);
       try {
@@ -289,39 +308,44 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "create-os-window") {
       const request = parseCreateRequest(payload);
-      const windowStage = context.getWindowStage();
-      const windowId = WindowPlugin.nextWindowId();
+      let created: window.Window | undefined;
       try {
-        // createSubWindow is async; the sync action hands out the window id immediately and
-        // registers the window when creation resolves. Decorations/content are applied by
-        // the business page through the returned id.
-        const pluginContext = this.getContext();
-        const sessionId = pluginContext.sessionId;
-        const moduleName = pluginContext.moduleName;
-        windowStage
-          .createSubWindow(request.name)
-          .then((win: window.Window) => {
-            if (!pluginContext.isActive()) {
-              return;
-            }
-            SubWindowRegistry.put(sessionId, moduleName, windowId, win);
-          })
-          .catch((error: Error) => {
-            console.error(`[WindowPlugin] createSubWindow failed: ${String(error)}`);
-          });
+        created = await context.getWindowStage().createSubWindow(request.name.trim());
+        this.assertCallActive(context);
+        await created.moveWindowTo(request.x, request.y);
+        await created.resize(request.width, request.height);
+        created.setWindowDecorVisible(request.decorations);
+        const backgroundColor = request.transparent
+          ? "#00000000"
+          : this.colorString(request.backgroundColor ?? 0xffffffff);
+        created.setWindowBackgroundColor(backgroundColor);
+        await created.showWindow();
+        this.assertCallActive(context);
+        const windowId = created.getWindowProperties().id;
+        if (!isWindowId(windowId)) {
+          throw new Error(`createSubWindow returned invalid window id '${windowId}'`);
+        }
+        const replaced = this.windows.get(windowId);
+        if (replaced !== undefined && replaced !== created) {
+          await replaced.destroyWindow();
+        }
+        this.windows.set(windowId, created);
         return { typeName: CREATE_RESPONSE_TYPE, value: new WindowCreateResponse(windowId) };
       } catch (error) {
+        if (created !== undefined) {
+          try {
+            await created.destroyWindow();
+          } catch {}
+        }
         throw new Error(`createSubWindow failed: ${String(error)}`);
       }
     }
 
     if (action === "set-decorations") {
       const request = parseDecorationsRequest(payload);
-      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+      const win = this.requireWindow(request.windowId);
       try {
-        // Decorations are rendered by the business page; the registry entry keeps the
-        // window alive across calls. No-op beyond validation on this platform.
-        void win;
+        win.setWindowDecorVisible(request.decorations);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
       } catch (error) {
         throw new Error(`set-decorations failed: ${String(error)}`);
@@ -330,11 +354,9 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "set-background-color") {
       const request = parseColorRequest(payload);
-      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+      const win = this.requireWindow(request.windowId);
       try {
-        this.dynamic(win).setWindowBackgroundColor(
-          `#${request.color.toString(16).padStart(8, "0")}`,
-        );
+        win.setWindowBackgroundColor(this.colorString(request.color));
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
       } catch (error) {
         throw new Error(`setWindowBackgroundColor failed: ${String(error)}`);
@@ -343,9 +365,13 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "set-blur") {
       const request = parseBlurRequest(payload);
-      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+      const win = this.requireWindow(request.windowId);
       try {
-        this.dynamic(win).setBlur(request.radius);
+        const dynamic: ESObject = this.dynamic(win);
+        if (typeof dynamic.setWindowShadowRadius !== "function") {
+          throw new Error("setWindowShadowRadius is unavailable on this API level");
+        }
+        dynamic.setWindowShadowRadius(request.radius);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
       } catch (error) {
         throw new Error(`setBlur failed: ${String(error)}`);
@@ -354,9 +380,13 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "focus") {
       const request = parseWindowIdRequest(payload);
-      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+      const win = this.requireWindow(request.windowId);
       try {
-        this.dynamic(win).focus();
+        const dynamic: ESObject = this.dynamic(win);
+        if (typeof dynamic.raiseToAppTop !== "function") {
+          throw new Error("raiseToAppTop is unavailable on this API level");
+        }
+        await (dynamic.raiseToAppTop() as Promise<void>);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
       } catch (error) {
         throw new Error(`focus failed: ${String(error)}`);
@@ -365,9 +395,9 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "set-focusable") {
       const request = parseFocusableRequest(payload);
-      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+      const win = this.requireWindow(request.windowId);
       try {
-        this.dynamic(win).setFocusable(request.focusable);
+        await win.setFocusable(request.focusable);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
       } catch (error) {
         throw new Error(`setFocusable failed: ${String(error)}`);
@@ -376,9 +406,9 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "move-to") {
       const request = parseMoveRequest(payload);
-      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+      const win = this.requireWindow(request.windowId);
       try {
-        this.dynamic(win).moveWindowTo(request.x, request.y);
+        await win.moveWindowTo(request.x, request.y);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
       } catch (error) {
         throw new Error(`moveWindowTo failed: ${String(error)}`);
@@ -387,9 +417,9 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "resize") {
       const request = parseResizeRequest(payload);
-      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+      const win = this.requireWindow(request.windowId);
       try {
-        this.dynamic(win).resize(request.width, request.height);
+        await win.resize(request.width, request.height);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
       } catch (error) {
         throw new Error(`resize failed: ${String(error)}`);
@@ -397,46 +427,55 @@ export class WindowPlugin extends SyncPluginBase {
     }
 
     if (action === "minimize") {
-      return this.windowCommand(context, "minimize", payload);
+      return await this.windowCommand("minimize", payload);
     }
     if (action === "maximize") {
-      return this.windowCommand(context, "maximize", payload);
+      return await this.windowCommand("maximize", payload);
     }
     if (action === "restore") {
-      return this.windowCommand(context, "restore", payload);
+      return await this.windowCommand("restore", payload);
     }
     if (action === "recover") {
-      return this.windowCommand(context, "recover", payload);
+      return await this.windowCommand("recover", payload);
     }
     if (action === "show") {
-      return this.windowCommand(context, "show", payload);
+      return await this.windowCommand("show", payload);
+    }
+    if (action === "destroy-window") {
+      return await this.windowCommand("destroy-window", payload);
     }
     if (action === "is-maximized") {
-      return this.windowState(context, "is-maximized", payload);
+      return this.windowState("is-maximized", payload);
     }
     if (action === "is-minimized") {
-      return this.windowState(context, "is-minimized", payload);
+      return this.windowState("is-minimized", payload);
     }
 
     throw new Error(`Unsupported ohos.window action '${action}'`);
   }
 
-  private windowCommand(
-    context: BridgeCallContext,
+  private async windowCommand(
     action: string,
     payload: BridgeTypedValue,
-  ): BridgeTypedValue {
+  ): Promise<BridgeTypedValue> {
     const request = parseWindowIdRequest(payload);
-    const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+    const win = this.requireWindow(request.windowId);
     try {
+      const dynamic: ESObject = this.dynamic(win);
       if (action === "minimize") {
-        this.dynamic(win).minimize();
+        await (dynamic.minimize() as Promise<void>);
       } else if (action === "maximize") {
-        this.dynamic(win).maximize();
+        await (dynamic.maximize() as Promise<void>);
       } else if (action === "restore") {
-        this.dynamic(win).restore();
-      } else if (action === "recover" || action === "show") {
-        this.dynamic(win).showWindow();
+        await (dynamic.restore() as Promise<void>);
+      } else if (action === "recover") {
+        await (dynamic.restore() as Promise<void>);
+        await win.showWindow();
+      } else if (action === "show") {
+        await win.showWindow();
+      } else if (action === "destroy-window") {
+        await win.destroyWindow();
+        this.windows.delete(request.windowId);
       }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
     } catch (error) {
@@ -444,31 +483,49 @@ export class WindowPlugin extends SyncPluginBase {
     }
   }
 
-  private windowState(
-    context: BridgeCallContext,
-    action: string,
-    payload: BridgeTypedValue,
-  ): BridgeTypedValue {
+  private windowState(action: string, payload: BridgeTypedValue): BridgeTypedValue {
     const request = parseWindowIdRequest(payload);
-    const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
+    const win = this.requireWindow(request.windowId);
     try {
-      const dynamic: ESObject = this.dynamic(win);
+      const status = win.getWindowStatus();
       const value: boolean =
         action === "is-maximized"
-          ? (dynamic.isMaximized() as boolean)
-          : (dynamic.isMinimized() as boolean);
+          ? status === window.WindowStatusType.MAXIMIZE
+          : status === window.WindowStatusType.MINIMIZE;
       return { typeName: STATE_RESPONSE_TYPE, value: new WindowStateResponse(value) };
     } catch (error) {
       throw new Error(`${action} failed: ${String(error)}`);
     }
   }
 
-  private static nextWindowId(): number {
-    return Date.now() % 0x7fffffff;
+  private requireWindow(windowId: number): window.Window {
+    const win = this.windows.get(windowId);
+    if (win === undefined) {
+      throw new Error(`Unknown OS sub-window '${windowId}' for this plugin instance`);
+    }
+    return win;
   }
 
-  override onDispose(context: BridgePluginHookContext): void {
-    SubWindowRegistry.clear(context.sessionId, context.moduleName);
+  private assertCallActive(context: BridgeCallContext): void {
+    if (!context.isActive()) {
+      throw new Error("Window bridge call is no longer active");
+    }
+  }
+
+  private colorString(color: number): string {
+    return `#${(color >>> 0).toString(16).padStart(8, "0")}`;
+  }
+
+  override async onDispose(_context: BridgePluginHookContext): Promise<void> {
+    const windows = Array.from(this.windows.values());
+    this.windows.clear();
+    await Promise.all(
+      windows.map(async (win: window.Window): Promise<void> => {
+        try {
+          await win.destroyWindow();
+        } catch {}
+      }),
+    );
   }
 
   private dynamic(win: window.Window): ESObject {

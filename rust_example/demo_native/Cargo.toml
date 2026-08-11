@@ -14,6 +14,7 @@ napi-derive-ohos = { workspace = true }
 openharmony-ability = { workspace = true }
 openharmony-ability-derive = { workspace = true }
 openharmony-ability-plugin-app-control = { workspace = true }
+openharmony-ability-plugin-autostart = { workspace = true }
 openharmony-ability-plugin-clipboard = { workspace = true }
 openharmony-ability-plugin-files = { workspace = true }
 openharmony-ability-plugin-menu = { workspace = true }

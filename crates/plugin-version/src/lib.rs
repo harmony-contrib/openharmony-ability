@@ -1,8 +1,8 @@
 //! Device version and capability detection plugin facade.
 //!
 //! Ports the former `crates/ability/src/version.rs` capability into the pluginized bridge
-//! model. All queries are synchronous (`MainThreadSyncBridge`) and require the ability
-//! context; ArkTS reads `@ohos.deviceInfo` and the global `canIUse()`.
+//! model. All queries are synchronous (`MainThreadSyncBridge`) and use process-level device
+//! information; ArkTS reads `@ohos.deviceInfo` and the global `canIUse()`.
 
 use napi_derive_ohos::napi;
 use napi_ohos::{Env, Error, Result};
@@ -17,9 +17,7 @@ impl BridgePlugin for VersionBridgePlugin {
     type Mode = MainThreadSyncBridge;
 
     const ID: &'static str = "ohos.version";
-    const VERSION: u32 = 1;
-    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
-        &[BridgeContextRequirement::Ability];
+    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
 }
 
 #[napi(object)]
@@ -109,8 +107,8 @@ impl VersionExt for OpenHarmonyApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{VersionRequest, VersionResponse};
-    use openharmony_ability::BridgeNapiType;
+    use super::{VersionBridgePlugin, VersionRequest, VersionResponse};
+    use openharmony_ability::{BridgeNapiType, BridgePlugin};
 
     #[test]
     fn version_uses_stable_named_napi_contracts() {
@@ -136,5 +134,6 @@ mod tests {
             result: Some(true),
         };
         assert!(capability.result.unwrap_or(false));
+        assert!(VersionBridgePlugin::REQUIRED_CONTEXTS.is_empty());
     }
 }

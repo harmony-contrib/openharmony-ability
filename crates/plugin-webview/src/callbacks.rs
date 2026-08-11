@@ -1,6 +1,6 @@
 //! Rust-owned WebView callback declarations.
 //!
-//! The registry stores only Rust closures keyed by module-local WebView ID. ArkTS receives a boolean
+//! The registry stores only Rust closures keyed by facade-local WebView ID. ArkTS receives a boolean
 //! subscription snapshot as part of create, then invokes every ArkWeb callback through a scoped
 //! named N-API event. No ArkTS Function, ObjectRef, or JSON event payload is kept by Rust.
 

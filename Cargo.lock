@@ -74,6 +74,7 @@ dependencies = [
  "openharmony-ability",
  "openharmony-ability-derive",
  "openharmony-ability-plugin-app-control",
+ "openharmony-ability-plugin-autostart",
  "openharmony-ability-plugin-clipboard",
  "openharmony-ability-plugin-files",
  "openharmony-ability-plugin-menu",
@@ -537,6 +538,15 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-app-control"
+version = "1.0.0-beta.0"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-autostart"
 version = "1.0.0-beta.0"
 dependencies = [
  "napi-derive-ohos",

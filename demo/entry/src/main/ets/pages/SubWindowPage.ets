@@ -24,10 +24,10 @@ struct SubWindowPage {
     }
   }
 
-  handleQueryAvoidArea() {
+  async handleQueryAvoidArea() {
     this.busy = true;
     try {
-      this.status = `✓ sub-window keyboard bottom inset=${subWindowKeyboardInset()}`;
+      this.status = `✓ sub-window keyboard bottom inset=${await subWindowKeyboardInset()}`;
     } catch (error) {
       this.status = `✗ avoid-area query failed: ${String(error)}`;
     } finally {

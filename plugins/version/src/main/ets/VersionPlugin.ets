@@ -24,10 +24,22 @@ class VersionResponse {
 }
 
 function parseVersionRequest(payload: BridgeTypedValue): VersionRequest {
-  if (payload.typeName !== VERSION_REQUEST_TYPE || typeof payload.value !== "object") {
+  if (
+    payload.typeName !== VERSION_REQUEST_TYPE ||
+    typeof payload.value !== "object" ||
+    payload.value === null
+  ) {
     throw new Error(`ohos.version requires bridge type ${VERSION_REQUEST_TYPE}`);
   }
-  return payload.value as VersionRequest;
+  const request = payload.value as VersionRequest;
+  if (
+    request.syscap !== undefined &&
+    request.syscap !== null &&
+    typeof request.syscap !== "string"
+  ) {
+    throw new Error("ohos.version.syscap must be a string when provided");
+  }
+  return request;
 }
 
 function requireSyscap(request: VersionRequest): string {
@@ -39,8 +51,7 @@ function requireSyscap(request: VersionRequest): string {
 
 export class VersionPlugin extends SyncPluginBase {
   readonly id = "ohos.version";
-  readonly version = 1;
-  readonly requires: BridgeContextRequirement[] = ["ability"];
+  readonly requires: BridgeContextRequirement[] = [];
 
   invokeSync(
     action: string,

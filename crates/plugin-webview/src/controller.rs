@@ -1,4 +1,4 @@
-//! Module-local business WebView ID -> process-unique ArkWeb tag mapping.
+//! Facade-local business WebView ID -> process-unique ArkWeb tag mapping.
 
 use std::{
     collections::BTreeMap,

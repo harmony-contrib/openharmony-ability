@@ -19,21 +19,22 @@
 |---|---|---|---|
 | `ohos.app-control` / `terminate`、`restart`、`set-color-mode` | `ohos.app_control.TerminateRequest`/`RestartRequest`/`ColorModeRequest` | `ohos.app_control.TerminateResponse`/`RestartResponse`/`ColorModeResponse` → `{ accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest` → `{ permissions }` | `ohos.permission.PermissionResponse` → `{ codes }` | async / `ability` |
-| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest` → `{ areaType }` | `ohos.window.AvoidAreaResponse` → `{ area: { visible, leftRect, topRect, rightRect, bottomRect } }` | sync / `ui-context`；查询当前 component 所在窗口 |
-| `ohos.window` / `create-os-window`、`set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`is-maximized`、`is-minimized` | `ohos.window.CreateRequest` / `WindowIdRequest` / `DecorationsRequest` / `ColorRequest` / `BlurRequest` / `MoveRequest` / `ResizeRequest` / `FocusableRequest` | `ohos.window.CreateResponse` → `{ windowId }` / `Acknowledgement` → `{ accepted }` / `StateResponse` → `{ value }` | sync / `ui-context` |
+| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest` → `{ areaType }` | `ohos.window.AvoidAreaResponse` → `{ area: { visible, leftRect, topRect, rightRect, bottomRect } }` | async / `ui-context`；查询当前 component 所在窗口 |
+| `ohos.window` / `create-os-window`、`set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window`、`is-maximized`、`is-minimized` | `ohos.window.CreateRequest` / `WindowIdRequest` / `DecorationsRequest` / `ColorRequest` / `BlurRequest` / `MoveRequest` / `ResizeRequest` / `FocusableRequest` | `ohos.window.CreateResponse` → `{ windowId }` / `Acknowledgement` → `{ accepted }` / `StateResponse` → `{ value }` | async / `ui-context` |
 | `ohos.webview` / `create` | `ohos.webview.CreateRequest` → `{ id, parentHandle?, ... }` | `ohos.webview.CreateResponse` → `{ id }` | async / `ui-context` |
 | `ohos.webview` / `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`clear-all-browsing-data` | `ohos.webview.ControllerRequest` → `{ id, visible?, color?, url?, html?, headers?, zoom? }` | `ohos.webview.Acknowledgement` → `{ accepted }` | async / `ui-context` |
 | `ohos.webview` / `get-url`、`cookies-with-url` | `ohos.webview.ControllerRequest` → `{ id, url? }` | `ohos.webview.StringResponse` → `{ value }` | async / `ui-context` |
 | `ohos.webview` / `evaluate-script` | `ohos.webview.ScriptRequest` → `{ id, script }` | `ohos.webview.ScriptResponse` → `{ result }` | async / `ui-context` |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象） | `ohos.resource.ResourceManagerReadyResponse` → `{ accepted }` | 入站事件 / `ability` |
 | `ohos.webview` / `set-bounds`、`set-cookie`、`snapshot`、`create-pdf`、`set-debugging-access`、`is-debugging-access` | `ohos.webview.BoundsRequest` / `CookieRequest` / `SnapshotRequest` / `PdfRequest`（`PdfConfig`） / `BoolRequest` | `ohos.webview.Acknowledgement` / `SnapshotResponse` → `{ rgba, width, height }` / `BoolResponse` → `{ value }` | async / `ui-context` |
-| `ohos.clipboard` / `write-image` | `ohos.clipboard.ImageRequest` → `{ rgba, width, height }` | `ohos.clipboard.Acknowledgement` → `{ accepted }` | async / `ability` |
+| `ohos.clipboard` / `write-image` | `ohos.clipboard.ImageRequest` → `{ rgba, width, height }` | `ohos.clipboard.Acknowledgement` → `{ accepted }` | async / `[]` |
+| `ohos.autostart` / `open-settings`、`is-enabled` | `ohos.autostart.Request` → `{ requested }` | `ohos.autostart.Acknowledgement` → `{ accepted }` / `ohos.autostart.StatusResponse` → `{ enabled, supported }` | async / `ability` |
 | `ohos.updater` / `check`、`download-and-install` | `ohos.updater.CheckRequest` | `ohos.updater.CheckResponse` → `{ result }`（`CheckResult`）/ `Acknowledgement` | async / `ability` |
-| `ohos.menu` / `set-menubar`、`popup`、`set-menubar-visible` | `ohos.menu.MenuBarRequest` / `PopupRequest` / `VisibilityRequest`（递归 `MenuItemData`） | `ohos.menu.Acknowledgement` → `{ accepted }` | async / `ability` |
+| `ohos.menu` / `set-menubar`、`popup`、`set-menubar-visible` | `ohos.menu.MenuBarRequest` / `PopupRequest` / `VisibilityRequest`（递归 `MenuItemData`） | `ohos.menu.Acknowledgement` → `{ accepted }` | async / `[]` |
 | `ohos.menu` / 主线程事件 `menu-click` | `ohos.menu.ClickRequest` → `{ id, windowId }` | `ohos.menu.ClickResponse` → `{ accepted }` | scoped 主线程具名 N-API |
 | `ohos.statusbar` / `add`、`remove`、`update-icon`、`update-menu`、`update-tips`、`predefined-action` | `ohos.statusbar.AddRequest`（`ItemData`）/ `IconRequest` / `MenuRequest` / `TipsRequest` / `ActionRequest` | `ohos.statusbar.Acknowledgement` → `{ accepted }` | async / `ability` |
 | `ohos.statusbar` / 主线程事件 `icon-click`、`menu-click` | `ohos.statusbar.ClickRequest` → `{ clickType }` / `MenuClickRequest` → `{ menuCode }` | `ohos.statusbar.ClickResponse` → `{ accepted }` | scoped 主线程具名 N-API |
-| `ohos.version` / `get-sdk-api-version`、`get-distribution-api-version`、`can-i-use`、`is-desktop-device` | `ohos.version.VersionRequest` → `{ syscap }` | `ohos.version.VersionResponse` → `{ value, result }` | sync / `ability` |
+| `ohos.version` / `get-sdk-api-version`、`get-distribution-api-version`、`can-i-use`、`is-desktop-device` | `ohos.version.VersionRequest` → `{ syscap }` | `ohos.version.VersionResponse` → `{ value, result }` | sync / `[]` |
 
 ## 代码位置
 
@@ -44,6 +45,7 @@
 | window | `crates/plugin-window/src/lib.rs` | `plugins/window/src/main/ets/WindowPlugin.ets` |
 | webview | `crates/plugin-webview/src/lib.rs` | `plugins/webview/src/main/ets/WebviewPlugin.ets` |
 | clipboard | `crates/plugin-clipboard/src/lib.rs` | `plugins/clipboard/src/main/ets/ClipboardPlugin.ets` |
+| autostart | `crates/plugin-autostart/src/lib.rs` | `plugins/autostart/src/main/ets/AutostartPlugin.ets` |
 | updater | `crates/plugin-updater/src/lib.rs` | `plugins/updater/src/main/ets/UpdaterPlugin.ets` |
 | menu | `crates/plugin-menu/src/lib.rs` | `plugins/menu/src/main/ets/MenuPlugin.ets` |
 | statusbar | `crates/plugin-statusbar/src/lib.rs` | `plugins/statusbar/src/main/ets/StatusBarPlugin.ets` |

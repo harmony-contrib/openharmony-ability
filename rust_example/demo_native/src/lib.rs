@@ -20,6 +20,7 @@ use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{Event, InputEvent, NodeExt, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
 use openharmony_ability_plugin_app_control::{AppControlBridgePlugin, AppControlExt};
+use openharmony_ability_plugin_autostart::{AutostartBridgePlugin, AutostartExt};
 use openharmony_ability_plugin_clipboard::{ClipboardBridgePlugin, ClipboardExt};
 use openharmony_ability_plugin_files::{
     dialog_type, FileDialogFilter, FileDialogOptions, FilesBridgePlugin, FilesExt,
@@ -39,7 +40,7 @@ use openharmony_ability_plugin_webview::{
     WebviewDownloadStartResponse, WebviewExt, WebviewJavascriptProxyBuilder, WebviewProtocol,
     WebviewProtocolOptions, WebviewStyle,
 };
-use openharmony_ability_plugin_window::{WindowBridgePlugin, WindowExtMulti};
+use openharmony_ability_plugin_window::{WindowBridgePlugin, WindowExt};
 
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
 static PERMISSION_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -381,6 +382,8 @@ fn openharmony_app(app: OpenHarmonyApp) {
         .expect("demo permission facade must be registered");
     app.register_plugin(AppControlBridgePlugin)
         .expect("demo app-control facade must be registered");
+    app.register_plugin(AutostartBridgePlugin)
+        .expect("demo autostart facade must be registered");
     app.register_plugin(WebviewBridgePlugin)
         .expect("demo WebView facade must be registered");
     app.register_plugin(WindowBridgePlugin)
@@ -559,6 +562,18 @@ pub async fn demo_clipboard_write_image() -> Result<()> {
     current_app()?.write_image(rgba, 2, 2).await
 }
 
+/// PR #63 capability demo: query the API 21+ autostart state.
+#[napi]
+pub async fn demo_autostart_is_enabled() -> Result<bool> {
+    current_app()?.autostart()?.is_enabled().await
+}
+
+/// PR #63 capability demo: open the system app-launch management page.
+#[napi]
+pub async fn demo_autostart_open_settings() -> Result<()> {
+    current_app()?.autostart()?.open_settings().await
+}
+
 /// PR #63 capability demo: AppGallery update check.
 #[napi]
 pub async fn demo_updater_check() -> Result<Option<String>> {
@@ -568,7 +583,7 @@ pub async fn demo_updater_check() -> Result<Option<String>> {
 
 /// PR #63 capability demo: create an OS sub-window through `ohos.window`.
 #[napi]
-pub fn demo_create_os_window(env: &Env) -> Result<i64> {
+pub async fn demo_create_os_window() -> Result<i64> {
     let request = openharmony_ability_plugin_window::WindowCreateRequest {
         name: "demo_sub".to_owned(),
         width: 480,
@@ -579,7 +594,19 @@ pub fn demo_create_os_window(env: &Env) -> Result<i64> {
         transparent: false,
         background_color: None,
     };
-    current_app()?.create_os_window(env, request)
+    current_app()?.window()?.create_os_window(request).await
+}
+
+/// PR #63 capability demo: destroy one OS sub-window created by `demo_create_os_window`.
+#[napi]
+pub async fn demo_destroy_os_window(window_id: i64) -> Result<()> {
+    current_app()?.window()?.destroy_window(window_id).await
+}
+
+/// PR #63 capability demo: remove the process-level status bar item.
+#[napi]
+pub async fn demo_statusbar_remove() -> Result<()> {
+    current_app()?.remove_from_status_bar().await
 }
 
 /// PR #63 capability demo: restart the app (cooldown 3s).

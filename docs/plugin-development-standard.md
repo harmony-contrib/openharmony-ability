@@ -211,10 +211,10 @@ export { LoginPlugin };
 | `ohos.app-control` / `restart` | `ohos.app_control.RestartRequest` → `ohos.app_control.RestartResponse { accepted }`（3s 冷却） | sync / `ability` |
 | `ohos.app-control` / `set-color-mode` | `ohos.app_control.ColorModeRequest { mode }` → `ohos.app_control.ColorModeResponse { accepted }`（0 暗 / 1 亮 / 2 跟随） | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
-| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | sync / `ui-context`；查询当前 module/component 所在窗口 |
-| `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | sync / `ui-context` |
-| `ohos.window` / `set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show` | `ohos.window.*Request { windowId, ... }` → `ohos.window.Acknowledgement { accepted }` | sync / `ui-context` |
-| `ohos.window` / `is-maximized`、`is-minimized` | `ohos.window.WindowIdRequest { windowId }` → `ohos.window.StateResponse { value }` | sync / `ui-context` |
+| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | async / `ui-context`；查询当前 component 所在窗口 |
+| `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | async / `ui-context` |
+| `ohos.window` / `set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window` | `ohos.window.*Request { windowId, ... }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context` |
+| `ohos.window` / `is-maximized`、`is-minimized` | `ohos.window.WindowIdRequest { windowId }` → `ohos.window.StateResponse { value }` | async / `ui-context` |
 | `ohos.webview` / `create` | `ohos.webview.CreateRequest { id, parentHandle? }` → `ohos.webview.CreateResponse { id }` | async / `ui-context` |
 | `ohos.node`（内置） / `create-container` | `ohos.node.CreateContainerRequest` → `ohos.node.HandleResponse { handle }` | async / `ui-context` |
 | `ohos.node`（内置） / `append-child` | `ohos.node.AppendChildRequest { parentHandle, childHandle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
@@ -227,15 +227,17 @@ export { LoginPlugin };
 | `ohos.webview` / `snapshot` | `ohos.webview.SnapshotRequest { id }` → `ohos.webview.SnapshotResponse { rgba, width, height }` | async / `ui-context` |
 | `ohos.webview` / `create-pdf` | `ohos.webview.PdfRequest { id, path, config }`（`ohos.webview.PdfConfig`） → `ohos.webview.Acknowledgement` | async / `ui-context` |
 | `ohos.webview` / `set-debugging-access`、`is-debugging-access` | `ohos.webview.BoolRequest { id, enabled }` → `ohos.webview.Acknowledgement` / `BoolResponse { value }` | async / `ui-context` |
-| `ohos.clipboard` / `write-image` | `ohos.clipboard.ImageRequest { rgba, width, height }` → `ohos.clipboard.Acknowledgement { accepted }` | async / `ability` |
+| `ohos.clipboard` / `write-image` | `ohos.clipboard.ImageRequest { rgba, width, height }` → `ohos.clipboard.Acknowledgement { accepted }` | async / `[]` |
+| `ohos.autostart` / `open-settings` | `ohos.autostart.Request { requested }` → `ohos.autostart.Acknowledgement { accepted }` | async / `ability`；普通应用只能引导用户前往系统设置 |
+| `ohos.autostart` / `is-enabled` | `ohos.autostart.Request { requested }` → `ohos.autostart.StatusResponse { enabled, supported }` | async / `ability`；API < 21 Rust facade 返回 `false` |
 | `ohos.updater` / `check` | `ohos.updater.CheckRequest` → `ohos.updater.CheckResponse { result }`（`ohos.updater.CheckResult`） | async / `ability` |
 | `ohos.updater` / `download-and-install` | `ohos.updater.CheckRequest` → `ohos.updater.Acknowledgement { accepted }` | async / `ability` |
-| `ohos.menu` / `set-menubar`、`popup` | `ohos.menu.MenuBarRequest { windowId, items }` / `ohos.menu.PopupRequest { windowId, x, y, items }`（递归 `ohos.menu.MenuItemData`） → `ohos.menu.Acknowledgement` | async / `ability` |
-| `ohos.menu` / `set-menubar-visible` | `ohos.menu.VisibilityRequest { windowId, visible }` → `ohos.menu.Acknowledgement` | async / `ability` |
+| `ohos.menu` / `set-menubar`、`popup` | `ohos.menu.MenuBarRequest { windowId, items }` / `ohos.menu.PopupRequest { windowId, x, y, items }`（递归 `ohos.menu.MenuItemData`） → `ohos.menu.Acknowledgement` | async / `[]` |
+| `ohos.menu` / `set-menubar-visible` | `ohos.menu.VisibilityRequest { windowId, visible }` → `ohos.menu.Acknowledgement` | async / `[]` |
 | `ohos.menu` / 主线程事件 `menu-click` | `ohos.menu.ClickRequest { id, windowId }` → `ohos.menu.ClickResponse { accepted }` | scoped 主线程具名 N-API |
 | `ohos.statusbar` / `add`、`remove`、`update-icon`、`update-menu`、`update-tips`、`predefined-action` | `ohos.statusbar.*Request`（`ItemData` / `IconData` / `MenuRequest` / `TipsRequest` / `ActionRequest`） → `ohos.statusbar.Acknowledgement` | async / `ability` |
 | `ohos.statusbar` / 主线程事件 `icon-click`、`menu-click` | `ohos.statusbar.ClickRequest { clickType }` / `MenuClickRequest { menuCode }` → `ohos.statusbar.ClickResponse { accepted }` | scoped 主线程具名 N-API |
-| `ohos.version` / `get-sdk-api-version`、`get-distribution-api-version`、`can-i-use`、`is-desktop-device` | `ohos.version.VersionRequest { syscap }` → `ohos.version.VersionResponse { value, result }` | sync / `ability` |
+| `ohos.version` / `get-sdk-api-version`、`get-distribution-api-version`、`can-i-use`、`is-desktop-device` | `ohos.version.VersionRequest { syscap }` → `ohos.version.VersionResponse { value, result }` | sync / `[]` |
 
 `resource` 是纯入站插件：ArkTS wrapper 在 `ability-create` 时经 `invokeNativeSync` 推送平台
 对象，Rust 在 `on_main_thread_event` 解码的同一 N-API callback 内把它转成 native 指针；对象
@@ -329,6 +331,7 @@ ArkTS 平台回调进入 Rust 的 `on_main_thread_event` 是**入站 scoped call
 
 | requirement | 就绪时点 | 适合的能力 |
 | --- | --- | --- |
+| `[]` | Ability session 和 bridge transport 已建立，不等待额外平台对象 | 设备信息、系统剪贴板、仅使用插件 session 状态的菜单 |
 | `ability` | `NativeAbility.onCreate` 已建立 Ability context | 权限、应用控制、登录会话 |
 | `window-stage` | `NativeAbility.onWindowStageCreate` | 只依赖 Ability `WindowStage` 的 stage 级能力 |
 | `ui-context` | 该 native module 唯一的 `DefaultXComponent` 已建立 UI context、实际 Window 并注入根 `FrameNode` | 组件窗口/避让区、WebView、任意 ArkUI/FrameNode 插件 |
@@ -571,14 +574,15 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 module-loc
 | `exit` | `plugin-app-control` / `ohos.app-control` | sync + 当前主线程 `Env` |
 | `restart`（appRecovery） | `plugin-app-control` / `ohos.app-control` `restart` | sync + `ability`；3s 冷却，无 `onDestroy` 回调 |
 | `set_color_mode` | `plugin-app-control` / `ohos.app-control` `set-color-mode` | sync + `ability`；0 暗 / 1 亮 / 2 跟随 |
-| `getWindowAvoidArea` | `plugin-window` / `ohos.window` | sync + `ui-context`；查询 module/component 所在窗口并返回完整避让区 |
-| `create_os_window`、多窗口操作（装饰/焦点/移动/缩放/最小化/最大化/恢复/背景/模糊） | `plugin-window` / `ohos.window` | sync + `ui-context`；窗口句柄按 session + module 隔离 |
+| `getWindowAvoidArea` | `plugin-window` / `ohos.window` | async + `ui-context`；查询当前 component 所在窗口并返回完整避让区 |
+| `create_os_window`、多窗口操作（装饰/焦点/移动/缩放/最小化/最大化/恢复/背景/模糊） | `plugin-window` / `ohos.window` | async + `ui-context`；窗口句柄属于插件实例，按平台 window id 区分 |
 | `createWebview`、嵌入式 WebView、custom protocol、导航/下载/标题回调、`set_bounds`、`set_cookie`、`web_page_snapshot`、`create_pdf`、`setWebDebuggingAccess` | `plugin-webview` / `ohos.webview` | 出站 async + `ui-context`；入站为 scoped 主线程具名 N-API；scheme 在 engine 初始化前声明；默认挂载当前 module root，也可传 `parentHandle` |
-| `clipboard_write_image` | `plugin-clipboard` / `ohos.clipboard` | async + `ability`；RGBA 长度校验 `width*height*4`，10s 超时 |
+| `clipboard_write_image` | `plugin-clipboard` / `ohos.clipboard` | async + `[]`；RGBA 长度校验 `width*height*4`，10s 超时 |
+| autostart 状态 / 打开应用启动管理设置 | `plugin-autostart` / `ohos.autostart` | async + `ability`；API 21+ 查询，普通应用不承诺直接切换开关 |
 | `Updater::check` / `download_and_install` | `plugin-updater` / `ohos.updater` | async + `ability`；AppGallery `updateManager` |
-| 菜单系统（menubar / popup / 可见性 / 点击事件） | `plugin-menu` / `ohos.menu` | 出站 async + `ability`（递归具名 `MenuItemData`）；点击事件为 scoped 主线程具名 N-API `menu-click`，Rust 经 `MenuExt::menu_event_receiver` 供 muda 监听 |
+| 菜单系统（menubar / popup / 可见性 / 点击事件） | `plugin-menu` / `ohos.menu` | 出站 async + `[]`（递归具名 `MenuItemData`）；状态按 session + 业务 window id 隔离，点击事件为 scoped 主线程具名 N-API `menu-click`，Rust 经 `MenuExt::menu_event_receiver` 供 muda 监听 |
 | 系统托盘（add/remove/icon/menu/tips/预定义动作/点击事件） | `plugin-statusbar` / `ohos.statusbar` | 出站 async + `ability`；点击事件为 scoped 主线程具名 N-API `icon-click` / `menu-click`，Rust 经 `StatusBarExt::*_click_receiver` 供 tray 监听 |
-| 版本检测（`sdk_api_version` / `distribution_api_version` / `canIUse` / `is_desktop_device`） | core `version` 模块（init/getters）+ `plugin-version` / `ohos.version` | 版本号由 `#[ability]` 宏从 `AbilityInitContext` 初始化，任意线程可读；`can-i-use` / `is-desktop-device` 为 sync + `ability` |
+| 版本检测（`sdk_api_version` / `distribution_api_version` / `canIUse` / `is_desktop_device`） | core `version` 模块（init/getters）+ `plugin-version` / `ohos.version` | 版本号由 `#[ability]` 宏从 `AbilityInitContext` 初始化，任意线程可读；`can-i-use` / `is-desktop-device` 为 sync + `[]` |
 | `Loadable` | `runtime/NativeModuleLoader` | framework 内部 runtime，不是能力 bridge |
 | `openURL` | `plugin-url` / `ohos.url` | async + `ability`；`context.openLink` |
 | `showFileDialog`（open/save/folder） | `plugin-files` / `ohos.files` | async + `ability`；结构化 `DialogOptions` 传参，filter 字符串语法仅在 ArkTS 插件内部转换 |

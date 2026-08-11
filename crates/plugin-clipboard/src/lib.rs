@@ -20,9 +20,7 @@ impl BridgePlugin for ClipboardBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.clipboard";
-    const VERSION: u32 = 1;
-    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
-        &[BridgeContextRequirement::Ability];
+    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
 }
 
 #[napi(object)]
@@ -57,6 +55,11 @@ impl ClipboardAcknowledgement {
 }
 
 fn validate_dimensions(rgba_len: usize, width: u32, height: u32) -> Result<()> {
+    if width == 0 || height == 0 {
+        return Err(Error::from_reason(
+            "clipboard image width and height must be positive",
+        ));
+    }
     let expected = (width as usize)
         .checked_mul(height as usize)
         .and_then(|v| v.checked_mul(4))
@@ -110,8 +113,10 @@ impl ClipboardExt for OpenHarmonyApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_dimensions, ClipboardAcknowledgement, ClipboardImageRequest};
-    use openharmony_ability::BridgeNapiType;
+    use super::{
+        validate_dimensions, ClipboardAcknowledgement, ClipboardBridgePlugin, ClipboardImageRequest,
+    };
+    use openharmony_ability::{BridgeNapiType, BridgePlugin};
 
     #[test]
     fn clipboard_uses_stable_named_napi_contracts() {
@@ -129,6 +134,7 @@ mod tests {
     fn clipboard_validates_rgba_dimensions() {
         assert!(validate_dimensions(4 * 2 * 2, 2, 2).is_ok());
         assert!(validate_dimensions(3, 2, 2).is_err());
-        assert!(validate_dimensions(0, 0, 0).is_ok());
+        assert!(validate_dimensions(0, 0, 0).is_err());
+        assert!(ClipboardBridgePlugin::REQUIRED_CONTEXTS.is_empty());
     }
 }

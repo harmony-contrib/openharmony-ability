@@ -46,10 +46,18 @@ function parseTerminateRequest(payload: BridgeTypedValue): TerminateRequest {
 }
 
 function parseRestartRequest(payload: BridgeTypedValue): RestartRequest {
-  if (payload.typeName !== RESTART_REQUEST_TYPE || typeof payload.value !== "object") {
+  if (
+    payload.typeName !== RESTART_REQUEST_TYPE ||
+    typeof payload.value !== "object" ||
+    payload.value === null
+  ) {
     throw new Error(`ohos.app-control.restart requires bridge type ${RESTART_REQUEST_TYPE}`);
   }
-  return payload.value as RestartRequest;
+  const request = payload.value as RestartRequest;
+  if (request.requested !== true) {
+    throw new Error("restart.requested must be true");
+  }
+  return request;
 }
 
 function parseColorModeRequest(payload: BridgeTypedValue): ColorModeRequest {
@@ -65,10 +73,11 @@ function parseColorModeRequest(payload: BridgeTypedValue): ColorModeRequest {
   return request;
 }
 
+let lastProcessRestartAt: number = 0;
+
 export class AppControlPlugin extends SyncPluginBase {
   readonly id = "ohos.app-control";
   readonly requires: BridgeContextRequirement[] = ["ability"];
-  private lastRestartAt: number = 0;
 
   invokeSync(
     action: string,
@@ -88,10 +97,10 @@ export class AppControlPlugin extends SyncPluginBase {
       // process dies immediately; repeated calls before the first restart completes are
       // dropped to avoid a restart loop.
       const now = Date.now();
-      if (now - this.lastRestartAt < 3000) {
+      if (now - lastProcessRestartAt < 3000) {
         throw new Error("restart is in cooldown; try again later");
       }
-      this.lastRestartAt = now;
+      lastProcessRestartAt = now;
       try {
         appRecovery.enableAppRecovery(
           appRecovery.RestartFlag.ALWAYS_RESTART,
@@ -100,6 +109,9 @@ export class AppControlPlugin extends SyncPluginBase {
         );
         appRecovery.restartApp();
       } catch (error) {
+        if (lastProcessRestartAt === now) {
+          lastProcessRestartAt = 0;
+        }
         throw new Error(`restartApp failed: ${String(error)}`);
       }
       return { typeName: RESTART_RESPONSE_TYPE, value: new AcceptedResponse(true) };
