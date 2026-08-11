@@ -20,7 +20,6 @@ impl BridgePlugin for FilesBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.files";
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
 }

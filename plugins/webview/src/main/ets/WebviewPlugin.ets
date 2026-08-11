@@ -518,13 +518,13 @@ function ensureWebEngineInitialized(context: BridgePluginContext): void {
   if (!webEngineInitialized) {
     // Seal and validate every module's declarations before any module mutates ArkWeb's global
     // scheme registry.
-    const sealedSchemes = notifyWebEngineAcrossModules(
+    const sealedSchemes = notifyWebEngineProcessWide(
       context,
       "seal-engine-schemes",
       ENGINE_LIFECYCLE_EVENT_TYPE,
       new WebviewEngineLifecycleEvent("seal-engine-schemes", []) as ESObject,
     );
-    notifyWebEngineAcrossModules(
+    notifyWebEngineProcessWide(
       context,
       "before-engine-init",
       ENGINE_LIFECYCLE_EVENT_TYPE,
@@ -536,7 +536,7 @@ function ensureWebEngineInitialized(context: BridgePluginContext): void {
   }
   // ArkWeb is process-global, while every native module has independent Rust static state.
   // Notify every active module, including those whose DefaultXComponent has not appeared yet.
-  notifyWebEngineAcrossModules(
+  notifyWebEngineProcessWide(
     context,
     "engine-initialized",
     ENGINE_LIFECYCLE_EVENT_TYPE,
@@ -797,20 +797,20 @@ function notifyNative(
   }
 }
 
-function notifyWebEngineAcrossModules(
+function notifyWebEngineProcessWide(
   context: BridgePluginContext,
   event: string,
   requestTypeName: string,
   value: ESObject,
 ): WebviewSchemeDeclaration[] {
-  const responses: ESObject[] = context.invokeNativeSyncAcrossModules(
+  const responses: ESObject[] = context.invokeNativeSyncProcessWide(
     event,
     requestTypeName,
     ENGINE_LIFECYCLE_RESPONSE_TYPE,
     value,
   ) as ESObject[];
   if (responses.length === 0) {
-    throw new Error(`WebView native notification '${event}' had no active module receiver`);
+    throw new Error(`WebView native notification '${event}' had no active plugin receiver`);
   }
   const schemeOptions: Map<string, number> = new Map();
   for (let index: number = 0; index < responses.length; index++) {
@@ -822,7 +822,9 @@ function notifyWebEngineAcrossModules(
       response.accepted !== true ||
       !Array.isArray(response.schemes)
     ) {
-      throw new Error(`WebView native notification '${event}' was not accepted by every module`);
+      throw new Error(
+        `WebView native notification '${event}' was not accepted by every active plugin instance`,
+      );
     }
     for (const declaration of response.schemes) {
       if (
@@ -839,7 +841,7 @@ function notifyWebEngineAcrossModules(
         schemeOptions.get(declaration.scheme) !== declaration.options
       ) {
         throw new Error(
-          `WebView scheme '${declaration.scheme}' has conflicting options across native modules`,
+          `WebView scheme '${declaration.scheme}' has conflicting options across active plugin instances`,
         );
       }
       schemeOptions.set(declaration.scheme, declaration.options);
@@ -949,7 +951,7 @@ class WebviewSurface {
     const parentHandle = payload.parentHandle ?? null;
     const instanceId = this.nextMountKey++;
     const nativeTagId = nextWebviewNativeTagId++;
-    const nativeTag = `ohos.webview.${this.pluginContext.sessionId}.${this.pluginContext.moduleName}.${nativeTagId}`;
+    const nativeTag = `ohos.webview.${this.pluginContext.sessionId}.${nativeTagId}`;
     const data: ManagedWebview = {
       id: payload.id,
       mountParentHandle: parentHandle,
@@ -1372,7 +1374,6 @@ class WebviewSurface {
 
 export class WebviewPlugin extends AsyncPluginBase {
   readonly id = "ohos.webview";
-  readonly version = 2;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
   private surface?: WebviewSurface;
 

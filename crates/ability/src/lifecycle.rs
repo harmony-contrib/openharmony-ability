@@ -7,8 +7,8 @@ use napi_ohos::{
 };
 
 use crate::{
-    AvoidArea, AvoidAreaInfo, AvoidAreaType, ContentRect, Event, OpenHarmonyApp,
-    PluginLifecycleEvent, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
+    AvoidArea, AvoidAreaInfo, AvoidAreaType, BridgePluginDeclaration, ContentRect, Event,
+    OpenHarmonyApp, PluginLifecycleEvent, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
 };
 
 #[napi(object)]
@@ -40,6 +40,7 @@ pub struct KeyboardCallback<'a> {
 
 #[napi(object)]
 pub struct ApplicationLifecycle<'a> {
+    pub bridge_plugins: Vec<BridgePluginDeclaration>,
     pub environment_callback: EnvironmentCallback<'a>,
     pub window_stage_event_callback: WindowStageEventCallback<'a>,
     pub keyboard_event_callback: KeyboardCallback<'a>,
@@ -63,6 +64,7 @@ pub fn create_lifecycle_handle<'a>(
     env: &'a Env,
     app: OpenHarmonyApp,
 ) -> Result<ApplicationLifecycle<'a>> {
+    let bridge_plugins = app.bridge_plugin_declarations()?;
     let waker_app = app.clone();
     let waker: Function<'_, (), ()> = env.create_function_from_closure("waker", move |_ctx| {
         if let Some(ref mut h) = *waker_app.event_loop.borrow_mut() {
@@ -325,6 +327,7 @@ pub fn create_lifecycle_handle<'a>(
         })?;
 
     Ok(ApplicationLifecycle {
+        bridge_plugins,
         environment_callback: EnvironmentCallback {
             on_configuration_updated,
             on_memory_level,

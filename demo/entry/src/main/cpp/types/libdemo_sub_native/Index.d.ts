@@ -184,9 +184,22 @@ export interface AbilityInitContext {
 }
 
 export interface ApplicationLifecycle {
+  bridgePlugins: Array<BridgePluginDeclaration>;
   environmentCallback: EnvironmentCallback;
   windowStageEventCallback: WindowStageEventCallback;
   keyboardEventCallback: KeyboardCallback;
+}
+
+/**
+ * Structural declaration exported to ArkTS after the native module has configured its Rust
+ * plugin registry. The host uses this to select the matching factory automatically and to
+ * validate the parts of the contract that affect scheduling. Request and response ABI identity
+ * remains pinned by each named N-API type.
+ */
+export interface BridgePluginDeclaration {
+  id: string;
+  execution: string;
+  requires: Array<string>;
 }
 
 export interface EnvironmentCallback {

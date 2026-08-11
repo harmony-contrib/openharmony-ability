@@ -6,6 +6,7 @@ import resourceManager from "@ohos.resourceManager";
 import window from "@ohos.window";
 
 export interface ApplicationLifecycle {
+  bridgePlugins: BridgePluginDeclaration[];
   environmentCallback: EnvironmentCallback;
   windowStageEventCallback: WindowStageEventCallback;
   keyboardEventCallback: KeyboardCallback;
@@ -53,7 +54,6 @@ export interface BridgeTypedValue {
 export interface BridgeBindings {
   bridgeInvoke: (
     pluginId: string,
-    pluginVersion: number,
     action: string,
     requestTypeName: string,
     responseTypeName: string,
@@ -62,7 +62,6 @@ export interface BridgeBindings {
   ) => Promise<ESObject>;
   bridgeInvokeSync: (
     pluginId: string,
-    pluginVersion: number,
     action: string,
     requestTypeName: string,
     responseTypeName: string,
@@ -113,6 +112,13 @@ export interface Module {
 
 export type BridgePluginExecution = "async" | "sync-main-thread";
 export type BridgeContextRequirement = "ability" | "window-stage" | "ui-context";
+
+/** Rust-side scheduling contract exported after one native module configures its registry. */
+export interface BridgePluginDeclaration {
+  id: string;
+  execution: BridgePluginExecution;
+  requires: BridgeContextRequirement[];
+}
 export type BridgeLifecycleKind =
   | "ability-create"
   | "ability-destroy"
@@ -162,9 +168,9 @@ export interface BridgeLifecycleEvent {
 }
 
 /**
- * Context is intentionally ArkTS-only. It is scoped to one native module and one Ability
- * session; Rust gets lifecycle notifications and direct named N-API events, not retained ArkTS
- * object references.
+ * Context is intentionally ArkTS-only and scoped to one Ability-session plugin instance. Native
+ * module routing is a BridgeHost implementation detail: plugins operate only on their attached
+ * platform context and never branch on a module name.
  *
  * A native module is bound to exactly one `DefaultXComponent` at a time, and every plugin for
  * that module shares the component's root FrameNode. An Ability may host several components by
@@ -176,13 +182,12 @@ export interface BridgeLifecycleEvent {
  */
 export interface BridgePluginContext {
   pluginId: string;
-  moduleName: string;
   sessionId: string;
   abilityContext: common.UIAbilityContext;
   isActive: () => boolean;
   /** Returns the Ability-level WindowStage. This is not necessarily the component's window. */
   getWindowStage: () => window.WindowStage;
-  /** Resolves the actual Window that owns this module's DefaultXComponent. */
+  /** Resolves the actual Window that owns the attached DefaultXComponent. */
   getWindow: () => window.Window;
   getUIContext: () => UIContext;
   /**
@@ -215,12 +220,11 @@ export interface BridgePluginContext {
     value: ESObject,
   ) => ESObject;
   /**
-   * Sends the same named event to this plugin's Rust facade in every active native module in the
-   * application process. This is reserved for genuinely process-global platform transitions
-   * (for example ArkWeb engine initialization); ordinary callbacks must use `invokeNativeSync`
-   * and remain module-scoped.
+   * Sends the same named event to every active Rust facade for this process-level capability.
+   * This is reserved for genuinely process-global platform transitions (for example ArkWeb
+   * engine initialization); ordinary callbacks must use `invokeNativeSync`.
    */
-  invokeNativeSyncAcrossModules: (
+  invokeNativeSyncProcessWide: (
     event: string,
     requestTypeName: string,
     responseTypeName: string,
@@ -252,7 +256,6 @@ export interface BridgePluginHookContext extends BridgePluginContext {
 
 interface BridgePluginBase {
   id: string;
-  version: number;
   requires?: BridgeContextRequirement[];
 }
 
@@ -294,14 +297,13 @@ export type BridgePlugin = AsyncBridgePlugin | MainThreadSyncBridgePlugin;
 
 /**
  * Shared base for plugin implementations. Concrete plugins declare only their identity
- * (`id` / `version` / `requires`) and the invoke method; the execution mode and optional
+ * (`id` / `requires`) and the invoke method; the execution mode and optional
  * lifecycle hooks come from the mode-specific bases below. The session-scoped context is
  * injected by `BridgeHost` through [`PluginBase.attachContext`] after creation, so plugin
  * constructors never need it.
  */
 export abstract class PluginBase {
   abstract readonly id: string;
-  abstract readonly version: number;
   abstract readonly requires: BridgeContextRequirement[];
   private context?: BridgePluginContext;
 
@@ -319,7 +321,7 @@ export abstract class PluginBase {
   attachContext(context: BridgePluginContext): void {
     if (this.context !== undefined) {
       throw new Error(
-        `Bridge plugin '${this.id}' instance cannot be reused across native modules or Ability sessions`,
+        `Bridge plugin '${this.id}' instance cannot be reused across Ability-session hosts`,
       );
     }
     this.context = context;
@@ -358,29 +360,24 @@ export abstract class SyncPluginBase extends PluginBase implements MainThreadSyn
 }
 
 /**
- * Registration entry for one plugin. Identity (`id` / `version` / `execution` / `requires`)
- * lives only on the plugin instance; the factory is a plain per-session instance creator
- * (plus an optional module filter). Use [`LazyPlugin`] to build one.
+ * Registration entry for one plugin. Identity (`id` / `execution` / `requires`) lives only on
+ * the plugin instance; the factory is a plain per-host instance creator. BridgeHost matches it
+ * automatically against the declarations exported by each Rust registry.
  */
 export interface BridgePluginFactory {
-  /** Optional: restrict this plugin to the listed native module names. */
-  modules?: string[];
-  /** Creates one plugin instance per native module and Ability session. */
+  /** Creates a fresh plugin instance for an automatically matched Ability-session host. */
   create: () => BridgePlugin;
 }
 
 /**
- * Lazy plugin registration entry: defers instance creation to `BridgeHost.install` (one
- * instance per native module and Ability session) and optionally filters by native module.
- * Identity fields are read from the created instance, so they are never repeated here.
+ * Lazy plugin registration entry. Identity fields are read from the created instance and matched
+ * to Rust declarations, so application code never repeats a plugin ID or native module list.
  */
 export class LazyPlugin implements BridgePluginFactory {
-  readonly modules?: string[];
   private readonly createFn: () => BridgePlugin;
 
-  constructor(create: () => BridgePlugin, modules?: string[]) {
+  constructor(create: () => BridgePlugin) {
     this.createFn = create;
-    this.modules = modules;
   }
 
   create(): BridgePlugin {

@@ -38,7 +38,6 @@ impl BridgePlugin for WebviewBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.webview";
-    const VERSION: u32 = 2;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::UiContext];
 

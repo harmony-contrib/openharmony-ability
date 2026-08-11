@@ -15,6 +15,7 @@ import {
   BridgeEmptyLifecyclePayload,
   BridgeLifecycleEvent,
   BridgePluginContext,
+  BridgePluginDeclaration,
   BridgePluginHookContext,
   BridgeTypedValue,
   LazyPlugin,
@@ -27,6 +28,13 @@ let stageInstallProbeCount: number = 0;
 let lifecycleOrderProbe: string[] = [];
 let broadcastProbeContext: BridgePluginContext | undefined;
 
+function asyncPluginDeclaration(
+  id: string,
+  requires: BridgeContextRequirement[],
+): BridgePluginDeclaration {
+  return { id, execution: "async", requires };
+}
+
 class InstallProbeRequest {
   readonly accepted: boolean = true;
 }
@@ -37,7 +45,6 @@ class InstallProbeResponse {
 
 class InstallProbePlugin extends AsyncPluginBase {
   readonly id = "test.install-probe";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   override onInstall(context: BridgePluginHookContext): void {
@@ -61,7 +68,6 @@ class InstallProbePlugin extends AsyncPluginBase {
 
 class StageInstallProbePlugin extends AsyncPluginBase {
   readonly id = "test.stage-install-probe";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["window-stage"];
 
   override onInstall(): void {
@@ -79,8 +85,33 @@ class StageInstallProbePlugin extends AsyncPluginBase {
 
 class AbilityEchoPlugin extends AsyncPluginBase {
   readonly id = "test.ability-echo";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
+
+  async invokeAsync(
+    _action: string,
+    request: BridgeTypedValue,
+    _context: BridgeCallContext,
+  ): Promise<BridgeTypedValue> {
+    return request;
+  }
+}
+
+class OrderedRequirementsPlugin extends AsyncPluginBase {
+  readonly id = "test.ordered-requirements";
+  readonly requires: BridgeContextRequirement[] = ["ui-context", "ability"];
+
+  async invokeAsync(
+    _action: string,
+    request: BridgeTypedValue,
+    _context: BridgeCallContext,
+  ): Promise<BridgeTypedValue> {
+    return request;
+  }
+}
+
+class ReservedNodePlugin extends AsyncPluginBase {
+  readonly id = "ohos.node";
+  readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
   async invokeAsync(
     _action: string,
@@ -93,7 +124,6 @@ class AbilityEchoPlugin extends AsyncPluginBase {
 
 class LifecycleOrderProbePlugin extends AsyncPluginBase {
   readonly id = "test.lifecycle-order-probe";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
   override onLifecycle(event: BridgeLifecycleEvent, _context: BridgePluginHookContext): void {
@@ -111,7 +141,6 @@ class LifecycleOrderProbePlugin extends AsyncPluginBase {
 
 class BroadcastProbePlugin extends AsyncPluginBase {
   readonly id = "test.broadcast-probe";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   override attachContext(context: BridgePluginContext): void {
@@ -263,6 +292,9 @@ export default function localUnitTest() {
       const sessionId = BridgeHostRegistry.prepare(["test_native"], {} as common.UIAbilityContext, [
         new LazyPlugin(() => new InstallProbePlugin()),
       ]);
+      BridgeHostRegistry.configurePlugins(sessionId, "test_native", [
+        asyncPluginDeclaration("test.install-probe", ["ability"]),
+      ]);
       expect(installProbeCount).assertEqual(0);
 
       BridgeHostRegistry.attachEventSink(sessionId, "test_native", (): InstallProbeResponse => {
@@ -279,10 +311,144 @@ export default function localUnitTest() {
       BridgeHostRegistry.beginClosing(sessionId);
       await BridgeHostRegistry.dispose(sessionId);
     });
+    it("pluginFactoriesAreSelectedByEachRustRegistryWithoutModuleFilters", 0, async () => {
+      installProbeCount = 0;
+      const modules = ["factory_match_module_a", "factory_match_module_b"];
+      const sessionId = BridgeHostRegistry.prepare(modules, {} as common.UIAbilityContext, [
+        new LazyPlugin(() => new InstallProbePlugin()),
+        new LazyPlugin(() => new AbilityEchoPlugin()),
+      ]);
+      BridgeHostRegistry.configurePlugins(sessionId, modules[0], [
+        asyncPluginDeclaration("test.install-probe", ["ability"]),
+      ]);
+      BridgeHostRegistry.configurePlugins(sessionId, modules[1], [
+        asyncPluginDeclaration("test.ability-echo", ["ability"]),
+      ]);
+      BridgeHostRegistry.attachEventSink(
+        sessionId,
+        modules[0],
+        (): InstallProbeResponse => new InstallProbeResponse(),
+      );
+      for (const moduleName of modules) {
+        await BridgeHostRegistry.activateAbility(sessionId, moduleName, {
+          kind: "ability-create",
+          payload: new BridgeAbilityCreateLifecyclePayload(""),
+        });
+      }
+
+      expect(installProbeCount).assertEqual(1);
+      let undeclaredPluginError = "";
+      try {
+        await BridgeHostRegistry.invokeAsync(
+          sessionId,
+          modules[1],
+          "test.install-probe",
+          "echo",
+          "test.InstallRequest",
+          "test.InstallRequest",
+          new InstallProbeRequest(),
+          1_000,
+        );
+      } catch (error) {
+        undeclaredPluginError = String(error);
+      }
+      expect(undeclaredPluginError.indexOf("is not installed") >= 0).assertTrue();
+
+      BridgeHostRegistry.beginClosing(sessionId);
+      await BridgeHostRegistry.dispose(sessionId);
+    });
+    it("pluginConfigurationFailsWhenRustPluginHasNoArkTSFactory", 0, async () => {
+      const moduleName = "missing_factory_module";
+      const sessionId = BridgeHostRegistry.prepare([moduleName], {} as common.UIAbilityContext, []);
+      let configurationError = "";
+      try {
+        BridgeHostRegistry.configurePlugins(sessionId, moduleName, [
+          asyncPluginDeclaration("test.ability-echo", ["ability"]),
+        ]);
+      } catch (error) {
+        configurationError = String(error);
+      }
+      expect(configurationError.indexOf("has no matching ArkTS factory") >= 0).assertTrue();
+
+      BridgeHostRegistry.beginClosing(sessionId);
+      await BridgeHostRegistry.dispose(sessionId);
+    });
+    it("pluginConfigurationRejectsExecutionAndContextMismatches", 0, async () => {
+      const executionModule = "execution_mismatch_module";
+      const executionSession = BridgeHostRegistry.prepare(
+        [executionModule],
+        {} as common.UIAbilityContext,
+        [new LazyPlugin(() => new AbilityEchoPlugin())],
+      );
+      let executionError = "";
+      try {
+        BridgeHostRegistry.configurePlugins(executionSession, executionModule, [
+          {
+            id: "test.ability-echo",
+            execution: "sync-main-thread",
+            requires: ["ability"],
+          },
+        ]);
+      } catch (error) {
+        executionError = String(error);
+      }
+      expect(executionError.indexOf("execution mismatch") >= 0).assertTrue();
+      BridgeHostRegistry.beginClosing(executionSession);
+      await BridgeHostRegistry.dispose(executionSession);
+
+      const contextModule = "context_mismatch_module";
+      const contextSession = BridgeHostRegistry.prepare(
+        [contextModule],
+        {} as common.UIAbilityContext,
+        [new LazyPlugin(() => new AbilityEchoPlugin())],
+      );
+      let contextError = "";
+      try {
+        BridgeHostRegistry.configurePlugins(contextSession, contextModule, [
+          asyncPluginDeclaration("test.ability-echo", ["window-stage"]),
+        ]);
+      } catch (error) {
+        contextError = String(error);
+      }
+      expect(contextError.indexOf("context mismatch") >= 0).assertTrue();
+      BridgeHostRegistry.beginClosing(contextSession);
+      await BridgeHostRegistry.dispose(contextSession);
+    });
+    it("pluginConfigurationRejectsBuiltInPluginIdConflicts", 0, async () => {
+      const moduleName = "reserved_plugin_id_module";
+      const sessionId = BridgeHostRegistry.prepare([moduleName], {} as common.UIAbilityContext, [
+        new LazyPlugin(() => new ReservedNodePlugin()),
+      ]);
+      let configurationError = "";
+      try {
+        BridgeHostRegistry.configurePlugins(sessionId, moduleName, []);
+      } catch (error) {
+        configurationError = String(error);
+      }
+      expect(configurationError.indexOf("conflicts with a built-in plugin") >= 0).assertTrue();
+
+      BridgeHostRegistry.beginClosing(sessionId);
+      await BridgeHostRegistry.dispose(sessionId);
+    });
+    it("pluginContextRequirementsAreComparedAsASet", 0, async () => {
+      const moduleName = "requirement_order_module";
+      const sessionId = BridgeHostRegistry.prepare([moduleName], {} as common.UIAbilityContext, [
+        new LazyPlugin(() => new OrderedRequirementsPlugin()),
+      ]);
+      BridgeHostRegistry.configurePlugins(sessionId, moduleName, [
+        asyncPluginDeclaration("test.ordered-requirements", ["ability", "ui-context"]),
+      ]);
+
+      BridgeHostRegistry.beginClosing(sessionId);
+      await BridgeHostRegistry.dispose(sessionId);
+    });
     it("abilityPluginDoesNotDependOnDefaultXComponentLifetime", 0, async () => {
       const moduleName = "ability_only_module";
       const sessionId = BridgeHostRegistry.prepare([moduleName], {} as common.UIAbilityContext, [
         new LazyPlugin(() => new AbilityEchoPlugin()),
+      ]);
+      BridgeHostRegistry.configurePlugins(sessionId, moduleName, [
+        asyncPluginDeclaration("test.ability-echo", ["ability"]),
       ]);
       await BridgeHostRegistry.activateAbility(sessionId, moduleName, {
         kind: "ability-create",
@@ -294,7 +460,6 @@ export default function localUnitTest() {
           sessionId,
           moduleName,
           "test.ability-echo",
-          1,
           "echo",
           "test.InstallRequest",
           "test.InstallRequest",
@@ -325,6 +490,9 @@ export default function localUnitTest() {
       const sessionId = BridgeHostRegistry.prepare(["test_native"], {} as common.UIAbilityContext, [
         new LazyPlugin(() => new StageInstallProbePlugin()),
       ]);
+      BridgeHostRegistry.configurePlugins(sessionId, "test_native", [
+        asyncPluginDeclaration("test.stage-install-probe", ["window-stage"]),
+      ]);
       await BridgeHostRegistry.activateAbility(sessionId, "test_native", {
         kind: "ability-create",
         payload: new BridgeAbilityCreateLifecyclePayload(""),
@@ -352,6 +520,7 @@ export default function localUnitTest() {
         {} as common.UIAbilityContext,
         [],
       );
+      BridgeHostRegistry.configurePlugins(firstSession, "module_owner_test", []);
       let duplicateError = "";
       try {
         BridgeHostRegistry.prepare(["module_owner_test"], {} as common.UIAbilityContext, []);
@@ -367,26 +536,36 @@ export default function localUnitTest() {
         {} as common.UIAbilityContext,
         [],
       );
+      BridgeHostRegistry.configurePlugins(replacementSession, "module_owner_test", []);
       BridgeHostRegistry.beginClosing(replacementSession);
       await BridgeHostRegistry.dispose(replacementSession);
     });
-    it("pluginInstanceCannotBeSharedAcrossNativeModules", 0, () => {
+    it("pluginInstanceCannotBeSharedAcrossNativeModules", 0, async () => {
       const singleton = new InstallProbePlugin();
       let reuseError = "";
+      const sessionId = BridgeHostRegistry.prepare(
+        ["singleton_module_a", "singleton_module_b"],
+        {} as common.UIAbilityContext,
+        [new LazyPlugin(() => singleton)],
+      );
       try {
-        BridgeHostRegistry.prepare(
-          ["singleton_module_a", "singleton_module_b"],
-          {} as common.UIAbilityContext,
-          [new LazyPlugin(() => singleton)],
-        );
+        BridgeHostRegistry.configurePlugins(sessionId, "singleton_module_a", [
+          asyncPluginDeclaration("test.install-probe", ["ability"]),
+        ]);
+        BridgeHostRegistry.configurePlugins(sessionId, "singleton_module_b", [
+          asyncPluginDeclaration("test.install-probe", ["ability"]),
+        ]);
       } catch (error) {
         reuseError = String(error);
       }
       expect(reuseError.indexOf("cannot be reused") >= 0).assertTrue();
+      BridgeHostRegistry.beginClosing(sessionId);
+      await BridgeHostRegistry.dispose(sessionId);
     });
     it("oneNativeModuleRejectsASecondDefaultXComponent", 0, async () => {
       const moduleName = "single_component_module";
       const sessionId = BridgeHostRegistry.prepare([moduleName], {} as common.UIAbilityContext, []);
+      BridgeHostRegistry.configurePlugins(sessionId, moduleName, []);
       await BridgeHostRegistry.activateAbility(sessionId, moduleName, {
         kind: "ability-create",
         payload: new BridgeAbilityCreateLifecyclePayload(""),
@@ -438,6 +617,7 @@ export default function localUnitTest() {
       const modules = ["component_module_a", "component_module_b"];
       const sessionId = BridgeHostRegistry.prepare(modules, {} as common.UIAbilityContext, []);
       for (const moduleName of modules) {
+        BridgeHostRegistry.configurePlugins(sessionId, moduleName, []);
         await BridgeHostRegistry.activateAbility(sessionId, moduleName, {
           kind: "ability-create",
           payload: new BridgeAbilityCreateLifecyclePayload(""),
@@ -466,6 +646,9 @@ export default function localUnitTest() {
         new LazyPlugin(() => new BroadcastProbePlugin()),
       ]);
       for (const moduleName of modules) {
+        BridgeHostRegistry.configurePlugins(sessionId, moduleName, [
+          asyncPluginDeclaration("test.broadcast-probe", ["ability"]),
+        ]);
         BridgeHostRegistry.attachEventSink(sessionId, moduleName, (): InstallProbeResponse => {
           receivedBy.push(moduleName);
           return new InstallProbeResponse();
@@ -480,7 +663,7 @@ export default function localUnitTest() {
       if (context === undefined) {
         throw new Error("broadcast probe was not installed");
       }
-      const responses = context.invokeNativeSyncAcrossModules(
+      const responses = context.invokeNativeSyncProcessWide(
         "engine-event",
         "test.InstallRequest",
         "test.InstallResponse",
@@ -498,6 +681,9 @@ export default function localUnitTest() {
       const moduleName = "lifecycle_order_module";
       const sessionId = BridgeHostRegistry.prepare([moduleName], {} as common.UIAbilityContext, [
         new LazyPlugin(() => new LifecycleOrderProbePlugin()),
+      ]);
+      BridgeHostRegistry.configurePlugins(sessionId, moduleName, [
+        asyncPluginDeclaration("test.lifecycle-order-probe", ["ui-context"]),
       ]);
       await BridgeHostRegistry.activateAbility(sessionId, moduleName, {
         kind: "ability-create",

@@ -24,7 +24,6 @@ const RESOURCE_MANAGER_READY_RESPONSE_TYPE = "ohos.resource.ResourceManagerReady
  */
 export class ResourcePlugin extends AsyncPluginBase {
   readonly id = "ohos.resource";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   override onInstall(context: BridgePluginHookContext): void {

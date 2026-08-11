@@ -23,7 +23,6 @@ class DemoProfileValue {
 /** Demonstrates built-in and application-defined named N-API types without a JSON envelope. */
 export class DemoTypedPlugin extends AsyncPluginBase {
   readonly id = "demo.raw";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(

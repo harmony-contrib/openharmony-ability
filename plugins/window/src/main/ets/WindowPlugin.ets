@@ -269,7 +269,6 @@ class SubWindowRegistry {
 
 export class WindowPlugin extends SyncPluginBase {
   readonly id = "ohos.window";
-  readonly version = 2;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
   invokeSync(

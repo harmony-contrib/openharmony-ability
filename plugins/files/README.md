@@ -37,7 +37,7 @@ Rust 侧还需注册 `FilesBridgePlugin`，并通过 `FilesExt::show_file_dialog
 
 | 字段 | 值 |
 | --- | --- |
-| `id` / `version` | `ohos.files` / `1` |
+| `id` | `ohos.files` |
 | `execution` | `async` |
 | `requires` | `["ability"]` |
 | 支持 action | `file-dialog` |

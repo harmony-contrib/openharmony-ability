@@ -18,6 +18,7 @@ use std::{
 };
 
 use futures_channel::oneshot;
+use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::{
         CallbackContext, FnArgs, FromNapiValue, Function, FunctionRef, JsObjectValue, JsValue,
@@ -41,6 +42,15 @@ pub enum BridgeExecution {
     Async,
     /// The call runs immediately in the active ArkTS N-API environment.
     MainThreadSync,
+}
+
+impl BridgeExecution {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Async => "async",
+            Self::MainThreadSync => "sync-main-thread",
+        }
+    }
 }
 
 /// A named value that can cross the Rust ↔ ArkTS bridge through N-API.
@@ -158,6 +168,28 @@ pub enum BridgeContextRequirement {
     Ability,
     WindowStage,
     UiContext,
+}
+
+impl BridgeContextRequirement {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ability => "ability",
+            Self::WindowStage => "window-stage",
+            Self::UiContext => "ui-context",
+        }
+    }
+}
+
+/// Structural declaration exported to ArkTS after the native module has configured its Rust
+/// plugin registry. The host uses this to select the matching factory automatically and to
+/// validate the parts of the contract that affect scheduling. Request and response ABI identity
+/// remains pinned by each named N-API type.
+#[napi(object)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BridgePluginDeclaration {
+    pub id: String,
+    pub execution: String,
+    pub requires: Vec<String>,
 }
 
 /// A synchronous, ArkTS-originated event scoped to the active N-API environment.
@@ -293,7 +325,7 @@ impl PluginLifecycleEvent {
     }
 }
 
-/// Stable Rust-side contract for a versioned ArkTS plugin.
+/// Stable Rust-side contract for an ArkTS plugin.
 ///
 /// `type Mode` is intentionally not a runtime flag. A facade for `AsyncBridge` cannot be passed
 /// to [`BridgeMainThread::call_sync`], and a facade for `MainThreadSyncBridge` cannot be passed
@@ -302,7 +334,6 @@ pub trait BridgePlugin: Send + Sync + 'static {
     type Mode: BridgePluginMode;
 
     const ID: &'static str;
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
 
     /// Context gate for one ArkTS -> Rust main-thread event.
@@ -415,6 +446,7 @@ struct RegisteredPluginEntry {
     plugin: Arc<dyn RegisteredBridgePlugin>,
     typed: Arc<dyn Any + Send + Sync>,
     required_contexts: &'static [BridgeContextRequirement],
+    execution: BridgeExecution,
     /// Once a plugin becomes ready in one Ability session it keeps receiving that session's
     /// teardown events even after its required context has already disappeared.
     activated: bool,
@@ -470,6 +502,7 @@ impl BridgePluginRegistry {
                     plugin: Arc::clone(&registered),
                     typed,
                     required_contexts: P::REQUIRED_CONTEXTS,
+                    execution: P::Mode::EXECUTION,
                     activated,
                 },
             );
@@ -507,6 +540,29 @@ impl BridgePluginRegistry {
                 P::ID
             ))
         })
+    }
+
+    /// Returns a deterministic snapshot of the Rust plugin contracts configured for this native
+    /// module. ArkTS consumes the snapshot during Ability-session initialization; plugins and
+    /// application code never configure or inspect native module names.
+    pub fn declarations(&self) -> Result<Vec<BridgePluginDeclaration>> {
+        let state = self
+            .state
+            .read()
+            .map_err(|_| Error::from_reason("Failed to read bridge plugin registry"))?;
+        Ok(state
+            .plugins
+            .iter()
+            .map(|(id, entry)| BridgePluginDeclaration {
+                id: id.clone(),
+                execution: entry.execution.as_str().to_owned(),
+                requires: entry
+                    .required_contexts
+                    .iter()
+                    .map(|requirement| requirement.as_str().to_owned())
+                    .collect(),
+            })
+            .collect())
     }
 
     /// Delivers an ArkTS-originated direct event to its Rust plugin without allowing its N-API
@@ -668,7 +724,6 @@ impl Default for BridgeCallOptions {
 
 struct BridgeRequest {
     plugin_id: String,
-    plugin_version: u32,
     action: String,
     request_type_name: String,
     response_type_name: String,
@@ -682,7 +737,6 @@ struct BridgeRequest {
 /// and must return promptly. The encoder is consumed on the ArkTS/N-API callback thread.
 struct SyncFromWorkerRequest {
     plugin_id: String,
-    plugin_version: u32,
     action: String,
     request_type_name: String,
     response_type_name: String,
@@ -717,8 +771,8 @@ where
     }
 }
 
-type AsyncBridgeArgs = FnArgs<(String, u32, String, String, String, sys::napi_value, u32)>;
-type SyncBridgeArgs = FnArgs<(String, u32, String, String, String, sys::napi_value)>;
+type AsyncBridgeArgs = FnArgs<(String, String, String, String, sys::napi_value, u32)>;
+type SyncBridgeArgs = FnArgs<(String, String, String, String, sys::napi_value)>;
 type AsyncBridgeFunction<'env> = Function<'env, AsyncBridgeArgs, Unknown<'env>>;
 type SyncBridgeFunction<'env> = Function<'env, SyncBridgeArgs, Unknown<'env>>;
 type BridgeInvokeTsfn =
@@ -759,14 +813,13 @@ impl BridgeClient {
         Response: BridgeNapiType,
     {
         validate_plugin_contract::<P>()?;
-        self.call_raw::<Request, Response>(P::ID, P::VERSION, action.as_ref(), request, options)
+        self.call_raw::<Request, Response>(P::ID, action.as_ref(), request, options)
             .await
     }
 
     async fn call_raw<Request, Response>(
         &self,
         plugin_id: &str,
-        plugin_version: u32,
         action: &str,
         request: Request,
         options: BridgeCallOptions,
@@ -775,17 +828,10 @@ impl BridgeClient {
         Request: BridgeNapiType,
         Response: BridgeNapiType,
     {
-        validate_wire_call(
-            plugin_id,
-            plugin_version,
-            action,
-            Request::TYPE_NAME,
-            Response::TYPE_NAME,
-        )?;
+        validate_wire_call(plugin_id, action, Request::TYPE_NAME, Response::TYPE_NAME)?;
 
         let request = BridgeRequest {
             plugin_id: plugin_id.to_owned(),
-            plugin_version,
             action: action.to_owned(),
             request_type_name: Request::TYPE_NAME.to_owned(),
             response_type_name: Response::TYPE_NAME.to_owned(),
@@ -858,19 +904,13 @@ impl BridgeClient {
             ));
         }
         validate_plugin_contract::<P>()?;
-        self.call_sync_from_worker_raw::<Request, Response>(
-            P::ID,
-            P::VERSION,
-            action.as_ref(),
-            request,
-        )
-        .await
+        self.call_sync_from_worker_raw::<Request, Response>(P::ID, action.as_ref(), request)
+            .await
     }
 
     async fn call_sync_from_worker_raw<Request, Response>(
         &self,
         plugin_id: &str,
-        plugin_version: u32,
         action: &str,
         request: Request,
     ) -> Result<Response>
@@ -878,17 +918,10 @@ impl BridgeClient {
         Request: BridgeNapiType,
         Response: BridgeNapiType,
     {
-        validate_wire_call(
-            plugin_id,
-            plugin_version,
-            action,
-            Request::TYPE_NAME,
-            Response::TYPE_NAME,
-        )?;
+        validate_wire_call(plugin_id, action, Request::TYPE_NAME, Response::TYPE_NAME)?;
 
         let request = SyncFromWorkerRequest {
             plugin_id: plugin_id.to_owned(),
-            plugin_version,
             action: action.to_owned(),
             request_type_name: Request::TYPE_NAME.to_owned(),
             response_type_name: Response::TYPE_NAME.to_owned(),
@@ -1102,13 +1135,7 @@ impl<'env> BridgeMainThread<'env> {
     {
         validate_plugin_contract::<P>()?;
         let action = action.as_ref();
-        validate_wire_call(
-            P::ID,
-            P::VERSION,
-            action,
-            Request::TYPE_NAME,
-            Response::TYPE_NAME,
-        )?;
+        validate_wire_call(P::ID, action, Request::TYPE_NAME, Response::TYPE_NAME)?;
         if self.env.raw() as usize != self.endpoint.owner_env {
             return Err(Error::from_reason(
                 "Synchronous bridge plugins may only run from the active ArkTS N-API environment",
@@ -1120,7 +1147,6 @@ impl<'env> BridgeMainThread<'env> {
         let response = invoke.call(FnArgs {
             data: (
                 P::ID.to_owned(),
-                P::VERSION,
                 action.to_owned(),
                 Request::TYPE_NAME.to_owned(),
                 Response::TYPE_NAME.to_owned(),
@@ -1180,7 +1206,6 @@ impl BridgeRuntime {
                 Ok(FnArgs {
                     data: (
                         request.plugin_id,
-                        request.plugin_version,
                         request.action,
                         request.request_type_name,
                         request.response_type_name,
@@ -1201,7 +1226,6 @@ impl BridgeRuntime {
                 Ok(FnArgs {
                     data: (
                         request.plugin_id,
-                        request.plugin_version,
                         request.action,
                         request.request_type_name,
                         request.response_type_name,
@@ -1284,11 +1308,6 @@ where
     P: BridgePlugin,
 {
     validate_identifier("plugin id", P::ID)?;
-    if P::VERSION == 0 {
-        return Err(Error::from_reason(
-            "Bridge plugin version must be greater than zero",
-        ));
-    }
     for (index, requirement) in P::REQUIRED_CONTEXTS.iter().enumerate() {
         if P::REQUIRED_CONTEXTS[..index].contains(requirement) {
             return Err(Error::from_reason(format!(
@@ -1302,7 +1321,6 @@ where
 
 fn validate_wire_call(
     plugin_id: &str,
-    plugin_version: u32,
     action: &str,
     request_type_name: &str,
     response_type_name: &str,
@@ -1311,11 +1329,6 @@ fn validate_wire_call(
     validate_identifier("action", action)?;
     validate_identifier("request type", request_type_name)?;
     validate_identifier("response type", response_type_name)?;
-    if plugin_version == 0 {
-        return Err(Error::from_reason(
-            "Bridge plugin version must be greater than zero",
-        ));
-    }
     Ok(())
 }
 
@@ -1435,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_versioned_plugin_identifiers() {
+    fn accepts_stable_plugin_identifiers() {
         assert!(validate_identifier("plugin id", "auth.login_v2").is_ok());
         assert!(validate_identifier("action", "publish-session").is_ok());
     }
@@ -1451,7 +1464,7 @@ mod tests {
     fn named_napi_types_share_one_transport_contract() {
         assert_eq!(<String as BridgeNapiType>::TYPE_NAME, "std.string");
         assert_eq!(<Vec<u8> as BridgeNapiType>::TYPE_NAME, "std.bytes");
-        assert!(validate_wire_call("test.plugin", 1, "echo", "std.string", "demo.Profile").is_ok());
+        assert!(validate_wire_call("test.plugin", "echo", "std.string", "demo.Profile").is_ok());
     }
 
     #[test]
@@ -1480,6 +1493,21 @@ mod tests {
         registry.register(TestPlugin).unwrap();
         assert_eq!(registry.len(), 1);
         assert!(registry.register(TestPlugin).is_err());
+    }
+
+    #[test]
+    fn registry_exports_structural_plugin_declarations() {
+        let registry = BridgePluginRegistry::default();
+        registry.register(UiContextPlugin).unwrap();
+        registry.register(TestPlugin).unwrap();
+
+        let declarations = registry.declarations().unwrap();
+        assert_eq!(declarations.len(), 2);
+        assert_eq!(declarations[0].id, "test.plugin");
+        assert_eq!(declarations[0].execution, "async");
+        assert!(declarations[0].requires.is_empty());
+        assert_eq!(declarations[1].id, "test.ui-context");
+        assert_eq!(declarations[1].requires, ["ui-context"]);
     }
 
     #[test]

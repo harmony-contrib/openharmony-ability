@@ -19,7 +19,6 @@ impl BridgePlugin for UrlBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.url";
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
 }

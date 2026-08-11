@@ -67,7 +67,6 @@ function parseColorModeRequest(payload: BridgeTypedValue): ColorModeRequest {
 
 export class AppControlPlugin extends SyncPluginBase {
   readonly id = "ohos.app-control";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
   private lastRestartAt: number = 0;
 

@@ -17,7 +17,6 @@ impl BridgePlugin for PermissionBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.permission";
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
 }

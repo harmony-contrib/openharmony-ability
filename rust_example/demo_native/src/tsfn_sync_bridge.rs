@@ -22,7 +22,7 @@ pub async fn inspect_from_worker(bridge: &BridgeRuntime) -> Result<String> {
         )
         .await?;
     Ok(format!(
-        "worker => module={}, session={}, uiContextReady={}, execution={}",
-        response.module, response.session_id, response.ui_context_ready, response.execution
+        "worker => session={}, uiContextReady={}, execution={}",
+        response.session_id, response.ui_context_ready, response.execution
     ))
 }
