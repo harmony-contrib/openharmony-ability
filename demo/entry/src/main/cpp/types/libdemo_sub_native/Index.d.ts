@@ -275,6 +275,68 @@ export interface RawRect {
   height: number;
 }
 
+export interface WindowAcknowledgement {
+  accepted: boolean;
+}
+
+export interface WindowBlurRequest {
+  windowId: number;
+  radius: number;
+}
+
+export interface WindowColorRequest {
+  windowId: number;
+  color: number;
+}
+
+export interface WindowCreateRequest {
+  name: string;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  /** Whether to show window decorations (title bar, drag area, close button). */
+  decorations: boolean;
+  /** Fully transparent window background. */
+  transparent: boolean;
+  /** Window background color in 0xAARRGGBB format; ignored when `transparent` is true. */
+  backgroundColor?: number;
+}
+
+export interface WindowCreateResponse {
+  windowId: number;
+}
+
+export interface WindowDecorationsRequest {
+  windowId: number;
+  decorations: boolean;
+}
+
+export interface WindowFocusableRequest {
+  windowId: number;
+  focusable: boolean;
+}
+
+export interface WindowIdRequest {
+  windowId: number;
+}
+
+export interface WindowMoveRequest {
+  windowId: number;
+  x: number;
+  y: number;
+}
+
+export interface WindowResizeRequest {
+  windowId: number;
+  width: number;
+  height: number;
+}
+
+export interface WindowStateResponse {
+  value: boolean;
+}
+
 export declare function createSubWindowWebview(): Promise<void>;
 
 export declare function disposeAllRenders(): void;
@@ -316,4 +378,4 @@ export declare function onBridgeSyncEvent(
 export declare function render(slot: NodeContent, renderOwner: string): void;
 
 /** Queries the window that owns this module's DefaultXComponent, not the Ability main window. */
-export declare function subWindowKeyboardInset(): number;
+export declare function subWindowKeyboardInset(): Promise<number>;

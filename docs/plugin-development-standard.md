@@ -209,7 +209,10 @@ export { LoginPlugin };
 | --- | --- | --- |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
-| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | sync / `ui-context`；查询当前 module/component 所在窗口 |
+| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | async / `ui-context`；查询当前 component 所在窗口 |
+| `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | async / `ui-context` |
+| `ohos.window` / `set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window` | `ohos.window.*Request { windowId, ... }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context` |
+| `ohos.window` / `is-maximized`、`is-minimized` | `ohos.window.WindowIdRequest { windowId }` → `ohos.window.StateResponse { value }` | async / `ui-context` |
 | `ohos.webview` / `create` | `ohos.webview.CreateRequest { id, parentHandle? }` → `ohos.webview.CreateResponse { id }` | async / `ui-context` |
 | `ohos.node`（内置） / `create-container` | `ohos.node.CreateContainerRequest` → `ohos.node.HandleResponse { handle }` | async / `ui-context` |
 | `ohos.node`（内置） / `append-child` | `ohos.node.AppendChildRequest { parentHandle, childHandle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
@@ -550,7 +553,8 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 facade-loc
 | --- | --- | --- |
 | `requestPermission` | `plugin-permission` / `ohos.permission` | async + `ability`；结果顺序与失败码保持不变 |
 | `exit` | `plugin-app-control` / `ohos.app-control` | sync + 当前主线程 `Env` |
-| `getWindowAvoidArea` | `plugin-window` / `ohos.window` | sync + `ui-context`；查询 module/component 所在窗口并返回完整避让区 |
+| `getWindowAvoidArea` | `plugin-window` / `ohos.window` | async + `ui-context`；查询当前 component 所在窗口并返回完整避让区 |
+| `create_os_window`、多窗口操作及显式销毁 | `plugin-window` / `ohos.window` | async + `ui-context`；窗口句柄属于插件实例，按平台 window id 区分；`onDispose` 兜底销毁未释放窗口 |
 | `createWebview`、嵌入式 WebView、custom protocol、导航/下载/标题回调 | `plugin-webview` / `ohos.webview` | 出站 async + `ui-context`；入站为 scoped 主线程具名 N-API；scheme 在 engine 初始化前声明 |
 | `Loadable` | `runtime/NativeModuleLoader` | framework 内部 runtime，不是能力 bridge |
 | `openURL` | `plugin-url` / `ohos.url` | async + `ability`；`context.openLink` |

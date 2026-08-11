@@ -1,7 +1,7 @@
 use std::sync::{LazyLock, RwLock};
 
 use napi_derive_ohos::napi;
-use napi_ohos::{Env, Error, Result};
+use napi_ohos::{Error, Result};
 use openharmony_ability::{AvoidAreaType, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
 use openharmony_ability_plugin_webview::{WebviewBridgePlugin, WebviewCreateRequest, WebviewExt};
@@ -32,9 +32,11 @@ pub async fn create_sub_window_webview() -> Result<()> {
 
 /// Queries the window that owns this module's DefaultXComponent, not the Ability main window.
 #[napi]
-pub fn sub_window_keyboard_inset(env: Env) -> Result<i32> {
+pub async fn sub_window_keyboard_inset() -> Result<i32> {
     Ok(current_app()?
-        .query_avoid_area(&env, AvoidAreaType::Keyboard)?
+        .window()?
+        .query_avoid_area(AvoidAreaType::Keyboard)
+        .await?
         .bottom_rect
         .height)
 }

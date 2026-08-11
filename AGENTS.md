@@ -57,7 +57,7 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 | `crates/derive` | `#[ability]` entry macro |
 | `crates/plugin-permission` | `ohos.permission` — async permission request |
 | `crates/plugin-app-control` | `ohos.app-control` — sync main-thread terminate |
-| `crates/plugin-window` | `ohos.window` — sync avoid-area query |
+| `crates/plugin-window` | `ohos.window` — async avoid-area and multi-window operations |
 | `crates/plugin-webview` | `ohos.webview` — WebView create, controller, custom protocol, JS proxy, callbacks |
 | `crates/plugin-files` | `ohos.files` — file dialogs (open/save/folder) |
 | `crates/plugin-url` | `ohos.url` — `context.openLink` |
