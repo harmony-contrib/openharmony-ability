@@ -92,7 +92,6 @@ impl BridgePlugin for ResourceBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.resource";
-    const VERSION: u32 = 1;
     // The wrapper pushes during its Ability-scoped onInstall hook, before any component is needed.
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];

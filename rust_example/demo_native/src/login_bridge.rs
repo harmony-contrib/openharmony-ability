@@ -20,7 +20,6 @@ impl BridgePlugin for DemoLoginPlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "demo.login";
-    const VERSION: u32 = 1;
 
     fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
         hilog_info!(format!("demo.login lifecycle => {event:?}").as_str());
@@ -54,7 +53,6 @@ impl_bridge_napi_type!(LoginResponse, "demo.login.LoginResponse");
 #[derive(Clone, Debug)]
 pub struct LoginPublishResponse {
     pub published: bool,
-    pub module: String,
 }
 
 impl_bridge_napi_type!(LoginPublishResponse, "demo.login.LoginPublishResponse");

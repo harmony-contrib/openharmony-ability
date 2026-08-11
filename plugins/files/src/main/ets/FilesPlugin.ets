@@ -139,7 +139,6 @@ async function showFileDialog(
 
 export class FilesPlugin extends AsyncPluginBase {
   readonly id = "ohos.files";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(

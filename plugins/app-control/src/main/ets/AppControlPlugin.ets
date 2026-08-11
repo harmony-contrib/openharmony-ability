@@ -34,7 +34,6 @@ function parseTerminateRequest(payload: BridgeTypedValue): TerminateRequest {
 
 export class AppControlPlugin extends SyncPluginBase {
   readonly id = "ohos.app-control";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   invokeSync(

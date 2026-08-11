@@ -44,7 +44,6 @@ function parsePermissions(payload: BridgeTypedValue): string[] {
 
 export class PermissionPlugin extends AsyncPluginBase {
   readonly id = "ohos.permission";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(

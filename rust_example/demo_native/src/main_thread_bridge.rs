@@ -20,7 +20,6 @@ impl_bridge_napi_type!(MainThreadInspectRequest, "demo.main-thread.InspectReques
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct MainThreadInspectResponse {
-    pub module: String,
     pub session_id: String,
     pub ui_context_ready: bool,
     pub execution: String,
@@ -35,7 +34,6 @@ impl BridgePlugin for DemoMainThreadPlugin {
     type Mode = MainThreadSyncBridge;
 
     const ID: &'static str = "demo.main-thread";
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::UiContext];
 }
@@ -51,8 +49,8 @@ pub fn inspect_from_napi_main_thread(app: &OpenHarmonyApp, env: &Env) -> Result<
                 MainThreadInspectRequest { requested: true },
             )?;
         Ok(format!(
-            "module={}, session={}, uiContextReady={}, execution={}",
-            response.module, response.session_id, response.ui_context_ready, response.execution
+            "session={}, uiContextReady={}, execution={}",
+            response.session_id, response.ui_context_ready, response.execution
         ))
     })
 }

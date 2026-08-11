@@ -123,7 +123,7 @@ envelope. Check the name at the capability boundary and return the declared resp
 import type { AsyncBridgePlugin, BridgeTypedValue } from "@ohos-rs/ability";
 
 class ProfilePlugin implements AsyncBridgePlugin {
-  // id/version/execution omitted
+  // id/execution/requires omitted
   async invokeAsync(_action: string, request: BridgeTypedValue): Promise<BridgeTypedValue> {
     if (request.typeName !== "account.Profile") {
       throw new Error("unexpected bridge type");

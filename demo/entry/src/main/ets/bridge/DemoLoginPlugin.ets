@@ -31,11 +31,9 @@ interface LoginProvider {
 
 interface LoginPublishResponse {
   published: boolean;
-  module: string;
 }
 
 interface MainThreadInspectResponse {
-  module: string;
   sessionId: string;
   uiContextReady: boolean;
   execution: string;
@@ -115,7 +113,6 @@ export class DemoIdentityProvider implements LoginProvider {
 
 export class DemoLoginPlugin extends AsyncPluginBase {
   readonly id: string = "demo.login";
-  readonly version: number = 1;
   /** Login can open system UI, so installation waits for DefaultXComponent's UIContext. */
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
@@ -157,7 +154,6 @@ export class DemoLoginPlugin extends AsyncPluginBase {
       AppStorage.setOrCreate("bridgeLoginResult", response.userId);
       const result: LoginPublishResponse = {
         published: true,
-        module: this.getContext().moduleName,
       };
       return { typeName: LOGIN_PUBLISH_RESPONSE_TYPE, value: result as ESObject };
     }
@@ -172,7 +168,6 @@ export class DemoLoginPlugin extends AsyncPluginBase {
  */
 export class DemoMainThreadPlugin extends SyncPluginBase {
   readonly id: string = "demo.main-thread";
-  readonly version: number = 1;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
   override onInstall(context: BridgePluginHookContext): void {
@@ -200,7 +195,6 @@ export class DemoMainThreadPlugin extends SyncPluginBase {
     }
     context.getUIContext();
     const response: MainThreadInspectResponse = {
-      module: context.moduleName,
       sessionId: context.sessionId,
       uiContextReady: true,
       execution: "sync-main-thread",

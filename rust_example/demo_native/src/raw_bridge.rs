@@ -13,7 +13,6 @@ impl BridgePlugin for DemoTypedPlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "demo.raw";
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
 }
 

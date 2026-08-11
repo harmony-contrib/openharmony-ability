@@ -20,24 +20,23 @@ export let demoWindowStage: window.WindowStage | null = null;
 
 const MAIN_NATIVE_MODULE = "demo_native";
 export const SUB_WINDOW_NATIVE_MODULE = "demo_sub_native";
-const MAIN_ONLY = [MAIN_NATIVE_MODULE];
-const WEBVIEW_MODULES = [MAIN_NATIVE_MODULE, SUB_WINDOW_NATIVE_MODULE];
+const NATIVE_MODULES = [MAIN_NATIVE_MODULE, SUB_WINDOW_NATIVE_MODULE];
 
 export default class EntryAbility extends NativeAbility {
-  public moduleName: string[] = WEBVIEW_MODULES;
+  public moduleName: string[] = NATIVE_MODULES;
   public defaultPage: boolean = false;
   public bridgePlugins = [
-    new LazyPlugin(() => new PermissionPlugin(), MAIN_ONLY),
-    new LazyPlugin(() => new AppControlPlugin(), MAIN_ONLY),
-    new LazyPlugin(() => new FilesPlugin(), MAIN_ONLY),
-    new LazyPlugin(() => new ResourcePlugin(), MAIN_ONLY),
-    new LazyPlugin(() => new WindowPlugin(), WEBVIEW_MODULES),
-    new LazyPlugin(() => new WebviewPlugin(), WEBVIEW_MODULES),
-    new LazyPlugin(() => new UrlPlugin(), MAIN_ONLY),
-    new LazyPlugin(() => new DemoLoginPlugin(new DemoIdentityProvider()), MAIN_ONLY),
-    new LazyPlugin(() => new DemoMainThreadPlugin(), MAIN_ONLY),
-    new LazyPlugin(() => new DemoTypedPlugin(), MAIN_ONLY),
-    new LazyPlugin(() => new DemoNodePlugin(), MAIN_ONLY),
+    new LazyPlugin(() => new PermissionPlugin()),
+    new LazyPlugin(() => new AppControlPlugin()),
+    new LazyPlugin(() => new FilesPlugin()),
+    new LazyPlugin(() => new ResourcePlugin()),
+    new LazyPlugin(() => new WindowPlugin()),
+    new LazyPlugin(() => new WebviewPlugin()),
+    new LazyPlugin(() => new UrlPlugin()),
+    new LazyPlugin(() => new DemoLoginPlugin(new DemoIdentityProvider())),
+    new LazyPlugin(() => new DemoMainThreadPlugin()),
+    new LazyPlugin(() => new DemoTypedPlugin()),
+    new LazyPlugin(() => new DemoNodePlugin()),
   ];
 
   protected override async loadWindowStageContent(windowStage: window.WindowStage): Promise<void> {

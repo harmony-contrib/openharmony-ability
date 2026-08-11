@@ -13,7 +13,6 @@ impl BridgePlugin for WindowBridgePlugin {
     type Mode = MainThreadSyncBridge;
 
     const ID: &'static str = "ohos.window";
-    const VERSION: u32 = 2;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::UiContext];
 }
@@ -105,7 +104,7 @@ mod tests {
 
     #[test]
     fn window_plugin_targets_the_component_window() {
-        assert_eq!(WindowBridgePlugin::VERSION, 2);
+        assert_eq!(WindowBridgePlugin::ID, "ohos.window");
         assert_eq!(
             WindowBridgePlugin::REQUIRED_CONTEXTS,
             &[BridgeContextRequirement::UiContext]

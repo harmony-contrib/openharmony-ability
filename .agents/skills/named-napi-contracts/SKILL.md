@@ -53,12 +53,14 @@ request/response 已从 JSON envelope 迁移为**具名 N-API 类型**。新代�
 - 内置标量：`std.string`、`std.bytes`、`std.bool`、`std.i32`、`std.f64`。
 - typeName 字符集：`^[A-Za-z0-9._-]+$`（`validate_identifier` 强制）。
 
-### 规则 4：action 命名与版本
+### 规则 4：action 命名与 ABI 演进
 
 - action 使用 kebab-case 动词短语：`create`、`set-visible`、`load-url`、
   `get-avoid-area`、`evaluate-script`、`clear-all-browsing-data`。
-- 每个插件 `VERSION` 必须与 ArkTS 侧 `version` 完全一致（BridgeHost.lookup 强校验），
-  改契约时必须双端同步 bump。
+- 插件没有独立数字版本。已有 action/typeName 的字段和语义必须稳定；不兼容修改应新增
+  action/typeName（必要时使用新插件 ID），并在 Rust/ArkTS 两端同时实现。
+- ArkTS factory 不配置 native module。Rust registry 在初始化后导出 `{ id, execution, requires }`，
+  `BridgeHost` 自动选择同 ID factory 并硬校验模式/context。
 
 ## 3. Rust 侧实现步骤
 
@@ -169,12 +171,12 @@ ArkTS object/function，也不得将响应交给 worker 后再返回。完整线
 
 - [ ] Rust crate：`crates/plugin-<name>/src/lib.rs`
   - [ ] `#[napi(object)]` 请求/响应结构体 + `impl_bridge_napi_type!`
-  - [ ] `impl BridgePlugin`：`type Mode`、`ID`、`VERSION`、`REQUIRED_CONTEXTS`
+  - [ ] `impl BridgePlugin`：`type Mode`、`ID`、`REQUIRED_CONTEXTS`
   - [ ] 扩展 trait（如 `PermissionExt`）挂在 `OpenHarmonyApp` 上，core 不感知
   - [ ] `validate_*` 业务校验
   - [ ] 单测断言 typeName / 请求校验 / 响应字段完整
 - [ ] ArkTS HAR：`plugins/<name>/src/main/ets/<Name>Plugin.ets`
-  - [ ] `create<Name>Plugin(): BridgePluginFactory`（id/version/execution/requires 与 Rust 一致）
+  - [ ] 导出 plugin class 并由 `LazyPlugin(() => new <Name>Plugin())` 创建（id/execution/requires 与 Rust 一致，不配置 module）
   - [ ] typeName 常量 + 解析校验 + 响应回填
   - [ ] `execution` 与 Rust `type Mode` 一致：async → `invokeAsync`，sync → `invokeSync`
 - [ ] `Cargo.toml` workspace 与 `native_ability/oh-package.json5` 登记

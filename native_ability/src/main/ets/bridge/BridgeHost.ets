@@ -13,6 +13,7 @@ import {
   MainThreadSyncBridgePlugin,
   BridgePlugin,
   BridgePluginContext,
+  BridgePluginDeclaration,
   BridgePluginFactory,
   BridgePluginHookContext,
 } from "../ability/type";
@@ -82,7 +83,6 @@ const NODE_SURFACE_PLUGIN_ID = "ohos.node";
  */
 class NodeSurfacePlugin implements AsyncBridgePlugin {
   readonly id = NODE_SURFACE_PLUGIN_ID;
-  readonly version = 2;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
   readonly execution: "async" = "async";
   private readonly host: BridgeHost;
@@ -212,7 +212,15 @@ function clampTimeout(timeoutMs: number): number {
 }
 
 function normalizedRequirements(requires?: BridgeContextRequirement[]): BridgeContextRequirement[] {
-  return requires ? requires.slice() : [];
+  const order: BridgeContextRequirement[] = ["ability", "window-stage", "ui-context"];
+  return requires
+    ? requires
+        .slice()
+        .sort(
+          (left: BridgeContextRequirement, right: BridgeContextRequirement): number =>
+            order.indexOf(left) - order.indexOf(right),
+        )
+    : [];
 }
 
 /**
@@ -248,40 +256,77 @@ class BridgeHost {
   private readonly sessionId: string;
   private readonly moduleName: string;
   private readonly abilityContext: common.UIAbilityContext;
+  private readonly pluginFactories: BridgePluginFactory[];
+  private pluginsConfigured: boolean = false;
   private applicationLifecycle?: ApplicationLifecycle;
   // One native module owns one DefaultXComponent/root tree. Multiple components in an Ability
   // use distinct native modules and therefore distinct BridgeHost instances.
   private component?: HostComponentState;
   private pendingComponent?: PendingComponentAttachment;
 
-  constructor(sessionId: string, moduleName: string, abilityContext: common.UIAbilityContext) {
+  constructor(
+    sessionId: string,
+    moduleName: string,
+    abilityContext: common.UIAbilityContext,
+    pluginFactories: BridgePluginFactory[],
+  ) {
     this.sessionId = sessionId;
     this.moduleName = moduleName;
     this.abilityContext = abilityContext;
+    this.pluginFactories = pluginFactories;
+    this.installNodeSurfacePlugin();
   }
 
-  /** Registers plugin instances without activating hooks. NativeAbility attaches Rust sinks first. */
-  registerFactories(factories: BridgePluginFactory[]): void {
-    this.installNodeSurfacePlugin();
-    for (const factory of factories) {
-      const modules = factory.modules;
-      if (modules && modules.length > 0 && modules.indexOf(this.moduleName) < 0) {
-        continue;
-      }
+  /**
+   * Matches ArkTS factories against this host's Rust registry after module.init has completed.
+   * Native module topology never enters the plugin contract; ID, execution and context are
+   * validated structurally before any hook is activated.
+   */
+  configurePlugins(declarations: BridgePluginDeclaration[]): void {
+    if (this.pluginsConfigured) {
+      throw new Error(`Bridge plugins are already configured for '${this.moduleName}'`);
+    }
+    const candidates: Map<string, BridgePlugin> = new Map();
+    for (const factory of this.pluginFactories) {
       this.validateFactory(factory);
-
-      // Identity lives on the instance: create, validate, then inject the
-      // session-scoped context before any lifecycle hook can run.
       const plugin = factory.create();
       this.validatePlugin(plugin);
       if (this.plugins.has(plugin.id)) {
-        throw new Error(`Duplicate bridge plugin '${plugin.id}' in module ${this.moduleName}`);
-      }
-      if (CLAIMED_PLUGIN_INSTANCES.has(plugin)) {
         throw new Error(
-          `Bridge plugin '${plugin.id}' instance cannot be reused across native modules or Ability sessions`,
+          `ArkTS bridge plugin factory '${plugin.id}' conflicts with a built-in plugin`,
         );
       }
+      if (candidates.has(plugin.id)) {
+        throw new Error(`Duplicate ArkTS bridge plugin factory '${plugin.id}'`);
+      }
+      candidates.set(plugin.id, plugin);
+    }
+
+    const declared: Map<string, boolean> = new Map();
+    const selected: BridgePlugin[] = [];
+    for (const declaration of declarations) {
+      this.validateDeclaration(declaration);
+      if (declared.has(declaration.id)) {
+        throw new Error(`Rust bridge plugin '${declaration.id}' is declared more than once`);
+      }
+      declared.set(declaration.id, true);
+      const plugin = candidates.get(declaration.id);
+      if (plugin === undefined) {
+        throw new Error(
+          `Rust bridge plugin '${declaration.id}' has no matching ArkTS factory in NativeAbility.bridgePlugins`,
+        );
+      }
+      this.assertPluginDeclaration(plugin, declaration);
+      selected.push(plugin);
+    }
+    for (const plugin of selected) {
+      if (CLAIMED_PLUGIN_INSTANCES.has(plugin)) {
+        throw new Error(
+          `Bridge plugin '${plugin.id}' instance cannot be reused across Ability-session hosts`,
+        );
+      }
+    }
+    for (const plugin of selected) {
       CLAIMED_PLUGIN_INSTANCES.add(plugin);
       plugin.attachContext?.(this.pluginContext(plugin.id));
       this.plugins.set(plugin.id, {
@@ -290,6 +335,7 @@ class BridgeHost {
         installAttempted: false,
       });
     }
+    this.pluginsConfigured = true;
   }
 
   attachApplicationLifecycle(lifecycle: ApplicationLifecycle): void {
@@ -671,6 +717,9 @@ class BridgeHost {
   /** Marks the Ability context ready only after the native module and both Rust sinks exist. */
   async activateAbility(event: BridgeLifecycleEvent): Promise<void> {
     this.assertActive();
+    if (!this.pluginsConfigured) {
+      throw new Error(`Bridge plugins are not configured for '${this.moduleName}'`);
+    }
     await this.enqueueLifecycle("ability-create", async (): Promise<void> => {
       this.assertActive();
       this.abilityReady = true;
@@ -802,7 +851,6 @@ class BridgeHost {
 
   async invokeAsync(
     pluginId: string,
-    pluginVersion: number,
     action: string,
     requestTypeName: string,
     responseTypeName: string,
@@ -810,8 +858,8 @@ class BridgeHost {
     timeoutMs: number,
   ): Promise<ESObject> {
     const request: BridgeTypedValue = { typeName: requestTypeName, value };
-    this.assertWireCall(pluginId, pluginVersion, action, request, responseTypeName);
-    const entry = this.lookup(pluginId, pluginVersion);
+    this.assertWireCall(pluginId, action, request, responseTypeName);
+    const entry = this.lookup(pluginId);
     if (entry.plugin.execution !== "async") {
       throw new Error(
         `Bridge plugin '${pluginId}' is synchronous and must be called through bridgeInvokeSync`,
@@ -856,15 +904,14 @@ class BridgeHost {
 
   invokeSync(
     pluginId: string,
-    pluginVersion: number,
     action: string,
     requestTypeName: string,
     responseTypeName: string,
     value: ESObject,
   ): ESObject {
     const request: BridgeTypedValue = { typeName: requestTypeName, value };
-    this.assertWireCall(pluginId, pluginVersion, action, request, responseTypeName);
-    const entry = this.lookup(pluginId, pluginVersion);
+    this.assertWireCall(pluginId, action, request, responseTypeName);
+    const entry = this.lookup(pluginId);
     if (entry.plugin.execution !== "sync-main-thread") {
       throw new Error(
         `Bridge plugin '${pluginId}' is asynchronous and must be called through bridgeInvoke`,
@@ -1169,7 +1216,6 @@ class BridgeHost {
   private pluginContext(pluginId: string): BridgePluginContext {
     return {
       pluginId,
-      moduleName: this.moduleName,
       sessionId: this.sessionId,
       abilityContext: this.abilityContext,
       isActive: (): boolean =>
@@ -1195,13 +1241,13 @@ class BridgeHost {
         value: ESObject,
       ): ESObject =>
         this.invokeNativeSync(pluginId, event, requestTypeName, responseTypeName, value),
-      invokeNativeSyncAcrossModules: (
+      invokeNativeSyncProcessWide: (
         event: string,
         requestTypeName: string,
         responseTypeName: string,
         value: ESObject,
       ): ESObject[] =>
-        BridgeHostRegistry.invokeNativeSyncAcrossModules(
+        BridgeHostRegistry.invokeNativeSyncProcessWide(
           pluginId,
           event,
           requestTypeName,
@@ -1220,7 +1266,6 @@ class BridgeHost {
     const context = this.pluginContext(pluginId);
     return {
       pluginId,
-      moduleName: this.moduleName,
       sessionId: this.sessionId,
       abilityContext: this.abilityContext,
       action,
@@ -1248,13 +1293,13 @@ class BridgeHost {
         value: ESObject,
       ): ESObject =>
         this.invokeNativeSync(pluginId, event, requestTypeName, responseTypeName, value),
-      invokeNativeSyncAcrossModules: (
+      invokeNativeSyncProcessWide: (
         event: string,
         requestTypeName: string,
         responseTypeName: string,
         value: ESObject,
       ): ESObject[] =>
-        context.invokeNativeSyncAcrossModules(event, requestTypeName, responseTypeName, value),
+        context.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
     };
   }
 
@@ -1265,7 +1310,6 @@ class BridgeHost {
     const context = this.pluginContext(pluginId);
     return {
       pluginId,
-      moduleName: this.moduleName,
       sessionId: this.sessionId,
       abilityContext: this.abilityContext,
       isActive: (): boolean => context.isActive() && !signal.isCancelled(),
@@ -1286,13 +1330,13 @@ class BridgeHost {
         value: ESObject,
       ): ESObject =>
         this.invokeNativeSync(pluginId, event, requestTypeName, responseTypeName, value),
-      invokeNativeSyncAcrossModules: (
+      invokeNativeSyncProcessWide: (
         event: string,
         requestTypeName: string,
         responseTypeName: string,
         value: ESObject,
       ): ESObject[] =>
-        context.invokeNativeSyncAcrossModules(event, requestTypeName, responseTypeName, value),
+        context.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
     };
   }
 
@@ -1504,7 +1548,7 @@ class BridgeHost {
     }
   }
 
-  private lookup(pluginId: string, pluginVersion: number): HostedPlugin {
+  private lookup(pluginId: string): HostedPlugin {
     this.assertActive();
     const entry = this.plugins.get(pluginId);
     if (!entry) {
@@ -1513,24 +1557,18 @@ class BridgeHost {
     if (entry.hookError !== undefined) {
       throw new Error(entry.hookError);
     }
-    if (entry.plugin.version !== pluginVersion) {
-      throw new Error(
-        `Bridge plugin '${pluginId}' version mismatch: Rust=${pluginVersion}, ArkTS=${entry.plugin.version}`,
-      );
-    }
     return entry;
   }
 
   private assertWireCall(
     pluginId: string,
-    pluginVersion: number,
     action: string,
     request: BridgeTypedValue,
     responseTypeName: string,
   ): void {
     this.assertActive();
-    if (!isBridgeIdentifier(pluginId) || !isBridgeIdentifier(action) || pluginVersion <= 0) {
-      throw new Error("Invalid bridge plugin id, version or action");
+    if (!isBridgeIdentifier(pluginId) || !isBridgeIdentifier(action)) {
+      throw new Error("Invalid bridge plugin id or action");
     }
     if (!isBridgeIdentifier(responseTypeName)) {
       throw new Error("Invalid bridge response type name");
@@ -1581,10 +1619,12 @@ class BridgeHost {
   }
 
   private validatePlugin(plugin: BridgePlugin): void {
-    if (!isBridgeIdentifier(plugin.id) || plugin.version <= 0) {
+    if (!isBridgeIdentifier(plugin.id)) {
       throw new Error(`Invalid bridge plugin declaration for module ${this.moduleName}`);
     }
-    for (const requirement of normalizedRequirements(plugin.requires)) {
+    const requirements = normalizedRequirements(plugin.requires);
+    for (let index: number = 0; index < requirements.length; index++) {
+      const requirement = requirements[index];
       if (
         requirement !== "ability" &&
         requirement !== "window-stage" &&
@@ -1592,6 +1632,56 @@ class BridgeHost {
       ) {
         throw new Error(`Invalid context requirement '${requirement}' for '${plugin.id}'`);
       }
+      if (requirements.indexOf(requirement) !== index) {
+        throw new Error(`Duplicate context requirement '${requirement}' for '${plugin.id}'`);
+      }
+    }
+  }
+
+  private validateDeclaration(declaration: BridgePluginDeclaration): void {
+    if (
+      !isBridgeIdentifier(declaration.id) ||
+      (declaration.execution !== "async" && declaration.execution !== "sync-main-thread") ||
+      !Array.isArray(declaration.requires)
+    ) {
+      throw new Error(`Invalid Rust bridge plugin declaration for '${this.moduleName}'`);
+    }
+    for (let index: number = 0; index < declaration.requires.length; index++) {
+      const requirement = declaration.requires[index];
+      if (
+        requirement !== "ability" &&
+        requirement !== "window-stage" &&
+        requirement !== "ui-context"
+      ) {
+        throw new Error(`Invalid context requirement '${requirement}' for '${declaration.id}'`);
+      }
+      if (declaration.requires.indexOf(requirement) !== index) {
+        throw new Error(`Duplicate context requirement '${requirement}' for '${declaration.id}'`);
+      }
+    }
+  }
+
+  private assertPluginDeclaration(
+    plugin: BridgePlugin,
+    declaration: BridgePluginDeclaration,
+  ): void {
+    if (plugin.execution !== declaration.execution) {
+      throw new Error(
+        `Bridge plugin '${plugin.id}' execution mismatch: Rust=${declaration.execution}, ArkTS=${plugin.execution}`,
+      );
+    }
+    const arktsRequirements = normalizedRequirements(plugin.requires);
+    const rustRequirements = normalizedRequirements(declaration.requires);
+    if (
+      arktsRequirements.length !== rustRequirements.length ||
+      arktsRequirements.some(
+        (requirement: BridgeContextRequirement, index: number): boolean =>
+          requirement !== rustRequirements[index],
+      )
+    ) {
+      throw new Error(
+        `Bridge plugin '${plugin.id}' context mismatch: Rust=${rustRequirements.join(",")}, ArkTS=${arktsRequirements.join(",")}`,
+      );
     }
   }
 
@@ -1658,9 +1748,8 @@ export class BridgeHostRegistry {
     }
     try {
       for (const moduleName of moduleNames) {
-        const host = new BridgeHost(sessionId, moduleName, abilityContext);
+        const host = new BridgeHost(sessionId, moduleName, abilityContext, factories);
         hosts.set(moduleName, host);
-        host.registerFactories(factories);
       }
     } catch (error) {
       throw new Error(String(error));
@@ -1680,6 +1769,14 @@ export class BridgeHostRegistry {
     await BridgeHostRegistry.host(sessionId, moduleName).activateAbility(event);
   }
 
+  static configurePlugins(
+    sessionId: string,
+    moduleName: string,
+    declarations: BridgePluginDeclaration[],
+  ): void {
+    BridgeHostRegistry.host(sessionId, moduleName).configurePlugins(declarations);
+  }
+
   static attachApplicationLifecycle(
     sessionId: string,
     moduleName: string,
@@ -1692,7 +1789,6 @@ export class BridgeHostRegistry {
     sessionId: string,
     moduleName: string,
     pluginId: string,
-    pluginVersion: number,
     action: string,
     requestTypeName: string,
     responseTypeName: string,
@@ -1701,7 +1797,6 @@ export class BridgeHostRegistry {
   ): Promise<ESObject> {
     return await BridgeHostRegistry.host(sessionId, moduleName).invokeAsync(
       pluginId,
-      pluginVersion,
       action,
       requestTypeName,
       responseTypeName,
@@ -1714,7 +1809,6 @@ export class BridgeHostRegistry {
     sessionId: string,
     moduleName: string,
     pluginId: string,
-    pluginVersion: number,
     action: string,
     requestTypeName: string,
     responseTypeName: string,
@@ -1722,7 +1816,6 @@ export class BridgeHostRegistry {
   ): ESObject {
     return BridgeHostRegistry.host(sessionId, moduleName).invokeSync(
       pluginId,
-      pluginVersion,
       action,
       requestTypeName,
       responseTypeName,
@@ -1734,7 +1827,7 @@ export class BridgeHostRegistry {
    * Broadcasts one named direct event to every active native module that registered `pluginId`.
    * This is intentionally process-wide for platform resources whose initialization is global.
    */
-  static invokeNativeSyncAcrossModules(
+  static invokeNativeSyncProcessWide(
     pluginId: string,
     event: string,
     requestTypeName: string,

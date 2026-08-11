@@ -41,7 +41,7 @@ Rust 侧必须在 `#[ability]` 初始化器注册 `WebviewBridgePlugin`；自定
 
 | 项目             | 值                                                                                                                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id` / `version` | `ohos.webview` / `2`                                                                                                                                                                 |
+| `id`             | `ohos.webview`                                                                                                                                                                       |
 | `execution`      | `async`                                                                                                                                                                              |
 | `requires`       | `["ui-context"]`                                                                                                                                                                     |
 | 挂载             | 当前 module/component 根树（默认全屏）；可选 `parentHandle`（`ohos.node` 容器）                                                                                                    |
@@ -70,8 +70,8 @@ Stack() {
 
 一个 `DefaultXComponent` 必须使用一个独立 native module；跨窗口组件不能共享 module，也不使用
 `windowKey`/`surfaceKey`。同一 module/component 可按不同 ID 同时持有多个 WebView。WebView ID 是
-不透明、module-local 的业务标识，不会直接拼接成节点 key 或进程级 ArkWeb tag；HAR 会用
-session + module + instance 序号生成内部唯一 native tag，因此不同 module 可安全复用同一业务 ID。
+不透明、facade-local 的业务标识，不会直接拼接成节点 key 或进程级 ArkWeb tag；HAR 会用
+session + 进程计数器生成内部唯一 native tag，因此同一进程的多个插件实例可安全复用同一业务 ID。
 
 节点挂载没有计时等待：module 根在 `ui-context-ready` 前已存在，`onInstall` 后即可挂载。
 Ability/session dispose 时，HAR 必须卸载自己创建的节点与 controller 状态（`remove` 走
@@ -87,10 +87,10 @@ Ability/session dispose 时，HAR 必须卸载自己创建的节点与 controlle
   Rust 会先校验当前 ID 对应的 controller generation，旧实例的延迟导航回调 fail-open、下载开始
   fail-closed，通知型回调直接丢弃。
 - custom scheme 必须在进程级 engine 初始化前注册；第一个 WebView create 会在初始化前后向所有已
-  激活、装配本插件的 native module 广播具名 engine 事件，因此尚未出现组件的 module 也会先 seal、
-  聚合校验并 flush 自己的 Rust scheme 状态。Ability 重建时可幂等重复相同 scheme + options；engine 启动后新增 scheme
-  会确定性失败；后加载 module 只能复用已注册且 options 完全相同的 scheme；不同 module 对同名
-  scheme 声明不同 options 时也会在 engine 初始化前失败。
+  激活、装配本插件的 Rust facade 广播具名 engine 事件，先 seal、聚合校验并 flush 各自的 Rust
+  scheme 状态。Ability 重建时可幂等重复相同 scheme + options；engine 启动后新增 scheme 会确定性
+  失败；后加载 facade 只能复用已注册且 options 完全相同的 scheme；不同 facade 对同名 scheme
+  声明不同 options 时也会在 engine 初始化前失败。
   controller attach 后先安装 tag 对应的 protocol、JS proxy 与 delegate，再进行首次导航。
 - URL custom protocol 与 `window.<object>.<method>()` JavaScript proxy 是不同机制；前者处理资源请求，
   后者处理页面到 Rust 的方法调用。
