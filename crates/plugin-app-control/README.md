@@ -9,7 +9,7 @@
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-app-control` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-app-control` |
-| 插件 ID / bridge 版本 | `ohos.app-control` / `1` |
+| 插件 ID | `ohos.app-control` |
 | 执行模式 | 主线程同步：`MainThreadSyncBridge` / `invokeSync` |
 | 前置 context | `ability` |
 | action | `terminate` |

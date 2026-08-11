@@ -10,7 +10,7 @@ ArkTS HAR `@ohos-rs/ability-plugin-permission` 成对使用：Rust 发起强类�
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-permission` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-permission` |
-| 插件 ID / bridge 版本 | `ohos.permission` / `1` |
+| 插件 ID | `ohos.permission` |
 | 执行模式 | 异步：`AsyncBridge` / `invokeAsync` |
 | 前置 context | `ability` |
 | action | `request` |
@@ -93,7 +93,7 @@ async fn request_camera(app: &OpenHarmonyApp) -> Result<()> {
 ## 开发与排查
 
 ArkTS 侧必须校验输入 `typeName === "ohos.permission.PermissionRequest"`，并返回
-`"ohos.permission.PermissionResponse"`。新增 action 或修改字段时，Rust 和 ArkTS 的 typeName、插件版本、
+`"ohos.permission.PermissionResponse"`。新增 action 或修改字段时，Rust 和 ArkTS 的 typeName、插件 ID、
 `requires`、执行模式必须同步更新；不得使用 JSON 序列化 API 传输 payload。
 
 完整的线程、生命周期、契约升级和验收要求见

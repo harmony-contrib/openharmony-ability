@@ -2,8 +2,8 @@
 
 `openharmony-ability-plugin-resource` 是 HarmonyOS `resourceManager` 能力的 Rust facade。它与
 ArkTS HAR `@ohos-rs/ability-plugin-resource` 成对使用：ArkTS wrapper 在 Ability-scoped `onInstall`
-经入站事件推送平台对象，Rust 在同一 N-API callback 内把它转成 native 指针，存入本 module 注册的
-`ResourceBridgePlugin` instance；之后所有
+经入站事件推送平台对象，Rust 在同一 N-API callback 内把它转成 native 指针，存入匹配 bridge
+registry 注册的 `ResourceBridgePlugin` instance；之后所有
 读取（raw file、media、drawable 等）通过 `ohos-resource-manager-binding` 直连 OpenHarmony C API，
 不经过 ArkTS。
 
@@ -13,7 +13,7 @@ ArkTS HAR `@ohos-rs/ability-plugin-resource` 成对使用：ArkTS wrapper 在 Ab
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-resource` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-resource` |
-| 插件 ID / bridge 版本 | `ohos.resource` / `1` |
+| 插件 ID | `ohos.resource` |
 | 执行模式 | 异步（`AsyncBridge` / `invokeAsync`，无出站 action） |
 | 前置 context | `ability` |
 | 入站事件 | `resource-manager-ready`：`ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` |
@@ -38,7 +38,7 @@ ArkTS 对象引用跨线程。
    }
    ```
 
-2. ArkTS 侧为每个 module/session 创建独立 wrapper；module 级 native pointer 由对应 Rust plugin
+2. ArkTS 侧为每个 Host/session 创建独立 wrapper；native pointer 由匹配的 Rust plugin registry
    instance 持有：
 
    ```ts

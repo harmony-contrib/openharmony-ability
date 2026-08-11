@@ -19,8 +19,8 @@ const RESOURCE_MANAGER_READY_RESPONSE_TYPE = "ohos.resource.ResourceManagerReady
  * object to a native `NativeResourceManager` pointer inside the same N-API callback and
  * performs every subsequent read through the OpenHarmony C API — no ArkTS call is involved.
  *
- * The ArkTS wrapper remains module/session-scoped. Its matching registered Rust plugin instance
- * owns the native manager, so multiple native modules cannot overwrite each other's state.
+ * The ArkTS wrapper remains Host/session-scoped. Its matching registered Rust plugin instance
+ * owns the native manager, so repeated plugin instances do not overwrite each other's state.
  */
 export class ResourcePlugin extends AsyncPluginBase {
   readonly id = "ohos.resource";

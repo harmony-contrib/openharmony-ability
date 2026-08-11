@@ -9,7 +9,7 @@
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-window` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-window` |
-| 插件 ID / bridge 版本 | `ohos.window` / `2` |
+| 插件 ID | `ohos.window` |
 | 执行模式 | 主线程同步：`MainThreadSyncBridge` / `invokeSync` |
 | 前置 context | `ui-context` |
 | action | `get-avoid-area` |
