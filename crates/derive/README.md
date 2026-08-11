@@ -23,9 +23,15 @@ making them framework render modes. A business that needs custom protocol interc
 it through `openharmony-ability-plugin-webview::WebviewProtocol` and
 `WebviewClient::custom_protocol` rather than restoring a macro branch.
 
+The generated `render(bindings, slot, render_owner)` export retains one Rust `RootNode` per
+appearance owner, allowing main and sub-window components to coexist. The matching
+`dispose_render(render_owner)` export releases only that appearance during synchronous component
+teardown; `dispose_all_renders()` is the WindowStage-destroy fallback for any component that did
+not receive `aboutToDisappear`.
+
 The generated `init(context)` forwards ArkTS init data into native code. Read it through
 `app.init_context()`, `app.module_name()`, `app.base_path()`, `app.pref_path()`, and
 `app.preferred_locales()`. The resource manager is a plugin capability: register
 `openharmony_ability_plugin_resource::ResourceBridgePlugin` in the `#[ability]` initializer and
 read it via the `ResourceExt` trait (`app.resource_manager()`); the ArkTS side must install
-`@ohos-rs/ability-plugin-resource` (typically as `new EagerPlugin(new ResourcePlugin())`).
+`@ohos-rs/ability-plugin-resource` as a session-scoped `new LazyPlugin(() => new ResourcePlugin())`.

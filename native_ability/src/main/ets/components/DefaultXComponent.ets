@@ -1,11 +1,21 @@
 import { NodeContent } from "@kit.ArkUI";
 import { FrameNode, NodeController } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
-import { BridgeBindings } from "../ability/type";
+import { BridgeBindings, Module } from "../ability/type";
 import { BridgeHostRegistry, MAIN_WINDOW_KEY } from "../bridge/BridgeHost";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 
 export const RouteName = "NativeAbility";
+
+let nextRenderOwnerId: number = 1;
+
+interface ComponentAttachment {
+  sessionId: string;
+  moduleName: string;
+  windowKey: string;
+  renderOwner: string;
+  nativeModule: Module;
+}
 
 /**
  * Mounts only the Rust XComponent and generic bridge bindings. Platform capabilities deliberately
@@ -25,65 +35,84 @@ export struct DefaultXComponent {
   private nodeController = new BridgeRootNodeController(this.getUIContext());
   @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
+  private appearanceGeneration: number = 0;
+  private attachment?: ComponentAttachment;
+  private releasePromise: Promise<void> = Promise.resolve();
 
-  private bindings: BridgeBindings = {
-    bridgeInvoke: async (
-      pluginId: string,
-      pluginVersion: number,
-      action: string,
-      requestTypeName: string,
-      responseTypeName: string,
-      value: ESObject,
-      timeoutMs: number,
-    ): Promise<ESObject> => {
-      return await BridgeHostRegistry.invokeAsync(
-        this.bridgeSessionId,
-        this.moduleName.trim(),
-        pluginId,
-        pluginVersion,
-        action,
-        requestTypeName,
-        responseTypeName,
-        value,
-        timeoutMs,
-      );
-    },
-    bridgeInvokeSync: (
-      pluginId: string,
-      pluginVersion: number,
-      action: string,
-      requestTypeName: string,
-      responseTypeName: string,
-      value: ESObject,
-    ): ESObject => {
-      return BridgeHostRegistry.invokeSync(
-        this.bridgeSessionId,
-        this.moduleName.trim(),
-        pluginId,
-        pluginVersion,
-        action,
-        requestTypeName,
-        responseTypeName,
-        value,
-      );
-    },
-    // The Rust MainThreadScheduler executes its closure inside this TSFN callback before this
-    // no-op function is invoked. It carries no capability-specific behavior.
-    bridgeDispatch: (): void => {},
-  };
+  private createBindings(sessionId: string, moduleName: string): BridgeBindings {
+    return {
+      bridgeInvoke: async (
+        pluginId: string,
+        pluginVersion: number,
+        action: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+        timeoutMs: number,
+      ): Promise<ESObject> => {
+        return await BridgeHostRegistry.invokeAsync(
+          sessionId,
+          moduleName,
+          pluginId,
+          pluginVersion,
+          action,
+          requestTypeName,
+          responseTypeName,
+          value,
+          timeoutMs,
+        );
+      },
+      bridgeInvokeSync: (
+        pluginId: string,
+        pluginVersion: number,
+        action: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+      ): ESObject => {
+        return BridgeHostRegistry.invokeSync(
+          sessionId,
+          moduleName,
+          pluginId,
+          pluginVersion,
+          action,
+          requestTypeName,
+          responseTypeName,
+          value,
+        );
+      },
+      // The Rust MainThreadScheduler executes its closure inside this TSFN callback before this
+      // no-op function is invoked. It carries no capability-specific behavior.
+      bridgeDispatch: (): void => {},
+    };
+  }
 
   async aboutToAppear(): Promise<void> {
+    const generation = ++this.appearanceGeneration;
+    await this.releasePromise;
+    if (generation !== this.appearanceGeneration) {
+      return;
+    }
     const moduleName = this.moduleName.trim();
     if (!moduleName) {
       throw new Error("DefaultXComponent.moduleName is required");
     }
 
     const nativeModule = await NativeModuleLoader.load(moduleName, this.loadMode);
+    if (generation !== this.appearanceGeneration) {
+      return;
+    }
+    const sessionId = this.bridgeSessionId;
+    if (!sessionId) {
+      throw new Error(
+        "DefaultXComponent cannot render before NativeAbility finishes creating its bridge session",
+      );
+    }
     // Idempotent fallback: NativeAbility.onCreate already attached the sink right after
     // module.init (same cached Module instance), so `ability`-only plugins can emit inbound
     // events on `ability-create`. Re-attaching here covers modules loaded without onCreate.
     BridgeHostRegistry.attachEventSink(
-      this.bridgeSessionId,
+      sessionId,
       moduleName,
       (
         pluginId: string,
@@ -107,35 +136,77 @@ export struct DefaultXComponent {
         nativeModule.onBridgeLifecycle?.(kind);
       },
     );
-    nativeModule.render(this.bindings, this.rootSlot);
+    const renderOwner = `${sessionId}:${moduleName}:${this.windowKey}:${nextRenderOwnerId++}`;
+    nativeModule.render(this.createBindings(sessionId, moduleName), this.rootSlot, renderOwner);
+
+    if (generation !== this.appearanceGeneration) {
+      nativeModule.disposeRender?.(renderOwner);
+      return;
+    }
 
     // Create the window root eagerly (NodeContainer asks the controller lazily) so it exists
     // before `ui-context-ready`. Every plugin then mounts into this one tree without slots,
     // registries or readiness waiters. Attaching the `"main"` window emits `ui-context-ready`;
     // sub-window instances (unique `windowKey`) only register their own surface.
     const root = this.nodeController.makeNode(this.getUIContext());
-    await BridgeHostRegistry.attachWindow(
-      this.bridgeSessionId,
+    const attachment: ComponentAttachment = {
+      sessionId,
       moduleName,
-      this.windowKey,
-      this.getUIContext(),
-      root,
-    );
+      windowKey: this.windowKey,
+      renderOwner,
+      nativeModule,
+    };
+    this.attachment = attachment;
+    try {
+      await BridgeHostRegistry.attachWindow(
+        sessionId,
+        moduleName,
+        attachment.windowKey,
+        this.getUIContext(),
+        root,
+      );
+      if (generation !== this.appearanceGeneration) {
+        await this.releasePromise;
+      }
+    } catch (error) {
+      if (generation !== this.appearanceGeneration) {
+        await this.releasePromise;
+        return;
+      }
+      const release = this.releaseAttachment(attachment);
+      this.releasePromise = release;
+      await release;
+      throw new Error(String(error));
+    }
   }
 
   aboutToDisappear(): void {
-    const moduleName = this.moduleName.trim();
-    if (this.bridgeSessionId && moduleName) {
-      const sessionId = this.bridgeSessionId;
-      const windowKey = this.windowKey;
-      BridgeHostRegistry.detachWindow(sessionId, moduleName, windowKey)
-        .catch(() => {})
-        .finally(() => {
-          this.nodeController.disposeRoot();
-        });
-      return;
+    this.appearanceGeneration += 1;
+    this.releasePromise = this.releaseAttachment(this.attachment);
+  }
+
+  private releaseAttachment(expected?: ComponentAttachment): Promise<void> {
+    if (expected !== undefined && this.attachment !== expected) {
+      return this.releasePromise;
     }
-    this.nodeController.disposeRoot();
+    const attachment = expected ?? this.attachment;
+    this.attachment = undefined;
+    if (attachment === undefined) {
+      this.nodeController.disposeRoot();
+      return Promise.resolve();
+    }
+    // RootNode owns the ContentSlot handle and must be dropped synchronously while this component
+    // still owns a live NodeContent. Host/plugin cleanup may continue asynchronously afterwards.
+    attachment.nativeModule.disposeRender?.(attachment.renderOwner);
+    return BridgeHostRegistry.detachWindow(
+      attachment.sessionId,
+      attachment.moduleName,
+      attachment.windowKey,
+    )
+      .catch(() => {})
+      .finally(() => {
+        this.nodeController.disposeRoot();
+      });
   }
 
   build() {

@@ -3,7 +3,7 @@ import {
   BridgeCallContext,
   BridgeContextRequirement,
   BridgeLifecycleEvent,
-  BridgePluginContext,
+  BridgePluginHookContext,
   BridgeTypedValue,
 } from "@ohos-rs/ability";
 
@@ -20,15 +20,15 @@ const RESOURCE_MANAGER_READY_RESPONSE_TYPE = "ohos.resource.ResourceManagerReady
  * object to a native `NativeResourceManager` pointer inside the same N-API callback and
  * performs every subsequent read through the OpenHarmony C API — no ArkTS call is involved.
  *
- * The plugin is registered as a shared instance (`EagerPlugin`) because the native resource
- * manager is a process-wide singleton; per-session instances would be redundant.
+ * The ArkTS wrapper remains session-scoped. Rust owns the process-wide native manager pointer;
+ * sharing one mutable ArkTS plugin instance across sessions would overwrite its hook context.
  */
 export class ResourcePlugin extends AsyncPluginBase {
   readonly id = "ohos.resource";
   readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
-  onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginContext): void {
+  onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
     if (event.kind !== "ability-create") {
       return;
     }

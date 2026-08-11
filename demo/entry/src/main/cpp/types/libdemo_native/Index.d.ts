@@ -289,7 +289,11 @@ export declare function onBridgeSyncEvent(
   value: unknown,
 ): unknown;
 
-export declare function render(bindings: object, slot: NodeContent): void;
+export declare function render(bindings: object, slot: NodeContent, renderOwner: string): void;
+
+export declare function disposeRender(renderOwner: string): void;
+
+export declare function disposeAllRenders(): void;
 
 export declare function setBackgroundColor(color: string): Promise<void>;
 

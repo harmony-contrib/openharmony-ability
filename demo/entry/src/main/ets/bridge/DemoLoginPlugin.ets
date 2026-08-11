@@ -1,7 +1,7 @@
 import {
   BridgeCallContext,
   BridgeTypedValue,
-  BridgePluginContext,
+  BridgePluginHookContext,
   AsyncPluginBase,
   BridgeContextRequirement,
   SyncPluginBase,
@@ -126,7 +126,7 @@ export class DemoLoginPlugin extends AsyncPluginBase {
     this.provider = provider;
   }
 
-  override async onInstall(context: BridgePluginContext): Promise<void> {
+  override async onInstall(context: BridgePluginHookContext): Promise<void> {
     // This would throw before UIContext readiness; BridgeHost guarantees it is ready here.
     context.getUIContext();
     AppStorage.setOrCreate("bridgeLoginStatus", "ready");
@@ -175,7 +175,7 @@ export class DemoMainThreadPlugin extends SyncPluginBase {
   readonly version: number = 1;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
-  override onInstall(context: BridgePluginContext): void {
+  override onInstall(context: BridgePluginHookContext): void {
     context.getUIContext();
   }
 

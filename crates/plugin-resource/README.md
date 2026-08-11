@@ -37,15 +37,15 @@ ArkTS 对象引用跨线程。
    }
    ```
 
-2. ArkTS 侧以共享实例安装 wrapper（resource manager 是进程级单例，无需每 session 实例）：
+2. ArkTS 侧为每个 module/session 创建独立 wrapper；进程级 native pointer 由 Rust 持有：
 
    ```ts
-   import { EagerPlugin } from "@ohos-rs/ability";
+   import { LazyPlugin } from "@ohos-rs/ability";
    import { ResourcePlugin } from "@ohos-rs/ability-plugin-resource";
 
    // in NativeAbility subclass:
    public bridgePlugins = [
-     new EagerPlugin(new ResourcePlugin()),
+     new LazyPlugin(() => new ResourcePlugin()),
    ];
    ```
 

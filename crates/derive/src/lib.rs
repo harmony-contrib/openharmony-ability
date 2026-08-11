@@ -28,10 +28,35 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             env: &'a napi_ohos::Env,
             bindings: napi_ohos::bindgen_prelude::ObjectRef,
             #[napi(ts_arg_type = "NodeContent")] slot: openharmony_ability::arkui::ArkUIHandle,
+            render_owner: String,
         ) -> napi_ohos::Result<()> {
+            if render_owner.is_empty() {
+                return Err(napi_ohos::Error::from_reason("renderOwner must not be empty"));
+            }
             let root = openharmony_ability::render(env, bindings, slot, (*APP).clone())?;
-            ROOT_NODE.replace(Some(root));
+            ROOT_NODES.with(|nodes| {
+                let mut nodes = nodes.borrow_mut();
+                if let Some(index) = nodes.iter().position(|(owner, _)| owner == &render_owner) {
+                    nodes.remove(index);
+                }
+                nodes.push((render_owner, root));
+            });
             Ok(())
+        }
+
+        #[napi_derive_ohos::napi]
+        pub fn dispose_render(render_owner: String) {
+            ROOT_NODES.with(|nodes| {
+                let mut nodes = nodes.borrow_mut();
+                if let Some(index) = nodes.iter().position(|(owner, _)| owner == &render_owner) {
+                    nodes.remove(index);
+                }
+            });
+        }
+
+        #[napi_derive_ohos::napi]
+        pub fn dispose_all_renders() {
+            ROOT_NODES.with(|nodes| nodes.borrow_mut().clear());
         }
     };
 
@@ -46,7 +71,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             static APP_CONFIGURED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
             thread_local! {
-                pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
+                pub static ROOT_NODES: std::cell::RefCell<Vec<(String, openharmony_ability::arkui::RootNode)>> = std::cell::RefCell::new(Vec::new());
             }
 
             #[napi_derive_ohos::napi]

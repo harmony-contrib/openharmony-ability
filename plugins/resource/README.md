@@ -12,7 +12,7 @@ ohpm install @ohos-rs/ability-plugin-resource
 ## 职责
 
 - 持有 `abilityContext.resourceManager` 平台对象；
-- 在 `ui-context-ready` 时经 `context.invokeNativeSync("resource-manager-ready", ...)` 把对象
+- 在 `ability-create` 时经 `context.invokeNativeSync("resource-manager-ready", ...)` 把对象
   推送给 Rust facade；
 - 不执行任何资源读取逻辑 —— 所有读取由 Rust 侧通过 `ohos-resource-manager-binding` 直连
   OpenHarmony C API 完成。
@@ -20,18 +20,18 @@ ohpm install @ohos-rs/ability-plugin-resource
 ## 接入
 
 ```ts
-import { EagerPlugin } from "@ohos-rs/ability";
+import { LazyPlugin } from "@ohos-rs/ability";
 import { ResourcePlugin } from "@ohos-rs/ability-plugin-resource";
 
 // in NativeAbility subclass:
 public bridgePlugins = [
-  new EagerPlugin(new ResourcePlugin()),
+  new LazyPlugin(() => new ResourcePlugin()),
 ];
 ```
 
-使用 `EagerPlugin`（共享单例实例）而非 `LazyPlugin`：native resource manager 是进程级全局状态，
-每个 session 创建独立 wrapper 实例是冗余的。wrapper 被重复 `attachContext` 时只是重复推送同一
-对象，天然幂等。
+ArkTS wrapper 必须是 module/session 级实例，避免 `attachContext` 覆盖另一个 session 的 hook
+上下文。native resource manager 的进程级 pointer 仍由 Rust/C API 层持有，不需要共享 ArkTS
+plugin instance。
 
 ## 契约
 

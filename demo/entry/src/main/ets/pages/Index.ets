@@ -216,7 +216,7 @@ struct Index {
         Math.max(24, Math.floor((mainRect.height - height) / 2)),
       );
       await subWindow.setUIContent("pages/SubWindowPage");
-      await subWindow.show();
+      await subWindow.showWindow();
       this.webviewStatus =
         '✓ sub window opened: it owns its own node tree (windowKey="' + SUB_WINDOW_KEY + '")';
     } catch (error) {

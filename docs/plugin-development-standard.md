@@ -332,19 +332,25 @@ OpenHarmony SDK 中 `UIAbility.onCreate`、`onWindowStageCreate` 和 `onWindowSt
 UIContext 和销毁事件不能相互穿插。单个插件的 lifecycle/onDispose 失败只能记录，不能中断后续插件；
 session 开始关闭后必须拒绝新调用并取消未完成调用。
 
-1. `NativeAbility.onCreate` 打开 module/session 对应的 `BridgeHost`，创建 factory，并发出
-   `ability-create`。
+1. `NativeAbility.onCreate` 先预创建 module/session 对应的 `BridgeHost` 和 plugin instance，但不执行
+   hook；native module 完成 `init`、Rust lifecycle/event sink 均已 attach、Rust 已收到
+   `AbilityCreated` 后，Host 才把 `ability` 标记为 ready，执行 `onInstall` 并发出
+   `ability-create`。因此 ability-only plugin 的 `onInstall` 可以安全调用 `invokeNativeSync`。
 2. `NativeAbility.onWindowStageCreate` 先提供 `WindowStage`，再发出 `window-stage-create`；窗口事件
-   仍要同时转发给原 native module lifecycle。
-3. `DefaultXComponent.aboutToAppear` 先挂接 native event sink，再按 `windowKey` 注册窗口表面
+   仍要同时转发给原 native module lifecycle。Stage create/destroy 使用 generation token：已入队的
+   create 在 destroy 后不得重新把 context 标记为 ready。自定义页面通过
+   `loadWindowStageContent` 加入这个受控事务，不得从平台回调启动脱离队列的 Promise。
+3. `DefaultXComponent.aboutToAppear` 先挂接 native event sink，以本次 appearance 唯一的
+   `renderOwner` 保存 Rust `RootNode`，再按 `windowKey` 注册窗口表面
    （UIContext + 根 `FrameNode`，根先于 `ui-context-ready` 存在）；`"main"` 窗口注册后通知 Rust
    `ui-context-ready`。这样 plugin `onInstall` 期间已经可以安全发起 scoped 回调或挂载节点，无需
    任何等待。子窗口实例（唯一 `windowKey`）只登记自己的表面，不重发 ready。
-4. UI 消失时，`detachWindow` 先发出 `ui-context-destroy`（仅 `"main"`），再卸载该窗口的 keyed
-   节点与句柄节点并 detach event sink（仅 `"main"`）；WindowStage 销毁时 detach 所有窗口并发出
+4. UI 消失时，`detachWindow` 先发出带 `windowKey` 的 `window-detached`，再发出
+   `ui-context-destroy`（仅 `"main"`），并卸载该窗口的 keyed
+   节点与句柄节点。WindowStage 销毁时 detach 所有窗口并发出
    `window-stage-destroy`；Ability 销毁时发出 `ability-destroy` 并 dispose 整个 session（session
    销毁时由 `BridgeHost` 级联卸载全部窗口的节点，根 `FrameNode` 本身由各 `DefaultXComponent`
-   销毁）。
+   在等待 Host 清理屏障后销毁）。Event sink 属于 module/session，只在 session dispose 时解除。
 5. `configuration-updated`、`memory-level`、window-stage event 等保持由 `NativeAbility` 原有链路
    分发，同时作为受控 lifecycle event 交给已安装插件。
 
@@ -365,6 +371,9 @@ ArkTS context 是 module + session 范围的。插件不得假设多个 module �
   callback 重试。
 - `onDispose` 必须幂等，负责移除平台 delegate、取消订阅、卸载节点、清空 controller/tag 映射。
   单个插件释放失败不能阻断其余插件释放。
+- `onInstall` / `onLifecycle` / `onDispose` 在独立的 bounded hook scope 中执行；scope 通过
+  `BridgePluginHookContext.onCancel` 通知取消，默认 watchdog 为 5 秒。插件不得忽略取消后继续挂载
+  节点或回写平台状态；单个 hook 超时只会把该插件标记失败并继续 session teardown。
 - 禁止用 `setTimeout`、轮询或固定延迟猜测页面、controller 或 context 是否已经就绪。等待条件必须由
   生命周期或真正的平台完成事件驱动。
 - 节点挂载无需等待：session 根在 `ui-context-ready` 之前已注入，`onInstall` 内即可挂载。创建到
@@ -383,9 +392,9 @@ context.appendChild(
 ## 6. ArkUI 节点树与挂载（一棵树模型）
 
 需要渲染内容的插件（WebView、地图、相机、视频等）都是 **FrameNode 提供者**：它们把节点挂进
-session 唯一一棵根树，不写进 `DefaultXComponent`，也没有 WebView 专用插槽。
+目标窗口唯一的一棵根树，不写进 `DefaultXComponent`，也没有 WebView 专用插槽。
 
-- 每个 module/session 只有一棵根树。`DefaultXComponent` 在 `aboutToAppear` 中先创建根
+- 每个 module/session/windowKey 只有一棵根树。`DefaultXComponent` 在 `aboutToAppear` 中先创建根
   `FrameNode` 并注入 `BridgeHost`，再发出 `ui-context-ready`；因此插件在 `onInstall` 里可以直接
   `context.appendChild(...)`，**不存在命名插槽、注册表、waitFor/require 或就绪计时器**。
 - `context.appendChild(key, node, cleanup)` / `context.removeChild(key)`：key 必须以插件 ID 为前缀
@@ -418,6 +427,12 @@ Stack() {
 
 - 只有 `"main"` 窗口的注册会发出 `ui-context-ready` / `ui-context-destroy`（插件安装与 session
   生命周期仍以主窗口为准）；子窗口注册只登记状态。
+- 每个窗口都会发出 `window-attached` / `window-detached`，payload 携带 `windowKey`。拥有 controller、
+  delegate 或异步 waiter 的插件必须按该 key 建表并在 detach 时清理对应窗口，禁止用主窗口的
+  `ui-context-destroy` 一次性清空其他仍存活窗口。
+- 每次 `DefaultXComponent` appearance 都有独立 `renderOwner`；Rust derive 层按 owner 保存多个
+  `RootNode`。组件快速消失会使 generation 失效并取消 pending attach，旧异步 continuation 不得重新
+  挂载已经消失的窗口。
 - 插件默认操作 `"main"` 窗口；子窗口内容用 `context.windowScope(windowKey)` 获取窗口作用域：
   `getUIContext()` / `getRootFrameNode()` / `appendChild` / `removeChild` / `getFrameNode`。
 - Rust 侧：`ohos.node` 的四个 action 与 `WebviewCreateRequest` 都支持 `window_key` 字段（缺省
@@ -553,10 +568,10 @@ export default class EntryAbility extends NativeAbility {
 factory 可以用 `modules` 限制适用的 native module。未装配、版本不匹配、模式不匹配和类型不匹配
 都应在桥接边界确定性报错，不得悄悄回退到 helper 或 JSON 兼容路径。
 
-`LazyPlugin`（默认）在 `BridgeHost.install` 时为每个 native module 和 Ability session 创建独立
-实例；`EagerPlugin` 共享一个调用方构造的实例，用于持有进程级全局状态的插件（例如只做一次
-native wrapper 推送的 `ohos.resource`）。共享实例会被重复 `attachContext`，必须容忍重复的
-lifecycle 通知与 dispose。
+`LazyPlugin` 在 `BridgeHost.registerFactories` 时为每个 native module 和 Ability session 创建独立
+实例。禁止跨 module/session 共享 ArkTS plugin instance：`attachContext`、hook cancellation 和
+controller/window 映射都是 session 状态。真正的进程级资源必须由 native/Rust 单例持有，ArkTS
+wrapper 仍保持 session-scoped。
 
 ## 9. 实现、Demo 与验收
 

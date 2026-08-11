@@ -1,4 +1,4 @@
-import { EagerPlugin, LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
 import window from "@ohos.window";
 import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
 import { FilesPlugin } from "@ohos-rs/ability-plugin-files";
@@ -25,7 +25,7 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => new PermissionPlugin()),
     new LazyPlugin(() => new AppControlPlugin()),
     new LazyPlugin(() => new FilesPlugin()),
-    new EagerPlugin(new ResourcePlugin()),
+    new LazyPlugin(() => new ResourcePlugin()),
     new LazyPlugin(() => new WindowPlugin()),
     new LazyPlugin(() => new WebviewPlugin()),
     new LazyPlugin(() => new UrlPlugin()),
@@ -35,15 +35,16 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => new DemoNodePlugin()),
   ];
 
-  onWindowStageCreate(windowStage: window.WindowStage): void {
+  protected override async loadWindowStageContent(windowStage: window.WindowStage): Promise<void> {
     demoWindowStage = windowStage;
-    super.onWindowStageCreate(windowStage);
-    void this.enqueueLifecycleOperation("demo-window-content", async (): Promise<void> => {
+    try {
       const mainWindow = windowStage.getMainWindowSync();
       // 全屏布局：内容延伸到状态栏下方（状态栏变透明），避免顶部出现系统绘制的黑色状态栏条。
       await mainWindow.setWindowLayoutFullScreen(true);
       await windowStage.loadContent("pages/Index");
-    });
+    } catch (error) {
+      throw new Error(`Unable to load demo WindowStage content: ${String(error)}`);
+    }
   }
 
   onWindowStageDestroy(): void {

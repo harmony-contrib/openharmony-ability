@@ -94,7 +94,7 @@ async fn request_camera(app: &OpenHarmonyApp) -> Result<()> {
 
 ArkTS 侧必须校验输入 `typeName === "ohos.permission.PermissionRequest"`，并返回
 `"ohos.permission.PermissionResponse"`。新增 action 或修改字段时，Rust 和 ArkTS 的 typeName、插件版本、
-`requires`、执行模式必须同步更新；不得使用 `JSON.stringify` / `JSON.parse` 传输 payload。
+`requires`、执行模式必须同步更新；不得使用 JSON 序列化 API 传输 payload。
 
 完整的线程、生命周期、契约升级和验收要求见
 [插件开发规范](../../docs/plugin-development-standard.md)。ArkTS 实现与装配细节见

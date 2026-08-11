@@ -73,7 +73,15 @@ export interface BridgeBindings {
 
 export interface Module {
   init: (context?: AbilityInitContext) => ApplicationLifecycle;
-  render: (bindings: BridgeBindings, slot: NodeContent) => void;
+  /**
+   * Mounts one Rust render tree into `slot`. `renderOwner` is unique per DefaultXComponent
+   * appearance, so rendering a sub-window never replaces another window's RootNode.
+   */
+  render: (bindings: BridgeBindings, slot: NodeContent, renderOwner: string) => void;
+  /** Releases only the render tree owned by `renderOwner`. Older native modules may omit it. */
+  disposeRender?: (renderOwner: string) => void;
+  /** Releases every remaining render tree when the WindowStage is torn down. */
+  disposeAllRenders?: () => void;
   /** Synchronous page-back decision exported by the native module, when it has one. */
   onBackPressIntercept?: () => boolean;
   /** Legacy N-API spelling retained for modules built before camel-case code generation. */
@@ -102,6 +110,8 @@ export type BridgeLifecycleKind =
   | "window-stage-event"
   | "ui-context-ready"
   | "ui-context-destroy"
+  | "window-attached"
+  | "window-detached"
   | "configuration-updated"
   | "memory-level";
 
@@ -131,15 +141,24 @@ export class BridgeMemoryLevelLifecyclePayload {
   }
 }
 
+export class BridgeWindowLifecyclePayload {
+  readonly windowKey: string;
+
+  constructor(windowKey: string) {
+    this.windowKey = windowKey;
+  }
+}
+
 export type BridgeLifecyclePayload =
   | BridgeEmptyLifecyclePayload
   | BridgeAbilityCreateLifecyclePayload
   | BridgeWindowStageEventLifecyclePayload
-  | BridgeMemoryLevelLifecyclePayload;
+  | BridgeMemoryLevelLifecyclePayload
+  | BridgeWindowLifecyclePayload;
 
 export interface BridgeLifecycleEvent {
-  kind: BridgeLifecycleKind;
-  payload: BridgeLifecyclePayload;
+  readonly kind: BridgeLifecycleKind;
+  readonly payload: BridgeLifecyclePayload;
 }
 
 /**
@@ -225,6 +244,15 @@ export interface BridgeCallContext extends BridgePluginContext {
   onCancel: (listener: () => void) => () => void;
 }
 
+/**
+ * A bounded execution scope for one plugin hook. BridgeHost cancels the scope when the session
+ * closes or the hook exceeds its watchdog, allowing teardown to continue with the next plugin.
+ */
+export interface BridgePluginHookContext extends BridgePluginContext {
+  isCancelled: () => boolean;
+  onCancel: (listener: () => void) => () => void;
+}
+
 interface BridgePluginBase {
   id: string;
   version: number;
@@ -238,28 +266,31 @@ export interface AsyncBridgePlugin extends BridgePluginBase {
    * (before onInstall). PluginBase implements it; interface-only plugins may omit it.
    */
   attachContext?: (context: BridgePluginContext) => void;
-  onInstall?: (context: BridgePluginContext) => void | Promise<void>;
-  onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginContext) => void | Promise<void>;
+  onInstall?: (context: BridgePluginHookContext) => void | Promise<void>;
+  onLifecycle?: (
+    event: BridgeLifecycleEvent,
+    context: BridgePluginHookContext,
+  ) => void | Promise<void>;
   invokeAsync: (
     action: string,
     request: BridgeTypedValue,
     context: BridgeCallContext,
   ) => Promise<BridgeTypedValue>;
-  onDispose?: (context: BridgePluginContext) => void | Promise<void>;
+  onDispose?: (context: BridgePluginHookContext) => void | Promise<void>;
 }
 
 export interface MainThreadSyncBridgePlugin extends BridgePluginBase {
   execution: "sync-main-thread";
   /** See [`AsyncBridgePlugin.attachContext`]. */
   attachContext?: (context: BridgePluginContext) => void;
-  onInstall?: (context: BridgePluginContext) => void;
-  onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginContext) => void;
+  onInstall?: (context: BridgePluginHookContext) => void;
+  onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginHookContext) => void;
   invokeSync: (
     action: string,
     request: BridgeTypedValue,
     context: BridgeCallContext,
   ) => BridgeTypedValue;
-  onDispose?: (context: BridgePluginContext) => void;
+  onDispose?: (context: BridgePluginHookContext) => void;
 }
 
 export type BridgePlugin = AsyncBridgePlugin | MainThreadSyncBridgePlugin;
@@ -277,9 +308,12 @@ export abstract class PluginBase {
   abstract readonly requires: BridgeContextRequirement[];
   private context?: BridgePluginContext;
 
-  onInstall(_context: BridgePluginContext): void | Promise<void> {}
-  onLifecycle(_event: BridgeLifecycleEvent, _context: BridgePluginContext): void | Promise<void> {}
-  onDispose(_context: BridgePluginContext): void | Promise<void> {}
+  onInstall(_context: BridgePluginHookContext): void | Promise<void> {}
+  onLifecycle(
+    _event: BridgeLifecycleEvent,
+    _context: BridgePluginHookContext,
+  ): void | Promise<void> {}
+  onDispose(_context: BridgePluginHookContext): void | Promise<void> {}
 
   /**
    * Called once by `BridgeHost` right after creation, before `onInstall`. Subclasses that
@@ -349,28 +383,5 @@ export class LazyPlugin implements BridgePluginFactory {
 
   create(): BridgePlugin {
     return this.createFn();
-  }
-}
-
-/**
- * Eager plugin registration entry: shares one caller-constructed plugin instance across every
- * native module and Ability session, and optionally filters by native module.
- *
- * Use this for plugins that own process-wide global state (for example a singleton native
- * wrapper) where per-session instances would be redundant or lossy. The instance receives
- * `attachContext` for every module/session it is installed into and must tolerate repeated
- * lifecycle and dispose notifications.
- */
-export class EagerPlugin implements BridgePluginFactory {
-  readonly modules?: string[];
-  private readonly instance: BridgePlugin;
-
-  constructor(instance: BridgePlugin, modules?: string[]) {
-    this.instance = instance;
-    this.modules = modules;
-  }
-
-  create(): BridgePlugin {
-    return this.instance;
   }
 }

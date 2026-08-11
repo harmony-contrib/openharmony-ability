@@ -262,6 +262,9 @@ pub fn create_lifecycle_handle<'a>(
             if let Some(ref mut h) = *on_ability_destroy_app.event_loop.borrow_mut() {
                 h(Event::Destroy)
             }
+            // The native module is process-wide, but bridge endpoints are Ability-session scoped.
+            // Drop TSFN/FunctionRef bindings before a recreated Ability can observe stale hosts.
+            on_ability_destroy_app.clear_bridge_bindings();
             Ok(())
         })?;
 

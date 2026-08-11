@@ -4,6 +4,7 @@ import window from "@ohos.window";
 import * as Entry from "../components/MainPage";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
+import { AbilityStateCodec } from "../runtime/AbilityStateCodec";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import {
   AbilityInitContext,
@@ -41,7 +42,58 @@ export class NativeAbility extends UIAbility {
     console.error(`[NativeAbility] lifecycle operation '${label}' failed: ${String(error)}`);
   });
   private acceptingLifecycle: boolean = false;
+  private abilityGeneration: number = 0;
+  private windowStageGeneration: number = 0;
   private windowStageActive: boolean = false;
+  private observedWindowStage?: window.WindowStage;
+  private observedMainWindow?: window.Window;
+
+  private readonly onWindowStageEvent = (event: window.WindowStageEventType): void => {
+    if (!this.acceptingLifecycle || this.observedWindowStage === undefined) {
+      return;
+    }
+    void this.enqueueLifecycleOperation("window-stage-event", async (): Promise<void> => {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onWindowStageEvent(event),
+      );
+      await this.notifyBridgeLifecycle({
+        kind: "window-stage-event",
+        payload: new BridgeWindowStageEventLifecyclePayload(event),
+      });
+    });
+  };
+
+  private readonly onWindowSizeChange = (size: window.Size): void => {
+    if (this.acceptingLifecycle && this.observedMainWindow !== undefined) {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onWindowSizeChange(size),
+      );
+    }
+  };
+
+  private readonly onWindowRectChange = (options: window.RectChangeOptions): void => {
+    if (this.acceptingLifecycle && this.observedMainWindow !== undefined) {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onWindowRectChange(options),
+      );
+    }
+  };
+
+  private readonly onAvoidAreaChange = (options: window.AvoidAreaOptions): void => {
+    if (this.acceptingLifecycle && this.observedMainWindow !== undefined) {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onAvoidAreaChange(options),
+      );
+    }
+  };
+
+  private readonly onKeyboardHeightChange = (height: number): void => {
+    if (this.acceptingLifecycle && this.observedMainWindow !== undefined) {
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
+      );
+    }
+  };
 
   protected resolveModuleNames(): string[] {
     const moduleNames = NativeModuleLoader.resolveModuleNames(this.moduleName);
@@ -73,21 +125,11 @@ export class NativeAbility extends UIAbility {
   }
 
   protected parseSavedStateMap(rawState: string): Record<string, string> {
-    if (!rawState) {
-      return {};
-    }
+    return AbilityStateCodec.decode(rawState);
+  }
 
-    try {
-      const parsed = JSON.parse(rawState) as Record<string, object>;
-      const mapped: Record<string, string> = {};
-      for (const key of Object.keys(parsed)) {
-        const value = parsed[key];
-        mapped[key] = typeof value === "string" ? value : String(value);
-      }
-      return mapped;
-    } catch {
-      return {};
-    }
+  protected serializeSavedStateMap(stateMap: Record<string, string>): string {
+    return AbilityStateCodec.encode(stateMap);
   }
 
   protected createInitContext(moduleName: string): AbilityInitContext {
@@ -99,6 +141,20 @@ export class NativeAbility extends UIAbility {
       moduleName,
       resourceManager: context?.resourceManager,
     };
+  }
+
+  /**
+   * Loads application content inside the framework's WindowStage lifecycle transaction. Override
+   * this instead of starting detached Promise work from the platform callback.
+   */
+  protected async loadWindowStageContent(windowStage: window.WindowStage): Promise<void> {
+    if (this.defaultPage) {
+      try {
+        await windowStage.loadContentByName(Entry.RouteName);
+      } catch (error) {
+        throw new Error(`Unable to load default WindowStage content: ${String(error)}`);
+      }
+    }
   }
 
   private updateAppStorage<T>(key: string, value: T): void {
@@ -135,14 +191,24 @@ export class NativeAbility extends UIAbility {
     if (!sessionId) {
       return;
     }
+    const deliveries: Promise<void>[] = [];
     for (const runtime of this.moduleRuntimes) {
-      try {
-        await BridgeHostRegistry.emitLifecycle(sessionId, runtime.moduleName, event);
-      } catch (error) {
-        console.error(
-          `[NativeAbility] bridge lifecycle '${event.kind}' failed for ${runtime.moduleName}: ${String(error)}`,
-        );
-      }
+      deliveries.push(this.notifyModuleBridgeLifecycle(sessionId, runtime.moduleName, event));
+    }
+    await Promise.all(deliveries);
+  }
+
+  private async notifyModuleBridgeLifecycle(
+    sessionId: string,
+    moduleName: string,
+    event: BridgeLifecycleEvent,
+  ): Promise<void> {
+    try {
+      await BridgeHostRegistry.emitLifecycle(sessionId, moduleName, event);
+    } catch (error) {
+      console.error(
+        `[NativeAbility] bridge lifecycle '${event.kind}' failed for ${moduleName}: ${String(error)}`,
+      );
     }
   }
 
@@ -150,18 +216,22 @@ export class NativeAbility extends UIAbility {
     requestedModules: string[],
     restoredStateMap: Record<string, string>,
     fallbackState: string,
+    generation: number,
   ): Promise<void> {
     const previousSessionId = this.bridgeSessionId;
     if (previousSessionId) {
       BridgeHostRegistry.beginClosing(previousSessionId);
       await BridgeHostRegistry.dispose(previousSessionId);
     }
+    this.assertInitializationActive(generation);
     this.bridgeSessionId = "";
     this.moduleRuntimes = [];
     this.windowStageActive = false;
     this.updateAppStorage("bridgeSessionId", "");
 
-    const sessionId = await BridgeHostRegistry.open(
+    // Prepare hosts without activating `ability` plugins. Their onInstall hooks are allowed to
+    // call Rust synchronously, so module.init and both sinks must exist first.
+    const sessionId = BridgeHostRegistry.prepare(
       requestedModules,
       this.context as common.UIAbilityContext,
       this.bridgePlugins,
@@ -176,6 +246,7 @@ export class NativeAbility extends UIAbility {
       // a module name point at the wrong lifecycle object after one dynamic import failed.
       for (const moduleName of requestedModules) {
         const module = await NativeModuleLoader.load(moduleName, this.loadMode);
+        this.assertInitializationActive(generation);
         loadedModules.push({ moduleName, module });
       }
 
@@ -200,14 +271,19 @@ export class NativeAbility extends UIAbility {
       }
 
       this.moduleRuntimes = initializedRuntimes;
+      const abilityActivations: Promise<void>[] = [];
       for (const runtime of initializedRuntimes) {
-        await BridgeHostRegistry.emitLifecycle(sessionId, runtime.moduleName, {
-          kind: "ability-create",
-          payload: new BridgeAbilityCreateLifecyclePayload(
-            restoredStateMap[runtime.moduleName] ?? fallbackState,
-          ),
-        });
+        abilityActivations.push(
+          BridgeHostRegistry.activateAbility(sessionId, runtime.moduleName, {
+            kind: "ability-create",
+            payload: new BridgeAbilityCreateLifecyclePayload(
+              restoredStateMap[runtime.moduleName] ?? fallbackState,
+            ),
+          }),
+        );
       }
+      await Promise.all(abilityActivations);
+      this.assertInitializationActive(generation);
     } catch (error) {
       for (const runtime of initializedRuntimes.slice().reverse()) {
         try {
@@ -225,19 +301,31 @@ export class NativeAbility extends UIAbility {
     }
   }
 
+  private assertInitializationActive(generation: number): void {
+    if (!this.acceptingLifecycle || generation !== this.abilityGeneration) {
+      throw new Error("Native Ability session initialization was cancelled by lifecycle teardown");
+    }
+  }
+
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     const isRestore: boolean =
       (want.parameters?.["ohos.ability.params.abilityRecoveryRestart"] as boolean) ?? false;
     const savedState = want.parameters?.[STATE_KEY];
     const state = isRestore && savedState !== undefined ? savedState.toString() : "";
     const requestedModules = this.resolveModuleNames();
-    const restoredStateMap = this.parseSavedStateMap(state);
+    // A single module owns its state string verbatim, even if business data happens to begin with
+    // the framework's multi-module prefix. Only multi-module sessions interpret the state map.
+    let restoredStateMap: Record<string, string> = {};
+    if (requestedModules.length > 1) {
+      restoredStateMap = this.parseSavedStateMap(state);
+    }
 
     this.acceptingLifecycle = true;
+    const generation = ++this.abilityGeneration;
     this.updateAppStorage("moduleName", this.moduleName);
     this.updateAppStorage("loadMode", this.loadMode);
     void this.enqueueLifecycleOperation("ability-create", async (): Promise<void> => {
-      await this.initializeSession(requestedModules, restoredStateMap, state);
+      await this.initializeSession(requestedModules, restoredStateMap, state, generation);
     });
   }
 
@@ -245,7 +333,9 @@ export class NativeAbility extends UIAbility {
     if (!this.acceptingLifecycle) {
       return;
     }
+    const generation = ++this.windowStageGeneration;
     void this.enqueueLifecycleOperation("window-stage-create", async (): Promise<void> => {
+      this.assertWindowStageActive(generation);
       const sessionId = this.bridgeSessionId;
       if (!sessionId) {
         throw new Error("Bridge session is unavailable during window-stage-create");
@@ -253,9 +343,14 @@ export class NativeAbility extends UIAbility {
 
       // First inject the ArkTS WindowStage object. Rust readiness is then advanced before ArkTS
       // plugin installation/lifecycle delivery can emit a synchronous event back into Rust.
+      const stageAssignments: Promise<void>[] = [];
       for (const runtime of this.moduleRuntimes) {
-        await BridgeHostRegistry.setWindowStage(sessionId, runtime.moduleName, windowStage);
+        stageAssignments.push(
+          BridgeHostRegistry.setWindowStage(sessionId, runtime.moduleName, windowStage),
+        );
       }
+      await Promise.all(stageAssignments);
+      this.assertWindowStageActive(generation);
       this.forEachLifecycle((lifecycle) =>
         lifecycle.windowStageEventCallback.onWindowStageCreate(),
       );
@@ -264,22 +359,11 @@ export class NativeAbility extends UIAbility {
         kind: "window-stage-create",
         payload: new BridgeEmptyLifecyclePayload(),
       });
+      this.assertWindowStageActive(generation);
 
       try {
-        windowStage.on("windowStageEvent", (event: window.WindowStageEventType) => {
-          if (!this.acceptingLifecycle) {
-            return;
-          }
-          void this.enqueueLifecycleOperation("window-stage-event", async (): Promise<void> => {
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.windowStageEventCallback.onWindowStageEvent(event),
-            );
-            await this.notifyBridgeLifecycle({
-              kind: "window-stage-event",
-              payload: new BridgeWindowStageEventLifecyclePayload(event),
-            });
-          });
-        });
+        this.observedWindowStage = windowStage;
+        windowStage.on("windowStageEvent", this.onWindowStageEvent);
       } catch {}
 
       let win: window.Window | null = null;
@@ -288,41 +372,40 @@ export class NativeAbility extends UIAbility {
       } catch {
         win = null;
       }
+      this.assertWindowStageActive(generation);
 
       if (win) {
         try {
-          win.on("windowSizeChange", (size: window.Size) => {
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.windowStageEventCallback.onWindowSizeChange(size),
-            );
-          });
-          win.on("windowRectChange", (options: window.RectChangeOptions) => {
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.windowStageEventCallback.onWindowRectChange(options),
-            );
-          });
-          win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.windowStageEventCallback.onAvoidAreaChange(options),
-            );
-          });
-          win.on("keyboardHeightChange", (height) => {
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
-            );
-          });
+          this.observedMainWindow = win;
+          win.on("windowSizeChange", this.onWindowSizeChange);
+          win.on("windowRectChange", this.onWindowRectChange);
+          win.on("avoidAreaChange", this.onAvoidAreaChange);
+          win.on("keyboardHeightChange", this.onKeyboardHeightChange);
         } catch {}
       }
 
-      if (this.defaultPage) {
-        await windowStage.loadContentByName(Entry.RouteName);
-      }
+      await this.loadWindowStageContent(windowStage);
+      this.assertWindowStageActive(generation);
     });
+  }
+
+  private assertWindowStageActive(generation: number): void {
+    if (!this.acceptingLifecycle || generation !== this.windowStageGeneration) {
+      throw new Error("WindowStage creation was cancelled by lifecycle teardown");
+    }
   }
 
   onWindowStageDestroy(): void {
     if (!this.acceptingLifecycle) {
       return;
+    }
+    this.windowStageGeneration += 1;
+    this.detachWindowListeners();
+    const sessionId = this.bridgeSessionId;
+    if (sessionId) {
+      for (const runtime of this.moduleRuntimes) {
+        BridgeHostRegistry.invalidateWindowStage(sessionId, runtime.moduleName);
+      }
     }
     void this.enqueueLifecycleOperation("window-stage-destroy", async (): Promise<void> => {
       await this.destroyWindowStageIfActive();
@@ -334,13 +417,48 @@ export class NativeAbility extends UIAbility {
       return;
     }
     this.windowStageActive = false;
+    this.detachWindowListeners();
     const sessionId = this.bridgeSessionId;
     if (sessionId) {
+      const stageClears: Promise<void>[] = [];
       for (const runtime of this.moduleRuntimes) {
-        await BridgeHostRegistry.clearWindowStage(sessionId, runtime.moduleName);
+        stageClears.push(BridgeHostRegistry.clearWindowStage(sessionId, runtime.moduleName));
       }
+      await Promise.all(stageClears);
+    }
+    for (const runtime of this.moduleRuntimes) {
+      try {
+        runtime.module.disposeAllRenders?.();
+      } catch {}
     }
     this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy());
+  }
+
+  private detachWindowListeners(): void {
+    const windowStage = this.observedWindowStage;
+    this.observedWindowStage = undefined;
+    if (windowStage !== undefined) {
+      try {
+        windowStage.off("windowStageEvent", this.onWindowStageEvent);
+      } catch {}
+    }
+
+    const win = this.observedMainWindow;
+    this.observedMainWindow = undefined;
+    if (win !== undefined) {
+      try {
+        win.off("windowSizeChange", this.onWindowSizeChange);
+      } catch {}
+      try {
+        win.off("windowRectChange", this.onWindowRectChange);
+      } catch {}
+      try {
+        win.off("avoidAreaChange", this.onAvoidAreaChange);
+      } catch {}
+      try {
+        win.off("keyboardHeightChange", this.onKeyboardHeightChange);
+      } catch {}
+    }
   }
 
   onMemoryLevel(level: AbilityConstant.MemoryLevel): void {
@@ -358,6 +476,14 @@ export class NativeAbility extends UIAbility {
 
   onDestroy(): Promise<void> {
     this.acceptingLifecycle = false;
+    this.abilityGeneration += 1;
+    this.windowStageGeneration += 1;
+    this.detachWindowListeners();
+    if (this.bridgeSessionId) {
+      // Reject new calls and cancel an active plugin hook immediately; the queued teardown below
+      // still preserves lifecycle ordering for state mutation and platform callbacks.
+      BridgeHostRegistry.beginClosing(this.bridgeSessionId);
+    }
     return this.enqueueLifecycleOperation("ability-destroy", async (): Promise<void> => {
       const sessionId = this.bridgeSessionId;
       if (!sessionId) {
@@ -414,7 +540,7 @@ export class NativeAbility extends UIAbility {
     if (stateValues.length === 1) {
       stateToSave = stateValues[0];
     } else if (stateValues.length > 1) {
-      stateToSave = JSON.stringify(stateMap);
+      stateToSave = this.serializeSavedStateMap(stateMap);
     }
     wantParam[STATE_KEY] = new String(stateToSave);
 

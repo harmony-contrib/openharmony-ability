@@ -3,6 +3,7 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgePluginContext,
+  BridgePluginHookContext,
   AsyncPluginBase,
   BridgeContextRequirement,
   BridgeLifecycleEvent,
@@ -35,11 +36,11 @@ export class DemoNodePlugin extends AsyncPluginBase {
 
   private mounted = false;
 
-  onInstall(context: BridgePluginContext): void {
+  onInstall(context: BridgePluginHookContext): void {
     this.mount(context);
   }
 
-  override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginContext): void {
+  override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
     if (event.kind === "ui-context-destroy") {
       // BridgeHost owns the detached tree and runs its cleanup; do not address a replacement
       // window through this plugin's session-scoped context.
@@ -71,7 +72,7 @@ export class DemoNodePlugin extends AsyncPluginBase {
     throw new Error(`Unsupported demo.node-badge action '${action}'`);
   }
 
-  onDispose(context: BridgePluginContext): void {
+  onDispose(context: BridgePluginHookContext): void {
     if (this.mounted) {
       context.removeChild("demo.node-badge");
       this.mounted = false;

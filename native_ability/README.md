@@ -133,21 +133,21 @@ JSON transport type.
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import Want from "@ohos.app.ability.Want";
-import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
 
 export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
   public defaultPage: boolean = false;
 
-  async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
-    super.onCreate(want, launchParam);
-  }
-
-  async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-    super.onWindowStageCreate(windowStage);
+  protected override async loadWindowStageContent(
+    windowStage: window.WindowStage,
+  ): Promise<void> {
     await windowStage.loadContent("pages/Index");
   }
 }
 ```
+
+OpenHarmony does not await `onCreate` or `onWindowStageCreate`. Override the framework hook above
+for custom page loading; it runs inside the serialized, generation-checked WindowStage transaction.
+Declaring the platform callback itself `async` is not an ordering barrier and can render
+`DefaultXComponent` before its bridge session exists.

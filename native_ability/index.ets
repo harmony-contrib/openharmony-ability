@@ -1,11 +1,11 @@
 export { NativeAbility } from "./src/main/ets/ability/NativeAbility";
 export {
   AsyncPluginBase,
-  EagerPlugin,
   LazyPlugin,
   BridgeAbilityCreateLifecyclePayload,
   BridgeEmptyLifecyclePayload,
   BridgeMemoryLevelLifecyclePayload,
+  BridgeWindowLifecyclePayload,
   BridgeWindowStageEventLifecyclePayload,
   PluginBase,
   SyncPluginBase,
@@ -23,6 +23,7 @@ export type {
   BridgePluginContext,
   BridgePluginExecution,
   BridgePluginFactory,
+  BridgePluginHookContext,
   BridgeWindowScope,
   MainThreadSyncBridgePlugin,
 } from "./src/main/ets/ability/type";

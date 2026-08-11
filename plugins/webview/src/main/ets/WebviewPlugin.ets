@@ -5,9 +5,11 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgePluginContext,
+  BridgePluginHookContext,
   AsyncPluginBase,
   BridgeContextRequirement,
   BridgeLifecycleEvent,
+  BridgeWindowLifecyclePayload,
 } from "@ohos-rs/ability";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
@@ -27,11 +29,7 @@ const ENGINE_LIFECYCLE_EVENT_TYPE = "ohos.webview.EngineLifecycleEvent";
 const CONTROLLER_EVENT_TYPE = "ohos.webview.ControllerEvent";
 const EVENT_ACKNOWLEDGEMENT_TYPE = "ohos.webview.EventAcknowledgement";
 
-/**
- * `setWebDebuggingAccess` is only present on newer ArkWeb SDKs. The plugin keeps its API 12
- * baseline by resolving this optional static API at runtime instead of exposing an API-20-only
- * symbol through the HAR type surface.
- */
+/** Optional static ArkWeb API resolved dynamically to preserve the API-12 package baseline. */
 interface WebviewDebuggingApi {
   setWebDebuggingAccess?: (enabled: boolean) => void;
 }
@@ -972,6 +970,16 @@ class WebviewSurface {
     }
   }
 
+  disposeWindow(windowKey: string, detachNodes: boolean = true): void {
+    for (const entryPair of Array.from(this.entries.entries())) {
+      const id = entryPair[0];
+      const entry = entryPair[1];
+      if (entry.data.windowKey === windowKey) {
+        this.remove(id, entry, detachNodes);
+      }
+    }
+  }
+
   private assertActive(): void {
     if (this.disposed) {
       throw new Error("WebView surface is already disposed");
@@ -1002,19 +1010,17 @@ export class WebviewPlugin extends AsyncPluginBase {
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
   private surface?: WebviewSurface;
 
-  override onInstall(context: BridgePluginContext): void {
+  override onInstall(context: BridgePluginHookContext): void {
     ensureWebEngineInitialized(context);
     this.surface = new WebviewSurface(context);
   }
 
-  override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginContext): void {
-    if (event.kind === "ui-context-destroy") {
-      const surface = this.surface;
-      this.surface = undefined;
-      // BridgeHost already detached the old window from its lookup table and owns the old node
-      // tree cleanup. Release controllers/waiters without accidentally addressing a newly
-      // attached main-window root.
-      surface?.dispose(false);
+  override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
+    if (event.kind === "window-detached") {
+      const payload = event.payload as BridgeWindowLifecyclePayload;
+      // BridgeHost has already removed this window from lookup and owns its node-tree cleanup.
+      // Release only controllers belonging to that window without addressing a replacement root.
+      this.surface?.disposeWindow(payload.windowKey, false);
       return;
     }
     if (event.kind === "ui-context-ready" && this.surface === undefined) {

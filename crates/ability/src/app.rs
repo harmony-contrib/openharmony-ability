@@ -379,6 +379,15 @@ impl OpenHarmonyApp {
         }
     }
 
+    pub(crate) fn clear_bridge_bindings(&self) {
+        if let Ok(mut guard) = self.bridge_runtime.write() {
+            guard.take();
+        }
+        if let Ok(mut guard) = self.bridge_main_thread.write() {
+            guard.take();
+        }
+    }
+
     pub fn show_keyboard(&self) {
         let _guard = self
             .is_keyboard_show

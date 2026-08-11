@@ -1,5 +1,13 @@
 # 1.0.0-beta.1
 
+- **Breaking**: remove `EagerPlugin`; every ArkTS plugin instance is now scoped to one
+  module/session. Process-wide resources stay in Rust/native singletons.
+- **Breaking**: plugin hooks receive `BridgePluginHookContext` with cancellation, and native
+  `render` receives a per-appearance `renderOwner` plus optional `disposeRender` cleanup.
+- Serialize Ability/WindowStage/UI lifecycle with generation guards, bounded hook watchdogs and
+  prepare-then-activate startup so Rust sinks exist before ability plugin installation.
+- Add per-window attach/detach lifecycle, independent Rust render roots and window-scoped WebView
+  controller cleanup.
 - **Breaking**: normalized node mounting — the named-slot model (`BridgeNodeSlot` /
   `BridgeNodeHost` / `slotId`) is gone. WebView `FrameNode`s mount into the session root tree
   (`context.appendChild`, key `ohos.webview.<id>`), full-bleed by default.
