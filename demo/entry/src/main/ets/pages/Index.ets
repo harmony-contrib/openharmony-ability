@@ -1,6 +1,6 @@
 import { DefaultXComponent, invokeNativeBackPressInterceptor } from "@ohos-rs/ability";
-import { demoWindowStage } from "../entryability/EntryAbility";
-import { SUB_WINDOW_KEY, SUB_WINDOW_NAME } from "./SubWindowPage";
+import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/EntryAbility";
+import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
   createBottomDemoWebview,
   createComposedDemoWebview,
@@ -161,7 +161,7 @@ struct Index {
     this.webviewStatus = "";
     try {
       await createDemoWebview();
-      this.webviewStatus = "✓ WebView mounted into the session root";
+      this.webviewStatus = "✓ WebView mounted into demo_native's component root";
     } catch (error) {
       this.webviewStatus = `✗ ${String(error)}`;
     } finally {
@@ -217,8 +217,7 @@ struct Index {
       );
       await subWindow.setUIContent("pages/SubWindowPage");
       await subWindow.showWindow();
-      this.webviewStatus =
-        '✓ sub window opened: it owns its own node tree (windowKey="' + SUB_WINDOW_KEY + '")';
+      this.webviewStatus = `✓ sub window opened: its DefaultXComponent owns module '${SUB_WINDOW_NATIVE_MODULE}'`;
     } catch (error) {
       this.webviewStatus = `✗ ${String(error)}`;
     } finally {
@@ -521,8 +520,8 @@ struct Index {
         ],
       })
       Stack() {
-        // Layer order is declaration order: business content below and above the single session
-        // node tree. The WebView plugin (and any other plugin) mounts its FrameNode into that
+        // Layer order is declaration order: business content below and above this module's
+        // component tree. The WebView plugin (and any other plugin) mounts its FrameNode into that
         // tree; there is no BridgeNodeHost or named slot anymore.
         this.WebviewUnderlay()
         DefaultXComponent({ moduleName: MODULE_NAME })

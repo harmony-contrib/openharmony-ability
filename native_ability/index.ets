@@ -5,7 +5,6 @@ export {
   BridgeAbilityCreateLifecyclePayload,
   BridgeEmptyLifecyclePayload,
   BridgeMemoryLevelLifecyclePayload,
-  BridgeWindowLifecyclePayload,
   BridgeWindowStageEventLifecyclePayload,
   PluginBase,
   SyncPluginBase,
@@ -24,7 +23,6 @@ export type {
   BridgePluginExecution,
   BridgePluginFactory,
   BridgePluginHookContext,
-  BridgeWindowScope,
   MainThreadSyncBridgePlugin,
 } from "./src/main/ets/ability/type";
 export { DefaultXComponent } from "./src/main/ets/components/DefaultXComponent";

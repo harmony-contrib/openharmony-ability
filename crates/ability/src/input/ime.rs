@@ -14,11 +14,15 @@ type ImeCallback = (
     ThreadsafeFunction<i32, (), i32, Status, false>,
 );
 
-pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp) -> Result<ImeCallback> {
+pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result<ImeCallback> {
     // insert event
     let on_insert_text_app = app.clone();
+    let on_insert_text_owner = render_owner.clone();
     let insert_text_callback: Function<String, ()> =
         env.create_function_from_closure("ime_insert_callback", move |ctx| {
+            if !on_insert_text_app.is_render_surface_active(&on_insert_text_owner) {
+                return Ok(());
+            }
             let s = ctx.first_arg::<String>().unwrap();
             if let Some(ref mut h) = *on_insert_text_app.event_loop.borrow_mut() {
                 h(Event::Input(InputEvent::ImeEvent(
@@ -35,8 +39,12 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp) -> Result<ImeCallback> {
 
     // keyboard status event
     let on_ime_hide_app = app.clone();
+    let on_ime_hide_owner = render_owner.clone();
     let on_ime_hide_callback: Function<u32, ()> =
         env.create_function_from_closure("ime_hide_callback", move |ctx| {
+            if !on_ime_hide_app.is_render_surface_active(&on_ime_hide_owner) {
+                return Ok(());
+            }
             let value = ctx.first_arg::<u32>().unwrap();
 
             let status = KeyboardStatus::from(value);
@@ -58,8 +66,12 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp) -> Result<ImeCallback> {
         .build()?;
 
     let on_backspace_app = app.clone();
+    let on_backspace_owner = render_owner.clone();
     let on_backspace_callback: Function<i32, ()> =
         env.create_function_from_closure("on_backspace_callback", move |ctx| {
+            if !on_backspace_app.is_render_surface_active(&on_backspace_owner) {
+                return Ok(());
+            }
             let value = ctx.first_arg::<i32>().unwrap();
             if let Some(ref mut h) = *on_backspace_app.event_loop.borrow_mut() {
                 h(Event::Input(InputEvent::ImeEvent(
@@ -75,8 +87,12 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp) -> Result<ImeCallback> {
         .build()?;
 
     let on_ime_enter_app = app.clone();
+    let on_ime_enter_owner = render_owner;
     let on_ime_enter_callback: Function<i32, ()> =
         env.create_function_from_closure("on_ime_enter_callback", move |ctx| {
+            if !on_ime_enter_app.is_render_surface_active(&on_ime_enter_owner) {
+                return Ok(());
+            }
             let value = ctx.first_arg::<i32>().unwrap();
             if let Some(ref mut h) = *on_ime_enter_app.event_loop.borrow_mut() {
                 h(Event::Input(InputEvent::ImeEvent(ImeEvent::EnterEvent(

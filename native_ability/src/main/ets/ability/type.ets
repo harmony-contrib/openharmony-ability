@@ -72,16 +72,27 @@ export interface BridgeBindings {
 }
 
 export interface Module {
-  init: (context?: AbilityInitContext) => ApplicationLifecycle;
   /**
-   * Mounts one Rust render tree into `slot`. `renderOwner` is unique per DefaultXComponent
-   * appearance, so rendering a sub-window never replaces another window's RootNode.
+   * Opens this native module's Ability-session bridge before any component is rendered. The
+   * owner is unique per Ability session and guards a later session from stale cleanup.
    */
-  render: (bindings: BridgeBindings, slot: NodeContent, renderOwner: string) => void;
-  /** Releases only the render tree owned by `renderOwner`. Older native modules may omit it. */
-  disposeRender?: (renderOwner: string) => void;
-  /** Releases every remaining render tree when the WindowStage is torn down. */
-  disposeAllRenders?: () => void;
+  init: (
+    bindings: BridgeBindings,
+    bridgeOwner: string,
+    context?: AbilityInitContext,
+  ) => ApplicationLifecycle;
+  /** Releases only the matching Ability-session bridge; stale owners are ignored. */
+  disposeBridge: (bridgeOwner: string) => void;
+  /**
+   * Mounts this native module's one Rust render tree into `slot`. `renderOwner` is unique per
+   * appearance and protects a later render from stale cleanup; another concurrently active
+   * DefaultXComponent must use a different native module.
+   */
+  render: (slot: NodeContent, renderOwner: string) => void;
+  /** Releases only the render tree owned by `renderOwner`. */
+  disposeRender: (renderOwner: string) => void;
+  /** Releases the remaining render tree when the WindowStage is torn down. */
+  disposeAllRenders: () => void;
   /** Synchronous page-back decision exported by the native module, when it has one. */
   onBackPressIntercept?: () => boolean;
   /** Legacy N-API spelling retained for modules built before camel-case code generation. */
@@ -110,8 +121,6 @@ export type BridgeLifecycleKind =
   | "window-stage-event"
   | "ui-context-ready"
   | "ui-context-destroy"
-  | "window-attached"
-  | "window-detached"
   | "configuration-updated"
   | "memory-level";
 
@@ -141,20 +150,11 @@ export class BridgeMemoryLevelLifecyclePayload {
   }
 }
 
-export class BridgeWindowLifecyclePayload {
-  readonly windowKey: string;
-
-  constructor(windowKey: string) {
-    this.windowKey = windowKey;
-  }
-}
-
 export type BridgeLifecyclePayload =
   | BridgeEmptyLifecyclePayload
   | BridgeAbilityCreateLifecyclePayload
   | BridgeWindowStageEventLifecyclePayload
-  | BridgeMemoryLevelLifecyclePayload
-  | BridgeWindowLifecyclePayload;
+  | BridgeMemoryLevelLifecyclePayload;
 
 export interface BridgeLifecycleEvent {
   readonly kind: BridgeLifecycleKind;
@@ -162,27 +162,14 @@ export interface BridgeLifecycleEvent {
 }
 
 /**
- * Window-scoped node surface. Each `DefaultXComponent` instance (one per window) owns its own
- * root FrameNode; the default window key is `"main"`. Plugins mount into a window scope so
- * sub-window plugin trees never overwrite the main window's.
- */
-export interface BridgeWindowScope {
-  /** The window key this scope is bound to (`"main"` for the default window). */
-  windowKey: string;
-  getUIContext: () => UIContext;
-  getRootFrameNode: () => FrameNode;
-  appendChild: (key: string, node: FrameNode, cleanup?: () => void) => void;
-  removeChild: (key: string) => void;
-  getFrameNode: (handle: number) => FrameNode;
-}
-
-/**
  * Context is intentionally ArkTS-only. It is scoped to one native module and one Ability
  * session; Rust gets lifecycle notifications and direct named N-API events, not retained ArkTS
  * object references.
  *
- * Every plugin shares one root FrameNode per window (owned by `DefaultXComponent`). There are no
- * named slots, registries or readiness waiters: the main window root exists before
+ * A native module is bound to exactly one `DefaultXComponent` at a time, and every plugin for
+ * that module shares the component's root FrameNode. An Ability may host several components by
+ * using a distinct native module for each one. There are no named slots or registries: the root
+ * exists before
  * `ui-context-ready`, so plugins can mount nodes during `onInstall`. `appendChild`/`removeChild`
  * use a caller-chosen key as the plugin's own cleanup credential; handle-based composition
  * (`getFrameNode`) is the Rust-facing surface of the built-in `ohos.node` plugin.
@@ -193,16 +180,20 @@ export interface BridgePluginContext {
   sessionId: string;
   abilityContext: common.UIAbilityContext;
   isActive: () => boolean;
+  /** Returns the Ability-level WindowStage. This is not necessarily the component's window. */
   getWindowStage: () => window.WindowStage;
+  /** Resolves the actual Window that owns this module's DefaultXComponent. */
+  getWindow: () => window.Window;
   getUIContext: () => UIContext;
   /**
-   * Returns the session root FrameNode that `DefaultXComponent` attaches before
+   * Returns this module's component root FrameNode, attached before
    * `ui-context-ready`. Plugins mount their own nodes here.
    */
   getRootFrameNode: () => FrameNode;
   /**
-   * Appends a FrameNode to the session root. `key` must be unique per plugin (prefix it with the
-   * plugin id) and is the cleanup credential for `removeChild`. An optional `cleanup` runs when
+   * Appends a FrameNode to this module's component root. `key` must be unique per plugin
+   * (normally prefixed by the plugin id) and is the cleanup credential for `removeChild`. An
+   * optional `cleanup` runs when
    * the node is removed or the bridge session disposes.
    */
   appendChild: (key: string, node: FrameNode, cleanup?: () => void) => void;
@@ -214,12 +205,6 @@ export interface BridgePluginContext {
    */
   getFrameNode: (handle: number) => FrameNode;
   /**
-   * Returns a window-scoped node surface. The default context methods operate on the `"main"`
-   * window; sub-window `DefaultXComponent` instances register under their own `windowKey` and
-   * plugins use this method to mount into them.
-   */
-  windowScope: (windowKey: string) => BridgeWindowScope;
-  /**
    * Makes an immediate, named N-API request to the matching Rust plugin. It is valid only while
    * the current ArkTS/N-API callback is active; do not retain the input or result.
    */
@@ -229,6 +214,18 @@ export interface BridgePluginContext {
     responseTypeName: string,
     value: ESObject,
   ) => ESObject;
+  /**
+   * Sends the same named event to this plugin's Rust facade in every active native module in the
+   * application process. This is reserved for genuinely process-global platform transitions
+   * (for example ArkWeb engine initialization); ordinary callbacks must use `invokeNativeSync`
+   * and remain module-scoped.
+   */
+  invokeNativeSyncAcrossModules: (
+    event: string,
+    requestTypeName: string,
+    responseTypeName: string,
+    value: ESObject,
+  ) => ESObject[];
 }
 
 export interface BridgeCallContext extends BridgePluginContext {
@@ -320,6 +317,11 @@ export abstract class PluginBase {
    * need the context outside the lifecycle hooks can read it via [`PluginBase.getContext`].
    */
   attachContext(context: BridgePluginContext): void {
+    if (this.context !== undefined) {
+      throw new Error(
+        `Bridge plugin '${this.id}' instance cannot be reused across native modules or Ability sessions`,
+      );
+    }
     this.context = context;
   }
 

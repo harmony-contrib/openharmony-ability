@@ -64,8 +64,8 @@ function parseAvoidAreaRequest(payload: BridgeTypedValue): AvoidAreaRequest {
 
 export class WindowPlugin extends SyncPluginBase {
   readonly id = "ohos.window";
-  readonly version = 1;
-  readonly requires: BridgeContextRequirement[] = ["window-stage"];
+  readonly version = 2;
+  readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
   invokeSync(
     action: string,
@@ -77,9 +77,8 @@ export class WindowPlugin extends SyncPluginBase {
     }
     const request = parseAvoidAreaRequest(payload);
     try {
-      const mainWindow = context.getWindowStage().getMainWindowSync();
       const areaType = request.areaType as window.AvoidAreaType;
-      const response = new AvoidAreaResponse(mainWindow.getWindowAvoidArea(areaType));
+      const response = new AvoidAreaResponse(context.getWindow().getWindowAvoidArea(areaType));
       return { typeName: AVOID_AREA_RESPONSE_TYPE, value: response };
     } catch (error) {
       throw new Error(`Unable to get window avoid area: ${String(error)}`);

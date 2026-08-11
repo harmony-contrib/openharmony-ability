@@ -30,15 +30,18 @@ struct ProtocolDeclaration {
 #[derive(Default)]
 struct ProtocolState {
     schemes: BTreeMap<String, u32>,
+    sealed: bool,
     flushed: bool,
     engine_initialized: bool,
-    /// Rust-owned declarations survive a controller remove/create cycle for the same WebView tag.
+    /// Rust-owned declarations survive a controller remove/create cycle for the same WebView ID.
     declarations: BTreeMap<String, BTreeMap<String, ProtocolDeclaration>>,
     /// A controller-attached event is the earliest point where ArkWeb guarantees that a
     /// BrowserContext exists for a concrete Web component.
-    attached_webviews: BTreeSet<String>,
-    /// Per-controller installation bookkeeping prevents a concurrent declaration and
-    /// controller-attached callback from registering the same handler twice.
+    /// Business WebView ID -> process-unique ArkWeb controller tag.
+    attached_webviews: BTreeMap<String, String>,
+    /// Per-native-tag installation bookkeeping prevents a concurrent declaration and
+    /// controller-attached callback from registering the same handler twice, without allowing a
+    /// stale controller completion to mark its replacement as installed.
     installing_schemes: BTreeMap<String, BTreeSet<String>>,
     installed_schemes: BTreeMap<String, BTreeSet<String>>,
 }
@@ -64,24 +67,8 @@ impl WebviewProtocol {
         let mut state = PROTOCOL_STATE
             .lock()
             .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?;
-        if state.engine_initialized {
-            return Err(Error::from_reason(format!(
-                "WebView scheme '{scheme}' must be registered before Web engine initialization"
-            )));
-        }
-        if state.flushed {
-            return Err(Error::from_reason(format!(
-                "WebView scheme '{scheme}' must be registered before WebviewBridgePlugin begins Web engine initialization"
-            )));
-        }
-
         let options_bits = options.bits();
-        if let Some(existing) = state.schemes.get(scheme) {
-            if *existing != options_bits {
-                return Err(Error::from_reason(format!(
-                    "WebView scheme '{scheme}' was already registered with different options"
-                )));
-            }
+        if !scheme_registration_needed(&state, scheme, options_bits)? {
             return Ok(());
         }
 
@@ -97,22 +84,57 @@ impl WebviewProtocol {
         if state.engine_initialized || state.flushed {
             return Ok(());
         }
+        if !state.sealed {
+            return Err(Error::from_reason(
+                "WebView scheme declarations must be sealed before platform registration",
+            ));
+        }
         CustomProtocol::register();
         state.flushed = true;
         Ok(())
     }
 
-    pub(crate) fn mark_engine_initialized() -> Result<()> {
+    pub(crate) fn seal_before_engine_init() -> Result<()> {
         let mut state = PROTOCOL_STATE
             .lock()
             .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?;
-        if !state.flushed {
-            return Err(Error::from_reason(
-                "WebView engine initialized before custom scheme declarations were flushed",
-            ));
+        state.sealed = true;
+        Ok(())
+    }
+
+    pub(crate) fn validate_process_schemes(registered_schemes: &[(String, u32)]) -> Result<()> {
+        let state = PROTOCOL_STATE
+            .lock()
+            .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?;
+        ensure_schemes_registered(&state, registered_schemes)
+    }
+
+    pub(crate) fn mark_engine_initialized(registered_schemes: &[(String, u32)]) -> Result<()> {
+        let mut state = PROTOCOL_STATE
+            .lock()
+            .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?;
+        ensure_schemes_registered(&state, registered_schemes)?;
+        if state.engine_initialized {
+            return Ok(());
         }
+        // A native module can be activated after another module initialized ArkWeb. Matching
+        // schemes are already registered process-wide, so this module joins without calling the
+        // pre-init platform API again. New or conflicting schemes were rejected above.
+        state.sealed = true;
+        state.flushed = true;
         state.engine_initialized = true;
         Ok(())
+    }
+
+    pub(crate) fn declared_schemes() -> Result<Vec<(String, u32)>> {
+        let state = PROTOCOL_STATE
+            .lock()
+            .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?;
+        Ok(state
+            .schemes
+            .iter()
+            .map(|(scheme, options)| (scheme.clone(), *options))
+            .collect())
     }
 
     fn require_declared(scheme: &str) -> Result<()> {
@@ -127,6 +149,54 @@ impl WebviewProtocol {
         }
         Ok(())
     }
+}
+
+fn ensure_schemes_registered(
+    state: &ProtocolState,
+    registered_schemes: &[(String, u32)],
+) -> Result<()> {
+    for (scheme, options) in &state.schemes {
+        if registered_schemes
+            .iter()
+            .any(|(registered, registered_options)| {
+                registered == scheme && registered_options == options
+            })
+        {
+            continue;
+        }
+        return Err(Error::from_reason(format!(
+            "WebView scheme '{scheme}' from this native module was not registered with matching options before the process-global engine initialized"
+        )));
+    }
+    Ok(())
+}
+
+fn scheme_registration_needed(
+    state: &ProtocolState,
+    scheme: &str,
+    options_bits: u32,
+) -> Result<bool> {
+    if let Some(existing) = state.schemes.get(scheme) {
+        if *existing != options_bits {
+            return Err(Error::from_reason(format!(
+                "WebView scheme '{scheme}' was already registered with different options"
+            )));
+        }
+        // Native module statics survive Ability recreation. Repeating the same declaration is a
+        // no-op even after the process-global engine has started.
+        return Ok(false);
+    }
+    if state.engine_initialized {
+        return Err(Error::from_reason(format!(
+            "WebView scheme '{scheme}' must be registered before Web engine initialization"
+        )));
+    }
+    if state.sealed || state.flushed {
+        return Err(Error::from_reason(format!(
+            "WebView scheme '{scheme}' must be registered before WebviewBridgePlugin begins Web engine initialization"
+        )));
+    }
+    Ok(true)
 }
 
 /// An HTTP-style request delivered for a custom WebView scheme.
@@ -152,7 +222,7 @@ impl WebviewProtocolResponder {
     }
 }
 
-/// Declares a custom-scheme handler for a WebView tag.
+/// Declares a custom-scheme handler for a module-local WebView ID.
 ///
 /// The declaration may be made before the ArkTS node exists. The handler is attached only when
 /// the Web component reports `controller-attached`, after ArkWeb has created its BrowserContext
@@ -213,20 +283,24 @@ where
                 true
             }
         };
-        if is_new_declaration
-            && state.attached_webviews.contains(&webview_id)
-            && reserve_installation(&mut state, &webview_id, &scheme)
-        {
-            Some(declaration)
-        } else {
-            // Declarations are persistent. Treat a retry as idempotent so an application can
-            // retry a failed create without replacing a closure that an existing controller uses.
-            None
+        let native_tag = state.attached_webviews.get(&webview_id).cloned();
+        match native_tag {
+            Some(native_tag)
+                if is_new_declaration && reserve_installation(&mut state, &native_tag, &scheme) =>
+            {
+                Some((declaration, native_tag))
+            }
+            _ => {
+                // Declarations are persistent. Treat a retry as idempotent so an application can
+                // retry a failed create without replacing a closure that an existing controller
+                // uses.
+                None
+            }
         }
     };
 
-    if let Some(declaration) = declaration_to_install {
-        install_and_record(&webview_id, declaration)?;
+    if let Some((declaration, native_tag)) = declaration_to_install {
+        install_and_record(&webview_id, &native_tag, declaration)?;
     }
     Ok(())
 }
@@ -236,8 +310,9 @@ where
 /// This is called from the scoped named N-API `controller-attached` event. It must complete before
 /// ArkTS starts the initial load so a custom-scheme document and every first-page subresource are
 /// handled by native Rust code.
-pub(crate) fn on_controller_attached(webview_id: &str) -> Result<()> {
+pub(crate) fn on_controller_attached(webview_id: &str, native_tag: &str) -> Result<()> {
     validate_webview_id(webview_id)?;
+    validate_webview_id(native_tag)?;
     let declarations = {
         let mut state = PROTOCOL_STATE
             .lock()
@@ -247,7 +322,13 @@ pub(crate) fn on_controller_attached(webview_id: &str) -> Result<()> {
                 "WebView custom protocol handler cannot attach before Web engine initialization",
             ));
         }
-        state.attached_webviews.insert(webview_id.to_owned());
+        let previous_tag = state
+            .attached_webviews
+            .insert(webview_id.to_owned(), native_tag.to_owned());
+        if let Some(previous_tag) = previous_tag.filter(|previous| previous != native_tag) {
+            state.installing_schemes.remove(&previous_tag);
+            state.installed_schemes.remove(&previous_tag);
+        }
         let declared = state
             .declarations
             .get(webview_id)
@@ -255,84 +336,109 @@ pub(crate) fn on_controller_attached(webview_id: &str) -> Result<()> {
             .unwrap_or_default();
         declared
             .into_iter()
-            .filter(|declaration| reserve_installation(&mut state, webview_id, &declaration.scheme))
+            .filter(|declaration| reserve_installation(&mut state, native_tag, &declaration.scheme))
             .collect::<Vec<_>>()
     };
 
     for declaration in declarations {
-        install_and_record(webview_id, declaration)?;
+        install_and_record(webview_id, native_tag, declaration)?;
     }
     Ok(())
 }
 
 /// Marks a controller detached while retaining declarations for a future controller with the same
-/// WebView tag.
-pub(crate) fn on_controller_removed(webview_id: &str) -> Result<()> {
+/// WebView ID and matching native tag.
+pub(crate) fn on_controller_removed(webview_id: &str, native_tag: &str) -> Result<()> {
     let mut state = PROTOCOL_STATE
         .lock()
         .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?;
+    if state.attached_webviews.get(webview_id).map(String::as_str) != Some(native_tag) {
+        return Ok(());
+    }
     state.attached_webviews.remove(webview_id);
-    state.installing_schemes.remove(webview_id);
-    state.installed_schemes.remove(webview_id);
+    state.installing_schemes.remove(native_tag);
+    state.installed_schemes.remove(native_tag);
     Ok(())
 }
 
-fn reserve_installation(state: &mut ProtocolState, webview_id: &str, scheme: &str) -> bool {
+/// Clears controller-generation state at component/session teardown while retaining declarations
+/// and the process-global engine/scheme state for a later appearance.
+pub(crate) fn clear_attached() -> Result<()> {
+    let mut state = PROTOCOL_STATE
+        .lock()
+        .map_err(|_| Error::from_reason("Failed to clear WebView protocol controller state"))?;
+    state.attached_webviews.clear();
+    state.installing_schemes.clear();
+    state.installed_schemes.clear();
+    Ok(())
+}
+
+fn reserve_installation(state: &mut ProtocolState, native_tag: &str, scheme: &str) -> bool {
     if state
         .installed_schemes
-        .get(webview_id)
+        .get(native_tag)
         .is_some_and(|schemes| schemes.contains(scheme))
         || state
             .installing_schemes
-            .get(webview_id)
+            .get(native_tag)
             .is_some_and(|schemes| schemes.contains(scheme))
     {
         return false;
     }
     state
         .installing_schemes
-        .entry(webview_id.to_owned())
+        .entry(native_tag.to_owned())
         .or_default()
         .insert(scheme.to_owned())
 }
 
-fn install_and_record(webview_id: &str, declaration: ProtocolDeclaration) -> Result<()> {
+fn install_and_record(
+    webview_id: &str,
+    native_tag: &str,
+    declaration: ProtocolDeclaration,
+) -> Result<()> {
     let scheme = declaration.scheme.clone();
-    match install_declaration(webview_id, declaration) {
-        Ok(()) => finish_installation(webview_id, &scheme, true),
+    match install_declaration(native_tag, declaration) {
+        Ok(()) => finish_installation(webview_id, native_tag, &scheme, true),
         Err(error) => {
-            let _ = finish_installation(webview_id, &scheme, false);
+            let _ = finish_installation(webview_id, native_tag, &scheme, false);
             Err(error)
         }
     }
 }
 
-fn finish_installation(webview_id: &str, scheme: &str, installed: bool) -> Result<()> {
+fn finish_installation(
+    webview_id: &str,
+    native_tag: &str,
+    scheme: &str,
+    installed: bool,
+) -> Result<()> {
     let mut state = PROTOCOL_STATE
         .lock()
         .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?;
     let remove_installing_entry = state
         .installing_schemes
-        .get_mut(webview_id)
+        .get_mut(native_tag)
         .map(|schemes| {
             schemes.remove(scheme);
             schemes.is_empty()
         })
         .unwrap_or(false);
     if remove_installing_entry {
-        state.installing_schemes.remove(webview_id);
+        state.installing_schemes.remove(native_tag);
     }
-    if installed {
+    if installed && state.attached_webviews.get(webview_id).map(String::as_str) == Some(native_tag)
+    {
         state
             .installed_schemes
-            .entry(webview_id.to_owned())
+            .entry(native_tag.to_owned())
             .or_default()
             .insert(scheme.to_owned());
     }
     Ok(())
 }
 
-fn install_declaration(webview_id: &str, declaration: ProtocolDeclaration) -> Result<()> {
+fn install_declaration(native_tag: &str, declaration: ProtocolDeclaration) -> Result<()> {
     let ProtocolDeclaration { scheme, callback } = declaration;
     let handler = CustomProtocolHandler::new();
     handler.on_request_start(move |request, request_handle| {
@@ -364,7 +470,7 @@ fn install_declaration(webview_id: &str, declaration: ProtocolDeclaration) -> Re
         true
     });
 
-    let attached = Web::new(webview_id.to_owned())
+    let attached = Web::new(native_tag.to_owned())
         .custom_protocol(scheme, handler)
         .map_err(|error| {
             Error::from_reason(format!("Failed to bind WebView custom protocol: {error}"))
@@ -449,7 +555,10 @@ fn validate_webview_id(webview_id: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{reserve_installation, validate_scheme, validate_webview_id, ProtocolState};
+    use super::{
+        ensure_schemes_registered, reserve_installation, scheme_registration_needed,
+        validate_scheme, validate_webview_id, ProtocolState,
+    };
 
     #[test]
     fn protocol_declarations_validate_scheme_and_webview_tag_before_arkweb() {
@@ -463,15 +572,38 @@ mod tests {
     #[test]
     fn per_controller_installation_is_reserved_only_once() {
         let mut state = ProtocolState::default();
-        assert!(reserve_installation(&mut state, "article", "asset"));
-        assert!(!reserve_installation(&mut state, "article", "asset"));
+        assert!(reserve_installation(&mut state, "native-tag-a", "asset"));
+        assert!(!reserve_installation(&mut state, "native-tag-a", "asset"));
+        assert!(reserve_installation(&mut state, "native-tag-b", "asset"));
 
         state.installing_schemes.clear();
         state
             .installed_schemes
-            .entry("article".to_owned())
+            .entry("native-tag-a".to_owned())
             .or_default()
             .insert("asset".to_owned());
-        assert!(!reserve_installation(&mut state, "article", "asset"));
+        assert!(!reserve_installation(&mut state, "native-tag-a", "asset"));
+    }
+
+    #[test]
+    fn identical_scheme_registration_is_idempotent_after_engine_initialization() {
+        let mut state = ProtocolState::default();
+        state.schemes.insert("asset".to_owned(), 7);
+        state.flushed = true;
+        state.engine_initialized = true;
+
+        assert!(!scheme_registration_needed(&state, "asset", 7).unwrap());
+        assert!(scheme_registration_needed(&state, "asset", 8).is_err());
+        assert!(scheme_registration_needed(&state, "late", 7).is_err());
+    }
+
+    #[test]
+    fn late_module_can_join_only_with_process_registered_schemes() {
+        let mut state = ProtocolState::default();
+        state.schemes.insert("asset".to_owned(), 7);
+
+        assert!(ensure_schemes_registered(&state, &[("asset".to_owned(), 7)]).is_ok());
+        assert!(ensure_schemes_registered(&state, &[("asset".to_owned(), 8)]).is_err());
+        assert!(ensure_schemes_registered(&state, &[]).is_err());
     }
 }

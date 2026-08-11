@@ -1,8 +1,8 @@
 import { NodeContent } from "@kit.ArkUI";
 import { FrameNode, NodeController } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
-import { BridgeBindings, Module } from "../ability/type";
-import { BridgeHostRegistry, MAIN_WINDOW_KEY } from "../bridge/BridgeHost";
+import { Module } from "../ability/type";
+import { BridgeHostRegistry } from "../bridge/BridgeHost";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 
 export const RouteName = "NativeAbility";
@@ -12,80 +12,29 @@ let nextRenderOwnerId: number = 1;
 interface ComponentAttachment {
   sessionId: string;
   moduleName: string;
-  windowKey: string;
   renderOwner: string;
   nativeModule: Module;
 }
 
 /**
- * Mounts only the Rust XComponent and generic bridge bindings. Platform capabilities deliberately
- * do not live here: a capability that needs ArkUI content (for example WebView) owns a plugin
- * and mounts its own FrameNode into the session root this component provides.
+ * Mounts only the Rust XComponent render surface and module root. The generic bridge transport
+ * already belongs to the NativeAbility/module session, so ability-only capabilities do not wait
+ * for this component. A capability that needs ArkUI content (for example WebView) owns a plugin
+ * and mounts its own FrameNode into the root this component provides.
  *
- * Multi-window: each instance registers its own window surface under `windowKey` (`"main"` by
- * default). Sub-window pages place another `DefaultXComponent` with a unique `windowKey` (for
- * example `windowId`), and plugins address it through `BridgePluginContext.windowScope`.
+ * Every instance must use its own native module. One Ability may host multiple instances (in the
+ * same window or different windows) by declaring and assigning a distinct module to each one.
  */
 @Component
 export struct DefaultXComponent {
   moduleName: string = "";
-  /** Unique key of the window surface this instance owns; `"main"` is the default window. */
-  @Prop windowKey: string = MAIN_WINDOW_KEY;
   private rootSlot = new NodeContent();
-  private nodeController = new BridgeRootNodeController(this.getUIContext());
+  private nodeController = new BridgeRootNodeController();
   @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
   private appearanceGeneration: number = 0;
   private attachment?: ComponentAttachment;
   private releasePromise: Promise<void> = Promise.resolve();
-
-  private createBindings(sessionId: string, moduleName: string): BridgeBindings {
-    return {
-      bridgeInvoke: async (
-        pluginId: string,
-        pluginVersion: number,
-        action: string,
-        requestTypeName: string,
-        responseTypeName: string,
-        value: ESObject,
-        timeoutMs: number,
-      ): Promise<ESObject> => {
-        return await BridgeHostRegistry.invokeAsync(
-          sessionId,
-          moduleName,
-          pluginId,
-          pluginVersion,
-          action,
-          requestTypeName,
-          responseTypeName,
-          value,
-          timeoutMs,
-        );
-      },
-      bridgeInvokeSync: (
-        pluginId: string,
-        pluginVersion: number,
-        action: string,
-        requestTypeName: string,
-        responseTypeName: string,
-        value: ESObject,
-      ): ESObject => {
-        return BridgeHostRegistry.invokeSync(
-          sessionId,
-          moduleName,
-          pluginId,
-          pluginVersion,
-          action,
-          requestTypeName,
-          responseTypeName,
-          value,
-        );
-      },
-      // The Rust MainThreadScheduler executes its closure inside this TSFN callback before this
-      // no-op function is invoked. It carries no capability-specific behavior.
-      bridgeDispatch: (): void => {},
-    };
-  }
 
   async aboutToAppear(): Promise<void> {
     const generation = ++this.appearanceGeneration;
@@ -108,60 +57,32 @@ export struct DefaultXComponent {
         "DefaultXComponent cannot render before NativeAbility finishes creating its bridge session",
       );
     }
-    // Idempotent fallback: NativeAbility.onCreate already attached the sink right after
-    // module.init (same cached Module instance), so `ability`-only plugins can emit inbound
-    // events on `ability-create`. Re-attaching here covers modules loaded without onCreate.
-    BridgeHostRegistry.attachEventSink(
-      sessionId,
-      moduleName,
-      (
-        pluginId: string,
-        event: string,
-        requestTypeName: string,
-        responseTypeName: string,
-        value: ESObject,
-      ): ESObject => {
-        if (typeof nativeModule.onBridgeSyncEvent !== "function") {
-          throw new Error("Native module does not export onBridgeSyncEvent");
-        }
-        return nativeModule.onBridgeSyncEvent(
-          pluginId,
-          event,
-          requestTypeName,
-          responseTypeName,
-          value,
-        );
-      },
-      (kind: string): void => {
-        nativeModule.onBridgeLifecycle?.(kind);
-      },
-    );
-    const renderOwner = `${sessionId}:${moduleName}:${this.windowKey}:${nextRenderOwnerId++}`;
-    nativeModule.render(this.createBindings(sessionId, moduleName), this.rootSlot, renderOwner);
+    // NativeAbility owns the module/session sinks from ability-create onward. The component only
+    // supplies the render surface and UI root; ability-only plugins never depend on appearance.
+    const renderOwner = `${sessionId}:${moduleName}:${nextRenderOwnerId++}`;
+    nativeModule.render(this.rootSlot, renderOwner);
 
     if (generation !== this.appearanceGeneration) {
-      nativeModule.disposeRender?.(renderOwner);
+      nativeModule.disposeRender(renderOwner);
       return;
     }
 
-    // Create the window root eagerly (NodeContainer asks the controller lazily) so it exists
-    // before `ui-context-ready`. Every plugin then mounts into this one tree without slots,
-    // registries or readiness waiters. Attaching the `"main"` window emits `ui-context-ready`;
-    // sub-window instances (unique `windowKey`) only register their own surface.
-    const root = this.nodeController.makeNode(this.getUIContext());
     const attachment: ComponentAttachment = {
       sessionId,
       moduleName,
-      windowKey: this.windowKey,
       renderOwner,
       nativeModule,
     };
     this.attachment = attachment;
     try {
-      await BridgeHostRegistry.attachWindow(
+      // Create this module's root eagerly (NodeContainer asks the controller lazily) so it exists
+      // before `ui-context-ready`. Keep it inside the render transaction: FrameNode construction
+      // failure must release the native RootNode/render owner as well.
+      const root = this.nodeController.makeNode(this.getUIContext());
+      await BridgeHostRegistry.attachComponent(
         sessionId,
         moduleName,
-        attachment.windowKey,
+        renderOwner,
         this.getUIContext(),
         root,
       );
@@ -197,11 +118,11 @@ export struct DefaultXComponent {
     }
     // RootNode owns the ContentSlot handle and must be dropped synchronously while this component
     // still owns a live NodeContent. Host/plugin cleanup may continue asynchronously afterwards.
-    attachment.nativeModule.disposeRender?.(attachment.renderOwner);
-    return BridgeHostRegistry.detachWindow(
+    attachment.nativeModule.disposeRender(attachment.renderOwner);
+    return BridgeHostRegistry.detachComponent(
       attachment.sessionId,
       attachment.moduleName,
-      attachment.windowKey,
+      attachment.renderOwner,
     )
       .catch(() => {})
       .finally(() => {
@@ -229,17 +150,11 @@ export struct DefaultXComponent {
 }
 
 /**
- * Owns the single session root FrameNode. Plugins never touch this controller directly; they
+ * Owns this native module's single component root FrameNode. Plugins never touch this controller directly; they
  * receive the root through `BridgePluginContext.getRootFrameNode()`.
  */
 class BridgeRootNodeController extends NodeController {
   private root: FrameNode | null = null;
-  private readonly uiContext: UIContext;
-
-  constructor(uiContext: UIContext) {
-    super();
-    this.uiContext = uiContext;
-  }
 
   makeNode(uiContext: UIContext): FrameNode {
     if (this.root === null) {
@@ -249,7 +164,10 @@ class BridgeRootNodeController extends NodeController {
   }
 
   disposeRoot(): void {
-    this.root?.dispose();
+    const root = this.root;
     this.root = null;
+    try {
+      root?.dispose();
+    } catch {}
   }
 }

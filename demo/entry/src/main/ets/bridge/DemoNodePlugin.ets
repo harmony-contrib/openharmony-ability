@@ -51,7 +51,7 @@ export class DemoNodePlugin extends AsyncPluginBase {
   }
 
   private mount(context: BridgePluginContext): void {
-    // The session root is guaranteed to exist before ui-context-ready, so plugins mount their
+    // This module's component root exists before ui-context-ready, so plugins mount their
     // nodes directly without slots, registries or readiness waiters.
     const node = new BuilderNode<[BadgeData]>(context.getUIContext());
     node.build(badgeBuilder, { title: "ordinary BuilderNode plugin" });

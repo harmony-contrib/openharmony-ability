@@ -3,7 +3,7 @@
 //! `BridgeRuntime` is the worker-safe half of the bridge: it owns only N-API
 //! `ThreadsafeFunction`s and can therefore turn an ArkTS `Promise<T>` into a Rust future.
 //! `BridgeMainThread` is deliberately a separate, non-cloneable capability. It is constructed
-//! only from an N-API `Env` on the render thread and is the sole route for synchronous plugins.
+//! only from an N-API `Env` on the Ability main thread and is the sole route for synchronous plugins.
 //! This split makes it impossible to accidentally invoke a synchronous ArkTS plugin from a Rust
 //! worker through the public typed API.
 
@@ -305,6 +305,18 @@ pub trait BridgePlugin: Send + Sync + 'static {
     const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
 
+    /// Context gate for one ArkTS -> Rust main-thread event.
+    ///
+    /// Most events use the plugin-wide requirement. A plugin may narrow this only for an event
+    /// that provably does not touch the later platform object (for example process-global engine
+    /// registration performed after Ability creation but before any UI component exists).
+    fn required_contexts_for_main_thread_event(
+        &self,
+        _event_name: &str,
+    ) -> &'static [BridgeContextRequirement] {
+        Self::REQUIRED_CONTEXTS
+    }
+
     /// Handles a direct event emitted from ArkTS while its N-API environment is active.
     ///
     /// This hook is not an outbound plugin call: it is the only Rust callback path permitted to
@@ -331,6 +343,10 @@ pub trait BridgePlugin: Send + Sync + 'static {
 }
 
 trait RegisteredBridgePlugin: Send + Sync {
+    fn required_contexts_for_main_thread_event(
+        &self,
+        event_name: &str,
+    ) -> &'static [BridgeContextRequirement];
     fn on_main_thread_event<'env>(
         &self,
         event: BridgeMainThreadEvent<'env>,
@@ -342,6 +358,13 @@ impl<P> RegisteredBridgePlugin for P
 where
     P: BridgePlugin,
 {
+    fn required_contexts_for_main_thread_event(
+        &self,
+        event_name: &str,
+    ) -> &'static [BridgeContextRequirement] {
+        BridgePlugin::required_contexts_for_main_thread_event(self, event_name)
+    }
+
     fn on_main_thread_event<'env>(
         &self,
         event: BridgeMainThreadEvent<'env>,
@@ -390,6 +413,7 @@ impl BridgeContextReadiness {
 
 struct RegisteredPluginEntry {
     plugin: Arc<dyn RegisteredBridgePlugin>,
+    typed: Arc<dyn Any + Send + Sync>,
     required_contexts: &'static [BridgeContextRequirement],
     /// Once a plugin becomes ready in one Ability session it keeps receiving that session's
     /// teardown events even after its required context has already disappeared.
@@ -420,7 +444,9 @@ impl BridgePluginRegistry {
         P: BridgePlugin,
     {
         validate_plugin_contract::<P>()?;
-        let plugin: Arc<dyn RegisteredBridgePlugin> = Arc::new(plugin);
+        let plugin = Arc::new(plugin);
+        let registered: Arc<dyn RegisteredBridgePlugin> = plugin.clone();
+        let typed: Arc<dyn Any + Send + Sync> = plugin.clone();
         let replay = {
             let mut state = self
                 .state
@@ -441,7 +467,8 @@ impl BridgePluginRegistry {
             state.plugins.insert(
                 P::ID.to_owned(),
                 RegisteredPluginEntry {
-                    plugin: Arc::clone(&plugin),
+                    plugin: Arc::clone(&registered),
+                    typed,
                     required_contexts: P::REQUIRED_CONTEXTS,
                     activated,
                 },
@@ -450,9 +477,36 @@ impl BridgePluginRegistry {
         };
 
         for event in replay {
-            plugin.on_lifecycle(&event)?;
+            registered.on_lifecycle(&event)?;
         }
         Ok(())
+    }
+
+    /// Returns the concrete registered plugin while the registry retains module ownership.
+    pub fn registered<P>(&self) -> Result<Option<Arc<P>>>
+    where
+        P: BridgePlugin,
+    {
+        validate_plugin_contract::<P>()?;
+        let typed = {
+            let state = self
+                .state
+                .read()
+                .map_err(|_| Error::from_reason("Failed to read bridge plugin registry"))?;
+            state
+                .plugins
+                .get(P::ID)
+                .map(|entry| Arc::clone(&entry.typed))
+        };
+        let Some(typed) = typed else {
+            return Ok(None);
+        };
+        Arc::downcast::<P>(typed).map(Some).map_err(|_| {
+            Error::from_reason(format!(
+                "Bridge plugin '{}' is registered with a different Rust implementation type",
+                P::ID
+            ))
+        })
     }
 
     /// Delivers an ArkTS-originated direct event to its Rust plugin without allowing its N-API
@@ -478,7 +532,10 @@ impl BridgePluginRegistry {
                     event.plugin_id()
                 )));
             }
-            if !state.readiness.supports(entry.required_contexts) {
+            let event_requirements = entry
+                .plugin
+                .required_contexts_for_main_thread_event(event.name());
+            if !state.readiness.supports(event_requirements) {
                 return Err(Error::from_reason(format!(
                     "Bridge plugin '{}' received a main-thread event before its required context was ready",
                     event.plugin_id()
@@ -1074,7 +1131,7 @@ impl<'env> BridgeMainThread<'env> {
     }
 }
 
-/// Per-module worker-safe runtime. A re-render replaces it on the N-API main thread.
+/// Per-module worker-safe runtime owned by one NativeAbility bridge session.
 #[derive(Clone)]
 pub struct BridgeRuntime {
     client: BridgeClient,
@@ -1084,6 +1141,19 @@ pub struct BridgeRuntime {
 pub(crate) struct BridgeBindings {
     pub(crate) runtime: BridgeRuntime,
     pub(crate) main_thread_endpoint: MainThreadBridgeEndpoint,
+}
+
+/// Builds and installs one module's Ability-session transport before any component render is
+/// required. Kept public only for code generated by `#[ability]` in downstream crates.
+#[doc(hidden)]
+pub fn attach_bridge_session(
+    env: &Env,
+    bindings: napi_ohos::bindgen_prelude::ObjectRef,
+    owner: &str,
+    app: &crate::OpenHarmonyApp,
+) -> Result<()> {
+    let bindings = BridgeRuntime::from_bindings(env, &bindings)?;
+    app.begin_bridge_session(owner, bindings.runtime, bindings.main_thread_endpoint)
 }
 
 impl BridgeRuntime {
@@ -1283,6 +1353,24 @@ mod tests {
         const ID: &'static str = "test.plugin";
     }
 
+    struct StatefulPlugin {
+        value: AtomicUsize,
+    }
+
+    impl BridgePlugin for StatefulPlugin {
+        type Mode = AsyncBridge;
+
+        const ID: &'static str = "test.stateful";
+    }
+
+    struct WrongStatefulPluginType;
+
+    impl BridgePlugin for WrongStatefulPluginType {
+        type Mode = AsyncBridge;
+
+        const ID: &'static str = "test.stateful";
+    }
+
     static UI_CONTEXT_LIFECYCLES: AtomicUsize = AtomicUsize::new(0);
 
     struct UiContextPlugin;
@@ -1392,6 +1480,23 @@ mod tests {
         registry.register(TestPlugin).unwrap();
         assert_eq!(registry.len(), 1);
         assert!(registry.register(TestPlugin).is_err());
+    }
+
+    #[test]
+    fn registry_returns_the_same_typed_plugin_instance() {
+        let registry = BridgePluginRegistry::default();
+        registry
+            .register(StatefulPlugin {
+                value: AtomicUsize::new(7),
+            })
+            .unwrap();
+
+        let first = registry.registered::<StatefulPlugin>().unwrap().unwrap();
+        let second = registry.registered::<StatefulPlugin>().unwrap().unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        first.value.store(9, Ordering::SeqCst);
+        assert_eq!(second.value.load(Ordering::SeqCst), 9);
+        assert!(registry.registered::<WrongStatefulPluginType>().is_err());
     }
 
     #[test]

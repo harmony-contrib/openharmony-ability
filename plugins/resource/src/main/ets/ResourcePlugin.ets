@@ -2,7 +2,6 @@ import {
   AsyncPluginBase,
   BridgeCallContext,
   BridgeContextRequirement,
-  BridgeLifecycleEvent,
   BridgePluginHookContext,
   BridgeTypedValue,
 } from "@ohos-rs/ability";
@@ -15,23 +14,20 @@ const RESOURCE_MANAGER_READY_RESPONSE_TYPE = "ohos.resource.ResourceManagerReady
  * Resource manager wrapper plugin.
  *
  * This wrapper owns only the HarmonyOS `resourceManager` platform object. It pushes the object
- * to Rust once, on `ability-create`: the inbound event sink is attached right after
- * `module.init` in `NativeAbility.onCreate`, so no UI render is required. Rust converts the
+ * to Rust once from `onInstall`: the inbound event sink is attached before Ability activation,
+ * so no WindowStage or DefaultXComponent is required. Rust converts the
  * object to a native `NativeResourceManager` pointer inside the same N-API callback and
  * performs every subsequent read through the OpenHarmony C API — no ArkTS call is involved.
  *
- * The ArkTS wrapper remains session-scoped. Rust owns the process-wide native manager pointer;
- * sharing one mutable ArkTS plugin instance across sessions would overwrite its hook context.
+ * The ArkTS wrapper remains module/session-scoped. Its matching registered Rust plugin instance
+ * owns the native manager, so multiple native modules cannot overwrite each other's state.
  */
 export class ResourcePlugin extends AsyncPluginBase {
   readonly id = "ohos.resource";
   readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
-  onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
-    if (event.kind !== "ability-create") {
-      return;
-    }
+  override onInstall(context: BridgePluginHookContext): void {
     const manager = context.abilityContext?.resourceManager;
     if (manager === undefined) {
       throw new Error("ohos.resource requires abilityContext.resourceManager");

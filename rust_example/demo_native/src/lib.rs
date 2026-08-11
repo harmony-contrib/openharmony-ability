@@ -19,10 +19,11 @@ use napi_ohos::{Either, Env, Error, Result};
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{Event, InputEvent, NodeExt, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
+use openharmony_ability_plugin_app_control::AppControlBridgePlugin;
 use openharmony_ability_plugin_files::{
     dialog_type, FileDialogFilter, FileDialogOptions, FilesExt,
 };
-use openharmony_ability_plugin_permission::PermissionExt;
+use openharmony_ability_plugin_permission::{PermissionBridgePlugin, PermissionExt};
 use openharmony_ability_plugin_resource::{ResourceBridgePlugin, ResourceExt};
 use openharmony_ability_plugin_url::UrlExt;
 use openharmony_ability_plugin_webview::{
@@ -30,6 +31,7 @@ use openharmony_ability_plugin_webview::{
     WebviewDownloadStartResponse, WebviewExt, WebviewJavascriptProxyBuilder, WebviewProtocol,
     WebviewProtocolOptions, WebviewStyle,
 };
+use openharmony_ability_plugin_window::WindowBridgePlugin;
 
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
 static PERMISSION_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -49,7 +51,6 @@ static WEBVIEW_BINDINGS: LazyLock<Mutex<DemoWebviewBindings>> =
 const WEB_TAG: &str = "demo_webview";
 const COMPOSED_WEB_TAG: &str = "demo_composed_webview";
 const BOTTOM_WEB_TAG: &str = "demo_bottom_webview";
-const SUB_WINDOW_WEB_TAG: &str = "demo_sub_window_webview";
 const WEB_SCHEME: &str = "demoweb";
 const WEB_URL: &str = "demoweb://index";
 const INDEX: &str = include_str!("index.html");
@@ -123,7 +124,7 @@ fn ensure_demo_webview_bindings(client: &WebviewClient) -> Result<()> {
 }
 
 /// Demo: reports whether the `ohos.resource` wrapper has pushed the native resource manager
-/// (it is installed on `ui-context-ready` after the native module is rendered).
+/// (it is installed from the Ability-scoped ArkTS `onInstall`, before UI rendering is required).
 #[napi]
 pub fn demo_resource_manager_ready() -> bool {
     current_app()
@@ -252,7 +253,7 @@ pub fn toggle_back_press_intercept() -> bool {
 }
 
 /// Creates a WebView through the WebView plugin. Without a parent container handle the ArkTS
-/// host mounts the WebView FrameNode into the session root (full-bleed default); it never touches
+/// host mounts the WebView FrameNode into this module's component root (full-bleed default); it never touches
 /// DefaultXComponent internals.
 #[napi]
 pub async fn create_demo_webview() -> Result<()> {
@@ -270,7 +271,7 @@ pub async fn create_demo_webview() -> Result<()> {
 
 /// Demonstrates the normalized composition model: an RS-layer container node is created through
 /// the built-in ohos.node plugin, the WebView FrameNode is attached under it via
-/// `parent_node(...)`, and the whole tree is mounted into the session root.
+/// `parent_node(...)`, and the whole tree is mounted into the module/component root.
 #[napi]
 pub async fn create_composed_demo_webview() -> Result<()> {
     let client = current_app()?.webview()?;
@@ -311,23 +312,6 @@ pub async fn create_bottom_demo_webview() -> Result<()> {
                     visible: None,
                     background_color: Some("#00000000".to_owned()),
                 })
-                .url(WEB_URL),
-        )
-        .await?;
-    Ok(())
-}
-
-/// Creates a WebView inside the sub-window surface (`window_key = "sub"`). The sub window page
-/// places a second `DefaultXComponent({ windowKey: "sub" })`, and this WebView mounts into that
-/// window's own node tree instead of the main window's.
-#[napi]
-pub async fn create_sub_window_webview() -> Result<()> {
-    let client = current_app()?.webview()?;
-    client
-        .create(
-            WebviewCreateRequest::new(SUB_WINDOW_WEB_TAG)
-                .window_key("sub")
-                .transparent(true)
                 .url(WEB_URL),
         )
         .await?;
@@ -385,15 +369,21 @@ fn openharmony_app(app: OpenHarmonyApp) {
     if let Err(error) = app.register_plugin(raw_bridge::DemoTypedPlugin) {
         hilog_info!(format!("failed to register demo.raw facade: {error}").as_str());
     }
+    app.register_plugin(PermissionBridgePlugin)
+        .expect("demo permission facade must be registered");
+    app.register_plugin(AppControlBridgePlugin)
+        .expect("demo app-control facade must be registered");
     app.register_plugin(WebviewBridgePlugin)
         .expect("demo WebView facade must be registered");
+    app.register_plugin(WindowBridgePlugin)
+        .expect("demo Window facade must be registered");
     if let Err(error) = app.register_plugin(openharmony_ability_plugin_url::UrlBridgePlugin) {
         hilog_info!(format!("failed to register url facade: {error}").as_str());
     }
     if let Err(error) = app.register_plugin(openharmony_ability_plugin_files::FilesBridgePlugin) {
         hilog_info!(format!("failed to register files facade: {error}").as_str());
     }
-    if let Err(error) = app.register_plugin(ResourceBridgePlugin) {
+    if let Err(error) = app.register_plugin(ResourceBridgePlugin::new()) {
         hilog_info!(format!("failed to register resource facade: {error}").as_str());
     }
     hilog_info!(format!(
