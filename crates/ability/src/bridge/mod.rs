@@ -3,7 +3,7 @@
 //! `BridgeRuntime` is the worker-safe half of the bridge: it owns only N-API
 //! `ThreadsafeFunction`s and can therefore turn an ArkTS `Promise<T>` into a Rust future.
 //! `BridgeMainThread` is deliberately a separate, non-cloneable capability. It is constructed
-//! only from an N-API `Env` on the render thread and is the sole route for synchronous plugins.
+//! only from an N-API `Env` on the Ability main thread and is the sole route for synchronous plugins.
 //! This split makes it impossible to accidentally invoke a synchronous ArkTS plugin from a Rust
 //! worker through the public typed API.
 
@@ -305,6 +305,18 @@ pub trait BridgePlugin: Send + Sync + 'static {
     const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
 
+    /// Context gate for one ArkTS -> Rust main-thread event.
+    ///
+    /// Most events use the plugin-wide requirement. A plugin may narrow this only for an event
+    /// that provably does not touch the later platform object (for example process-global engine
+    /// registration performed after Ability creation but before any UI component exists).
+    fn required_contexts_for_main_thread_event(
+        &self,
+        _event_name: &str,
+    ) -> &'static [BridgeContextRequirement] {
+        Self::REQUIRED_CONTEXTS
+    }
+
     /// Handles a direct event emitted from ArkTS while its N-API environment is active.
     ///
     /// This hook is not an outbound plugin call: it is the only Rust callback path permitted to
@@ -331,6 +343,10 @@ pub trait BridgePlugin: Send + Sync + 'static {
 }
 
 trait RegisteredBridgePlugin: Send + Sync {
+    fn required_contexts_for_main_thread_event(
+        &self,
+        event_name: &str,
+    ) -> &'static [BridgeContextRequirement];
     fn on_main_thread_event<'env>(
         &self,
         event: BridgeMainThreadEvent<'env>,
@@ -342,6 +358,13 @@ impl<P> RegisteredBridgePlugin for P
 where
     P: BridgePlugin,
 {
+    fn required_contexts_for_main_thread_event(
+        &self,
+        event_name: &str,
+    ) -> &'static [BridgeContextRequirement] {
+        BridgePlugin::required_contexts_for_main_thread_event(self, event_name)
+    }
+
     fn on_main_thread_event<'env>(
         &self,
         event: BridgeMainThreadEvent<'env>,
@@ -390,7 +413,11 @@ impl BridgeContextReadiness {
 
 struct RegisteredPluginEntry {
     plugin: Arc<dyn RegisteredBridgePlugin>,
+    typed: Arc<dyn Any + Send + Sync>,
     required_contexts: &'static [BridgeContextRequirement],
+    /// Once a plugin becomes ready in one Ability session it keeps receiving that session's
+    /// teardown events even after its required context has already disappeared.
+    activated: bool,
 }
 
 #[derive(Default)]
@@ -398,6 +425,7 @@ struct BridgePluginRegistryState {
     plugins: BTreeMap<String, RegisteredPluginEntry>,
     readiness: BridgeContextReadiness,
     lifecycle_history: Vec<PluginLifecycleEvent>,
+    session_active: bool,
 }
 
 /// Registration point for Rust facades that consume ArkTS plugin events and lifecycle changes.
@@ -416,7 +444,9 @@ impl BridgePluginRegistry {
         P: BridgePlugin,
     {
         validate_plugin_contract::<P>()?;
-        let plugin: Arc<dyn RegisteredBridgePlugin> = Arc::new(plugin);
+        let plugin = Arc::new(plugin);
+        let registered: Arc<dyn RegisteredBridgePlugin> = plugin.clone();
+        let typed: Arc<dyn Any + Send + Sync> = plugin.clone();
         let replay = {
             let mut state = self
                 .state
@@ -428,7 +458,8 @@ impl BridgePluginRegistry {
                     P::ID
                 )));
             }
-            let replay = if state.readiness.supports(P::REQUIRED_CONTEXTS) {
+            let activated = state.session_active && state.readiness.supports(P::REQUIRED_CONTEXTS);
+            let replay = if activated {
                 state.lifecycle_history.clone()
             } else {
                 Vec::new()
@@ -436,17 +467,46 @@ impl BridgePluginRegistry {
             state.plugins.insert(
                 P::ID.to_owned(),
                 RegisteredPluginEntry {
-                    plugin: Arc::clone(&plugin),
+                    plugin: Arc::clone(&registered),
+                    typed,
                     required_contexts: P::REQUIRED_CONTEXTS,
+                    activated,
                 },
             );
             replay
         };
 
         for event in replay {
-            plugin.on_lifecycle(&event)?;
+            registered.on_lifecycle(&event)?;
         }
         Ok(())
+    }
+
+    /// Returns the concrete registered plugin while the registry retains module ownership.
+    pub fn registered<P>(&self) -> Result<Option<Arc<P>>>
+    where
+        P: BridgePlugin,
+    {
+        validate_plugin_contract::<P>()?;
+        let typed = {
+            let state = self
+                .state
+                .read()
+                .map_err(|_| Error::from_reason("Failed to read bridge plugin registry"))?;
+            state
+                .plugins
+                .get(P::ID)
+                .map(|entry| Arc::clone(&entry.typed))
+        };
+        let Some(typed) = typed else {
+            return Ok(None);
+        };
+        Arc::downcast::<P>(typed).map(Some).map_err(|_| {
+            Error::from_reason(format!(
+                "Bridge plugin '{}' is registered with a different Rust implementation type",
+                P::ID
+            ))
+        })
     }
 
     /// Delivers an ArkTS-originated direct event to its Rust plugin without allowing its N-API
@@ -466,7 +526,16 @@ impl BridgePluginRegistry {
                     event.plugin_id()
                 ))
             })?;
-            if !state.readiness.supports(entry.required_contexts) {
+            if !state.session_active {
+                return Err(Error::from_reason(format!(
+                    "Bridge plugin '{}' received a main-thread event outside an active Ability session",
+                    event.plugin_id()
+                )));
+            }
+            let event_requirements = entry
+                .plugin
+                .required_contexts_for_main_thread_event(event.name());
+            if !state.readiness.supports(event_requirements) {
                 return Err(Error::from_reason(format!(
                     "Bridge plugin '{}' received a main-thread event before its required context was ready",
                     event.plugin_id()
@@ -483,37 +552,85 @@ impl BridgePluginRegistry {
                 .state
                 .write()
                 .map_err(|_| Error::from_reason("Failed to read bridge plugin registry"))?;
-            let previous = state.readiness;
+
+            // The OpenHarmony process may keep the native module loaded while recreating the
+            // Ability. Lifecycle replay is session-scoped: never expose events from the previous
+            // Ability instance to a plugin activated in the next one.
+            if matches!(event, PluginLifecycleEvent::AbilityCreated { .. }) {
+                state.readiness = BridgeContextReadiness::default();
+                state.lifecycle_history.clear();
+                state.session_active = true;
+                for entry in state.plugins.values_mut() {
+                    entry.activated = false;
+                }
+            } else if !state.session_active {
+                // A closing ArkTS hook or stale TSFN may complete after AbilityDestroyed. Late
+                // events belong to no session and must never reach process-wide Rust plugins.
+                return Ok(());
+            }
+
             state.readiness.observe(&event);
             if state.lifecycle_history.len() >= MAX_LIFECYCLE_HISTORY {
-                state.lifecycle_history.remove(0);
+                if let Some(index) = state.lifecycle_history.iter().position(|recorded| {
+                    matches!(
+                        recorded,
+                        PluginLifecycleEvent::ConfigurationUpdated
+                            | PluginLifecycleEvent::MemoryLevel { .. }
+                            | PluginLifecycleEvent::WindowStageEvent { .. }
+                    )
+                }) {
+                    state.lifecycle_history.remove(index);
+                } else {
+                    // Preserve AbilityCreated at index 0 when possible, while keeping the replay
+                    // buffer genuinely bounded even across repeated structural context cycles.
+                    let index = usize::from(state.lifecycle_history.len() > 1);
+                    state.lifecycle_history.remove(index);
+                }
             }
             state.lifecycle_history.push(event.clone());
 
-            state
-                .plugins
-                .values()
-                .filter_map(|entry| {
-                    let was_ready = previous.supports(entry.required_contexts);
-                    let is_ready = state.readiness.supports(entry.required_contexts);
-                    let events = if !was_ready && is_ready {
-                        state.lifecycle_history.clone()
-                    } else if was_ready {
-                        vec![event.clone()]
-                    } else {
-                        Vec::new()
-                    };
-                    (!events.is_empty()).then(|| (Arc::clone(&entry.plugin), events))
-                })
-                .collect::<Vec<_>>()
+            let readiness = state.readiness;
+            let history = state.lifecycle_history.clone();
+            let session_active = state.session_active;
+            let mut deliveries = Vec::new();
+            for entry in state.plugins.values_mut() {
+                let events = if entry.activated {
+                    vec![event.clone()]
+                } else if session_active && readiness.supports(entry.required_contexts) {
+                    entry.activated = true;
+                    history.clone()
+                } else {
+                    Vec::new()
+                };
+                if !events.is_empty() {
+                    deliveries.push((Arc::clone(&entry.plugin), events));
+                }
+            }
+
+            if matches!(event, PluginLifecycleEvent::AbilityDestroyed) {
+                state.session_active = false;
+                state.lifecycle_history.clear();
+                for entry in state.plugins.values_mut() {
+                    entry.activated = false;
+                }
+            }
+            deliveries
         };
 
+        let mut first_error = None;
         for (plugin, events) in deliveries {
             for event in events {
-                plugin.on_lifecycle(&event)?;
+                if let Err(error) = plugin.on_lifecycle(&event) {
+                    // A faulty lifecycle subscriber must not prevent the other plugins from
+                    // observing teardown. Preserve the first error for diagnostics after every
+                    // delivery has had a chance to run.
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
             }
         }
-        Ok(())
+        first_error.map_or(Ok(()), Err)
     }
 
     #[cfg(test)]
@@ -1014,7 +1131,7 @@ impl<'env> BridgeMainThread<'env> {
     }
 }
 
-/// Per-module worker-safe runtime. A re-render replaces it on the N-API main thread.
+/// Per-module worker-safe runtime owned by one NativeAbility bridge session.
 #[derive(Clone)]
 pub struct BridgeRuntime {
     client: BridgeClient,
@@ -1024,6 +1141,19 @@ pub struct BridgeRuntime {
 pub(crate) struct BridgeBindings {
     pub(crate) runtime: BridgeRuntime,
     pub(crate) main_thread_endpoint: MainThreadBridgeEndpoint,
+}
+
+/// Builds and installs one module's Ability-session transport before any component render is
+/// required. Kept public only for code generated by `#[ability]` in downstream crates.
+#[doc(hidden)]
+pub fn attach_bridge_session(
+    env: &Env,
+    bindings: napi_ohos::bindgen_prelude::ObjectRef,
+    owner: &str,
+    app: &crate::OpenHarmonyApp,
+) -> Result<()> {
+    let bindings = BridgeRuntime::from_bindings(env, &bindings)?;
+    app.begin_bridge_session(owner, bindings.runtime, bindings.main_thread_endpoint)
 }
 
 impl BridgeRuntime {
@@ -1204,7 +1334,10 @@ fn validate_identifier(label: &str, value: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
 
     use super::{
         validate_identifier, validate_wire_call, AsyncBridge, BridgeCallOptions,
@@ -1220,6 +1353,24 @@ mod tests {
         const ID: &'static str = "test.plugin";
     }
 
+    struct StatefulPlugin {
+        value: AtomicUsize,
+    }
+
+    impl BridgePlugin for StatefulPlugin {
+        type Mode = AsyncBridge;
+
+        const ID: &'static str = "test.stateful";
+    }
+
+    struct WrongStatefulPluginType;
+
+    impl BridgePlugin for WrongStatefulPluginType {
+        type Mode = AsyncBridge;
+
+        const ID: &'static str = "test.stateful";
+    }
+
     static UI_CONTEXT_LIFECYCLES: AtomicUsize = AtomicUsize::new(0);
 
     struct UiContextPlugin;
@@ -1233,6 +1384,52 @@ mod tests {
 
         fn on_lifecycle(&self, _event: &PluginLifecycleEvent) -> Result<(), napi_ohos::Error> {
             UI_CONTEXT_LIFECYCLES.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct RecordingUiContextPlugin {
+        events: Arc<Mutex<Vec<PluginLifecycleEvent>>>,
+    }
+
+    impl BridgePlugin for RecordingUiContextPlugin {
+        type Mode = AsyncBridge;
+
+        const ID: &'static str = "test.recording-ui-context";
+        const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
+            &[BridgeContextRequirement::UiContext];
+
+        fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<(), napi_ohos::Error> {
+            self.events.lock().unwrap().push(event.clone());
+            Ok(())
+        }
+    }
+
+    struct FailingLifecyclePlugin;
+
+    impl BridgePlugin for FailingLifecyclePlugin {
+        type Mode = AsyncBridge;
+
+        const ID: &'static str = "test.a-failing-lifecycle";
+
+        fn on_lifecycle(&self, _event: &PluginLifecycleEvent) -> Result<(), napi_ohos::Error> {
+            Err(napi_ohos::Error::from_reason(
+                "intentional lifecycle failure",
+            ))
+        }
+    }
+
+    struct HealthyLifecyclePlugin {
+        deliveries: Arc<AtomicUsize>,
+    }
+
+    impl BridgePlugin for HealthyLifecyclePlugin {
+        type Mode = AsyncBridge;
+
+        const ID: &'static str = "test.z-healthy-lifecycle";
+
+        fn on_lifecycle(&self, _event: &PluginLifecycleEvent) -> Result<(), napi_ohos::Error> {
+            self.deliveries.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
@@ -1286,6 +1483,23 @@ mod tests {
     }
 
     #[test]
+    fn registry_returns_the_same_typed_plugin_instance() {
+        let registry = BridgePluginRegistry::default();
+        registry
+            .register(StatefulPlugin {
+                value: AtomicUsize::new(7),
+            })
+            .unwrap();
+
+        let first = registry.registered::<StatefulPlugin>().unwrap().unwrap();
+        let second = registry.registered::<StatefulPlugin>().unwrap().unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        first.value.store(9, Ordering::SeqCst);
+        assert_eq!(second.value.load(Ordering::SeqCst), 9);
+        assert!(registry.registered::<WrongStatefulPluginType>().is_err());
+    }
+
+    #[test]
     fn registry_replays_lifecycle_only_after_required_context_is_ready() {
         UI_CONTEXT_LIFECYCLES.store(0, Ordering::SeqCst);
         let registry = BridgePluginRegistry::default();
@@ -1300,5 +1514,189 @@ mod tests {
             .dispatch_lifecycle(PluginLifecycleEvent::UiContextReady)
             .unwrap();
         assert_eq!(UI_CONTEXT_LIFECYCLES.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn activated_plugin_receives_teardown_and_next_session_has_fresh_history() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let registry = BridgePluginRegistry::default();
+        registry
+            .register(RecordingUiContextPlugin {
+                events: Arc::clone(&events),
+            })
+            .unwrap();
+
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::AbilityCreated {
+                restored_state: "first".to_owned(),
+            })
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::WindowStageCreated)
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::UiContextReady)
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::UiContextDestroyed)
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::WindowStageDestroyed)
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::AbilityDestroyed)
+            .unwrap();
+
+        assert_eq!(events.lock().unwrap().len(), 6);
+
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::AbilityCreated {
+                restored_state: "second".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(events.lock().unwrap().len(), 6);
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::UiContextReady)
+            .unwrap();
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 8);
+        assert_eq!(
+            events[6..],
+            [
+                PluginLifecycleEvent::AbilityCreated {
+                    restored_state: "second".to_owned(),
+                },
+                PluginLifecycleEvent::UiContextReady,
+            ]
+        );
+    }
+
+    #[test]
+    fn lifecycle_replay_keeps_session_anchors_during_transient_event_pressure() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let registry = BridgePluginRegistry::default();
+        registry
+            .register(RecordingUiContextPlugin {
+                events: Arc::clone(&events),
+            })
+            .unwrap();
+
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::AbilityCreated {
+                restored_state: "anchor".to_owned(),
+            })
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::WindowStageCreated)
+            .unwrap();
+        for event_type in 0..32 {
+            registry
+                .dispatch_lifecycle(PluginLifecycleEvent::WindowStageEvent { event_type })
+                .unwrap();
+        }
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::UiContextReady)
+            .unwrap();
+
+        let events = events.lock().unwrap();
+        assert!(matches!(
+            events.first(),
+            Some(PluginLifecycleEvent::AbilityCreated { restored_state }) if restored_state == "anchor"
+        ));
+        assert_eq!(
+            events.get(1),
+            Some(&PluginLifecycleEvent::WindowStageCreated)
+        );
+        assert_eq!(events.last(), Some(&PluginLifecycleEvent::UiContextReady));
+    }
+
+    #[test]
+    fn lifecycle_replay_remains_bounded_during_context_recreation() {
+        let registry = BridgePluginRegistry::default();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::AbilityCreated {
+                restored_state: "bounded".to_owned(),
+            })
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::WindowStageCreated)
+            .unwrap();
+        for _ in 0..32 {
+            registry
+                .dispatch_lifecycle(PluginLifecycleEvent::UiContextReady)
+                .unwrap();
+            registry
+                .dispatch_lifecycle(PluginLifecycleEvent::UiContextDestroyed)
+                .unwrap();
+        }
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::UiContextReady)
+            .unwrap();
+
+        let events = Arc::new(Mutex::new(Vec::new()));
+        registry
+            .register(RecordingUiContextPlugin {
+                events: Arc::clone(&events),
+            })
+            .unwrap();
+
+        let events = events.lock().unwrap();
+        assert!(events.len() <= super::MAX_LIFECYCLE_HISTORY);
+        assert!(matches!(
+            events.first(),
+            Some(PluginLifecycleEvent::AbilityCreated { restored_state }) if restored_state == "bounded"
+        ));
+        assert_eq!(events.last(), Some(&PluginLifecycleEvent::UiContextReady));
+    }
+
+    #[test]
+    fn lifecycle_registry_ignores_events_after_ability_destroy() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let registry = BridgePluginRegistry::default();
+        registry
+            .register(RecordingUiContextPlugin {
+                events: Arc::clone(&events),
+            })
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::AbilityCreated {
+                restored_state: String::new(),
+            })
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::UiContextReady)
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::AbilityDestroyed)
+            .unwrap();
+        let deliveries_after_destroy = events.lock().unwrap().len();
+
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::WindowStageCreated)
+            .unwrap();
+        registry
+            .dispatch_lifecycle(PluginLifecycleEvent::UiContextReady)
+            .unwrap();
+        assert_eq!(events.lock().unwrap().len(), deliveries_after_destroy);
+    }
+
+    #[test]
+    fn lifecycle_failure_does_not_block_other_plugins() {
+        let healthy_deliveries = Arc::new(AtomicUsize::new(0));
+        let registry = BridgePluginRegistry::default();
+        registry.register(FailingLifecyclePlugin).unwrap();
+        registry
+            .register(HealthyLifecyclePlugin {
+                deliveries: Arc::clone(&healthy_deliveries),
+            })
+            .unwrap();
+
+        assert!(registry
+            .dispatch_lifecycle(PluginLifecycleEvent::AbilityCreated {
+                restored_state: String::new(),
+            })
+            .is_err());
+        assert_eq!(healthy_deliveries.load(Ordering::SeqCst), 1);
     }
 }

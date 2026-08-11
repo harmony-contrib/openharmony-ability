@@ -34,6 +34,11 @@ Notes:
 1. Every lifecycle override should call the `super` implementation first.
 2. `moduleName` is the bare module name; the runtime resolves it to `lib<moduleName>.so`.
 3. `moduleName` can also be `string[]` when one ability needs multiple native modules.
+4. Each `DefaultXComponent` uses exactly one distinct module. A module cannot be attached to two
+   components or two active Ability sessions at the same time.
+5. The module bridge transport is opened during `NativeAbility.onCreate`, independently from its
+   optional component render. Ability-only plugins therefore work before appearance and across a
+   component disappear/reappear cycle; UI plugins still wait for `ui-context-ready`.
 
 ### `loadMode`
 
@@ -46,8 +51,10 @@ When using `sync`, add the corresponding library to `build-profile.json5` runtim
 
 ### `DefaultXComponent`
 
-`DefaultXComponent` loads the native module and binds the default native rendering surface. It
-also exposes the generic `xcomponent-overlay` node slot for capability plugins.
+`DefaultXComponent` loads one native module, binds its rendering surface, and owns that module's
+single node tree. An Ability can place several components in one or several windows by declaring
+several modules and assigning a different module to each component. A module's second concurrent
+component attachment is rejected.
 
 ```ts
 import { DefaultXComponent } from "@ohos-rs/ability";
@@ -67,19 +74,26 @@ struct Index {
 }
 ```
 
-### Plugins and node slots
+### Plugins and module-owned node trees
 
 Compose ArkTS plugin factories explicitly in `NativeAbility.bridgePlugins`. A capability that
-needs UI nodes mounts a `FrameNode` into a generic slot; the framework never embeds a WebView
-special case.
+needs UI nodes mounts a `FrameNode` into its module's component root (`context.appendChild`); the
+framework never embeds a WebView special case. Rust composes trees through opaque `ohos.node`
+handles; `FrameNode` values never cross the N-API boundary. One component may host multiple
+WebViews, distinguished by controller ID and mount key.
+
+`WindowStage` lifecycle remains Ability-wide. Window size, rect, avoid-area and keyboard events do
+not: each component host resolves the actual `Window` from its `UIContext` and forwards those
+events only to that component's native module. A sub-window module therefore never receives main
+window geometry by mistake.
 
 ```ts
-import { BridgeNodeHost, DefaultXComponent, NativeAbility } from "@ohos-rs/ability";
-import { createWebviewPlugin } from "@ohos-rs/ability-plugin-webview";
+import { DefaultXComponent, LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { WebviewPlugin } from "@ohos-rs/ability-plugin-webview";
 
 export default class EntryAbility extends NativeAbility {
-  public moduleName = "demo_native";
-  public bridgePlugins = [createWebviewPlugin()];
+  public moduleName = ["demo_native", "demo_sub_native"];
+  public bridgePlugins = [new LazyPlugin(() => new WebviewPlugin())];
 }
 
 @Entry
@@ -91,12 +105,10 @@ struct Page {
 
   build() {
     Stack() {
+      // Each component uses a distinct module and owns an independent tree.
       DefaultXComponent({ moduleName: "demo_native" })
-      BridgeNodeHost({
-        moduleName: "demo_native",
-        slotId: "webview-panel",
-        foreground: this.BusinessOverlay,
-      })
+      DefaultXComponent({ moduleName: "demo_sub_native" })
+      this.BusinessOverlay()
     }
   }
 }
@@ -133,24 +145,21 @@ JSON transport type.
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
-import Want from "@ohos.app.ability.Want";
-import { AbilityConstant } from "@kit.AbilityKit";
 import window from "@ohos.window";
 
 export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
   public defaultPage: boolean = false;
 
-  async onCreate(
-    want: Want,
-    launchParam: AbilityConstant.LaunchParam
+  protected override async loadWindowStageContent(
+    windowStage: window.WindowStage,
   ): Promise<void> {
-    super.onCreate(want, launchParam);
-  }
-
-  async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-    super.onWindowStageCreate(windowStage);
     await windowStage.loadContent("pages/Index");
   }
 }
 ```
+
+OpenHarmony does not await `onCreate` or `onWindowStageCreate`. Override the framework hook above
+for custom page loading; it runs inside the serialized, generation-checked WindowStage transaction.
+Declaring the platform callback itself `async` is not an ordering barrier and can render
+`DefaultXComponent` before its bridge session exists.

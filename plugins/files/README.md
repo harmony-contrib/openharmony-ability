@@ -33,7 +33,7 @@ export default class EntryAbility extends NativeAbility {
 Rust 侧还需注册 `FilesBridgePlugin`，并通过 `FilesExt::show_file_dialog` 发起调用。使用示例见
 [Rust facade README](../../crates/plugin-files/README.md)。
 
-## Factory 契约
+## Plugin 契约
 
 | 字段 | 值 |
 | --- | --- |

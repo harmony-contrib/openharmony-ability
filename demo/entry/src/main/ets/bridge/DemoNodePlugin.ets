@@ -1,13 +1,12 @@
 import { BuilderNode, FrameNode } from "@ohos.arkui.node";
 import {
   BridgeCallContext,
-  BridgeNodeSlot,
-  BridgeNodeSlotRegistry,
   BridgeTypedValue,
   BridgePluginContext,
-  DEFAULT_PLUGIN_NODE_SLOT,
+  BridgePluginHookContext,
   AsyncPluginBase,
   BridgeContextRequirement,
+  BridgeLifecycleEvent,
 } from "@ohos-rs/ability";
 
 interface BadgeData {
@@ -35,14 +34,25 @@ export class DemoNodePlugin extends AsyncPluginBase {
   readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
-  private slot?: BridgeNodeSlot;
+  private mounted = false;
 
-  onInstall(context: BridgePluginContext): void {
-    const slot = BridgeNodeSlotRegistry.require(
-      context.sessionId,
-      context.moduleName,
-      DEFAULT_PLUGIN_NODE_SLOT,
-    );
+  onInstall(context: BridgePluginHookContext): void {
+    this.mount(context);
+  }
+
+  override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
+    if (event.kind === "ui-context-destroy") {
+      // BridgeHost owns the detached tree and runs its cleanup; do not address a replacement
+      // window through this plugin's session-scoped context.
+      this.mounted = false;
+    } else if (event.kind === "ui-context-ready" && !this.mounted) {
+      this.mount(context);
+    }
+  }
+
+  private mount(context: BridgePluginContext): void {
+    // This module's component root exists before ui-context-ready, so plugins mount their
+    // nodes directly without slots, registries or readiness waiters.
     const node = new BuilderNode<[BadgeData]>(context.getUIContext());
     node.build(badgeBuilder, { title: "ordinary BuilderNode plugin" });
     const frameNode = node.getFrameNode();
@@ -50,8 +60,8 @@ export class DemoNodePlugin extends AsyncPluginBase {
       throw new Error("BuilderNode did not produce a FrameNode");
     }
     const mountedNode: FrameNode = frameNode;
-    slot.mount("demo.node-badge", mountedNode, () => mountedNode.dispose());
-    this.slot = slot;
+    context.appendChild("demo.node-badge", mountedNode, () => mountedNode.dispose());
+    this.mounted = true;
   }
 
   async invokeAsync(
@@ -62,8 +72,10 @@ export class DemoNodePlugin extends AsyncPluginBase {
     throw new Error(`Unsupported demo.node-badge action '${action}'`);
   }
 
-  onDispose(): void {
-    this.slot?.unmount("demo.node-badge");
-    this.slot = undefined;
+  onDispose(context: BridgePluginHookContext): void {
+    if (this.mounted) {
+      context.removeChild("demo.node-badge");
+      this.mounted = false;
+    }
   }
 }

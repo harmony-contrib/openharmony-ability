@@ -84,7 +84,7 @@ async function checkForUpdate(
         0x0000,
         "UpdaterPlugin",
         "getBundleInfoForSelf failed: %{public}s",
-        JSON.stringify(error),
+        String(error),
       );
     }
 

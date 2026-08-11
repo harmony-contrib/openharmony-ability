@@ -60,6 +60,9 @@ impl AbilityInitContext {
 pub struct OpenHarmonyAppInner {
     pub(crate) raw_window: Option<RawWindow>,
     pub(crate) xcomponent: Option<XComponent>,
+    /// Owner token of this native module's one active DefaultXComponent render.
+    render_owner: Option<String>,
+    surface_active: bool,
 
     state: Vec<u8>,
     save_state: bool,
@@ -117,6 +120,8 @@ impl OpenHarmonyAppInner {
         OpenHarmonyAppInner {
             raw_window: None,
             xcomponent: None,
+            render_owner: None,
+            surface_active: false,
             state: vec![],
             save_state: false,
             id,
@@ -160,6 +165,64 @@ impl OpenHarmonyAppInner {
         }
     }
 
+    fn claim_render_owner(&mut self, owner: &str) -> Result<()> {
+        if self.render_owner.is_some() {
+            return Err(Error::from_reason(
+                "This native module already has an active DefaultXComponent render owner",
+            ));
+        }
+        self.render_owner = Some(owner.to_owned());
+        self.surface_active = false;
+        Ok(())
+    }
+
+    fn owns_render(&self, owner: &str) -> bool {
+        self.render_owner.as_deref() == Some(owner)
+    }
+
+    fn activate_surface(&mut self, owner: &str, raw_window: Option<RawWindow>, rect: Rect) -> bool {
+        if !self.owns_render(owner) || self.surface_active {
+            return false;
+        }
+        self.raw_window = raw_window;
+        self.rect = rect;
+        self.surface_active = true;
+        true
+    }
+
+    fn update_surface_rect(&mut self, owner: &str, rect: Rect) -> bool {
+        if !self.owns_render(owner) || !self.surface_active {
+            return false;
+        }
+        self.rect = rect;
+        true
+    }
+
+    fn deactivate_surface(&mut self, owner: &str) -> bool {
+        if !self.owns_render(owner) || !self.surface_active {
+            return false;
+        }
+        self.raw_window = None;
+        self.rect = Rect::default();
+        self.surface_active = false;
+        true
+    }
+
+    fn release_render_owner(&mut self, owner: &str) -> Option<bool> {
+        if !self.owns_render(owner) {
+            return None;
+        }
+        let surface_was_active = self.surface_active;
+        self.render_owner = None;
+        self.surface_active = false;
+        self.raw_window = None;
+        self.xcomponent = None;
+        self.rect = Rect::default();
+        self.window_rect = Rect::default();
+        self.avoid_areas.clear();
+        Some(surface_was_active)
+    }
+
     pub fn content_rect(&self) -> Rect {
         self.rect
     }
@@ -196,14 +259,21 @@ impl OpenHarmonyAppInner {
 type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>;
 type BackPressInterceptor = Arc<RefCell<Option<Box<dyn FnMut() -> bool + Sync + Send>>>>;
 
+/// Transport endpoints owned by one NativeAbility/module session. This lifetime is deliberately
+/// independent from the module's optional DefaultXComponent render surface.
+struct ActiveBridgeSession {
+    owner: String,
+    runtime: BridgeRuntime,
+    main_thread_endpoint: MainThreadBridgeEndpoint,
+}
+
 #[derive(Clone)]
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: EventLoop,
     pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
-    bridge_runtime: Arc<RwLock<Option<BridgeRuntime>>>,
-    bridge_main_thread: Arc<RwLock<Option<MainThreadBridgeEndpoint>>>,
+    bridge_session: Arc<RwLock<Option<ActiveBridgeSession>>>,
     bridge_plugins: Arc<BridgePluginRegistry>,
     is_keyboard_show: Arc<Mutex<bool>>,
 }
@@ -255,8 +325,7 @@ impl OpenHarmonyApp {
             back_press_interceptor: Arc::new(RefCell::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
             ime: Arc::new(RefCell::new(None)),
-            bridge_runtime: Arc::new(RwLock::new(None)),
-            bridge_main_thread: Arc::new(RwLock::new(None)),
+            bridge_session: Arc::new(RwLock::new(None)),
             bridge_plugins: Arc::new(BridgePluginRegistry::default()),
             is_keyboard_show: Arc::new(Mutex::new(false)),
         }
@@ -302,19 +371,103 @@ impl OpenHarmonyApp {
         self.init_context().preferred_locales
     }
 
+    pub(crate) fn begin_render(&self, owner: &str, xcomponent: XComponent) -> Result<()> {
+        let bridge_active = self
+            .bridge_session
+            .read()
+            .map_err(|_| Error::from_reason("Failed to read native module bridge session"))?
+            .is_some();
+        if !bridge_active {
+            return Err(Error::from_reason(
+                "A DefaultXComponent cannot render outside an active NativeAbility module session",
+            ));
+        }
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|_| Error::from_reason("Failed to claim native render owner"))?;
+        inner.claim_render_owner(owner)?;
+        inner.xcomponent = Some(xcomponent);
+        Ok(())
+    }
+
+    pub(crate) fn activate_render_surface(
+        &self,
+        owner: &str,
+        raw_window: Option<RawWindow>,
+        rect: Rect,
+    ) -> bool {
+        self.inner
+            .write()
+            .map(|mut inner| inner.activate_surface(owner, raw_window, rect))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn update_render_surface_rect(&self, owner: &str, rect: Rect) -> bool {
+        self.inner
+            .write()
+            .map(|mut inner| inner.update_surface_rect(owner, rect))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn is_render_surface_active(&self, owner: &str) -> bool {
+        self.inner
+            .read()
+            .map(|inner| inner.owns_render(owner) && inner.surface_active)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn deactivate_render_surface(&self, owner: &str) -> bool {
+        let deactivated = self
+            .inner
+            .write()
+            .map(|mut inner| inner.deactivate_surface(owner))
+            .unwrap_or(false);
+        if deactivated {
+            self.ime.borrow_mut().take();
+        }
+        deactivated
+    }
+
+    /// Releases one generated `#[ability]` render. A stale owner is ignored, so delayed cleanup
+    /// from an old DefaultXComponent cannot clear a replacement component's native state.
+    #[doc(hidden)]
+    pub fn release_render(&self, owner: &str) {
+        let surface_was_active = self
+            .inner
+            .write()
+            .ok()
+            .and_then(|mut inner| inner.release_render_owner(owner));
+        let Some(surface_was_active) = surface_was_active else {
+            return;
+        };
+        self.ime.borrow_mut().take();
+        if surface_was_active {
+            self.dispatch_surface_destroy();
+        }
+    }
+
+    pub(crate) fn dispatch_surface_destroy(&self) {
+        if let Some(ref mut handler) = *self.event_loop.borrow_mut() {
+            handler(Event::SurfaceDestroy);
+        }
+    }
+
     /// Returns the generic ArkTS bridge for this native module.
     ///
-    /// The runtime is initialized when the module is rendered. Calls can be made from a worker
-    /// thread; they are always marshalled back to ArkTS through a ThreadsafeFunction.
+    /// The runtime is initialized with the NativeAbility/module session, before any
+    /// DefaultXComponent is required. Calls can be made from a worker thread; they are always
+    /// marshalled back to ArkTS through a ThreadsafeFunction. Individual plugins still enforce
+    /// their declared Ability, WindowStage, or UIContext readiness.
     pub fn bridge(&self) -> Result<BridgeRuntime> {
-        self.bridge_runtime
+        self.bridge_session
             .read()
             .map_err(|_| Error::from_reason("Failed to read bridge runtime"))?
             .as_ref()
-            .cloned()
+            .map(|session| session.runtime.clone())
             .ok_or_else(|| {
                 Error::from_reason(
-                    "Bridge runtime is not ready. Call it after the NativeAbility XComponent is rendered.",
+                    "Bridge runtime is not ready. Call it during an active NativeAbility session.",
                 )
             })
     }
@@ -338,14 +491,17 @@ impl OpenHarmonyApp {
         operation: impl FnOnce(BridgeMainThread<'_>) -> Result<T>,
     ) -> Result<T> {
         let bridge = self
-            .bridge_main_thread
+            .bridge_session
             .read()
             .map_err(|_| Error::from_reason("Failed to read main-thread bridge"))?;
-        let endpoint = bridge.as_ref().ok_or_else(|| {
-            Error::from_reason(
-                "Synchronous bridge is not ready. Call it after the NativeAbility XComponent is rendered.",
+        let endpoint = bridge
+            .as_ref()
+            .map(|session| &session.main_thread_endpoint)
+            .ok_or_else(|| {
+                Error::from_reason(
+                "Synchronous bridge is not ready. Call it during an active NativeAbility session.",
             )
-        })?;
+            })?;
         operation(BridgeMainThread::new(env, endpoint))
     }
 
@@ -358,6 +514,14 @@ impl OpenHarmonyApp {
         P: BridgePlugin,
     {
         self.bridge_plugins.register(plugin)
+    }
+
+    /// Returns the concrete Rust plugin instance registered for this native module.
+    pub fn registered_plugin<P>(&self) -> Result<Option<Arc<P>>>
+    where
+        P: BridgePlugin,
+    {
+        self.bridge_plugins.registered::<P>()
     }
 
     #[doc(hidden)]
@@ -373,16 +537,46 @@ impl OpenHarmonyApp {
         self.bridge_plugins.dispatch_lifecycle(event)
     }
 
-    pub(crate) fn set_bridge_bindings(
+    pub(crate) fn begin_bridge_session(
         &self,
+        owner: &str,
         runtime: BridgeRuntime,
         main_thread_endpoint: MainThreadBridgeEndpoint,
-    ) {
-        if let Ok(mut guard) = self.bridge_runtime.write() {
-            guard.replace(runtime);
+    ) -> Result<()> {
+        if owner.is_empty() {
+            return Err(Error::from_reason("Bridge session owner must not be empty"));
         }
-        if let Ok(mut guard) = self.bridge_main_thread.write() {
-            guard.replace(main_thread_endpoint);
+        let mut session = self
+            .bridge_session
+            .write()
+            .map_err(|_| Error::from_reason("Failed to claim bridge session"))?;
+        if session.is_some() {
+            return Err(Error::from_reason(
+                "This native module already belongs to an active NativeAbility bridge session",
+            ));
+        }
+        *session = Some(ActiveBridgeSession {
+            owner: owner.to_owned(),
+            runtime,
+            main_thread_endpoint,
+        });
+        Ok(())
+    }
+
+    /// Releases only the matching Ability/module transport. A delayed stale teardown cannot
+    /// clear endpoints installed for a later session.
+    #[doc(hidden)]
+    pub fn release_bridge_session(&self, owner: &str) {
+        let released = self.bridge_session.write().ok().and_then(|mut session| {
+            if session.as_ref().map(|active| active.owner.as_str()) != Some(owner) {
+                return None;
+            }
+            session.take()
+        });
+        if released.is_some() {
+            if let Ok(mut inner) = self.inner.write() {
+                inner.set_init_context(AbilityInitContext::default());
+            }
         }
     }
 
@@ -539,4 +733,58 @@ pub fn take_initial_want_uri() -> String {
         .lock()
         .map(|mut u| std::mem::take(&mut *u))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OpenHarmonyAppInner;
+    use crate::{AvoidArea, AvoidAreaType, Rect};
+
+    #[test]
+    fn render_owner_rejects_overlap_and_ignores_stale_surface_callbacks() {
+        let mut inner = OpenHarmonyAppInner::new();
+        inner.claim_render_owner("owner-a").unwrap();
+        assert!(inner.claim_render_owner("owner-b").is_err());
+        assert!(!inner.activate_surface("owner-b", None, Rect::default()));
+        assert!(inner.activate_surface("owner-a", None, Rect::default()));
+        assert_eq!(inner.release_render_owner("owner-b"), None);
+        assert_eq!(inner.release_render_owner("owner-a"), Some(true));
+
+        inner.claim_render_owner("owner-b").unwrap();
+        assert!(inner.activate_surface("owner-b", None, Rect::default()));
+        assert!(!inner.deactivate_surface("owner-a"));
+        assert_eq!(inner.release_render_owner("owner-a"), None);
+        assert!(inner.owns_render("owner-b"));
+        assert!(inner.surface_active);
+    }
+
+    #[test]
+    fn surface_recreation_keeps_the_same_render_owner() {
+        let mut inner = OpenHarmonyAppInner::new();
+        inner.claim_render_owner("owner").unwrap();
+        assert!(inner.activate_surface("owner", None, Rect::default()));
+        assert!(inner.deactivate_surface("owner"));
+        assert!(inner.owns_render("owner"));
+        assert!(inner.activate_surface("owner", None, Rect::default()));
+        assert_eq!(inner.release_render_owner("owner"), Some(true));
+    }
+
+    #[test]
+    fn releasing_a_component_clears_its_window_scoped_cache() {
+        let mut inner = OpenHarmonyAppInner::new();
+        inner.claim_render_owner("owner").unwrap();
+        inner.window_rect = Rect {
+            top: 1,
+            left: 2,
+            width: 3,
+            height: 4,
+        };
+        inner
+            .avoid_areas
+            .insert(AvoidAreaType::Keyboard, AvoidArea::default());
+
+        assert_eq!(inner.release_render_owner("owner"), Some(false));
+        assert_eq!(inner.window_rect, Rect::default());
+        assert!(inner.avoid_areas.is_empty());
+    }
 }

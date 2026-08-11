@@ -1,3 +1,9 @@
+# 1.0.0-beta.1
+- **Breaking**: bridge version 2 requires `ui-context` and resolves the Window that owns this
+  module's `DefaultXComponent`, so sub-window modules no longer query the Ability's main window.
+
+---
+
 # 1.0.0-beta.0
 - Initial release: typed `ohos.window` plugin for window avoid-area queries.
 - Main-thread sync `get-avoid-area` action returning the complete avoid area.

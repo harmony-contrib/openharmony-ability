@@ -16,9 +16,9 @@ impl BridgePlugin for WindowBridgePlugin {
     type Mode = MainThreadSyncBridge;
 
     const ID: &'static str = "ohos.window";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
-        &[BridgeContextRequirement::WindowStage];
+        &[BridgeContextRequirement::UiContext];
 }
 
 #[napi(object)]
@@ -437,8 +437,19 @@ impl WindowCommandHelper for OpenHarmonyApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{AvoidAreaRequest, AvoidAreaResponse, RawAvoidArea, RawRect};
-    use openharmony_ability::{AvoidArea, BridgeNapiType, Rect};
+    use super::{AvoidAreaRequest, AvoidAreaResponse, RawAvoidArea, RawRect, WindowBridgePlugin};
+    use openharmony_ability::{
+        AvoidArea, BridgeContextRequirement, BridgeNapiType, BridgePlugin, Rect,
+    };
+
+    #[test]
+    fn window_plugin_targets_the_component_window() {
+        assert_eq!(WindowBridgePlugin::VERSION, 2);
+        assert_eq!(
+            WindowBridgePlugin::REQUIRED_CONTEXTS,
+            &[BridgeContextRequirement::UiContext]
+        );
+    }
 
     #[test]
     fn avoid_area_uses_stable_named_napi_contracts() {

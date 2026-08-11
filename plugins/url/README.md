@@ -32,7 +32,7 @@ export default class EntryAbility extends NativeAbility {
 Rust 侧还需注册 `UrlBridgePlugin`，并通过 `UrlExt::open_url` 发起调用。使用示例见
 [Rust facade README](../../crates/plugin-url/README.md)。
 
-## Factory 契约
+## Plugin 契约
 
 | 字段 | 值 |
 | --- | --- |

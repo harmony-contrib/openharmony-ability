@@ -4,14 +4,31 @@ import { Module } from "../ability/type";
 export class NativeModuleLoader {
   private static modules: Record<string, Module> = {};
 
+  private static isCurrentModule(value: ESObject): boolean {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      typeof value.init === "function" &&
+      typeof value.disposeBridge === "function" &&
+      typeof value.render === "function" &&
+      typeof value.disposeRender === "function" &&
+      typeof value.disposeAllRenders === "function"
+    );
+  }
+
   static resolveModuleNames(name: string | string[]): string[] {
     const names = Array.isArray(name) ? name : [name];
     const resolved: string[] = [];
 
     for (const item of names) {
       const moduleName = item.trim();
-      if (!moduleName || resolved.indexOf(moduleName) !== -1) {
-        continue;
+      if (!moduleName) {
+        throw new Error("moduleName entries must not be empty");
+      }
+      if (resolved.indexOf(moduleName) !== -1) {
+        throw new Error(
+          `Native module '${moduleName}' is declared more than once; every DefaultXComponent needs a distinct module`,
+        );
       }
       if (moduleName.startsWith("lib") || moduleName.endsWith(".so")) {
         throw new Error(`moduleName must not include lib/.so wrapper: ${moduleName}`);
@@ -42,17 +59,16 @@ export class NativeModuleLoader {
     }
 
     let module: Module | null = null;
-    if (typeof currentModule?.render === "function" && typeof currentModule?.init === "function") {
+    if (NativeModuleLoader.isCurrentModule(currentModule)) {
       module = currentModule as Module;
-    } else if (
-      typeof currentModule?.default?.render === "function" &&
-      typeof currentModule?.default?.init === "function"
-    ) {
+    } else if (NativeModuleLoader.isCurrentModule(currentModule?.default)) {
       module = currentModule.default as Module;
     }
 
     if (!module) {
-      throw new Error(`${libraryName} is not a valid dynamic library`);
+      throw new Error(
+        `${libraryName} does not implement the current native module session/render contract`,
+      );
     }
 
     NativeModuleLoader.modules[resolvedModuleName] = module;

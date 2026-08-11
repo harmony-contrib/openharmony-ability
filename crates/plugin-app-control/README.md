@@ -32,15 +32,15 @@ fn configure_ability(app: OpenHarmonyApp) {
 ```
 
 ```ts
-import { NativeAbility } from "@ohos-rs/ability";
-import { createAppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
+import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
 
 export default class EntryAbility extends NativeAbility {
-  public bridgePlugins = [createAppControlPlugin()];
+  public bridgePlugins = [new LazyPlugin(() => new AppControlPlugin())];
 }
 ```
 
-同时在应用 `oh-package.json5` 添加 `@ohos-rs/ability-plugin-app-control`。HAR 的具体依赖和 factory 说明见
+同时在应用 `oh-package.json5` 添加 `@ohos-rs/ability-plugin-app-control`。HAR 的具体依赖和 plugin 说明见
 [ArkTS README](../../plugins/app-control/README.md)。
 
 ## Rust 使用方式
@@ -64,8 +64,9 @@ pub fn terminate_application(env: Env, code: i32) -> Result<()> {
 ## 线程与生命周期限制
 
 - 该插件不是 async API：禁止在 Rust worker、`async` future、`spawn` 任务或 `block_on` 中调用。
-- `BridgeMainThread` 会校验活跃 N-API environment；若 `DefaultXComponent` 尚未 render、Ability context
-  未就绪或 `Env` 不匹配，调用会立即报错。
+- `BridgeMainThread` 会校验活跃 N-API environment；bridge transport 在 native module session 初始化时
+  建立，不依赖 `DefaultXComponent`。若 Ability context 未就绪、session 已关闭或 `Env` 不匹配，调用会
+  立即报错。
 - ArkTS 调用 `process.ProcessManager.exit(code)`。一旦系统实际结束进程，后续业务逻辑不应依赖继续执行。
 - `accepted = false` 会被 Rust facade 转换为错误，不能静默忽略。
 

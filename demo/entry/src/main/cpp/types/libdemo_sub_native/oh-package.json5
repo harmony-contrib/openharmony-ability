@@ -1,0 +1,6 @@
+{
+  "name": "libdemo_sub_native.so",
+  "version": "1.0.0",
+  "description": "Type declarations for the secondary native module demo",
+  "main": "Index.d.ts",
+}

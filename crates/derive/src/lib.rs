@@ -5,7 +5,8 @@ use syn::ItemFn;
 /// Defines one native ability module.
 ///
 /// The attribute no longer accepts `webview` or `protocol` arguments. WebView is an application
-/// plugin with an explicit ArkTS host slot, rather than a framework-level render special case.
+/// plugin that mounts into this module's component root, rather than a framework-level render
+/// special case.
 #[proc_macro_attribute]
 pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
     if !attr.is_empty() {
@@ -26,12 +27,52 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[napi_derive_ohos::napi]
         pub fn render<'a>(
             env: &'a napi_ohos::Env,
-            bindings: napi_ohos::bindgen_prelude::ObjectRef,
             #[napi(ts_arg_type = "NodeContent")] slot: openharmony_ability::arkui::ArkUIHandle,
+            render_owner: String,
         ) -> napi_ohos::Result<()> {
-            let root = openharmony_ability::render(env, bindings, slot, (*APP).clone())?;
-            ROOT_NODE.replace(Some(root));
+            if render_owner.is_empty() {
+                return Err(napi_ohos::Error::from_reason("renderOwner must not be empty"));
+            }
+            if ROOT_NODE.with(|node| node.borrow().is_some()) {
+                return Err(napi_ohos::Error::from_reason(
+                    "This native module is already rendered by another DefaultXComponent; use a distinct native module for every active component",
+                ));
+            }
+            let root = openharmony_ability::render(
+                env,
+                slot,
+                render_owner.clone(),
+                (*APP).clone(),
+            )?;
+            ROOT_NODE.with(|node| *node.borrow_mut() = Some((render_owner, root)));
             Ok(())
+        }
+
+        #[napi_derive_ohos::napi]
+        pub fn dispose_render(render_owner: String) {
+            ROOT_NODE.with(|node| {
+                let owns_render = node
+                    .borrow()
+                    .as_ref()
+                    .map(|(owner, _)| owner == &render_owner)
+                    .unwrap_or(false);
+                if owns_render {
+                    let root = node.borrow_mut().take();
+                    drop(root);
+                    (*APP).release_render(&render_owner);
+                }
+            });
+        }
+
+        #[napi_derive_ohos::napi]
+        pub fn dispose_all_renders() {
+            ROOT_NODE.with(|node| {
+                let root = node.borrow_mut().take();
+                if let Some((owner, root)) = root {
+                    drop(root);
+                    (*APP).release_render(&owner);
+                }
+            });
         }
     };
 
@@ -43,9 +84,32 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             static APP: std::sync::LazyLock<openharmony_ability::OpenHarmonyApp> =
                 std::sync::LazyLock::new(openharmony_ability::OpenHarmonyApp::new);
+            static APP_CONFIGURED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+            struct BridgeSessionInitGuard {
+                owner: Option<String>,
+            }
+
+            impl BridgeSessionInitGuard {
+                fn new(owner: String) -> Self {
+                    Self { owner: Some(owner) }
+                }
+
+                fn disarm(&mut self) {
+                    self.owner = None;
+                }
+            }
+
+            impl Drop for BridgeSessionInitGuard {
+                fn drop(&mut self) {
+                    if let Some(owner) = self.owner.take() {
+                        (*APP).release_bridge_session(&owner);
+                    }
+                }
+            }
 
             thread_local! {
-                pub static ROOT_NODE: std::cell::RefCell<Option<openharmony_ability::arkui::RootNode>> = std::cell::RefCell::new(None);
+                pub static ROOT_NODE: std::cell::RefCell<Option<(String, openharmony_ability::arkui::RootNode)>> = std::cell::RefCell::new(None);
             }
 
             #[napi_derive_ohos::napi]
@@ -56,11 +120,12 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[napi_derive_ohos::napi]
             pub fn init<'a>(
                 env: &'a napi_ohos::Env,
+                bindings: napi_ohos::bindgen_prelude::ObjectRef,
+                bridge_owner: String,
                 #[napi(ts_arg_type = "AbilityInitContext")]
                 context: Option<napi_ohos::bindgen_prelude::Object<'a>>,
             ) -> napi_ohos::Result<openharmony_ability::ApplicationLifecycle<'a>> {
                 let init_context = openharmony_ability::AbilityInitContext::from_object(context.as_ref())?;
-
                 // Initialize version information from ArkTS side
                 openharmony_ability::version::init(
                     init_context.sdk_api_version.unwrap_or(0),
@@ -71,11 +136,23 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                     openharmony_ability::version::sdk_api_version(),
                     openharmony_ability::version::distribution_api_version(),
                 );
-
+                openharmony_ability::attach_bridge_session(env, bindings, &bridge_owner, &APP)?;
+                let mut bridge_guard = BridgeSessionInitGuard::new(bridge_owner);
                 (*APP).set_init_context(init_context);
+                // A native module can outlive one UIAbility instance. Configure its process-wide
+                // Rust plugin registry exactly once, while still refreshing the per-session init
+                // context and lifecycle handle on every Ability recreation.
+                APP_CONFIGURED.get_or_init(|| #fn_name((*APP).clone()));
                 let lifecycle_handle = openharmony_ability::create_lifecycle_handle(env, (*APP).clone())?;
-                #fn_name((*APP).clone());
+                bridge_guard.disarm();
                 Ok(lifecycle_handle)
+            }
+
+            /// Releases the Ability-session transport without touching this module's independent
+            /// DefaultXComponent render owner. Stale owners are ignored.
+            #[napi_derive_ohos::napi]
+            pub fn dispose_bridge(bridge_owner: String) {
+                (*APP).release_bridge_session(&bridge_owner);
             }
 
             /// Synchronous ArkTS platform callback -> Rust plugin decision port.

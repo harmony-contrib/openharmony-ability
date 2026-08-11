@@ -25,6 +25,10 @@ interface FileDialogOptions {
   filters: FileDialogFilter[];
 }
 
+interface DocumentViewPickerWithSelectedIndex {
+  getSelectedIndex(): number;
+}
+
 class FileDialogResponse {
   readonly files: string[];
   readonly filter: number;
@@ -108,7 +112,10 @@ async function showFileDialog(
     const files = await documentPicker.save(saveOptions);
     let filter = -1;
     if (deviceInfo.sdkApiVersion >= 14 && supportsFolderSelection()) {
-      filter = documentPicker.getSelectedIndex();
+      // Keep the package compatible with API 12 while using the API 14 method only after the
+      // runtime capability check. The narrow adapter prevents the static checker from rejecting
+      // an otherwise guarded call solely because compatibleSdkVersion is lower than 14.
+      filter = (documentPicker as DocumentViewPickerWithSelectedIndex).getSelectedIndex();
     }
     return new FileDialogResponse(files, filter);
   }

@@ -1,16 +1,15 @@
 import { WebHeader } from "@kit.ArkUI";
-import { UIContext } from "@ohos.arkui.UIContext";
-import { BuilderNode, FrameNode } from "@ohos.arkui.node";
+import { BusinessError } from "@kit.BasicServicesKit";
+import { BuilderNode } from "@ohos.arkui.node";
 import webview from "@ohos.web.webview";
 import {
   BridgeCallContext,
-  BridgeNodeSlot,
-  BridgeNodeSlotRegistry,
   BridgeTypedValue,
   BridgePluginContext,
-  DEFAULT_PLUGIN_NODE_SLOT,
+  BridgePluginHookContext,
   AsyncPluginBase,
   BridgeContextRequirement,
+  BridgeLifecycleEvent,
 } from "@ohos-rs/ability";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
@@ -34,14 +33,11 @@ const DOWNLOAD_START_RESPONSE_TYPE = "ohos.webview.DownloadStartResponse";
 const DOWNLOAD_END_EVENT_TYPE = "ohos.webview.DownloadEndEvent";
 const TITLE_CHANGE_EVENT_TYPE = "ohos.webview.TitleChangeEvent";
 const ENGINE_LIFECYCLE_EVENT_TYPE = "ohos.webview.EngineLifecycleEvent";
+const ENGINE_LIFECYCLE_RESPONSE_TYPE = "ohos.webview.EngineLifecycleResponse";
 const CONTROLLER_EVENT_TYPE = "ohos.webview.ControllerEvent";
 const EVENT_ACKNOWLEDGEMENT_TYPE = "ohos.webview.EventAcknowledgement";
 
-/**
- * `setWebDebuggingAccess` is only present on newer ArkWeb SDKs. The plugin keeps its API 12
- * baseline by resolving this optional static API at runtime instead of exposing an API-20-only
- * symbol through the HAR type surface.
- */
+/** Optional static ArkWeb API resolved dynamically to preserve the API-12 package baseline. */
 interface WebviewDebuggingApi {
   setWebDebuggingAccess?: (enabled: boolean) => void;
   getWebDebuggingAccess?: () => boolean;
@@ -64,7 +60,9 @@ function enableWebDebuggingIfAvailable(): void {
 interface WebviewStyle {
   x?: number | string | null;
   y?: number | string | null;
+  /** Optional width override; defaults to the full container. Numbers are vp, strings are ArkUI lengths. */
   width?: number | string | null;
+  /** Optional height override; defaults to the full container. Numbers are vp, strings are ArkUI lengths. */
   height?: number | string | null;
   visible?: boolean | null;
   backgroundColor?: string | null;
@@ -84,9 +82,12 @@ interface WebviewEventOptions {
 
 interface WebviewCreatePayload {
   id: string;
-  slotId?: string;
-  /** Target OS sub-window id for per-window WebView creation (multi-window support). */
-  windowId?: string | null;
+  /**
+   * Optional opaque container handle issued by the built-in ohos.node plugin. When provided the
+   * WebView FrameNode is appended under that container instead of this module's component root,
+   * so an RS-layer node tree can adopt WebViews as children.
+   */
+  parentHandle?: number | null;
   url?: string | null;
   html?: string | null;
   style?: WebviewStyle | null;
@@ -102,7 +103,6 @@ interface WebviewCreatePayload {
 
 interface ControllerPayload {
   id: string;
-  slotId?: string | null;
   visible?: boolean | null;
   color?: string | null;
   url?: string | null;
@@ -113,12 +113,13 @@ interface ControllerPayload {
 
 interface ScriptPayload {
   id: string;
-  slotId?: string | null;
   script: string;
 }
 
 interface ManagedWebview extends WebviewCreatePayload {
   controller: WebviewController;
+  /** Process-unique ArkWeb controller tag; distinct from the module-local public ID. */
+  nativeTag: string;
   style: WebviewStyle;
   eventOptions: WebviewEventOptions;
   didInitialLoad: boolean;
@@ -130,6 +131,10 @@ interface ManagedWebview extends WebviewCreatePayload {
   onTitleChange: (title: string) => void;
   onDownloadStart: (url: string, tempPath: string | null) => WebviewDownloadStartResponse;
   onDownloadEnd: (url: string, tempPath: string | null, success: boolean) => void;
+  /** How this WebView was mounted: a parent-handle container or the component root. */
+  mountParentHandle: number | null;
+  /** Host-internal cleanup key; WebView IDs remain opaque business identifiers. */
+  mountKey: string;
 }
 
 interface ControllerWaiter {
@@ -229,11 +234,9 @@ class WebviewEntry {
 
 class WebviewCreatedResponse {
   readonly id: string;
-  readonly slotId: string;
 
-  constructor(id: string, slotId: string) {
+  constructor(id: string) {
     this.id = id;
-    this.slotId = slotId;
   }
 }
 
@@ -267,7 +270,6 @@ class WebviewBoolResponse {
 
 interface WebviewBoundsPayload {
   id: string;
-  slotId?: string | null;
   x: number;
   y: number;
   width: number;
@@ -276,19 +278,16 @@ interface WebviewBoundsPayload {
 
 interface WebviewCookiePayload {
   id: string;
-  slotId?: string | null;
   url: string;
   value: string;
 }
 
 interface WebviewSnapshotPayload {
   id: string;
-  slotId?: string | null;
 }
 
 interface WebviewBoolPayload {
   id: string;
-  slotId?: string | null;
   enabled?: boolean | null;
 }
 
@@ -305,7 +304,6 @@ interface PdfConfig {
 
 interface WebviewPdfPayload {
   id: string;
-  slotId?: string | null;
   path: string;
   config?: PdfConfig | null;
 }
@@ -406,10 +404,12 @@ class WebviewStringResponse {
 
 class WebviewNavigationRequest {
   readonly id: string;
+  readonly nativeTag: string;
   readonly url: string;
 
-  constructor(id: string, url: string) {
+  constructor(id: string, nativeTag: string, url: string) {
     this.id = id;
+    this.nativeTag = nativeTag;
     this.url = url;
   }
 }
@@ -420,11 +420,13 @@ interface WebviewNavigationResponse {
 
 class WebviewDownloadStartRequest {
   readonly id: string;
+  readonly nativeTag: string;
   readonly url: string;
   readonly tempPath: string | null;
 
-  constructor(id: string, url: string, tempPath: string | null) {
+  constructor(id: string, nativeTag: string, url: string, tempPath: string | null) {
     this.id = id;
+    this.nativeTag = nativeTag;
     this.url = url;
     this.tempPath = tempPath;
   }
@@ -437,12 +439,20 @@ interface WebviewDownloadStartResponse {
 
 class WebviewDownloadEndEvent {
   readonly id: string;
+  readonly nativeTag: string;
   readonly url: string;
   readonly tempPath: string | null;
   readonly success: boolean;
 
-  constructor(id: string, url: string, tempPath: string | null, success: boolean) {
+  constructor(
+    id: string,
+    nativeTag: string,
+    url: string,
+    tempPath: string | null,
+    success: boolean,
+  ) {
     this.id = id;
+    this.nativeTag = nativeTag;
     this.url = url;
     this.tempPath = tempPath;
     this.success = success;
@@ -451,27 +461,33 @@ class WebviewDownloadEndEvent {
 
 class WebviewTitleChangeEvent {
   readonly id: string;
+  readonly nativeTag: string;
   readonly title: string;
 
-  constructor(id: string, title: string) {
+  constructor(id: string, nativeTag: string, title: string) {
     this.id = id;
+    this.nativeTag = nativeTag;
     this.title = title;
   }
 }
 
 class WebviewEngineLifecycleEvent {
   readonly phase: string;
+  readonly schemes: WebviewSchemeDeclaration[];
 
-  constructor(phase: string) {
+  constructor(phase: string, schemes: WebviewSchemeDeclaration[]) {
     this.phase = phase;
+    this.schemes = schemes;
   }
 }
 
 class WebviewControllerEvent {
   readonly id: string;
+  readonly nativeTag: string;
 
-  constructor(id: string) {
+  constructor(id: string, nativeTag: string) {
     this.id = id;
+    this.nativeTag = nativeTag;
   }
 }
 
@@ -479,7 +495,19 @@ interface WebviewEventAcknowledgement {
   accepted: boolean;
 }
 
+interface WebviewSchemeDeclaration {
+  scheme: string;
+  options: number;
+}
+
+interface WebviewEngineLifecycleResponse {
+  accepted: boolean;
+  schemes: WebviewSchemeDeclaration[];
+}
+
 let webEngineInitialized = false;
+let webEngineSchemes: WebviewSchemeDeclaration[] = [];
+let nextWebviewNativeTagId = 1;
 
 /**
  * Custom schemes must be registered by Rust before this call. The two events let the Rust
@@ -487,22 +515,32 @@ let webEngineInitialized = false;
  * declaration set afterwards.
  */
 function ensureWebEngineInitialized(context: BridgePluginContext): void {
-  if (webEngineInitialized) {
-    return;
+  if (!webEngineInitialized) {
+    // Seal and validate every module's declarations before any module mutates ArkWeb's global
+    // scheme registry.
+    const sealedSchemes = notifyWebEngineAcrossModules(
+      context,
+      "seal-engine-schemes",
+      ENGINE_LIFECYCLE_EVENT_TYPE,
+      new WebviewEngineLifecycleEvent("seal-engine-schemes", []) as ESObject,
+    );
+    notifyWebEngineAcrossModules(
+      context,
+      "before-engine-init",
+      ENGINE_LIFECYCLE_EVENT_TYPE,
+      new WebviewEngineLifecycleEvent("before-engine-init", sealedSchemes) as ESObject,
+    );
+    webview.WebviewController.initializeWebEngine();
+    webEngineSchemes = sealedSchemes;
+    webEngineInitialized = true;
   }
-  notifyNative(
-    context,
-    "before-engine-init",
-    ENGINE_LIFECYCLE_EVENT_TYPE,
-    new WebviewEngineLifecycleEvent("before-engine-init") as ESObject,
-  );
-  webview.WebviewController.initializeWebEngine();
-  webEngineInitialized = true;
-  notifyNative(
+  // ArkWeb is process-global, while every native module has independent Rust static state.
+  // Notify every active module, including those whose DefaultXComponent has not appeared yet.
+  notifyWebEngineAcrossModules(
     context,
     "engine-initialized",
     ENGINE_LIFECYCLE_EVENT_TYPE,
-    new WebviewEngineLifecycleEvent("engine-initialized") as ESObject,
+    new WebviewEngineLifecycleEvent("engine-initialized", webEngineSchemes) as ESObject,
   );
 }
 
@@ -575,6 +613,15 @@ function ensureCreatePayload(payload: WebviewCreatePayload): WebviewCreatePayloa
   ) {
     throw new Error("WebView transparent must be a boolean");
   }
+  if (
+    payload.parentHandle !== undefined &&
+    payload.parentHandle !== null &&
+    (typeof payload.parentHandle !== "number" ||
+      !Number.isInteger(payload.parentHandle) ||
+      payload.parentHandle <= 0)
+  ) {
+    throw new Error("WebView parentHandle must be a positive integer ohos.node handle");
+  }
   normalizeEventOptions(payload.eventOptions);
   return payload;
 }
@@ -603,6 +650,22 @@ function normalizeEventOptions(
   };
 }
 
+function styleLength(
+  value: number | string | null | undefined,
+  description: string,
+): number | string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "number" && typeof value !== "string") {
+    throw new Error(description + " must be a number or an ArkUI length string");
+  }
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new Error(description + " must be finite");
+  }
+  return value;
+}
+
 function normalizeStyle(
   style: WebviewStyle | null | undefined,
   transparent: boolean | null | undefined,
@@ -620,11 +683,13 @@ function normalizeStyle(
   if (style.y !== undefined && style.y !== null) {
     normalized.y = style.y;
   }
-  if (style.width !== undefined && style.width !== null) {
-    normalized.width = style.width;
+  const width = styleLength(style.width, "WebView style.width");
+  if (width !== null) {
+    normalized.width = width;
   }
-  if (style.height !== undefined && style.height !== null) {
-    normalized.height = style.height;
+  const height = styleLength(style.height, "WebView style.height");
+  if (height !== null) {
+    normalized.height = height;
   }
   if (style.visible !== undefined && style.visible !== null) {
     normalized.visible = style.visible;
@@ -655,33 +720,18 @@ function headersOf(headers?: Record<string, string> | null): WebHeader[] {
   return result;
 }
 
-function withSlotId(payload: WebviewCreatePayload, slotId: string): WebviewCreatePayload {
-  const copied: WebviewCreatePayload = {
-    id: payload.id,
-    slotId,
-    windowId: payload.windowId,
-    url: payload.url,
-    html: payload.html,
-    style: payload.style,
-    javascriptEnabled: payload.javascriptEnabled,
-    devtools: payload.devtools,
-    userAgent: payload.userAgent,
-    autoplay: payload.autoplay,
-    initializationScripts: payload.initializationScripts,
-    headers: payload.headers,
-    transparent: payload.transparent,
-    eventOptions: payload.eventOptions,
-  };
-  return copied;
-}
-
-function navigationDecision(context: BridgePluginContext, id: string, url: string): boolean {
+function navigationDecision(
+  context: BridgePluginContext,
+  id: string,
+  nativeTag: string,
+  url: string,
+): boolean {
   try {
     const response = context.invokeNativeSync(
       "navigation-request",
       NAVIGATION_REQUEST_TYPE,
       NAVIGATION_RESPONSE_TYPE,
-      new WebviewNavigationRequest(id, url) as ESObject,
+      new WebviewNavigationRequest(id, nativeTag, url) as ESObject,
     ) as WebviewNavigationResponse;
     if (
       response === null ||
@@ -702,6 +752,7 @@ function navigationDecision(context: BridgePluginContext, id: string, url: strin
 function downloadStartDecision(
   context: BridgePluginContext,
   id: string,
+  nativeTag: string,
   url: string,
   tempPath: string | null,
 ): WebviewDownloadStartResponse {
@@ -710,7 +761,7 @@ function downloadStartDecision(
       "download-start",
       DOWNLOAD_START_REQUEST_TYPE,
       DOWNLOAD_START_RESPONSE_TYPE,
-      new WebviewDownloadStartRequest(id, url, tempPath) as ESObject,
+      new WebviewDownloadStartRequest(id, nativeTag, url, tempPath) as ESObject,
     ) as WebviewDownloadStartResponse;
     if (
       response === null ||
@@ -744,6 +795,61 @@ function notifyNative(
   if (response === null || typeof response !== "object" || response.accepted !== true) {
     throw new Error("WebView native notification was not accepted");
   }
+}
+
+function notifyWebEngineAcrossModules(
+  context: BridgePluginContext,
+  event: string,
+  requestTypeName: string,
+  value: ESObject,
+): WebviewSchemeDeclaration[] {
+  const responses: ESObject[] = context.invokeNativeSyncAcrossModules(
+    event,
+    requestTypeName,
+    ENGINE_LIFECYCLE_RESPONSE_TYPE,
+    value,
+  ) as ESObject[];
+  if (responses.length === 0) {
+    throw new Error(`WebView native notification '${event}' had no active module receiver`);
+  }
+  const schemeOptions: Map<string, number> = new Map();
+  for (let index: number = 0; index < responses.length; index++) {
+    const responseValue: ESObject = responses[index];
+    const response = responseValue as WebviewEngineLifecycleResponse;
+    if (
+      response === null ||
+      typeof response !== "object" ||
+      response.accepted !== true ||
+      !Array.isArray(response.schemes)
+    ) {
+      throw new Error(`WebView native notification '${event}' was not accepted by every module`);
+    }
+    for (const declaration of response.schemes) {
+      if (
+        declaration === null ||
+        typeof declaration !== "object" ||
+        !declaration.scheme ||
+        !Number.isInteger(declaration.options) ||
+        declaration.options < 0
+      ) {
+        throw new Error(`WebView native notification '${event}' returned an invalid scheme`);
+      }
+      if (
+        schemeOptions.has(declaration.scheme) &&
+        schemeOptions.get(declaration.scheme) !== declaration.options
+      ) {
+        throw new Error(
+          `WebView scheme '${declaration.scheme}' has conflicting options across native modules`,
+        );
+      }
+      schemeOptions.set(declaration.scheme, declaration.options);
+    }
+  }
+  const declarations: WebviewSchemeDeclaration[] = [];
+  for (const entry of schemeOptions.entries()) {
+    declarations.push({ scheme: entry[0], options: entry[1] });
+  }
+  return declarations;
 }
 
 function setupDownloadDelegate(data: ManagedWebview): void {
@@ -783,7 +889,7 @@ function BuildWebview(data: ManagedWebview) {
     .width(data.style.width ?? "100%")
     .height(data.style.height ?? "100%")
     .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
-    .backgroundColor(data.style.backgroundColor)
+    .backgroundColor(data.style.backgroundColor ?? undefined)
     .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
     .javaScriptAccess(data.javascriptEnabled ?? true)
     .mediaPlayGestureAccess(data.autoplay === true ? false : true)
@@ -819,21 +925,19 @@ function BuildWebview(data: ManagedWebview) {
 
 const webviewBuilder = wrapBuilder<[ManagedWebview]>(BuildWebview);
 
-/** One mounted surface per generic BridgeNodeSlot; it owns only ArkTS nodes. */
+/**
+ * One surface per WebviewPlugin instance (per session and module). It owns no root node of its
+ * own: every WebView is mounted either into this module's component root (full-bleed default) or
+ * under a caller-provided container handle from the built-in ohos.node plugin.
+ */
 class WebviewSurface {
-  private readonly root: FrameNode;
   private readonly entries: Map<string, WebviewEntry> = new Map();
   private disposed = false;
-  readonly slot: BridgeNodeSlot;
-  private readonly uiContext: UIContext;
+  private nextMountKey = 1;
   private readonly pluginContext: BridgePluginContext;
 
-  constructor(slot: BridgeNodeSlot, uiContext: UIContext, pluginContext: BridgePluginContext) {
-    this.slot = slot;
-    this.uiContext = uiContext;
+  constructor(pluginContext: BridgePluginContext) {
     this.pluginContext = pluginContext;
-    this.root = new FrameNode(uiContext);
-    slot.mount("ohos.webview.surface", this.root, () => this.dispose(false));
   }
 
   async create(payload: WebviewCreatePayload, callContext: BridgeCallContext): Promise<void> {
@@ -842,9 +946,15 @@ class WebviewSurface {
     this.remove(payload.id);
     const style = normalizeStyle(payload.style, payload.transparent);
     const eventOptions = normalizeEventOptions(payload.eventOptions);
+    const parentHandle = payload.parentHandle ?? null;
+    const instanceId = this.nextMountKey++;
+    const nativeTagId = nextWebviewNativeTagId++;
+    const nativeTag = `ohos.webview.${this.pluginContext.sessionId}.${this.pluginContext.moduleName}.${nativeTagId}`;
     const data: ManagedWebview = {
       id: payload.id,
-      slotId: payload.slotId,
+      mountParentHandle: parentHandle,
+      mountKey: `ohos.webview.${instanceId}`,
+      nativeTag,
       url: payload.url,
       html: payload.html,
       javascriptEnabled: payload.javascriptEnabled,
@@ -855,7 +965,7 @@ class WebviewSurface {
       headers: payload.headers,
       transparent: payload.transparent,
       eventOptions,
-      controller: new webview.WebviewController(payload.id) as WebviewController,
+      controller: new webview.WebviewController(nativeTag) as WebviewController,
       style,
       didInitialLoad: false,
       beginControllerAttach: (): boolean => false,
@@ -866,7 +976,7 @@ class WebviewSurface {
         if (eventOptions.navigationIntercept !== true) {
           return false;
         }
-        return navigationDecision(this.pluginContext, payload.id, url);
+        return navigationDecision(this.pluginContext, payload.id, nativeTag, url);
       },
       onTitleChange: (title: string): void => {
         if (eventOptions.titleChange !== true) {
@@ -877,14 +987,14 @@ class WebviewSurface {
             this.pluginContext,
             "title-change",
             TITLE_CHANGE_EVENT_TYPE,
-            new WebviewTitleChangeEvent(payload.id, title) as ESObject,
+            new WebviewTitleChangeEvent(payload.id, nativeTag, title) as ESObject,
           );
         } catch (error) {
           console.error("WebView title notification failed: " + String(error));
         }
       },
       onDownloadStart: (url: string, tempPath: string | null): WebviewDownloadStartResponse => {
-        return downloadStartDecision(this.pluginContext, payload.id, url, tempPath);
+        return downloadStartDecision(this.pluginContext, payload.id, nativeTag, url, tempPath);
       },
       onDownloadEnd: (url: string, tempPath: string | null, success: boolean): void => {
         if (eventOptions.downloadEnd !== true) {
@@ -895,17 +1005,18 @@ class WebviewSurface {
             this.pluginContext,
             "download-end",
             DOWNLOAD_END_EVENT_TYPE,
-            new WebviewDownloadEndEvent(payload.id, url, tempPath, success) as ESObject,
+            new WebviewDownloadEndEvent(payload.id, nativeTag, url, tempPath, success) as ESObject,
           );
         } catch (error) {
           console.error("WebView download-end notification failed: " + String(error));
         }
       },
     };
+    ensureWebEngineInitialized(callContext);
     if (payload.devtools) {
       enableWebDebuggingIfAvailable();
     }
-    const node = new BuilderNode<[ManagedWebview]>(this.uiContext);
+    const node = new BuilderNode<[ManagedWebview]>(this.pluginContext.getUIContext());
     const entry = new WebviewEntry(data, node);
     data.beginControllerAttach = (): boolean => entry.beginControllerAttach();
     data.notifyNativeControllerAttached = (): void => {
@@ -913,7 +1024,7 @@ class WebviewSurface {
         this.pluginContext,
         "controller-attached",
         CONTROLLER_EVENT_TYPE,
-        new WebviewControllerEvent(data.id) as ESObject,
+        new WebviewControllerEvent(data.id, data.nativeTag) as ESObject,
       );
     };
     data.markControllerReady = (): void => entry.markControllerReady();
@@ -923,7 +1034,19 @@ class WebviewSurface {
       node.build(webviewBuilder, data);
       this.entries.set(payload.id, entry);
       registered = true;
-      this.root.appendChild(node.getFrameNode());
+      const frameNode = node.getFrameNode();
+      if (frameNode === null) {
+        throw new Error(`Unable to build WebView '${payload.id}': no FrameNode`);
+      }
+      if (parentHandle !== null) {
+        this.pluginContext.getFrameNode(parentHandle).appendChild(frameNode);
+      } else {
+        this.pluginContext.appendChild(data.mountKey, frameNode, (): void => {
+          try {
+            frameNode.dispose();
+          } catch {}
+        });
+      }
     } catch (error) {
       if (registered) {
         this.remove(payload.id, entry);
@@ -972,7 +1095,13 @@ class WebviewSurface {
     return true;
   }
 
-  setCookie(id: string, url: string, value: string): boolean {
+  async setCookie(
+    id: string,
+    url: string,
+    value: string,
+    callContext: BridgeCallContext,
+  ): Promise<boolean> {
+    await this.controllerEntry(id, callContext);
     // `configCookieSync` requires API 14; on older devices the runtime check rejects the call.
     // oxlint-disable-next-line arkts/system-api-version
     const cookieApi = webview.WebCookieManager as ESObject as CookieApi;
@@ -1004,8 +1133,13 @@ class WebviewSurface {
     }
   }
 
-  async createPdf(id: string, path: string, config: PdfConfig | null): Promise<boolean> {
-    const entry = await this.controllerEntry(id, undefined);
+  async createPdf(
+    id: string,
+    path: string,
+    config: PdfConfig | null,
+    callContext: BridgeCallContext,
+  ): Promise<boolean> {
+    const entry = await this.controllerEntry(id, callContext);
     try {
       const pdfConfig: ESObject = {};
       if (config?.width !== undefined && config?.width !== null) {
@@ -1050,7 +1184,12 @@ class WebviewSurface {
     }
   }
 
-  setDebuggingAccess(enabled: boolean): boolean {
+  async setDebuggingAccess(
+    id: string,
+    enabled: boolean,
+    callContext: BridgeCallContext,
+  ): Promise<boolean> {
+    await this.controllerEntry(id, callContext);
     const debuggingApi = webview.WebviewController as ESObject as WebviewDebuggingApi;
     if (typeof debuggingApi.setWebDebuggingAccess !== "function") {
       throw new Error("Web debugging access is unavailable on this ArkWeb API level");
@@ -1059,7 +1198,8 @@ class WebviewSurface {
     return true;
   }
 
-  isDebuggingAccess(): boolean {
+  async isDebuggingAccess(id: string, callContext: BridgeCallContext): Promise<boolean> {
+    await this.controllerEntry(id, callContext);
     const debuggingApi = webview.WebviewController as ESObject as WebviewDebuggingApi;
     if (typeof debuggingApi.getWebDebuggingAccess !== "function") {
       return false;
@@ -1147,22 +1287,35 @@ class WebviewSurface {
     }
   }
 
-  remove(id: string, expected?: WebviewEntry): boolean {
+  remove(id: string, expected?: WebviewEntry, detachNode: boolean = true): boolean {
     const entry = this.entries.get(id);
     if (!entry || (expected !== undefined && entry !== expected)) {
       return false;
     }
     this.entries.delete(id);
     entry.failController(`WebView '${id}' was removed before its controller attached`);
-    try {
-      this.root.removeChild(entry.node.getFrameNode());
-    } catch {}
+    if (detachNode) {
+      const parentHandle = entry.data.mountParentHandle;
+      if (parentHandle !== null) {
+        const frameNode = entry.node.getFrameNode();
+        if (frameNode !== null) {
+          try {
+            this.pluginContext.getFrameNode(parentHandle).removeChild(frameNode);
+          } catch {}
+          try {
+            frameNode.dispose();
+          } catch {}
+        }
+      } else {
+        this.pluginContext.removeChild(entry.data.mountKey);
+      }
+    }
     try {
       notifyNative(
         this.pluginContext,
         "controller-removed",
         CONTROLLER_EVENT_TYPE,
-        new WebviewControllerEvent(id) as ESObject,
+        new WebviewControllerEvent(id, entry.data.nativeTag) as ESObject,
       );
     } catch (error) {
       console.error("WebView controller-removed notification failed: " + String(error));
@@ -1183,18 +1336,14 @@ class WebviewSurface {
     }
   }
 
-  dispose(unmount: boolean): void {
+  dispose(detachNodes: boolean = true): void {
     if (this.disposed) {
       return;
     }
     this.disposed = true;
     for (const id of Array.from(this.entries.keys())) {
-      this.remove(id);
+      this.remove(id, undefined, detachNodes);
     }
-    if (unmount) {
-      this.slot.unmount("ohos.webview.surface");
-    }
-    this.root.dispose();
   }
 
   private assertActive(): void {
@@ -1203,20 +1352,10 @@ class WebviewSurface {
     }
   }
 
-  private async controllerEntry(
-    id: string,
-    callContext: BridgeCallContext | undefined,
-  ): Promise<WebviewEntry> {
+  private async controllerEntry(id: string, callContext: BridgeCallContext): Promise<WebviewEntry> {
     const entry = this.entries.get(id);
     if (!entry) {
       throw new Error(`Unknown WebView controller '${id}'`);
-    }
-    if (callContext === undefined) {
-      await entry.waitForController((listener: () => void): (() => void) => {
-        listener();
-        return () => {};
-      });
-      return entry;
     }
     this.assertCallActive(callContext);
     await entry.waitForController(callContext.onCancel);
@@ -1231,76 +1370,26 @@ class WebviewSurface {
   }
 }
 
-function surfaceKey(context: BridgePluginContext, slotId: string): string {
-  return `${context.sessionId}:${context.moduleName}:${slotId}`;
-}
-
-class WebviewSurfaceRegistry {
-  private static readonly surfaces: Map<string, WebviewSurface> = new Map();
-
-  static get(context: BridgePluginContext, slotId: string): WebviewSurface {
-    const slot = BridgeNodeSlotRegistry.require(context.sessionId, context.moduleName, slotId);
-    return WebviewSurfaceRegistry.forSlot(context, slot);
-  }
-
-  /**
-   * `create` is asynchronous, so it may wait for a business-owned BridgeNodeHost that is still
-   * entering the page. Controller actions deliberately remain immediate and use `get` above.
-   */
-  static async getWhenMounted(
-    surfaceContext: BridgePluginContext,
-    slotId: string,
-    callContext: BridgeCallContext,
-  ): Promise<WebviewSurface> {
-    const slot = await BridgeNodeSlotRegistry.waitFor(
-      surfaceContext.sessionId,
-      surfaceContext.moduleName,
-      slotId,
-      callContext.onCancel,
-    );
-    if (!slot.isActive() || !surfaceContext.isActive() || !callContext.isActive()) {
-      throw new Error("Bridge session is no longer active while waiting for the WebView node slot");
-    }
-    return WebviewSurfaceRegistry.forSlot(surfaceContext, slot);
-  }
-
-  private static forSlot(context: BridgePluginContext, slot: BridgeNodeSlot): WebviewSurface {
-    const key = surfaceKey(context, slot.slotId);
-    const current = WebviewSurfaceRegistry.surfaces.get(key);
-    if (current && current.slot === slot) {
-      return current;
-    }
-    if (current !== undefined) {
-      current.dispose(false);
-    }
-    const surface = new WebviewSurface(slot, slot.uiContext, context);
-    WebviewSurfaceRegistry.surfaces.set(key, surface);
-    return surface;
-  }
-
-  static disposeSession(context: BridgePluginContext): void {
-    const prefix = `${context.sessionId}:${context.moduleName}:`;
-    const keys: string[] = Array.from(WebviewSurfaceRegistry.surfaces.keys());
-    for (const key of keys) {
-      if (!key.startsWith(prefix)) {
-        continue;
-      }
-      const surface = WebviewSurfaceRegistry.surfaces.get(key);
-      if (surface !== undefined) {
-        WebviewSurfaceRegistry.surfaces.delete(key);
-        surface.dispose(true);
-      }
-    }
-  }
-}
-
 export class WebviewPlugin extends AsyncPluginBase {
   readonly id = "ohos.webview";
-  readonly version = 1;
+  readonly version = 2;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
+  private surface?: WebviewSurface;
 
-  override onInstall(context: BridgePluginContext): void {
-    ensureWebEngineInitialized(context);
+  override onInstall(_context: BridgePluginHookContext): void {
+    this.surface = new WebviewSurface(this.getContext());
+  }
+
+  override onLifecycle(event: BridgeLifecycleEvent, _context: BridgePluginHookContext): void {
+    if (event.kind === "ui-context-destroy") {
+      // BridgeHost already detached this module's component and owns its node-tree cleanup.
+      this.surface?.dispose(false);
+      this.surface = undefined;
+      return;
+    }
+    if (event.kind === "ui-context-ready" && this.surface === undefined) {
+      this.surface = new WebviewSurface(this.getContext());
+    }
   }
 
   async invokeAsync(
@@ -1311,16 +1400,10 @@ export class WebviewPlugin extends AsyncPluginBase {
     if (!context.isActive()) {
       throw new Error("Bridge session is no longer active");
     }
+    const surface = this.requireSurface();
     if (action === "create") {
       const createPayload = ensureCreatePayload(parseCreatePayload(payload));
-      const slotId = createPayload.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      const payloadWithSlot = withSlotId(createPayload, slotId);
-      const surface = await WebviewSurfaceRegistry.getWhenMounted(
-        this.getContext(),
-        slotId,
-        context,
-      );
-      await surface.create(payloadWithSlot, context);
+      await surface.create(createPayload, context);
       if (!context.isActive()) {
         throw new Error(
           "Bridge session is no longer active after WebView controller initialization",
@@ -1328,30 +1411,74 @@ export class WebviewPlugin extends AsyncPluginBase {
       }
       return {
         typeName: CREATE_RESPONSE_TYPE,
-        value: new WebviewCreatedResponse(createPayload.id, slotId),
+        value: new WebviewCreatedResponse(createPayload.id),
       };
     }
 
     if (action === "evaluate-script") {
       const scriptPayload = parseScriptPayload(payload);
-      const slotId = scriptPayload.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      const result = await WebviewSurfaceRegistry.get(this.getContext(), slotId).evaluateScript(
-        scriptPayload.id,
-        scriptPayload.script,
-        context,
-      );
+      const result = await surface.evaluateScript(scriptPayload.id, scriptPayload.script, context);
       return {
         typeName: SCRIPT_RESPONSE_TYPE,
         value: new WebviewScriptResponse(result),
       };
     }
 
+    if (action === "set-bounds") {
+      const bounds = parseBoundsPayload(payload);
+      const accepted = surface.setBounds(
+        bounds.id,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+      );
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(accepted) };
+    }
+    if (action === "set-cookie") {
+      const cookie = parseCookiePayload(payload);
+      const accepted = await surface.setCookie(cookie.id, cookie.url, cookie.value, context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(accepted) };
+    }
+    if (action === "snapshot") {
+      const snapshotRequest = parseSnapshotPayload(payload);
+      const snapshot = await surface.snapshot(snapshotRequest.id, context);
+      return { typeName: SNAPSHOT_RESPONSE_TYPE, value: snapshot };
+    }
+    if (action === "set-debugging-access") {
+      const debugRequest = parseBoolPayload(payload);
+      if (typeof debugRequest.enabled !== "boolean") {
+        throw new Error("set-debugging-access.enabled must be a boolean");
+      }
+      const accepted = await surface.setDebuggingAccess(
+        debugRequest.id,
+        debugRequest.enabled,
+        context,
+      );
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(accepted) };
+    }
+    if (action === "is-debugging-access") {
+      const debugRequest = parseBoolPayload(payload);
+      return {
+        typeName: BOOL_RESPONSE_TYPE,
+        value: new WebviewBoolResponse(await surface.isDebuggingAccess(debugRequest.id, context)),
+      };
+    }
+    if (action === "create-pdf") {
+      const pdfRequest = parsePdfPayload(payload);
+      const accepted = await surface.createPdf(
+        pdfRequest.id,
+        pdfRequest.path,
+        pdfRequest.config ?? null,
+        context,
+      );
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(accepted) };
+    }
+
     const controllerPayload = parseControllerPayload(payload, action);
     if (!controllerPayload?.id?.trim()) {
       throw new Error("WebView controller id must not be empty");
     }
-    const slotId = controllerPayload.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-    const surface = WebviewSurfaceRegistry.get(this.getContext(), slotId);
     let accepted = false;
     if (action === "get-url") {
       return {
@@ -1409,52 +1536,6 @@ export class WebviewPlugin extends AsyncPluginBase {
         throw new Error("set-background-color.color must not be empty");
       }
       accepted = surface.setBackgroundColor(controllerPayload.id, controllerPayload.color);
-    } else if (action === "set-bounds") {
-      const bounds = parseBoundsPayload(payload);
-      const boundsSlotId = bounds.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      accepted = WebviewSurfaceRegistry.get(this.getContext(), boundsSlotId).setBounds(
-        bounds.id,
-        bounds.x,
-        bounds.y,
-        bounds.width,
-        bounds.height,
-      );
-    } else if (action === "set-cookie") {
-      const cookie = parseCookiePayload(payload);
-      const cookieSlotId = cookie.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      accepted = WebviewSurfaceRegistry.get(this.getContext(), cookieSlotId).setCookie(
-        cookie.id,
-        cookie.url,
-        cookie.value,
-      );
-    } else if (action === "snapshot") {
-      const snapshotRequest = parseSnapshotPayload(payload);
-      const snapshotSlotId = snapshotRequest.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      const snapshot = await WebviewSurfaceRegistry.get(this.getContext(), snapshotSlotId).snapshot(
-        snapshotRequest.id,
-        context,
-      );
-      return { typeName: SNAPSHOT_RESPONSE_TYPE, value: snapshot };
-    } else if (action === "set-debugging-access") {
-      const debugRequest = parseBoolPayload(payload);
-      if (typeof debugRequest.enabled !== "boolean") {
-        throw new Error("set-debugging-access.enabled must be a boolean");
-      }
-      accepted = surface.setDebuggingAccess(debugRequest.enabled);
-    } else if (action === "is-debugging-access") {
-      parseBoolPayload(payload);
-      return {
-        typeName: BOOL_RESPONSE_TYPE,
-        value: new WebviewBoolResponse(surface.isDebuggingAccess()),
-      };
-    } else if (action === "create-pdf") {
-      const pdfRequest = parsePdfPayload(payload);
-      const pdfSlotId = pdfRequest.slotId || DEFAULT_PLUGIN_NODE_SLOT;
-      accepted = await WebviewSurfaceRegistry.get(this.getContext(), pdfSlotId).createPdf(
-        pdfRequest.id,
-        pdfRequest.path,
-        pdfRequest.config ?? null,
-      );
     } else if (action === "remove") {
       accepted = surface.remove(controllerPayload.id);
     } else {
@@ -1463,8 +1544,20 @@ export class WebviewPlugin extends AsyncPluginBase {
     return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(accepted) };
   }
 
-  onDispose(context: BridgePluginContext): void {
-    WebviewSurfaceRegistry.disposeSession(context);
+  onDispose(): void {
+    const surface = this.surface;
+    this.surface = undefined;
+    surface?.dispose();
+  }
+
+  private requireSurface(): WebviewSurface {
+    const surface = this.surface;
+    if (surface === undefined) {
+      throw new Error(
+        "WebView surface is not installed; the ohos.webview plugin requires ui-context readiness",
+      );
+    }
+    return surface;
   }
 }
 

@@ -3,18 +3,16 @@
 //! The ArkTS wrapper (`plugins/resource`) owns the HarmonyOS `resourceManager` platform object
 //! and hands it to Rust through the inbound `resource-manager-ready` main-thread event. Rust
 //! converts the object to a native `NativeResourceManager` pointer **inside the same N-API
-//! callback** ([`ResourceManagerRef::from_bridge_value`]) and stores it globally; the ArkTS
-//! object is never retained. Every subsequent read (raw files, media, drawables, strings) calls
-//! the OpenHarmony C API directly through `ohos-resource-manager-binding` — no ArkTS round-trip
-//! is involved.
+//! callback** ([`ResourceManagerRef::from_bridge_value`]) and stores it in this native module's
+//! registered Rust plugin instance; the ArkTS object is never retained. Every subsequent read
+//! calls the OpenHarmony C API directly through `ohos-resource-manager-binding`.
 //!
-//! The wrapper pushes on the `ability-create` lifecycle event: the inbound event sink is
-//! attached right after `module.init` in `NativeAbility.onCreate` (not at UI render time), so
-//! plugins that only require `ability` can emit ArkTS → Rust events before rendering.
+//! The wrapper pushes from its Ability-scoped `onInstall` hook. It does not depend on a
+//! WindowStage or DefaultXComponent.
 
 use std::{
     ops::Deref,
-    sync::{Arc, LazyLock, RwLock},
+    sync::{Arc, RwLock},
 };
 
 use napi_derive_ohos::napi;
@@ -23,18 +21,14 @@ use ohos_resource_manager_binding::ResourceManager as NativeResourceManager;
 use ohos_resource_manager_sys::OH_ResourceManager_InitNativeResourceManager;
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeContextRequirement, BridgeMainThreadEvent,
-    BridgeNapiType, BridgePlugin, OpenHarmonyApp,
+    BridgeNapiType, BridgePlugin, OpenHarmonyApp, PluginLifecycleEvent,
 };
 
 pub use ohos_resource_manager_binding::ScreenDensity as ResourceScreenDensity;
 pub use ohos_resource_manager_binding::{IconType, RawDir, RawFile, RawFile64, RawFileError};
 
-/// Inbound event name emitted by the ArkTS wrapper when the native module is rendered.
+/// Inbound event name emitted when the Ability-scoped ArkTS wrapper is installed.
 pub const RESOURCE_MANAGER_READY_EVENT: &str = "resource-manager-ready";
-
-type ResourceManagerState = LazyLock<RwLock<Option<ResourceManager>>>;
-
-static RESOURCE_MANAGER: ResourceManagerState = LazyLock::new(|| RwLock::new(None));
 
 /// Cloneable handle to the HarmonyOS native resource manager installed by the `ohos.resource`
 /// plugin. Read operations deref to `ohos_resource_manager_binding::ResourceManager`.
@@ -44,7 +38,7 @@ static RESOURCE_MANAGER: ResourceManagerState = LazyLock::new(|| RwLock::new(Non
 /// The underlying `NativeResourceManager` methods are **not thread-safe** (documented by
 /// `ohos-resource-manager-binding`). The handle is cloneable across threads, but concurrent
 /// reads from multiple threads must be serialized by the caller (for example through a
-/// `Mutex<ResourceManager>`); this mirrors the pre-plugin global singleton semantics.
+/// `Mutex<ResourceManager>`).
 #[derive(Clone)]
 pub struct ResourceManager(Arc<NativeResourceManager>);
 
@@ -66,32 +60,40 @@ impl Deref for ResourceManager {
     }
 }
 
-/// Returns the global resource manager installed by the `ohos.resource` plugin, if the ArkTS
-/// wrapper has already pushed it on `ui-context-ready`.
-pub fn resource_manager() -> Option<ResourceManager> {
-    RESOURCE_MANAGER
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().cloned())
+/// Rust facade receiving and owning the native resource manager for one native module.
+#[derive(Default)]
+pub struct ResourceBridgePlugin {
+    resource_manager: RwLock<Option<ResourceManager>>,
 }
 
-fn set_resource_manager(resource_manager: Option<ResourceManager>) {
-    if let Ok(mut guard) = RESOURCE_MANAGER.write() {
-        *guard = resource_manager;
+impl ResourceBridgePlugin {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn resource_manager(&self) -> Option<ResourceManager> {
+        self.resource_manager
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned())
+    }
+
+    fn replace_resource_manager(&self, resource_manager: Option<ResourceManager>) -> Result<()> {
+        let mut state = self
+            .resource_manager
+            .write()
+            .map_err(|_| Error::from_reason("Failed to update native resource manager"))?;
+        *state = resource_manager;
+        Ok(())
     }
 }
-
-/// Rust facade receiving the ArkTS `resourceManager` object.
-pub struct ResourceBridgePlugin;
 
 impl BridgePlugin for ResourceBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.resource";
     const VERSION: u32 = 1;
-    // The wrapper pushes the platform object on `ability-create`. The inbound event sink is
-    // attached right after `module.init` in `NativeAbility.onCreate` and the Rust registry has
-    // observed `AbilityCreated` before ArkTS emits `ability-create`, so the gate is satisfied.
+    // The wrapper pushes during its Ability-scoped onInstall hook, before any component is needed.
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
 
@@ -102,13 +104,23 @@ impl BridgePlugin for ResourceBridgePlugin {
         match event.name() {
             RESOURCE_MANAGER_READY_EVENT => {
                 let ready = event.decode::<ResourceManagerRef>()?;
-                set_resource_manager(Some(ready.into_manager()));
+                self.replace_resource_manager(Some(ready.into_manager()))?;
                 event.respond(ResourceManagerReadyResponse { accepted: true })
             }
             other => Err(Error::from_reason(format!(
                 "Unsupported ohos.resource main-thread event '{other}'"
             ))),
         }
+    }
+
+    fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
+        if matches!(
+            event,
+            PluginLifecycleEvent::AbilityCreated { .. } | PluginLifecycleEvent::AbilityDestroyed
+        ) {
+            self.replace_resource_manager(None)?;
+        }
+        Ok(())
     }
 }
 
@@ -158,7 +170,7 @@ impl_bridge_napi_type!(
     "ohos.resource.ResourceManagerReadyResponse"
 );
 
-/// Extension trait exposing the global resource manager on `OpenHarmonyApp`.
+/// Extension trait exposing this native module's registered resource manager.
 ///
 /// ```no_run
 /// use openharmony_ability::OpenHarmonyApp;
@@ -176,14 +188,20 @@ pub trait ResourceExt {
 
 impl ResourceExt for OpenHarmonyApp {
     fn resource_manager(&self) -> Option<ResourceManager> {
-        resource_manager()
+        self.registered_plugin::<ResourceBridgePlugin>()
+            .ok()
+            .flatten()
+            .and_then(|plugin| plugin.resource_manager())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ResourceManagerReadyResponse, ResourceManagerRef, RESOURCE_MANAGER_READY_EVENT};
-    use openharmony_ability::BridgeNapiType;
+    use super::{
+        ResourceBridgePlugin, ResourceExt, ResourceManagerReadyResponse, ResourceManagerRef,
+        RESOURCE_MANAGER_READY_EVENT,
+    };
+    use openharmony_ability::{BridgeNapiType, OpenHarmonyApp};
 
     #[test]
     fn resource_uses_stable_named_napi_contracts() {
@@ -201,6 +219,12 @@ mod tests {
 
     #[test]
     fn resource_manager_is_unset_before_the_wrapper_pushes() {
-        assert!(super::resource_manager().is_none());
+        let app = OpenHarmonyApp::new();
+        app.register_plugin(ResourceBridgePlugin::new()).unwrap();
+        assert!(app.resource_manager().is_none());
+        assert!(app
+            .registered_plugin::<ResourceBridgePlugin>()
+            .unwrap()
+            .is_some());
     }
 }

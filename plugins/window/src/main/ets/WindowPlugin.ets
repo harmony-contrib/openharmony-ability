@@ -1,7 +1,7 @@
 import window from "@ohos.window";
 import {
   BridgeCallContext,
-  BridgePluginContext,
+  BridgePluginHookContext,
   BridgeTypedValue,
   BridgeContextRequirement,
   SyncPluginBase,
@@ -236,45 +236,41 @@ function parseFocusableRequest(payload: BridgeTypedValue): WindowFocusableReques
 class SubWindowRegistry {
   private static readonly windows: Map<string, window.Window> = new Map();
 
-  static put(sessionId: string, windowId: number, win: window.Window): void {
-    SubWindowRegistry.windows.set(`${sessionId}:${windowId}`, win);
+  private static key(sessionId: string, moduleName: string, windowId: number): string {
+    return `${sessionId}:${moduleName}:${windowId}`;
   }
 
-  static get(sessionId: string, windowId: number): window.Window {
-    const win = SubWindowRegistry.windows.get(`${sessionId}:${windowId}`);
+  static put(sessionId: string, moduleName: string, windowId: number, win: window.Window): void {
+    SubWindowRegistry.windows.set(SubWindowRegistry.key(sessionId, moduleName, windowId), win);
+  }
+
+  static get(sessionId: string, moduleName: string, windowId: number): window.Window {
+    const win = SubWindowRegistry.windows.get(
+      SubWindowRegistry.key(sessionId, moduleName, windowId),
+    );
     if (!win) {
-      throw new Error(`Unknown OS sub-window '${windowId}' for session '${sessionId}'`);
+      throw new Error(
+        `Unknown OS sub-window '${windowId}' for module '${moduleName}' in session '${sessionId}'`,
+      );
     }
     return win;
   }
 
-  static remove(sessionId: string, windowId: number): void {
-    SubWindowRegistry.windows.delete(`${sessionId}:${windowId}`);
+  static clear(sessionId: string, moduleName: string): void {
+    const prefix = `${sessionId}:${moduleName}:`;
+    const keys = Array.from(SubWindowRegistry.windows.keys());
+    for (const key of keys) {
+      if (key.startsWith(prefix)) {
+        SubWindowRegistry.windows.delete(key);
+      }
+    }
   }
 }
 
 export class WindowPlugin extends SyncPluginBase {
   readonly id = "ohos.window";
-  readonly version = 1;
-  readonly requires: BridgeContextRequirement[] = ["window-stage"];
-  private pluginContext?: BridgePluginContext;
-
-  override attachContext(context: BridgePluginContext): void {
-    super.attachContext(context);
-    this.pluginContext = context;
-  }
-
-  private requireContext(): BridgePluginContext {
-    const context = this.pluginContext;
-    if (context === undefined) {
-      throw new Error(`Bridge plugin '${this.id}' was used before its context was attached`);
-    }
-    return context;
-  }
-
-  private dynamic(win: window.Window): ESObject {
-    return win as ESObject;
-  }
+  readonly version = 2;
+  readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
   invokeSync(
     action: string,
@@ -284,9 +280,8 @@ export class WindowPlugin extends SyncPluginBase {
     if (action === "get-avoid-area") {
       const request = parseAvoidAreaRequest(payload);
       try {
-        const mainWindow = context.getWindowStage().getMainWindowSync();
         const areaType = request.areaType as window.AvoidAreaType;
-        const response = new AvoidAreaResponse(mainWindow.getWindowAvoidArea(areaType));
+        const response = new AvoidAreaResponse(context.getWindow().getWindowAvoidArea(areaType));
         return { typeName: AVOID_AREA_RESPONSE_TYPE, value: response };
       } catch (error) {
         throw new Error(`Unable to get window avoid area: ${String(error)}`);
@@ -301,11 +296,16 @@ export class WindowPlugin extends SyncPluginBase {
         // createSubWindow is async; the sync action hands out the window id immediately and
         // registers the window when creation resolves. Decorations/content are applied by
         // the business page through the returned id.
-        const sessionId = this.requireContext().sessionId;
+        const pluginContext = this.getContext();
+        const sessionId = pluginContext.sessionId;
+        const moduleName = pluginContext.moduleName;
         windowStage
           .createSubWindow(request.name)
           .then((win: window.Window) => {
-            SubWindowRegistry.put(sessionId, windowId, win);
+            if (!pluginContext.isActive()) {
+              return;
+            }
+            SubWindowRegistry.put(sessionId, moduleName, windowId, win);
           })
           .catch((error: Error) => {
             console.error(`[WindowPlugin] createSubWindow failed: ${String(error)}`);
@@ -318,7 +318,7 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "set-decorations") {
       const request = parseDecorationsRequest(payload);
-      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
       try {
         // Decorations are rendered by the business page; the registry entry keeps the
         // window alive across calls. No-op beyond validation on this platform.
@@ -331,7 +331,7 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "set-background-color") {
       const request = parseColorRequest(payload);
-      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
       try {
         this.dynamic(win).setWindowBackgroundColor(
           `#${request.color.toString(16).padStart(8, "0")}`,
@@ -344,7 +344,7 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "set-blur") {
       const request = parseBlurRequest(payload);
-      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
       try {
         this.dynamic(win).setBlur(request.radius);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -355,7 +355,7 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "focus") {
       const request = parseWindowIdRequest(payload);
-      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
       try {
         this.dynamic(win).focus();
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -366,7 +366,7 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "set-focusable") {
       const request = parseFocusableRequest(payload);
-      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
       try {
         this.dynamic(win).setFocusable(request.focusable);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -377,7 +377,7 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "move-to") {
       const request = parseMoveRequest(payload);
-      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
       try {
         this.dynamic(win).moveWindowTo(request.x, request.y);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -388,7 +388,7 @@ export class WindowPlugin extends SyncPluginBase {
 
     if (action === "resize") {
       const request = parseResizeRequest(payload);
-      const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+      const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
       try {
         this.dynamic(win).resize(request.width, request.height);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
@@ -428,7 +428,7 @@ export class WindowPlugin extends SyncPluginBase {
     payload: BridgeTypedValue,
   ): BridgeTypedValue {
     const request = parseWindowIdRequest(payload);
-    const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+    const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
     try {
       if (action === "minimize") {
         this.dynamic(win).minimize();
@@ -451,7 +451,7 @@ export class WindowPlugin extends SyncPluginBase {
     payload: BridgeTypedValue,
   ): BridgeTypedValue {
     const request = parseWindowIdRequest(payload);
-    const win = SubWindowRegistry.get(this.requireContext().sessionId, request.windowId);
+    const win = SubWindowRegistry.get(context.sessionId, context.moduleName, request.windowId);
     try {
       const dynamic: ESObject = this.dynamic(win);
       const value: boolean =
@@ -466,5 +466,13 @@ export class WindowPlugin extends SyncPluginBase {
 
   private static nextWindowId(): number {
     return Date.now() % 0x7fffffff;
+  }
+
+  override onDispose(context: BridgePluginHookContext): void {
+    SubWindowRegistry.clear(context.sessionId, context.moduleName);
+  }
+
+  private dynamic(win: window.Window): ESObject {
+    return win as ESObject;
   }
 }

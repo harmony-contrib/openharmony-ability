@@ -1,0 +1,20 @@
+[package]
+name = "demo_sub_native"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+log = { workspace = true }
+napi-ohos = { workspace = true, features = ["tokio_rt"] }
+napi-derive-ohos = { workspace = true }
+openharmony-ability = { workspace = true }
+openharmony-ability-derive = { workspace = true }
+openharmony-ability-plugin-webview = { workspace = true }
+openharmony-ability-plugin-window = { workspace = true }
+
+[build-dependencies]
+napi-build-ohos = { workspace = true }

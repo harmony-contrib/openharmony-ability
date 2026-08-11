@@ -1,8 +1,8 @@
 //! WebView plugin facade.
 //!
 //! The plugin is intentionally named-N-API-value/controller-ID based. Rust never keeps an ArkTS
-//! `WebviewController` or `ObjectRef`; the ArkTS HAR mounts its own `FrameNode` into a generic
-//! `BridgeNodeSlot`.
+//! `WebviewController` or `ObjectRef`; the ArkTS HAR mounts its own `FrameNode` into the session
+//! root, or under a caller-provided `ohos.node` container handle.
 
 use std::collections::BTreeMap;
 
@@ -12,9 +12,11 @@ use ohos_web_binding::Web;
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeMainThreadEvent, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
+    PluginLifecycleEvent,
 };
 
 mod callbacks;
+mod controller;
 mod js_proxy;
 mod protocol;
 
@@ -25,7 +27,10 @@ pub use protocol::{
     WebviewProtocolRequest, WebviewProtocolResponder, WebviewProtocolResponse,
 };
 
-pub const DEFAULT_WEBVIEW_SLOT: &str = "xcomponent-overlay";
+const BEFORE_ENGINE_INIT_EVENT: &str = "before-engine-init";
+const SEAL_ENGINE_SCHEMES_EVENT: &str = "seal-engine-schemes";
+const ENGINE_INITIALIZED_EVENT: &str = "engine-initialized";
+const CONTROLLER_ATTACHED_EVENT: &str = "controller-attached";
 
 pub struct WebviewBridgePlugin;
 
@@ -33,46 +38,63 @@ impl BridgePlugin for WebviewBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "ohos.webview";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::UiContext];
+
+    fn required_contexts_for_main_thread_event(
+        &self,
+        event_name: &str,
+    ) -> &'static [BridgeContextRequirement] {
+        match event_name {
+            SEAL_ENGINE_SCHEMES_EVENT | BEFORE_ENGINE_INIT_EVENT | ENGINE_INITIALIZED_EVENT => {
+                &[BridgeContextRequirement::Ability]
+            }
+            _ => Self::REQUIRED_CONTEXTS,
+        }
+    }
 
     fn on_main_thread_event<'env>(
         &self,
         event: BridgeMainThreadEvent<'env>,
     ) -> Result<Unknown<'env>> {
         match event.name() {
-            "before-engine-init" => {
-                expect_engine_phase(
-                    event.decode::<WebviewEngineLifecycleEvent>()?,
-                    "before-engine-init",
-                )?;
+            SEAL_ENGINE_SCHEMES_EVENT => {
+                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
+                expect_engine_phase(&lifecycle, SEAL_ENGINE_SCHEMES_EVENT)?;
+                WebviewProtocol::seal_before_engine_init()?;
+                event.respond(engine_lifecycle_response()?)
+            }
+            BEFORE_ENGINE_INIT_EVENT => {
+                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
+                expect_engine_phase(&lifecycle, BEFORE_ENGINE_INIT_EVENT)?;
+                WebviewProtocol::validate_process_schemes(&engine_scheme_pairs(&lifecycle))?;
                 WebviewProtocol::flush_before_engine_init()?;
-                event.respond(WebviewEventAcknowledgement { accepted: true })
+                event.respond(engine_lifecycle_response()?)
             }
-            "engine-initialized" => {
-                expect_engine_phase(
-                    event.decode::<WebviewEngineLifecycleEvent>()?,
-                    "engine-initialized",
-                )?;
-                WebviewProtocol::mark_engine_initialized()?;
-                event.respond(WebviewEventAcknowledgement { accepted: true })
+            ENGINE_INITIALIZED_EVENT => {
+                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
+                expect_engine_phase(&lifecycle, ENGINE_INITIALIZED_EVENT)?;
+                WebviewProtocol::mark_engine_initialized(&engine_scheme_pairs(&lifecycle))?;
+                event.respond(engine_lifecycle_response()?)
             }
-            "controller-attached" => {
+            CONTROLLER_ATTACHED_EVENT => {
                 let controller = event.decode::<WebviewControllerEvent>()?;
-                let webview_id = webview_id_from_controller_event(controller)?;
+                let (webview_id, native_tag) = controller_identity(controller)?;
+                controller::on_attached(&webview_id, &native_tag)?;
                 // Both registries own Rust closures only. Flush them on the scoped main-thread
                 // event after ArkWeb has created its BrowserContext and before ArkTS begins the
                 // first navigation.
-                protocol::on_controller_attached(&webview_id)?;
-                js_proxy::on_controller_attached(&webview_id)?;
+                protocol::on_controller_attached(&webview_id, &native_tag)?;
+                js_proxy::on_controller_attached(&webview_id, &native_tag)?;
                 event.respond(WebviewEventAcknowledgement { accepted: true })
             }
             "controller-removed" => {
                 let controller = event.decode::<WebviewControllerEvent>()?;
-                let webview_id = webview_id_from_controller_event(controller)?;
-                protocol::on_controller_removed(&webview_id)?;
-                js_proxy::on_controller_removed(&webview_id)?;
+                let (webview_id, native_tag) = controller_identity(controller)?;
+                protocol::on_controller_removed(&webview_id, &native_tag)?;
+                js_proxy::on_controller_removed(&webview_id, &native_tag)?;
+                controller::on_removed(&webview_id, &native_tag)?;
                 event.respond(WebviewEventAcknowledgement { accepted: true })
             }
             "navigation-request" => {
@@ -99,9 +121,35 @@ impl BridgePlugin for WebviewBridgePlugin {
             ))),
         }
     }
+
+    fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
+        if matches!(
+            event,
+            PluginLifecycleEvent::UiContextDestroyed | PluginLifecycleEvent::AbilityDestroyed
+        ) {
+            clear_attached_webview_state()?;
+        }
+        Ok(())
+    }
 }
 
-fn expect_engine_phase(event: WebviewEngineLifecycleEvent, expected: &str) -> Result<()> {
+fn clear_attached_webview_state() -> Result<()> {
+    let mut first_error = None;
+    for result in [
+        controller::clear_attached(),
+        protocol::clear_attached(),
+        js_proxy::clear_attached(),
+    ] {
+        if let Err(error) = result {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+fn expect_engine_phase(event: &WebviewEngineLifecycleEvent, expected: &str) -> Result<()> {
     if event.phase == expected {
         Ok(())
     } else {
@@ -112,13 +160,36 @@ fn expect_engine_phase(event: WebviewEngineLifecycleEvent, expected: &str) -> Re
     }
 }
 
-fn webview_id_from_controller_event(event: WebviewControllerEvent) -> Result<String> {
+fn engine_scheme_pairs(event: &WebviewEngineLifecycleEvent) -> Vec<(String, u32)> {
+    event
+        .schemes
+        .iter()
+        .map(|declaration| (declaration.scheme.clone(), declaration.options))
+        .collect()
+}
+
+fn engine_lifecycle_response() -> Result<WebviewEngineLifecycleResponse> {
+    Ok(WebviewEngineLifecycleResponse {
+        accepted: true,
+        schemes: WebviewProtocol::declared_schemes()?
+            .into_iter()
+            .map(|(scheme, options)| WebviewSchemeDeclaration { scheme, options })
+            .collect(),
+    })
+}
+
+fn controller_identity(event: WebviewControllerEvent) -> Result<(String, String)> {
     if event.id.trim().is_empty() {
         return Err(Error::from_reason(
             "WebView controller event id must not be empty",
         ));
     }
-    Ok(event.id)
+    if event.native_tag.trim().is_empty() {
+        return Err(Error::from_reason(
+            "WebView controller event nativeTag must not be empty",
+        ));
+    }
+    Ok((event.id, event.native_tag))
 }
 
 #[napi(object)]
@@ -126,7 +197,12 @@ fn webview_id_from_controller_event(event: WebviewControllerEvent) -> Result<Str
 pub struct WebviewStyle {
     pub x: Option<Either<f64, String>>,
     pub y: Option<Either<f64, String>>,
+    /// Optional width override. Defaults to the full container size; numbers are vp, strings are
+    /// ArkUI length expressions (for example "30%").
     pub width: Option<Either<f64, String>>,
+    /// Optional height override. Defaults to the full container size; numbers are vp, strings are
+    /// ArkUI length expressions. Combined with `y` (for example y = "70%", height = "30%") a
+    /// WebView can be rendered in a corner or along one edge instead of full-screen.
     pub height: Option<Either<f64, String>>,
     pub visible: Option<bool>,
     pub background_color: Option<String>,
@@ -137,6 +213,10 @@ pub struct WebviewStyle {
 #[derive(Clone, Debug)]
 pub struct WebviewEngineLifecycleEvent {
     pub phase: String,
+    /// Process-global scheme set sealed before ArkWeb initialization. A module activated after
+    /// the engine started may join only when every local declaration already exists in this set
+    /// with identical options.
+    pub schemes: Vec<WebviewSchemeDeclaration>,
 }
 
 impl_bridge_napi_type!(
@@ -144,11 +224,35 @@ impl_bridge_napi_type!(
     "ohos.webview.EngineLifecycleEvent"
 );
 
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewSchemeDeclaration {
+    pub scheme: String,
+    pub options: u32,
+}
+
+impl_bridge_napi_type!(WebviewSchemeDeclaration, "ohos.webview.SchemeDeclaration");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewEngineLifecycleResponse {
+    pub accepted: bool,
+    pub schemes: Vec<WebviewSchemeDeclaration>,
+}
+
+impl_bridge_napi_type!(
+    WebviewEngineLifecycleResponse,
+    "ohos.webview.EngineLifecycleResponse"
+);
+
 /// Controller lifecycle signal delivered directly from the ArkTS WebView host.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct WebviewControllerEvent {
     pub id: String,
+    /// Process-unique ArkWeb controller tag generated by the ArkTS host. The public WebView ID
+    /// remains module-local and is never used as a process-global platform key.
+    pub native_tag: String,
 }
 
 impl_bridge_napi_type!(WebviewControllerEvent, "ohos.webview.ControllerEvent");
@@ -178,9 +282,10 @@ pub struct WebviewInitializationScript {
 #[derive(Clone, Debug)]
 pub struct WebviewCreateRequest {
     pub id: String,
-    pub slot_id: String,
-    /// Target OS sub-window id for per-window WebView creation (multi-window support).
-    pub window_id: Option<String>,
+    /// Optional opaque container handle issued by the built-in `ohos.node` plugin. When provided,
+    /// the ArkTS host appends the WebView FrameNode under that container instead of this native
+    /// module's DefaultXComponent root.
+    pub parent_handle: Option<u32>,
     pub url: Option<String>,
     pub html: Option<String>,
     pub style: WebviewStyle,
@@ -203,8 +308,7 @@ impl WebviewCreateRequest {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            slot_id: DEFAULT_WEBVIEW_SLOT.to_owned(),
-            window_id: None,
+            parent_handle: None,
             url: None,
             html: None,
             style: WebviewStyle::default(),
@@ -219,13 +323,10 @@ impl WebviewCreateRequest {
         }
     }
 
-    pub fn slot_id(mut self, slot_id: impl Into<String>) -> Self {
-        self.slot_id = slot_id.into();
-        self
-    }
-
-    pub fn window_id(mut self, window_id: impl Into<String>) -> Self {
-        self.window_id = Some(window_id.into());
+    /// Mounts the WebView FrameNode under the given `ohos.node` container handle instead of the
+    /// component root, so an RS-layer node tree can adopt WebViews as children.
+    pub fn parent_node(mut self, handle: u32) -> Self {
+        self.parent_handle = Some(handle);
         self
     }
 
@@ -262,9 +363,6 @@ impl WebviewCreateRequest {
         if self.id.trim().is_empty() {
             return Err(Error::from_reason("WebView id must not be empty"));
         }
-        if self.slot_id.trim().is_empty() {
-            return Err(Error::from_reason("WebView slotId must not be empty"));
-        }
         if self.url.is_some() == self.html.is_some() {
             return Err(Error::from_reason(
                 "WebView requires exactly one source: url or html",
@@ -279,6 +377,8 @@ impl WebviewCreateRequest {
 #[derive(Clone, Debug)]
 pub struct WebviewNavigationRequest {
     pub id: String,
+    /// Process-unique controller generation used to reject callbacks from a replaced WebView.
+    pub native_tag: String,
     pub url: String,
 }
 
@@ -298,6 +398,8 @@ impl_bridge_napi_type!(WebviewNavigationResponse, "ohos.webview.NavigationRespon
 #[derive(Clone, Debug)]
 pub struct WebviewDownloadStartRequest {
     pub id: String,
+    /// Process-unique controller generation used to reject callbacks from a replaced WebView.
+    pub native_tag: String,
     pub url: String,
     pub temp_path: Option<String>,
 }
@@ -341,6 +443,8 @@ impl WebviewDownloadStartResponse {
 #[derive(Clone, Debug)]
 pub struct WebviewDownloadEndEvent {
     pub id: String,
+    /// Process-unique controller generation used to reject callbacks from a replaced WebView.
+    pub native_tag: String,
     pub url: String,
     pub temp_path: Option<String>,
     pub success: bool,
@@ -351,6 +455,8 @@ pub struct WebviewDownloadEndEvent {
 #[derive(Clone, Debug)]
 pub struct WebviewTitleChangeEvent {
     pub id: String,
+    /// Process-unique controller generation used to reject callbacks from a replaced WebView.
+    pub native_tag: String,
     pub title: String,
 }
 
@@ -387,9 +493,8 @@ impl WebviewClient {
         // named create request so ArkTS can bind ArkWeb hooks without retaining Rust closures.
         request.event_options = callbacks::options_for(&request.id)?;
         let request_id = request.id.clone();
-        let request_slot_id = request.slot_id.clone();
         let response: WebviewCreateResponse = self.call("create", request).await?;
-        if response.id != request_id || response.slot_id != request_slot_id {
+        if response.id != request_id {
             return Err(Error::from_reason(
                 "WebView plugin returned a mismatched controller ID",
             ));
@@ -397,20 +502,18 @@ impl WebviewClient {
         Ok(WebviewHandle {
             client: self.clone(),
             id: response.id,
-            slot_id: response.slot_id,
         })
     }
 
     /// Reopens a controller-ID facade for a WebView already created in this module/session.
-    pub fn handle(&self, id: impl Into<String>, slot_id: impl Into<String>) -> WebviewHandle {
+    pub fn handle(&self, id: impl Into<String>) -> WebviewHandle {
         WebviewHandle {
             client: self.clone(),
             id: id.into(),
-            slot_id: slot_id.into(),
         }
     }
 
-    /// Declares a custom-scheme handler by WebView tag before the ArkTS node is created.
+    /// Declares a custom-scheme handler by module-local WebView ID before the ArkTS node is created.
     ///
     /// The Rust closure is queued and attached from the controller-attached main-thread event,
     /// before the initial URL is loaded. This is the preferred route when the first URL uses that
@@ -474,7 +577,6 @@ impl WebviewExt for OpenHarmonyApp {
 pub struct WebviewHandle {
     client: WebviewClient,
     id: String,
-    slot_id: String,
 }
 
 impl WebviewHandle {
@@ -482,14 +584,9 @@ impl WebviewHandle {
         &self.id
     }
 
-    pub fn slot_id(&self) -> &str {
-        &self.slot_id
-    }
-
     fn controller_request(&self) -> WebviewControllerRequest {
         WebviewControllerRequest {
             id: self.id.clone(),
-            slot_id: self.slot_id.clone(),
             visible: None,
             color: None,
             url: None,
@@ -518,7 +615,7 @@ impl WebviewHandle {
             .value)
     }
 
-    /// Declares a handler for this controller tag. For a first custom-scheme load, prefer
+    /// Declares a handler for this controller ID. For a first custom-scheme load, prefer
     /// [`WebviewClient::custom_protocol`] before calling [`WebviewClient::create`].
     pub fn custom_protocol<S, F>(&self, scheme: S, callback: F) -> Result<()>
     where
@@ -540,12 +637,13 @@ impl WebviewHandle {
             .custom_protocol_async(&self.id, scheme, callback)
     }
 
-    /// Registers a native ArkWeb controller-attached callback for this WebView tag.
+    /// Registers a native ArkWeb controller-attached callback for the currently attached
+    /// controller. The public ID is resolved to the process-unique native tag first.
     pub fn on_controller_attach<F>(&self, callback: F) -> Result<()>
     where
         F: FnMut() + 'static,
     {
-        Web::new(self.id.clone())
+        Web::new(controller::native_tag_for(&self.id)?)
             .on_controller_attach(callback)
             .map_err(|error| {
                 Error::from_reason(format!(
@@ -558,7 +656,7 @@ impl WebviewHandle {
     where
         F: FnMut() + 'static,
     {
-        Web::new(self.id.clone())
+        Web::new(controller::native_tag_for(&self.id)?)
             .on_page_begin(callback)
             .map_err(|error| {
                 Error::from_reason(format!(
@@ -571,7 +669,7 @@ impl WebviewHandle {
     where
         F: FnMut() + 'static,
     {
-        Web::new(self.id.clone())
+        Web::new(controller::native_tag_for(&self.id)?)
             .on_page_end(callback)
             .map_err(|error| {
                 Error::from_reason(format!(
@@ -584,7 +682,7 @@ impl WebviewHandle {
     where
         F: FnMut() + 'static,
     {
-        Web::new(self.id.clone())
+        Web::new(controller::native_tag_for(&self.id)?)
             .on_destroy(callback)
             .map_err(|error| {
                 Error::from_reason(format!(
@@ -619,7 +717,6 @@ impl WebviewHandle {
     pub async fn set_bounds(&self, x: f64, y: f64, width: f64, height: f64) -> Result<()> {
         let request = WebviewBoundsRequest {
             id: self.id.clone(),
-            slot_id: self.slot_id.clone(),
             x,
             y,
             width,
@@ -636,7 +733,6 @@ impl WebviewHandle {
     pub async fn set_cookie(&self, url: impl Into<String>, value: impl Into<String>) -> Result<()> {
         let request = WebviewCookieRequest {
             id: self.id.clone(),
-            slot_id: self.slot_id.clone(),
             url: url.into(),
             value: value.into(),
         };
@@ -655,7 +751,6 @@ impl WebviewHandle {
                 "snapshot",
                 WebviewSnapshotRequest {
                     id: self.id.clone(),
-                    slot_id: self.slot_id.clone(),
                 },
             )
             .await?;
@@ -671,7 +766,6 @@ impl WebviewHandle {
                 "set-debugging-access",
                 WebviewBoolRequest {
                     id: self.id.clone(),
-                    slot_id: self.slot_id.clone(),
                     enabled: Some(enabled),
                 },
             )
@@ -687,7 +781,6 @@ impl WebviewHandle {
                 "is-debugging-access",
                 WebviewBoolRequest {
                     id: self.id.clone(),
-                    slot_id: self.slot_id.clone(),
                     enabled: None,
                 },
             )
@@ -704,7 +797,6 @@ impl WebviewHandle {
     ) -> Result<()> {
         let request = WebviewPdfRequest {
             id: self.id.clone(),
-            slot_id: self.slot_id.clone(),
             path: path.into(),
             config,
         };
@@ -819,7 +911,6 @@ impl WebviewHandle {
                 "evaluate-script",
                 WebviewScriptRequest {
                     id: self.id.clone(),
-                    slot_id: self.slot_id.clone(),
                     script: script.into(),
                 },
             )
@@ -845,7 +936,6 @@ impl WebviewHandle {
 #[derive(Clone, Debug)]
 pub struct WebviewCreateResponse {
     pub id: String,
-    pub slot_id: String,
 }
 
 impl_bridge_napi_type!(WebviewCreateResponse, "ohos.webview.CreateResponse");
@@ -854,7 +944,6 @@ impl_bridge_napi_type!(WebviewCreateResponse, "ohos.webview.CreateResponse");
 #[derive(Clone, Debug)]
 pub struct WebviewScriptRequest {
     pub id: String,
-    pub slot_id: String,
     pub script: String,
 }
 
@@ -872,7 +961,6 @@ impl_bridge_napi_type!(WebviewScriptResponse, "ohos.webview.ScriptResponse");
 #[derive(Clone, Debug)]
 pub struct WebviewControllerRequest {
     pub id: String,
-    pub slot_id: String,
     pub visible: Option<bool>,
     pub color: Option<String>,
     pub url: Option<String>,
@@ -895,7 +983,6 @@ impl_bridge_napi_type!(WebviewStringResponse, "ohos.webview.StringResponse");
 #[derive(Clone, Debug)]
 pub struct WebviewBoundsRequest {
     pub id: String,
-    pub slot_id: String,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -926,7 +1013,6 @@ impl WebviewBoundsRequest {
 #[derive(Clone, Debug)]
 pub struct WebviewCookieRequest {
     pub id: String,
-    pub slot_id: String,
     pub url: String,
     /// Set-Cookie format value, e.g. `name=value; Domain=...; Path=...`.
     pub value: String,
@@ -953,7 +1039,6 @@ impl WebviewCookieRequest {
 #[derive(Clone, Debug)]
 pub struct WebviewSnapshotRequest {
     pub id: String,
-    pub slot_id: String,
 }
 
 impl_bridge_napi_type!(WebviewSnapshotRequest, "ohos.webview.SnapshotRequest");
@@ -972,7 +1057,6 @@ impl_bridge_napi_type!(WebviewSnapshotResponse, "ohos.webview.SnapshotResponse")
 #[derive(Clone, Debug)]
 pub struct WebviewBoolRequest {
     pub id: String,
-    pub slot_id: String,
     pub enabled: Option<bool>,
 }
 
@@ -1006,7 +1090,6 @@ impl_bridge_napi_type!(PdfConfig, "ohos.webview.PdfConfig");
 #[derive(Clone, Debug)]
 pub struct WebviewPdfRequest {
     pub id: String,
-    pub slot_id: String,
     pub path: String,
     pub config: Option<PdfConfig>,
 }
@@ -1053,14 +1136,43 @@ mod tests {
     #[test]
     fn create_request_retains_optional_value_semantics() {
         let request = WebviewCreateRequest::new("webview")
+            .parent_node(7)
             .transparent(true)
             .url("https://example.test");
         assert_eq!(request.id, "webview");
-        assert_eq!(request.slot_id, DEFAULT_WEBVIEW_SLOT);
+        assert_eq!(request.parent_handle, Some(7));
         assert_eq!(request.url.as_deref(), Some("https://example.test"));
         assert!(request.html.is_none());
         assert!(request.headers.is_none());
         assert_eq!(request.transparent, Some(true));
+    }
+
+    #[test]
+    fn create_request_defaults_to_session_root_mount() {
+        let request = WebviewCreateRequest::new("webview").html("<p>hi</p>");
+        assert!(request.parent_handle.is_none());
+    }
+
+    #[test]
+    fn webview_id_remains_an_opaque_business_identifier() {
+        let request = WebviewCreateRequest::new("window 2 / detail#1").html("<p>hi</p>");
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn controller_event_separates_business_id_from_process_native_tag() {
+        let identity = controller_identity(WebviewControllerEvent {
+            id: "detail".to_owned(),
+            native_tag: "ohos.webview.bridge-1.demo-native.7".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(identity.0, "detail");
+        assert_eq!(identity.1, "ohos.webview.bridge-1.demo-native.7");
+        assert!(controller_identity(WebviewControllerEvent {
+            id: "detail".to_owned(),
+            native_tag: " ".to_owned(),
+        })
+        .is_err());
     }
 
     #[test]
@@ -1098,6 +1210,14 @@ mod tests {
             "ohos.webview.EngineLifecycleEvent"
         );
         assert_eq!(
+            <WebviewSchemeDeclaration as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.SchemeDeclaration"
+        );
+        assert_eq!(
+            <WebviewEngineLifecycleResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.EngineLifecycleResponse"
+        );
+        assert_eq!(
             <WebviewControllerEvent as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.ControllerEvent"
         );
@@ -1128,6 +1248,27 @@ mod tests {
         assert_eq!(
             <WebviewEventAcknowledgement as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.EventAcknowledgement"
+        );
+    }
+
+    #[test]
+    fn engine_events_are_ability_scoped_but_controller_events_require_ui() {
+        let plugin = WebviewBridgePlugin;
+        assert_eq!(
+            plugin.required_contexts_for_main_thread_event(SEAL_ENGINE_SCHEMES_EVENT),
+            &[BridgeContextRequirement::Ability]
+        );
+        assert_eq!(
+            plugin.required_contexts_for_main_thread_event(BEFORE_ENGINE_INIT_EVENT),
+            &[BridgeContextRequirement::Ability]
+        );
+        assert_eq!(
+            plugin.required_contexts_for_main_thread_event(ENGINE_INITIALIZED_EVENT),
+            &[BridgeContextRequirement::Ability]
+        );
+        assert_eq!(
+            plugin.required_contexts_for_main_thread_event(CONTROLLER_ATTACHED_EVENT),
+            &[BridgeContextRequirement::UiContext]
         );
     }
 }
