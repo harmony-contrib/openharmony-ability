@@ -1,6 +1,6 @@
 # 1.0.0-beta.1
 
-- **Breaking**: bridge version 2 removes `windowKey`; each native module owns one
+- **Breaking**: the bridge contract removes `windowKey`; each native module owns one
   `DefaultXComponent`, while multiple WebViews coexist by controller ID. Multiple windows use
   distinct native modules.
 - **Breaking**: normalized node mounting — the named-slot model (`BridgeNodeSlot` /

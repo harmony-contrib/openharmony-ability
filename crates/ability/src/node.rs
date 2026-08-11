@@ -95,7 +95,6 @@ impl BridgePlugin for NodeSurfaceBridgePlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = NODE_SURFACE_PLUGIN_ID;
-    const VERSION: u32 = 2;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::UiContext];
 }
@@ -211,7 +210,6 @@ mod tests {
     #[test]
     fn plugin_identity_is_the_builtin_contract() {
         assert_eq!(NodeSurfaceBridgePlugin::ID, "ohos.node");
-        assert_eq!(NodeSurfaceBridgePlugin::VERSION, 2);
         assert_eq!(
             NodeSurfaceBridgePlugin::REQUIRED_CONTEXTS,
             &[BridgeContextRequirement::UiContext]

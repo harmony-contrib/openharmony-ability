@@ -13,7 +13,7 @@
 一个插件从创建到交付必须按以下顺序完成：
 
 1. 划定能力边界，确定它是异步能力还是必须立即返回的主线程同步能力，并列出它依赖的 context。
-2. 建立 `crates/plugin-<name>` 与 `plugins/<name>` 成对包，先固定插件 ID、版本、action 和
+2. 建立 `crates/plugin-<name>` 与 `plugins/<name>` 成对包，先固定插件 ID、action 和
    具名 request/response ABI。
 3. 在 Rust 实现 `BridgePlugin` marker 与面向业务的扩展 trait/client；在 ArkTS 实现同一契约的
    `BridgePluginFactory`。
@@ -52,25 +52,25 @@ demo/                            # 显式注册 factory，并覆盖真实调用�
 
 ## 2. 插件身份与双端一致性
 
-Rust `BridgePlugin` 和 ArkTS `BridgePluginFactory` 是同一个契约的两面。下列字段必须完全一致：
+Rust `BridgePlugin` 和 ArkTS plugin instance 是同一个契约的两面。下列字段必须完全一致：
 
 | 字段 | Rust | ArkTS | 规则 |
 | --- | --- | --- | --- |
-| 插件 ID | `BridgePlugin::ID` | `factory.id` / `plugin.id` | 使用稳定、小写、点分名称，例如 `ohos.permission` |
-| 版本 | `BridgePlugin::VERSION` | `factory.version` / `plugin.version` | 任一 request/response 或 action 语义变化时双端同步升级 |
+| 插件 ID | `BridgePlugin::ID` | `plugin.id` | 使用稳定、小写、点分名称，例如 `ohos.permission` |
 | 执行模式 | `type Mode` | `execution` | 只能是 async 或 sync-main-thread，不能由运行时布尔值决定 |
 | context 前置条件 | `REQUIRED_CONTEXTS` | `requires` | 内容完全相同；不能只在一端声明 |
 
 ID、action 和 type name 只能使用 `A-Za-z0-9._-`；action 使用 kebab-case 的动词短语，例如
-`request`、`get-avoid-area`、`set-visible`。同一插件内 action 的语义不得因版本不同而悄悄改变。
+`request`、`get-avoid-area`、`set-visible`。插件没有独立数字版本；不兼容变更必须使用新的
+action/typeName（必要时使用新的插件 ID），不能在原 typeName 下悄悄改变字段或语义。
 
 ### 2.1 通用桥接边界
 
 插件不得自行发明 Rust ↔ ArkTS 通信通道。所有出站 action 都使用 core 提供的统一参数顺序：
 
 ```text
-异步：bridgeInvoke(pluginId, version, action, requestType, responseType, value, timeoutMs)
-同步：bridgeInvokeSync(pluginId, version, action, requestType, responseType, value)
+异步：bridgeInvoke(pluginId, action, requestType, responseType, value, timeoutMs)
+同步：bridgeInvokeSync(pluginId, action, requestType, responseType, value)
 入站：onBridgeSyncEvent(pluginId, event, requestType, responseType, value)
 ```
 
@@ -111,7 +111,6 @@ pub struct LoginBridgePlugin;
 impl BridgePlugin for LoginBridgePlugin {
     type Mode = AsyncBridge;
     const ID: &'static str = "account.login";
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
 }
@@ -177,7 +176,6 @@ function parseLoginRequest(payload: BridgeTypedValue): LoginRequest {
 ```ts
 class LoginPlugin implements AsyncBridgePlugin {
   readonly id = "account.login";
-  readonly version = 1;
   readonly execution: "async" = "async";
   readonly requires: ["ability"] = ["ability"];
 
@@ -204,14 +202,17 @@ export { LoginPlugin };
 
 ### 3.3 既有内置插件的契约基线
 
-迁移 helper 或新增 action 时，应以现有插件的类型名、模式和 context 作为兼容语义基线；只能在
-双端升级版本后改变契约。
+迁移 helper 或新增 action 时，应以现有插件的类型名、模式和 context 作为兼容语义基线；不兼容
+契约必须引入新的 action/typeName，不能修改已有具名 N-API 类型的含义。
 
 | 插件 / action | request → response | 模式 / context |
 | --- | --- | --- |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
-| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | sync / `ui-context`；查询当前 module/component 所在窗口 |
+| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | async / `ui-context`；查询当前 component 所在窗口 |
+| `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | async / `ui-context` |
+| `ohos.window` / `set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window` | `ohos.window.*Request { windowId, ... }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context` |
+| `ohos.window` / `is-maximized`、`is-minimized` | `ohos.window.WindowIdRequest { windowId }` → `ohos.window.StateResponse { value }` | async / `ui-context` |
 | `ohos.webview` / `create` | `ohos.webview.CreateRequest { id, parentHandle? }` → `ohos.webview.CreateResponse { id }` | async / `ui-context` |
 | `ohos.node`（内置） / `create-container` | `ohos.node.CreateContainerRequest` → `ohos.node.HandleResponse { handle }` | async / `ui-context` |
 | `ohos.node`（内置） / `append-child` | `ohos.node.AppendChildRequest { parentHandle, childHandle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
@@ -297,7 +298,7 @@ let response = bridge
 - request/response 必须是 `Send + 'static` 的 Rust 所有权数据；编码与解码都在主线程 callback 内
   完成，worker 只收到解码后的具名 response，不接触任何 N-API/ArkTS 对象。
 - 该通道复用 `bridgeInvokeSync` 线格式，ArkTS 侧无感知；与主线程 `call_sync` 使用同一份
-  ID/version/action/typeName 契约。
+  ID/action/typeName 契约。
 
 ArkTS 平台回调进入 Rust 的 `on_main_thread_event` 是**入站 scoped callback**，不是第三种
 执行模式。它也必须在当前 N-API callback 内完成；如果需要做耗时工作，只能先复制已解码的 Rust
@@ -330,10 +331,12 @@ OpenHarmony SDK 中 `UIAbility.onCreate`、`onWindowStageCreate` 和 `onWindowSt
 UIContext 和销毁事件不能相互穿插。单个插件的 lifecycle/onDispose 失败只能记录，不能中断后续插件；
 session 开始关闭后必须拒绝新调用并取消未完成调用。
 
-1. `NativeAbility.onCreate` 先预创建 module/session 对应的 `BridgeHost` 和 plugin instance，但不执行
-   hook；随后把通用 `BridgeRuntime`/主线程 endpoint 作为 module/session transport 注入 native
-   module，再完成 `init`。该 transport 与组件 render 生命周期解耦，使用独立 `bridgeOwner` 防止旧
-   session 清理新 endpoint；Rust lifecycle/event sink 均已 attach、Rust 已收到
+1. `NativeAbility.onCreate` 先预创建 module/session 对应的 `BridgeHost`，但暂不实例化或安装业务
+   plugin；随后把通用 `BridgeRuntime`/主线程 endpoint 作为 module/session transport 注入 native
+   module。`init` 完成后，Rust 返回该 module 实际注册的 `{ id, execution, requires }` 声明，Host
+   自动从 Ability 的 factory 列表选择同 ID 实现并硬校验模式/context；插件本身和业务装配均不接触
+   module 路由。该 transport 与组件 render 生命周期解耦，使用独立 `bridgeOwner` 防止旧 session
+   清理新 endpoint；Rust lifecycle/event sink 均已 attach、Rust 已收到
    `AbilityCreated` 后，Host 才把 `ability` 标记为 ready，执行 `onInstall` 并发出
    `ability-create`。因此 ability-only plugin 的 `onInstall` 可以安全调用 `invokeNativeSync`，Rust
    ability-only 出站调用也不需要等待 `DefaultXComponent` appearance。
@@ -363,9 +366,10 @@ WindowStage 已先销毁，它仍必须收到该 session 后续的 `ui-context-d
 `window-stage-destroy` 和 `ability-destroy`。下一次 `ability-create` 必须清空上一 session 的 readiness
 和 lifecycle history，再从新会话开始重放，禁止把旧 Ability 事件带入新实例。
 
-ArkTS context 是 module + session 范围的。插件不得假设多个 module 共用 controller、根节点或
-状态表；一个 Host 的 context 永远只指向该 module 的唯一组件。所有跨页面状态键必须至少包含
-`sessionId` 与 `moduleName`。
+ArkTS plugin context 是一个 Host/session 范围的能力视图，但不暴露 native module 名称。框架可能在
+同一进程创建多个同类 plugin instance；实现方必须正确处理重复构造、并发调用和独立 dispose，不能用
+module 名分支业务逻辑。实例局部资源直接保存在实例上；平台本身只有一个进程级对象时，应使用显式的
+进程级 coordinator 和不可复用 owner token，并用 `sessionId` 隔离仍属于 session 的外部状态。
 
 规则如下：
 
@@ -376,9 +380,9 @@ ArkTS context 是 module + session 范围的。插件不得假设多个 module �
   callback 重试。
 - `onDispose` 必须幂等，负责移除平台 delegate、取消订阅、卸载节点、清空 controller/tag 映射。
   单个插件释放失败不能阻断其余插件释放。
-- 普通反向事件必须使用 module-scoped `invokeNativeSync`。只有 ArkWeb engine 这类平台明确为进程级的
-  状态转换，才可使用 `invokeNativeSyncAcrossModules` 同步通知所有已激活且装配同一插件的 native
-  module；广播仍必须使用具名 request/response，且任一 module 拒绝都应中止初始化。
+- 普通反向事件必须使用当前 plugin instance 的 `invokeNativeSync`。只有 ArkWeb engine 这类平台明确
+  为进程级的状态转换，才可使用 `invokeNativeSyncProcessWide` 同步通知所有已激活且装配同一插件的
+  Rust facade；广播仍必须使用具名 request/response，且任一参与者拒绝都应中止初始化。
 - `onInstall` / `onLifecycle` / `onDispose` 在独立的 bounded hook scope 中执行；scope 通过
   `BridgePluginHookContext.onCancel` 通知取消，默认 watchdog 为 5 秒。插件不得忽略取消后继续挂载
   节点或回写平台状态；单个 hook 超时只会把该插件标记失败并继续 session teardown。
@@ -445,7 +449,7 @@ Stack() {
   回调覆盖新组件的 raw window、IME 或尺寸。组件快速消失会使 generation 失效并取消 pending
   attach，旧异步 continuation 不得重新挂载已经消失的组件。
 - `BridgePluginContext` 的 `getUIContext` / `getRootFrameNode` / `appendChild` / `removeChild` /
-  `getFrameNode` 均只操作当前 module 的组件，不接受窗口 key；`getWindow()` 通过该 UIContext 定位
+  `getFrameNode` 均只操作当前 Host 的组件，不接受窗口 key；`getWindow()` 通过该 UIContext 定位
   组件实际所在窗口，不能用 Ability 的主窗口替代 sub window。
 - Window size/rect/avoid-area/keyboard listener 与组件 attach/detach 同寿命，回调必须校验当前
   组件状态；主窗口事件不得广播给 sub-window module，旧窗口的延迟回调也不得命中新 appearance。
@@ -454,8 +458,10 @@ Stack() {
 - 一个 module/component 内的 `WebviewSurface.entries` 按 WebView ID 保存多个 controller；不同 ID
   必须并存并使用独立 mount key，同 ID 的重新 create 才替换旧实例。所有 controller 平台回调都要
   携带内部 native tag，并在 Rust 分发前校验当前 generation，禁止旧实例的延迟回调命中替代实例。
-- ArkTS factory 可用 `LazyPlugin(..., modules)` 限定适用 module；多 module Ability 不应把会主动向
-  Rust 发送事件的插件装到没有注册对应 Rust facade 的 module。
+- ArkTS factory 不声明适用 module。每个 Rust native module 在 `init` 后导出自己的 plugin 声明，
+  `BridgeHost` 自动选择匹配 factory；未注册该 Rust facade 的 Host 不 attach、安装或接收该插件事件。
+  factory 可能为结构校验创建候选实例，因此 constructor 必须无平台副作用；资源创建只能放在
+  `onInstall` 或 action 中，并在 `onDispose` 对称释放。
 
 ## 7. 平台回调与 WebView 特例
 
@@ -493,13 +499,13 @@ WebView 插件还必须遵守：
 
 ### 7.1 WebView 回调契约与失败策略
 
-WebView 的 callback builder 必须在 `WebviewClient::create` 前按 module-local WebView ID 声明。Rust 保存的是
+WebView 的 callback builder 必须在 `WebviewClient::create` 前按 facade-local WebView ID 声明。Rust 保存的是
 `Send + Sync + 'static` closure，而不是 ArkTS 函数；ArkTS 在创建时只拿到订阅快照，以决定是否安装
 对应 ArkWeb delegate。
 
 | ArkWeb 时点 | Rust 事件/契约 | 默认或错误语义 |
 | --- | --- | --- |
-| engine 初始化前/后 | `EngineLifecycleEvent` → `EngineLifecycleResponse` | 初始化前 flush scheme，跨 module 校验同名 scheme options，初始化后封存声明 |
+| engine 初始化前/后 | `EngineLifecycleEvent` → `EngineLifecycleResponse` | 初始化前 flush scheme，进程内校验同名 scheme options，初始化后封存声明 |
 | controller attach/remove | `ControllerEvent` → `EventAcknowledgement` | attach 时安装 proxy/protocol，remove 时清理状态 |
 | `onLoadIntercept` | `NavigationRequest` → `NavigationResponse` | 未订阅或 handler 失败时 `intercept = false`，fail-open |
 | `WebDownloadDelegate.onBeforeDownload` | `DownloadStartRequest` → `DownloadStartResponse` | 失败时取消下载，fail-closed；允许改写临时保存路径 |
@@ -517,18 +523,18 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 module-loc
 
 1. 应用在 `#[ability]` 初始化期间通过 `WebviewProtocol::register` 声明 scheme 及 option；该步骤
    必须早于 `WebviewController.initializeWebEngine()`。
-2. 第一个 WebView create 在初始化 ArkWeb engine 前，通过 `invokeNativeSyncAcrossModules` 向所有已
-   激活、装配 `ohos.webview` 的 native module 广播 `seal-engine-schemes`，先冻结并聚合校验所有
-   scheme/options；校验通过后才广播 `before-engine-init`，由各 module 的 Rust facade flush 自己的
-   scheme 声明。ArkTS 随后初始化 engine，再广播 `engine-initialized` 封存声明集。
+2. 第一个 WebView create 在初始化 ArkWeb engine 前，通过 `invokeNativeSyncProcessWide` 向所有已
+   激活、装配 `ohos.webview` 的 Rust facade 广播 `seal-engine-schemes`，先冻结并聚合校验所有
+   scheme/options；校验通过后才广播 `before-engine-init`，由各 facade flush 自己的 scheme 声明。
+   ArkTS 随后初始化 engine，再广播 `engine-initialized` 封存声明集。
    `EngineLifecycleEvent` 必须携带已封存的进程级 scheme/options 集合。该 engine 事件只依赖
    `ability`，controller 等其余事件仍依赖 `ui-context`。封存后新增 scheme 必须确定性失败；Ability
-   重建或后加载 module 重复声明完全相同的 scheme + options 是幂等操作。每个 module
+   重建或后加载 facade 重复声明完全相同的 scheme + options 是幂等操作。每个 facade
    必须在具名 `EngineLifecycleResponse` 返回自己的 scheme/options；同名 scheme 的 options 不一致时
    ArkTS 必须在调用 `initializeWebEngine()` 前确定性中止。
 3. 业务在 `WebviewClient::create` 前按 tag 调用 `custom_protocol`、注册 JS proxy 和 callback；Rust
-   只保存业务 ID/scheme/closure 声明，不能保存 ArkTS controller。业务 ID 只需在当前 native module
-   内唯一；ArkTS host 必须为每次 controller 创建生成包含 session + module 的进程唯一 native tag，
+   只保存业务 ID/scheme/closure 声明，不能保存 ArkTS controller。业务 ID 只需在当前 facade
+   内唯一；ArkTS host 必须为每次 controller 创建生成包含 session 与进程计数器的唯一 native tag，
    并通过具名 `ControllerEvent { id, nativeTag }` 让 Rust 用 native tag 安装 ArkWeb protocol/proxy。
    平台回调继续向业务暴露原 ID，禁止把 native tag 泄漏成公共 controller ID。
 4. controller attach 后先通过 scoped direct event 安装 protocol、proxy 与 delegate，再开始首次
@@ -547,7 +553,8 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 module-loc
 | --- | --- | --- |
 | `requestPermission` | `plugin-permission` / `ohos.permission` | async + `ability`；结果顺序与失败码保持不变 |
 | `exit` | `plugin-app-control` / `ohos.app-control` | sync + 当前主线程 `Env` |
-| `getWindowAvoidArea` | `plugin-window` / `ohos.window` | sync + `ui-context`；查询 module/component 所在窗口并返回完整避让区 |
+| `getWindowAvoidArea` | `plugin-window` / `ohos.window` | async + `ui-context`；查询当前 component 所在窗口并返回完整避让区 |
+| `create_os_window`、多窗口操作及显式销毁 | `plugin-window` / `ohos.window` | async + `ui-context`；窗口句柄属于插件实例，按平台 window id 区分；`onDispose` 兜底销毁未释放窗口 |
 | `createWebview`、嵌入式 WebView、custom protocol、导航/下载/标题回调 | `plugin-webview` / `ohos.webview` | 出站 async + `ui-context`；入站为 scoped 主线程具名 N-API；scheme 在 engine 初始化前声明 |
 | `Loadable` | `runtime/NativeModuleLoader` | framework 内部 runtime，不是能力 bridge |
 | `openURL` | `plugin-url` / `ohos.url` | async + `ability`；`context.openLink` |
@@ -580,7 +587,7 @@ lifecycle 创建与释放，不能依赖重复执行初始化器。
 同一 Ability 内的多个组件都要使用不同 module 名称/动态库；`NativeAbility.moduleName` 数组负责预加载
 本 Ability 的所有 module，每个组件再通过自己的 `moduleName` 选择对应 Host。
 
-ArkTS HAR 导出 plugin class，应用通过 `LazyPlugin` 为每个 module/session 创建独立实例：
+ArkTS HAR 导出 plugin class，应用只提供可用 factory；不按 module 配置插件：
 
 ```ts
 import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
@@ -601,17 +608,17 @@ export default class EntryAbility extends NativeAbility {
 }
 ```
 
-`LazyPlugin` 的第二个参数可以用 `modules` 限制适用的 native module。未装配、版本不匹配、模式不匹配和类型不匹配
-都应在桥接边界确定性报错，不得悄悄回退到 helper 或 JSON 兼容路径。
+`LazyPlugin` 只接收创建函数。Rust module 在初始化后导出实际注册的结构声明，`BridgeHost` 按 ID
+自动匹配 factory，并在任何 hook 执行前校验 execution/requires。缺少 factory、重复 ID、模式不匹配、
+context 不匹配和 typeName 不匹配都必须在边界确定性报错，不得悄悄回退到 helper 或 JSON 兼容路径。
 
-`LazyPlugin` 在 `BridgeHost.registerFactories` 时为每个 native module 和 Ability session 创建独立
-实例。禁止跨 module/session 共享 ArkTS plugin instance：`attachContext`、hook cancellation 和
-controller 映射都是 session 状态，`PluginBase.attachContext` 会拒绝复用。module 级状态应由注册到
-该 `OpenHarmonyApp` 的具体 Rust plugin instance 持有；例如 ResourceManager 通过
-`registered_plugin::<ResourceBridgePlugin>()` 读取，而不是使用跨 module 全局变量。只有平台本身明确
-进程级的资源才使用进程级状态。即使 `requires = []`，插件仍在 Ability ready 后安装并属于当前
-module/session；空 requirements 只表示不额外依赖 WindowStage/UIContext，不表示可以恢复共享
-`EagerPlugin` 实例。
+框架可能为同一进程中的多个 Host/session 创建多个 ArkTS plugin instance。禁止返回同一个实例：
+`attachContext`、hook cancellation 和 controller 映射都是实例状态，`PluginBase.attachContext` 会拒绝
+复用。插件不读取 module 名，也不要求业务按 module 配置；它必须自行保证多实例、重复调用和独立
+dispose 正确。Rust 状态由注册到具体 `OpenHarmonyApp` 的 plugin instance 持有；例如
+ResourceManager 通过 `registered_plugin::<ResourceBridgePlugin>()` 读取，而不是使用跨 Host 全局变量。
+只有平台本身明确进程级的资源才使用进程级 coordinator。即使 `requires = []`，插件仍在 Ability ready
+后安装并属于当前 Host/session；空 requirements 只表示不访问额外平台 context。
 
 ## 9. 实现、Demo 与验收
 
@@ -623,7 +630,7 @@ module/session；空 requirements 只表示不额外依赖 WindowStage/UIContext
 | 异步 action | Rust worker 可以发起调用；ArkTS Promise 完成后 Rust 收到具名 response，不存在 JSON encode/decode |
 | 主线程同步 action（如有） | 在 `#[napi]` callback 的 `Env` 内成功；`call_sync` 不能从 worker 直接调用（无 `Env`）；没有 Promise 或阻塞等待 |
 | 子线程同步 action（TSFN，如有） | 从 Rust worker 调用 `call_sync_from_worker` 成功拿到具名 response；从 N-API 主线程调用被立即拒绝（防死锁） |
-| context 延迟 | async 调用会等待本 module 唯一组件的 context/根节点就绪；sync 调用在未就绪时立即失败 |
+| context 延迟 | async 调用会等待当前 Host 组件的 context/根节点就绪；sync 调用在未就绪时立即失败 |
 | 生命周期销毁 | timeout、Ability/session destroy 会取消调用；UI/WindowStage detach 会触发生命周期 cleanup，临时节点、delegate、waiter 和映射被释放或失效 |
 | 原生节点（如有） | 插件能 `appendChild` 到 session 根或经 `ohos.node` 句柄组合子树；业务 underlay/foreground 由页面 `Stack` 声明顺序决定，行为不变 |
 | 平台回调（如有） | 在当前回调栈完成 Rust 决策，并覆盖明确的 fail-open/fail-closed 语义 |
@@ -637,7 +644,8 @@ module/session；空 requirements 只表示不额外依赖 WindowStage/UIContext
 新增或迁移插件必须完成以下项目后才可合入：
 
 - [ ] 建立 `crates/plugin-<name>` 与 `plugins/<name>` 成对包，并完成 workspace/HAR/应用装配登记。
-- [ ] Rust `BridgePlugin` 与 ArkTS factory 的 ID、VERSION、Mode、requires 完全一致。
+- [ ] Rust `BridgePlugin` 与 ArkTS plugin 的 ID、Mode、requires 完全一致；不兼容契约使用新的
+  action/typeName。
 - [ ] 每个 request/response 都是具名 N-API 类型；ArkTS 输入校验 `typeName` 和字段，输出填写
   正确的 `typeName`；不存在 JSON 桥接代码。
 - [ ] 同步 facade 支持主线程 `Env` 调用与（如提供）worker `call_sync_from_worker` 两条路径，两条
@@ -671,7 +679,7 @@ ArkTS/HAP 编译和真机验证也属于合入条件；仅 Rust 单测通过不�
 ## 10. 推荐评审问题
 
 1. core 是否仍然不知道该插件的具体能力、平台类型和业务语义？
-2. Rust 与 ArkTS 是否对 ID、版本、模式、context、action 和 typeName 使用同一份契约？
+2. Rust 与 ArkTS 是否对 ID、模式、context、action 和 typeName 使用同一份契约？
 3. 是否能证明同步路径不会 `await`，异步路径不会保存 Env/ArkTS 对象？
 4. 插件依赖的生命周期、根节点就绪、取消和 dispose 是否都有明确的事件驱动路径？
 5. 若插件为 WebView 或其他原生节点，业务是否仍拥有布局层级（页面 `Stack` 声明顺序）？

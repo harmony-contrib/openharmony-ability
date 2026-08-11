@@ -33,7 +33,6 @@ function parseOpenRequest(payload: BridgeTypedValue): UrlOpenRequest {
 
 export class UrlPlugin extends AsyncPluginBase {
   readonly id = "ohos.url";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   async invokeAsync(

@@ -9,7 +9,7 @@
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-url` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-url` |
-| 插件 ID / bridge 版本 | `ohos.url` / `1` |
+| 插件 ID | `ohos.url` |
 | 执行模式 | 异步：`AsyncBridge` / `invokeAsync` |
 | 前置 context | `ability` |
 | action | `open-url` |

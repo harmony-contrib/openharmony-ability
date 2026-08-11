@@ -36,7 +36,7 @@ Rust 侧还需注册 `UrlBridgePlugin`，并通过 `UrlExt::open_url` 发起调�
 
 | 字段 | 值 |
 | --- | --- |
-| `id` / `version` | `ohos.url` / `1` |
+| `id` | `ohos.url` |
 | `execution` | `async` |
 | `requires` | `["ability"]` |
 | 支持 action | `open-url` |

@@ -13,7 +13,6 @@ impl BridgePlugin for AppControlBridgePlugin {
     type Mode = MainThreadSyncBridge;
 
     const ID: &'static str = "ohos.app-control";
-    const VERSION: u32 = 1;
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
 }

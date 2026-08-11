@@ -10,7 +10,7 @@
 - ArkTS → Rust 的反向事件使用 `context.invokeNativeSync(event, requestTypeName,
   responseTypeName, value)`，同样传递具名 N-API value，不使用 JSON event port。
 - 内置标量类型：`std.string`、`std.bytes`、`std.bool`、`std.i32`、`std.f64`。
-- C++ N-API 插件必须使用相同的 `(pluginId, version, action, requestTypeName,
+- C++ N-API 插件必须使用相同的 `(pluginId, action, requestTypeName,
   responseTypeName, value)` 边界，不得跨 worker 保存 `napi_env`/`napi_ref`/ArkTS 对象。
 
 ## 契约总表
@@ -19,11 +19,12 @@
 |---|---|---|---|
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest` → `{ code }` | `ohos.app_control.TerminateResponse` → `{ accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest` → `{ permissions }` | `ohos.permission.PermissionResponse` → `{ codes }` | async / `ability` |
-| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest` → `{ areaType }` | `ohos.window.AvoidAreaResponse` → `{ area: { visible, leftRect, topRect, rightRect, bottomRect } }` | sync / `window-stage` |
-| `ohos.webview` / `create` | `ohos.webview.CreateRequest` → `WebviewCreateRequest` | `ohos.webview.CreateResponse` → `{ id, slotId }` | async / `ui-context` |
-| `ohos.webview` / `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`clear-all-browsing-data` | `ohos.webview.ControllerRequest` → `{ id, slotId, visible, color, url, html, headers, zoom }` | `ohos.webview.Acknowledgement` → `{ accepted }` | async / `ui-context` |
-| `ohos.webview` / `get-url`、`cookies-with-url` | `ohos.webview.ControllerRequest` → `{ id, slotId, url }` | `ohos.webview.StringResponse` → `{ value }` | async / `ui-context` |
-| `ohos.webview` / `evaluate-script` | `ohos.webview.ScriptRequest` → `{ id, slotId, script }` | `ohos.webview.ScriptResponse` → `{ result }` | async / `ui-context` |
+| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest` → `{ areaType }` | `ohos.window.AvoidAreaResponse` → `{ area: { visible, leftRect, topRect, rightRect, bottomRect } }` | async / `ui-context`；查询当前 component 所在窗口 |
+| `ohos.window` / `create-os-window`、`set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window`、`is-maximized`、`is-minimized` | `ohos.window.CreateRequest` / `WindowIdRequest` / `DecorationsRequest` / `ColorRequest` / `BlurRequest` / `MoveRequest` / `ResizeRequest` / `FocusableRequest` | `ohos.window.CreateResponse` → `{ windowId }` / `Acknowledgement` → `{ accepted }` / `StateResponse` → `{ value }` | async / `ui-context` |
+| `ohos.webview` / `create` | `ohos.webview.CreateRequest` → `{ id, parentHandle?, ... }` | `ohos.webview.CreateResponse` → `{ id }` | async / `ui-context` |
+| `ohos.webview` / `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`clear-all-browsing-data` | `ohos.webview.ControllerRequest` → `{ id, visible?, color?, url?, html?, headers?, zoom? }` | `ohos.webview.Acknowledgement` → `{ accepted }` | async / `ui-context` |
+| `ohos.webview` / `get-url`、`cookies-with-url` | `ohos.webview.ControllerRequest` → `{ id, url? }` | `ohos.webview.StringResponse` → `{ value }` | async / `ui-context` |
+| `ohos.webview` / `evaluate-script` | `ohos.webview.ScriptRequest` → `{ id, script }` | `ohos.webview.ScriptResponse` → `{ result }` | async / `ui-context` |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象） | `ohos.resource.ResourceManagerReadyResponse` → `{ accepted }` | 入站事件 / `ability` |
 
 ## 代码位置
@@ -42,7 +43,7 @@
 
 | 事件 | request type → response type | 方向 |
 |---|---|---|
-| `before-engine-init` / `engine-initialized` | `ohos.webview.EngineLifecycleEvent` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
+| `seal-engine-schemes` / `before-engine-init` / `engine-initialized` | `ohos.webview.EngineLifecycleEvent` → `ohos.webview.EngineLifecycleResponse` | ArkTS → Rust |
 | `controller-attached` / `controller-removed` | `ohos.webview.ControllerEvent` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
 | `navigation-request` | `ohos.webview.NavigationRequest` → `ohos.webview.NavigationResponse` | ArkTS → Rust |
 | `download-start` | `ohos.webview.DownloadStartRequest` → `ohos.webview.DownloadStartResponse` | ArkTS → Rust |

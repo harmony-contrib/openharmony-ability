@@ -164,7 +164,6 @@ export class NativeAbility extends UIAbility {
     return {
       bridgeInvoke: async (
         pluginId: string,
-        pluginVersion: number,
         action: string,
         requestTypeName: string,
         responseTypeName: string,
@@ -175,7 +174,6 @@ export class NativeAbility extends UIAbility {
           sessionId,
           moduleName,
           pluginId,
-          pluginVersion,
           action,
           requestTypeName,
           responseTypeName,
@@ -185,7 +183,6 @@ export class NativeAbility extends UIAbility {
       },
       bridgeInvokeSync: (
         pluginId: string,
-        pluginVersion: number,
         action: string,
         requestTypeName: string,
         responseTypeName: string,
@@ -195,7 +192,6 @@ export class NativeAbility extends UIAbility {
           sessionId,
           moduleName,
           pluginId,
-          pluginVersion,
           action,
           requestTypeName,
           responseTypeName,
@@ -314,6 +310,7 @@ export class NativeAbility extends UIAbility {
           bridgeOwner,
         };
         initializedRuntimes.push(runtime);
+        BridgeHostRegistry.configurePlugins(sessionId, loaded.moduleName, lifecycle.bridgePlugins);
         BridgeHostRegistry.attachApplicationLifecycle(sessionId, loaded.moduleName, lifecycle);
         this.attachBridgeSinks(sessionId, loaded.moduleName, loaded.module);
 

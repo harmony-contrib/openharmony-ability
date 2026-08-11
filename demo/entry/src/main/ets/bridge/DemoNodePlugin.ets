@@ -31,7 +31,6 @@ const badgeBuilder = wrapBuilder<[BadgeData]>(BuildBadge);
 /** Demonstrates that a bridge plugin can mount a normal ArkUI BuilderNode, not only WebView. */
 export class DemoNodePlugin extends AsyncPluginBase {
   readonly id = "demo.node-badge";
-  readonly version = 1;
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
 
   private mounted = false;

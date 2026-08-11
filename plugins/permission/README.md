@@ -41,7 +41,7 @@ Rust 侧也必须在 `#[ability]` 初始化器注册 `PermissionBridgePlugin`。
 
 | 字段 | 值 |
 | --- | --- |
-| `id` / `version` | `ohos.permission` / `1` |
+| `id` | `ohos.permission` |
 | `execution` | `async` |
 | `requires` | `["ability"]` |
 | 支持 action | `request` |
@@ -59,7 +59,7 @@ Rust 侧也必须在 `#[ability]` 初始化器注册 `PermissionBridgePlugin`。
 
 ## 维护要求
 
-修改 action、字段或 typeName 时，必须同步修改 Rust crate、factory 版本、测试和 demo。请求/响应使用
-真实 N-API object，不得引入 `JSON.stringify` / `JSON.parse`。
+修改 action、字段或 typeName 时，必须同步修改 Rust crate、ArkTS 实现、测试和 demo；不兼容契约
+使用新的 action/typeName。请求/响应使用真实 N-API object，不得引入 `JSON.stringify` / `JSON.parse`。
 
 完整线程、生命周期与验收规则见 [插件开发规范](../../docs/plugin-development-standard.md)。

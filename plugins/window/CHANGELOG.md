@@ -1,5 +1,13 @@
+# Unreleased
+- **Breaking**: all window actions now use the async bridge so Promise-based platform window
+  operations are awaited before Rust observes completion.
+- Adds host-scoped multi-window create, state and mutation actions; every plugin instance owns and
+  disposes its own platform windows without module-aware configuration.
+
+---
+
 # 1.0.0-beta.1
-- **Breaking**: bridge version 2 requires `ui-context` and resolves the Window that owns this
+- **Breaking**: the plugin now requires `ui-context` and resolves the Window that owns this
   module's `DefaultXComponent`, so sub-window modules no longer query the Ability's main window.
 
 ---

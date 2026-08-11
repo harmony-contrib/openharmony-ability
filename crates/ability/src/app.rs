@@ -17,8 +17,9 @@ use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
     bridge::MainThreadBridgeEndpoint, AvoidArea, AvoidAreaType, BridgeMainThread,
-    BridgeMainThreadEvent, BridgePlugin, BridgePluginRegistry, BridgeRuntime, Configuration, Event,
-    MainThreadScheduler, OpenHarmonyWaker, PluginLifecycleEvent, Rect, WAKER,
+    BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration, BridgePluginRegistry,
+    BridgeRuntime, Configuration, Event, MainThreadScheduler, OpenHarmonyWaker,
+    PluginLifecycleEvent, Rect, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -515,6 +516,14 @@ impl OpenHarmonyApp {
         P: BridgePlugin,
     {
         self.bridge_plugins.registered::<P>()
+    }
+
+    /// Structural plugin contracts configured by this native module. Used by generated startup
+    /// code so ArkTS can select matching factories without exposing module routing to plugins or
+    /// application registration.
+    #[doc(hidden)]
+    pub fn bridge_plugin_declarations(&self) -> Result<Vec<BridgePluginDeclaration>> {
+        self.bridge_plugins.declarations()
     }
 
     #[doc(hidden)]

@@ -38,7 +38,7 @@ Rust 必须同时注册 `AppControlBridgePlugin`，并只在当前 N-API callbac
 
 | 字段 | 值 |
 | --- | --- |
-| `id` / `version` | `ohos.app-control` / `1` |
+| `id` | `ohos.app-control` |
 | `execution` | `sync-main-thread` |
 | `requires` | `["ability"]` |
 | 支持 action | `terminate` |

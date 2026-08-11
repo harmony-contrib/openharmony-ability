@@ -29,15 +29,15 @@ public bridgePlugins = [
 ];
 ```
 
-ArkTS wrapper 必须是 module/session 级实例；`attachContext` 会拒绝跨 module/session 复用。
-native resource manager 由该 module 注册的 Rust `ResourceBridgePlugin` instance 持有，不共享 ArkTS
-plugin instance，也不使用跨 module 全局 pointer。
+ArkTS wrapper 必须是 Host/session 级实例；`attachContext` 会拒绝跨 Host/session 复用。
+native resource manager 由匹配的 Rust `ResourceBridgePlugin` registry instance 持有，不共享 ArkTS
+plugin instance，也不使用进程级全局 pointer。
 
 ## 契约
 
 | 项目 | 值 |
 | --- | --- |
-| 插件 ID / 版本 | `ohos.resource` / `1` |
+| 插件 ID | `ohos.resource` |
 | 执行模式 | `async`（无出站 action，`invokeAsync` 一律抛错） |
 | requires | `["ability"]`（与 Rust `REQUIRED_CONTEXTS` 一致） |
 | 入站事件 | `resource-manager-ready`：request type `ohos.resource.ResourceManagerRef`，response type `ohos.resource.ResourceManagerReadyResponse` |
