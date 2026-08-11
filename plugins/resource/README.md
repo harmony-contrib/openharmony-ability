@@ -12,7 +12,7 @@ ohpm install @ohos-rs/ability-plugin-resource
 ## 职责
 
 - 持有 `abilityContext.resourceManager` 平台对象；
-- 在 `ui-context-ready` 时经 `context.invokeNativeSync("resource-manager-ready", ...)` 把对象
+- 在 Ability-scoped `onInstall` 经 `context.invokeNativeSync("resource-manager-ready", ...)` 把对象
   推送给 Rust facade；
 - 不执行任何资源读取逻辑 —— 所有读取由 Rust 侧通过 `ohos-resource-manager-binding` 直连
   OpenHarmony C API 完成。
@@ -20,18 +20,18 @@ ohpm install @ohos-rs/ability-plugin-resource
 ## 接入
 
 ```ts
-import { EagerPlugin } from "@ohos-rs/ability";
+import { LazyPlugin } from "@ohos-rs/ability";
 import { ResourcePlugin } from "@ohos-rs/ability-plugin-resource";
 
 // in NativeAbility subclass:
 public bridgePlugins = [
-  new EagerPlugin(new ResourcePlugin()),
+  new LazyPlugin(() => new ResourcePlugin()),
 ];
 ```
 
-使用 `EagerPlugin`（共享单例实例）而非 `LazyPlugin`：native resource manager 是进程级全局状态，
-每个 session 创建独立 wrapper 实例是冗余的。wrapper 被重复 `attachContext` 时只是重复推送同一
-对象，天然幂等。
+ArkTS wrapper 必须是 module/session 级实例；`attachContext` 会拒绝跨 module/session 复用。
+native resource manager 由该 module 注册的 Rust `ResourceBridgePlugin` instance 持有，不共享 ArkTS
+plugin instance，也不使用跨 module 全局 pointer。
 
 ## 契约
 
@@ -44,6 +44,5 @@ public bridgePlugins = [
 
 ## 时序
 
-推送点在 `ability-create`。入站事件 sink 在 `NativeAbility.onCreate` 中 `module.init` 之后立即
-attach（`attachBridgeEventSink`），不再等到 UI 渲染；`DefaultXComponent.aboutToAppear` 中的
-attach 保留为同一 module 对象的幂等兜底。
+推送点在 `onInstall`。此时入站事件 sink 和 Rust `AbilityCreated` 都已就绪，但不需要 WindowStage、
+UIContext 或 DefaultXComponent。

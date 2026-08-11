@@ -22,11 +22,11 @@ ohpm install @ohos-rs/ability-plugin-app-control
 ```
 
 ```ts
-import { NativeAbility } from "@ohos-rs/ability";
-import { createAppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
+import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
 
 export default class EntryAbility extends NativeAbility {
-  public bridgePlugins = [createAppControlPlugin()];
+  public bridgePlugins = [new LazyPlugin(() => new AppControlPlugin())];
 }
 ```
 
@@ -34,7 +34,7 @@ Rust 必须同时注册 `AppControlBridgePlugin`，并只在当前 N-API callbac
 `AppControlExt::terminate`。完整 Rust 用法见
 [Rust facade README](../../crates/plugin-app-control/README.md)。
 
-## Factory 契约
+## Plugin 契约
 
 | 字段 | 值 |
 | --- | --- |

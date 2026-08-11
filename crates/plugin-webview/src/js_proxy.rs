@@ -1,12 +1,13 @@
 //! Web-page JavaScript → Rust proxy support owned by the WebView plugin.
 //!
 //! ArkWeb requires a JavaScript proxy to be registered after its controller has attached. The
-//! public builder therefore queues declarations by WebView tag and `WebviewBridgePlugin` flushes
+//! public builder therefore queues declarations by module-local WebView ID and
+//! `WebviewBridgePlugin` flushes
 //! them when the ArkTS Web component reports `controller-attached`. This keeps the page callback
 //! in native ArkWeb while avoiding an ArkTS object or N-API function reference on a Rust worker.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     sync::{Arc, LazyLock, Mutex},
 };
 
@@ -30,7 +31,8 @@ struct ProxyDeclaration {
 
 #[derive(Default)]
 struct ProxyState {
-    attached_webviews: BTreeSet<String>,
+    /// Business WebView ID -> process-unique ArkWeb controller tag.
+    attached_webviews: BTreeMap<String, String>,
     declarations: BTreeMap<String, Vec<ProxyDeclaration>>,
 }
 
@@ -40,9 +42,9 @@ static PROXY_STATE: LazyLock<Mutex<ProxyState>> =
 /// Builder for a persistent JavaScript object exposed to a WebView page.
 ///
 /// The registered object is available as `window.<object_name>` and each declared method receives
-/// the ArkWeb tag plus stringified page arguments. Calling [`Self::build`] before `create` is the
-/// preferred path: the declaration is installed exactly when the controller attaches, before the
-/// initial document is loaded.
+/// the module-local business WebView ID plus stringified page arguments. Calling [`Self::build`]
+/// before `create` is the preferred path: the declaration is installed exactly when the
+/// process-unique ArkWeb controller attaches, before the initial document is loaded.
 pub struct WebviewJavascriptProxyBuilder {
     webview_id: String,
     object_name: String,
@@ -72,23 +74,26 @@ impl WebviewJavascriptProxyBuilder {
 
     /// Queues the declaration until the WebView controller attaches, or installs it immediately
     /// and reloads the page when the controller is already attached. Declarations survive a
-    /// remove/create cycle for the same WebView tag.
+    /// remove/create cycle for the same WebView ID.
     pub fn build(self) -> Result<()> {
         let declaration = self.into_declaration()?;
         let declaration_to_install = {
             let mut state = PROXY_STATE
                 .lock()
                 .map_err(|_| Error::from_reason("Failed to lock WebView JavaScript proxy state"))?;
-            let attached = state.attached_webviews.contains(&declaration.webview_id);
+            let native_tag = state
+                .attached_webviews
+                .get(&declaration.webview_id)
+                .cloned();
             state
                 .declarations
                 .entry(declaration.webview_id.clone())
                 .or_default()
                 .push(declaration.clone());
-            attached.then_some(declaration)
+            native_tag.map(|native_tag| (declaration, native_tag))
         };
-        if let Some(declaration) = declaration_to_install {
-            install(declaration, true)?;
+        if let Some((declaration, native_tag)) = declaration_to_install {
+            install(declaration, &native_tag, true)?;
         }
         Ok(())
     }
@@ -123,12 +128,15 @@ impl WebviewJavascriptProxyBuilder {
 }
 
 /// Flushes queued page-to-Rust proxies once ArkTS has attached the native controller.
-pub(crate) fn on_controller_attached(webview_id: &str) -> Result<()> {
+pub(crate) fn on_controller_attached(webview_id: &str, native_tag: &str) -> Result<()> {
     let declarations = {
         let mut state = PROXY_STATE
             .lock()
             .map_err(|_| Error::from_reason("Failed to lock WebView JavaScript proxy state"))?;
-        if !state.attached_webviews.insert(webview_id.to_owned()) {
+        let previous_tag = state
+            .attached_webviews
+            .insert(webview_id.to_owned(), native_tag.to_owned());
+        if previous_tag.as_deref() == Some(native_tag) {
             return Ok(());
         }
         state
@@ -139,29 +147,48 @@ pub(crate) fn on_controller_attached(webview_id: &str) -> Result<()> {
     };
 
     for declaration in declarations {
-        install(declaration, false)?;
+        install(declaration, native_tag, false)?;
     }
     Ok(())
 }
 
 /// Marks a controller detached. Declarations remain queued for a future controller using the
-/// same WebView tag, while ArkWeb owns proxies that were already installed.
-pub(crate) fn on_controller_removed(webview_id: &str) -> Result<()> {
+/// same WebView ID, while ArkWeb owns proxies that were already installed.
+pub(crate) fn on_controller_removed(webview_id: &str, native_tag: &str) -> Result<()> {
     let mut state = PROXY_STATE
         .lock()
         .map_err(|_| Error::from_reason("Failed to lock WebView JavaScript proxy state"))?;
+    if state.attached_webviews.get(webview_id).map(String::as_str) != Some(native_tag) {
+        return Ok(());
+    }
     state.attached_webviews.remove(webview_id);
     Ok(())
 }
 
-fn install(declaration: ProxyDeclaration, refresh_after_install: bool) -> Result<()> {
-    let mut builder =
-        ArkWebProxyBuilder::new(declaration.webview_id.clone(), declaration.object_name);
+/// Clears controller-generation state at component/session teardown. Proxy declarations remain
+/// available for a later controller created with the same module-local business ID.
+pub(crate) fn clear_attached() -> Result<()> {
+    PROXY_STATE
+        .lock()
+        .map_err(|_| Error::from_reason("Failed to clear WebView JavaScript proxy state"))?
+        .attached_webviews
+        .clear();
+    Ok(())
+}
+
+fn install(
+    declaration: ProxyDeclaration,
+    native_tag: &str,
+    refresh_after_install: bool,
+) -> Result<()> {
+    let webview_id = declaration.webview_id;
+    let mut builder = ArkWebProxyBuilder::new(native_tag.to_owned(), declaration.object_name);
     for method in declaration.methods {
         let callback = Arc::clone(&method.callback);
-        builder = builder.add_method(method.name, move |webview_id, arguments| {
+        let callback_webview_id = webview_id.clone();
+        builder = builder.add_method(method.name, move |_native_tag, arguments| {
             if let Ok(mut callback) = callback.lock() {
-                callback(webview_id, arguments);
+                callback(callback_webview_id.clone(), arguments);
             }
         });
     }

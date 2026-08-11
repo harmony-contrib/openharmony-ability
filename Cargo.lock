@@ -57,11 +57,26 @@ dependencies = [
  "ohos-hilog-binding",
  "openharmony-ability",
  "openharmony-ability-derive",
+ "openharmony-ability-plugin-app-control",
  "openharmony-ability-plugin-files",
  "openharmony-ability-plugin-permission",
  "openharmony-ability-plugin-resource",
  "openharmony-ability-plugin-url",
  "openharmony-ability-plugin-webview",
+ "openharmony-ability-plugin-window",
+]
+
+[[package]]
+name = "demo_sub_native"
+version = "0.1.0"
+dependencies = [
+ "napi-build-ohos",
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+ "openharmony-ability-derive",
+ "openharmony-ability-plugin-webview",
+ "openharmony-ability-plugin-window",
 ]
 
 [[package]]

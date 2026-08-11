@@ -72,8 +72,27 @@ export interface BridgeBindings {
 }
 
 export interface Module {
-  init: (context?: AbilityInitContext) => ApplicationLifecycle;
-  render: (bindings: BridgeBindings, slot: NodeContent) => void;
+  /**
+   * Opens this native module's Ability-session bridge before any component is rendered. The
+   * owner is unique per Ability session and guards a later session from stale cleanup.
+   */
+  init: (
+    bindings: BridgeBindings,
+    bridgeOwner: string,
+    context?: AbilityInitContext,
+  ) => ApplicationLifecycle;
+  /** Releases only the matching Ability-session bridge; stale owners are ignored. */
+  disposeBridge: (bridgeOwner: string) => void;
+  /**
+   * Mounts this native module's one Rust render tree into `slot`. `renderOwner` is unique per
+   * appearance and protects a later render from stale cleanup; another concurrently active
+   * DefaultXComponent must use a different native module.
+   */
+  render: (slot: NodeContent, renderOwner: string) => void;
+  /** Releases only the render tree owned by `renderOwner`. */
+  disposeRender: (renderOwner: string) => void;
+  /** Releases the remaining render tree when the WindowStage is torn down. */
+  disposeAllRenders: () => void;
   /** Synchronous page-back decision exported by the native module, when it has one. */
   onBackPressIntercept?: () => boolean;
   /** Legacy N-API spelling retained for modules built before camel-case code generation. */
@@ -138,23 +157,8 @@ export type BridgeLifecyclePayload =
   | BridgeMemoryLevelLifecyclePayload;
 
 export interface BridgeLifecycleEvent {
-  kind: BridgeLifecycleKind;
-  payload: BridgeLifecyclePayload;
-}
-
-/**
- * Window-scoped node surface. Each `DefaultXComponent` instance (one per window) owns its own
- * root FrameNode; the default window key is `"main"`. Plugins mount into a window scope so
- * sub-window plugin trees never overwrite the main window's.
- */
-export interface BridgeWindowScope {
-  /** The window key this scope is bound to (`"main"` for the default window). */
-  windowKey: string;
-  getUIContext: () => UIContext;
-  getRootFrameNode: () => FrameNode;
-  appendChild: (key: string, node: FrameNode, cleanup?: () => void) => void;
-  removeChild: (key: string) => void;
-  getFrameNode: (handle: number) => FrameNode;
+  readonly kind: BridgeLifecycleKind;
+  readonly payload: BridgeLifecyclePayload;
 }
 
 /**
@@ -162,8 +166,10 @@ export interface BridgeWindowScope {
  * session; Rust gets lifecycle notifications and direct named N-API events, not retained ArkTS
  * object references.
  *
- * Every plugin shares one root FrameNode per window (owned by `DefaultXComponent`). There are no
- * named slots, registries or readiness waiters: the main window root exists before
+ * A native module is bound to exactly one `DefaultXComponent` at a time, and every plugin for
+ * that module shares the component's root FrameNode. An Ability may host several components by
+ * using a distinct native module for each one. There are no named slots or registries: the root
+ * exists before
  * `ui-context-ready`, so plugins can mount nodes during `onInstall`. `appendChild`/`removeChild`
  * use a caller-chosen key as the plugin's own cleanup credential; handle-based composition
  * (`getFrameNode`) is the Rust-facing surface of the built-in `ohos.node` plugin.
@@ -174,16 +180,20 @@ export interface BridgePluginContext {
   sessionId: string;
   abilityContext: common.UIAbilityContext;
   isActive: () => boolean;
+  /** Returns the Ability-level WindowStage. This is not necessarily the component's window. */
   getWindowStage: () => window.WindowStage;
+  /** Resolves the actual Window that owns this module's DefaultXComponent. */
+  getWindow: () => window.Window;
   getUIContext: () => UIContext;
   /**
-   * Returns the session root FrameNode that `DefaultXComponent` attaches before
+   * Returns this module's component root FrameNode, attached before
    * `ui-context-ready`. Plugins mount their own nodes here.
    */
   getRootFrameNode: () => FrameNode;
   /**
-   * Appends a FrameNode to the session root. `key` must be unique per plugin (prefix it with the
-   * plugin id) and is the cleanup credential for `removeChild`. An optional `cleanup` runs when
+   * Appends a FrameNode to this module's component root. `key` must be unique per plugin
+   * (normally prefixed by the plugin id) and is the cleanup credential for `removeChild`. An
+   * optional `cleanup` runs when
    * the node is removed or the bridge session disposes.
    */
   appendChild: (key: string, node: FrameNode, cleanup?: () => void) => void;
@@ -195,12 +205,6 @@ export interface BridgePluginContext {
    */
   getFrameNode: (handle: number) => FrameNode;
   /**
-   * Returns a window-scoped node surface. The default context methods operate on the `"main"`
-   * window; sub-window `DefaultXComponent` instances register under their own `windowKey` and
-   * plugins use this method to mount into them.
-   */
-  windowScope: (windowKey: string) => BridgeWindowScope;
-  /**
    * Makes an immediate, named N-API request to the matching Rust plugin. It is valid only while
    * the current ArkTS/N-API callback is active; do not retain the input or result.
    */
@@ -210,6 +214,18 @@ export interface BridgePluginContext {
     responseTypeName: string,
     value: ESObject,
   ) => ESObject;
+  /**
+   * Sends the same named event to this plugin's Rust facade in every active native module in the
+   * application process. This is reserved for genuinely process-global platform transitions
+   * (for example ArkWeb engine initialization); ordinary callbacks must use `invokeNativeSync`
+   * and remain module-scoped.
+   */
+  invokeNativeSyncAcrossModules: (
+    event: string,
+    requestTypeName: string,
+    responseTypeName: string,
+    value: ESObject,
+  ) => ESObject[];
 }
 
 export interface BridgeCallContext extends BridgePluginContext {
@@ -222,6 +238,15 @@ export interface BridgeCallContext extends BridgePluginContext {
    * function removes the listener. This is the lifecycle signal for waits on ArkUI state; it is
    * deliberately separate from a timer-based readiness heuristic.
    */
+  onCancel: (listener: () => void) => () => void;
+}
+
+/**
+ * A bounded execution scope for one plugin hook. BridgeHost cancels the scope when the session
+ * closes or the hook exceeds its watchdog, allowing teardown to continue with the next plugin.
+ */
+export interface BridgePluginHookContext extends BridgePluginContext {
+  isCancelled: () => boolean;
   onCancel: (listener: () => void) => () => void;
 }
 
@@ -238,28 +263,31 @@ export interface AsyncBridgePlugin extends BridgePluginBase {
    * (before onInstall). PluginBase implements it; interface-only plugins may omit it.
    */
   attachContext?: (context: BridgePluginContext) => void;
-  onInstall?: (context: BridgePluginContext) => void | Promise<void>;
-  onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginContext) => void | Promise<void>;
+  onInstall?: (context: BridgePluginHookContext) => void | Promise<void>;
+  onLifecycle?: (
+    event: BridgeLifecycleEvent,
+    context: BridgePluginHookContext,
+  ) => void | Promise<void>;
   invokeAsync: (
     action: string,
     request: BridgeTypedValue,
     context: BridgeCallContext,
   ) => Promise<BridgeTypedValue>;
-  onDispose?: (context: BridgePluginContext) => void | Promise<void>;
+  onDispose?: (context: BridgePluginHookContext) => void | Promise<void>;
 }
 
 export interface MainThreadSyncBridgePlugin extends BridgePluginBase {
   execution: "sync-main-thread";
   /** See [`AsyncBridgePlugin.attachContext`]. */
   attachContext?: (context: BridgePluginContext) => void;
-  onInstall?: (context: BridgePluginContext) => void;
-  onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginContext) => void;
+  onInstall?: (context: BridgePluginHookContext) => void;
+  onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginHookContext) => void;
   invokeSync: (
     action: string,
     request: BridgeTypedValue,
     context: BridgeCallContext,
   ) => BridgeTypedValue;
-  onDispose?: (context: BridgePluginContext) => void;
+  onDispose?: (context: BridgePluginHookContext) => void;
 }
 
 export type BridgePlugin = AsyncBridgePlugin | MainThreadSyncBridgePlugin;
@@ -277,15 +305,23 @@ export abstract class PluginBase {
   abstract readonly requires: BridgeContextRequirement[];
   private context?: BridgePluginContext;
 
-  onInstall(_context: BridgePluginContext): void | Promise<void> {}
-  onLifecycle(_event: BridgeLifecycleEvent, _context: BridgePluginContext): void | Promise<void> {}
-  onDispose(_context: BridgePluginContext): void | Promise<void> {}
+  onInstall(_context: BridgePluginHookContext): void | Promise<void> {}
+  onLifecycle(
+    _event: BridgeLifecycleEvent,
+    _context: BridgePluginHookContext,
+  ): void | Promise<void> {}
+  onDispose(_context: BridgePluginHookContext): void | Promise<void> {}
 
   /**
    * Called once by `BridgeHost` right after creation, before `onInstall`. Subclasses that
    * need the context outside the lifecycle hooks can read it via [`PluginBase.getContext`].
    */
   attachContext(context: BridgePluginContext): void {
+    if (this.context !== undefined) {
+      throw new Error(
+        `Bridge plugin '${this.id}' instance cannot be reused across native modules or Ability sessions`,
+      );
+    }
     this.context = context;
   }
 
@@ -349,28 +385,5 @@ export class LazyPlugin implements BridgePluginFactory {
 
   create(): BridgePlugin {
     return this.createFn();
-  }
-}
-
-/**
- * Eager plugin registration entry: shares one caller-constructed plugin instance across every
- * native module and Ability session, and optionally filters by native module.
- *
- * Use this for plugins that own process-wide global state (for example a singleton native
- * wrapper) where per-session instances would be redundant or lossy. The instance receives
- * `attachContext` for every module/session it is installed into and must tolerate repeated
- * lifecycle and dispose notifications.
- */
-export class EagerPlugin implements BridgePluginFactory {
-  readonly modules?: string[];
-  private readonly instance: BridgePlugin;
-
-  constructor(instance: BridgePlugin, modules?: string[]) {
-    this.instance = instance;
-    this.modules = modules;
-  }
-
-  create(): BridgePlugin {
-    return this.instance;
   }
 }

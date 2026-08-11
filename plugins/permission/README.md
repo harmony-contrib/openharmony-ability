@@ -23,21 +23,21 @@ ohpm install @ohos-rs/ability-plugin-permission
 }
 ```
 
-在入口 Ability 显式注册 factory，并继续调用 `NativeAbility` 的生命周期实现：
+在入口 Ability 通过 `LazyPlugin` 显式注册新 plugin 实例，并继续调用 `NativeAbility` 的生命周期实现：
 
 ```ts
-import { NativeAbility } from "@ohos-rs/ability";
-import { createPermissionPlugin } from "@ohos-rs/ability-plugin-permission";
+import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { PermissionPlugin } from "@ohos-rs/ability-plugin-permission";
 
 export default class EntryAbility extends NativeAbility {
-  public bridgePlugins = [createPermissionPlugin()];
+  public bridgePlugins = [new LazyPlugin(() => new PermissionPlugin())];
 }
 ```
 
 Rust 侧也必须在 `#[ability]` 初始化器注册 `PermissionBridgePlugin`。两端装配方式见
 [Rust facade README](../../crates/plugin-permission/README.md)。
 
-## Factory 契约
+## Plugin 契约
 
 | 字段 | 值 |
 | --- | --- |

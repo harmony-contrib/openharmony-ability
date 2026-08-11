@@ -1,12 +1,38 @@
 # 1.0.0-beta.1
 
+- **Breaking**: remove `EagerPlugin`; every ArkTS plugin instance is now scoped to one
+  module/session, and `PluginBase` rejects instance reuse. Module-owned resources stay in the
+  corresponding registered Rust plugin instance.
+- **Breaking**: plugin hooks receive `BridgePluginHookContext` with cancellation, and native
+  `render(slot, renderOwner)` receives a per-appearance owner plus `disposeRender` cleanup.
+- **Breaking**: generic bridge bindings move from component `render` to
+  `init(bindings, bridgeOwner, context)` / `disposeBridge(bridgeOwner)`. The transport now follows
+  the module's Ability session, so ability-only plugins do not depend on XComponent appearance.
+- Propagate `renderOwner` through Rust XComponent surface/input/frame callbacks so stale native
+  callbacks cannot mutate a replacement component's window, IME or geometry state.
+- Serialize Ability/WindowStage/UI lifecycle with generation guards, bounded hook watchdogs and
+  prepare-then-activate startup so Rust sinks exist before ability plugin installation.
+- **Breaking**: enforce one `DefaultXComponent` per native module. One Ability supports multiple
+  components/windows through distinct modules; the same module cannot belong to two active
+  Ability sessions. Duplicate/empty `moduleName` entries fail configuration immediately, and the
+  generated native `render` export also rejects a second concurrent root.
 - **Breaking**: normalized node mounting — the named-slot model (`BridgeNodeSlot` /
-  `BridgeNodeHost` / `slotId`) is gone. WebView `FrameNode`s mount into the session root tree
-  (`context.appendChild`, key `ohos.webview.<id>`), full-bleed by default.
+  `BridgeNodeHost` / `slotId`) is gone. WebView `FrameNode`s mount into the module root tree
+  (`context.appendChild`, host-owned unique key), full-bleed by default.
 - **Breaking**: `CreateRequest`/`ControllerRequest`/`ScriptRequest`/`CreateResponse` drop
   `slotId`; `CreateRequest` gains optional `parentHandle` (`ohos.node` container handle) so an
   RS-layer node tree can adopt WebViews as children.
-- No readiness waiting: the session root exists before `ui-context-ready`; `onInstall` can mount.
+- **Breaking**: remove `windowKey`/`windowScope` and the `window_key` fields from `ohos.node` and
+  WebView create contracts; both bridge versions are now 2. Multiple WebViews use distinct IDs in
+  the same module/component.
+- **Breaking**: `BridgePluginContext.getWindow()` resolves the Window that owns the current
+  module/component. `ohos.window` version 2 now requires `ui-context`, so sub-window queries no
+  longer fall back to the Ability's main window.
+- Route size/rect/avoid-area/keyboard callbacks from each component's actual Window to only its
+  native module; only `windowStageEvent` remains Ability-wide.
+- The module/component root exists before `ui-context-ready`; `onInstall` can mount.
+- Add named `invokeNativeSyncAcrossModules` for process-global plugin transitions; ArkWeb engine
+  initialization uses it to coordinate all active native modules before the first WebView.
 - Business layering is page `Stack` declaration order; `underlay`/`foreground` hosts are gone.
 
 --- 
