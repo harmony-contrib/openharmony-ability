@@ -3,8 +3,8 @@
 //! The ArkTS wrapper (`plugins/resource`) owns the HarmonyOS `resourceManager` platform object
 //! and hands it to Rust through the inbound `resource-manager-ready` main-thread event. Rust
 //! converts the object to a native `NativeResourceManager` pointer **inside the same N-API
-//! callback** ([`ResourceManagerRef::from_bridge_value`]) and stores it in this native module's
-//! registered Rust plugin instance; the ArkTS object is never retained. Every subsequent read
+//! callback** ([`ResourceManagerRef::from_bridge_value`]) and stores it in the registered Rust
+//! plugin instance; the ArkTS object is never retained. Every subsequent read
 //! calls the OpenHarmony C API directly through `ohos-resource-manager-binding`.
 //!
 //! The wrapper pushes from its Ability-scoped `onInstall` hook. It does not depend on a
@@ -60,7 +60,7 @@ impl Deref for ResourceManager {
     }
 }
 
-/// Rust facade receiving and owning the native resource manager for one native module.
+/// Rust facade receiving and owning the native resource manager for one plugin registry.
 #[derive(Default)]
 pub struct ResourceBridgePlugin {
     resource_manager: RwLock<Option<ResourceManager>>,
@@ -169,7 +169,7 @@ impl_bridge_napi_type!(
     "ohos.resource.ResourceManagerReadyResponse"
 );
 
-/// Extension trait exposing this native module's registered resource manager.
+/// Extension trait exposing the current bridge registry's resource manager.
 ///
 /// ```no_run
 /// use openharmony_ability::OpenHarmonyApp;

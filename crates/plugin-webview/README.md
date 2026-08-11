@@ -14,7 +14,7 @@ ArkWeb delegate；Rust 只持有 controller ID、具名 N-API 数据及 Rust-own
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-webview` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-webview` |
-| 插件 ID / bridge 版本 | `ohos.webview` / `2` |
+| 插件 ID | `ohos.webview` |
 | 执行模式 | 异步：`AsyncBridge` / `invokeAsync` |
 | 前置 context | `ui-context` |
 | 挂载 | 当前 Host/component 根树（默认全屏）；可选 `parentHandle` 挂到 `ohos.node` 容器 |

@@ -9,7 +9,7 @@ ArkTS HAR `@ohos-rs/ability-plugin-files` 成对使用，是异步插件，可�
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-files` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-files` |
-| 插件 ID / bridge 版本 | `ohos.files` / `1` |
+| 插件 ID | `ohos.files` |
 | 执行模式 | 异步：`AsyncBridge` / `invokeAsync` |
 | 前置 context | `ability` |
 | action | `file-dialog` |

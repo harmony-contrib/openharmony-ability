@@ -468,7 +468,7 @@ Stack() {
   回调覆盖新组件的 raw window、IME 或尺寸。组件快速消失会使 generation 失效并取消 pending
   attach，旧异步 continuation 不得重新挂载已经消失的组件。
 - `BridgePluginContext` 的 `getUIContext` / `getRootFrameNode` / `appendChild` / `removeChild` /
-  `getFrameNode` 均只操作当前 module 的组件，不接受窗口 key；`getWindow()` 通过该 UIContext 定位
+  `getFrameNode` 均只操作当前 Host 的组件，不接受窗口 key；`getWindow()` 通过该 UIContext 定位
   组件实际所在窗口，不能用 Ability 的主窗口替代 sub window。
 - Window size/rect/avoid-area/keyboard listener 与组件 attach/detach 同寿命，回调必须校验当前
   组件状态；主窗口事件不得广播给 sub-window module，旧窗口的延迟回调也不得命中新 appearance。
@@ -518,7 +518,7 @@ WebView 插件还必须遵守：
 
 ### 7.1 WebView 回调契约与失败策略
 
-WebView 的 callback builder 必须在 `WebviewClient::create` 前按 module-local WebView ID 声明。Rust 保存的是
+WebView 的 callback builder 必须在 `WebviewClient::create` 前按 facade-local WebView ID 声明。Rust 保存的是
 `Send + Sync + 'static` closure，而不是 ArkTS 函数；ArkTS 在创建时只拿到订阅快照，以决定是否安装
 对应 ArkWeb delegate。
 
@@ -657,7 +657,7 @@ ResourceManager 通过 `registered_plugin::<ResourceBridgePlugin>()` 读取，�
 | 异步 action | Rust worker 可以发起调用；ArkTS Promise 完成后 Rust 收到具名 response，不存在 JSON encode/decode |
 | 主线程同步 action（如有） | 在 `#[napi]` callback 的 `Env` 内成功；`call_sync` 不能从 worker 直接调用（无 `Env`）；没有 Promise 或阻塞等待 |
 | 子线程同步 action（TSFN，如有） | 从 Rust worker 调用 `call_sync_from_worker` 成功拿到具名 response；从 N-API 主线程调用被立即拒绝（防死锁） |
-| context 延迟 | async 调用会等待本 module 唯一组件的 context/根节点就绪；sync 调用在未就绪时立即失败 |
+| context 延迟 | async 调用会等待当前 Host 组件的 context/根节点就绪；sync 调用在未就绪时立即失败 |
 | 生命周期销毁 | timeout、Ability/session destroy 会取消调用；UI/WindowStage detach 会触发生命周期 cleanup，临时节点、delegate、waiter 和映射被释放或失效 |
 | 原生节点（如有） | 插件能 `appendChild` 到 session 根或经 `ohos.node` 句柄组合子树；业务 underlay/foreground 由页面 `Stack` 声明顺序决定，行为不变 |
 | 平台回调（如有） | 在当前回调栈完成 Rust 决策，并覆盖明确的 fail-open/fail-closed 语义 |
