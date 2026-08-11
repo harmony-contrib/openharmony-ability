@@ -575,7 +575,7 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 facade-loc
 | `restart`（appRecovery） | `plugin-app-control` / `ohos.app-control` `restart` | sync + `ability`；3s 冷却，无 `onDestroy` 回调 |
 | `set_color_mode` | `plugin-app-control` / `ohos.app-control` `set-color-mode` | sync + `ability`；0 暗 / 1 亮 / 2 跟随 |
 | `getWindowAvoidArea` | `plugin-window` / `ohos.window` | async + `ui-context`；查询当前 component 所在窗口并返回完整避让区 |
-| `create_os_window`、多窗口操作（装饰/焦点/移动/缩放/最小化/最大化/恢复/背景/模糊） | `plugin-window` / `ohos.window` | async + `ui-context`；窗口句柄属于插件实例，按平台 window id 区分 |
+| `create_os_window`、多窗口操作及显式销毁 | `plugin-window` / `ohos.window` | async + `ui-context`；窗口句柄属于插件实例，按平台 window id 区分；`onDispose` 兜底销毁未释放窗口 |
 | `createWebview`、嵌入式 WebView、custom protocol、导航/下载/标题回调、`set_bounds`、`set_cookie`、`web_page_snapshot`、`create_pdf`、`setWebDebuggingAccess` | `plugin-webview` / `ohos.webview` | 出站 async + `ui-context`；入站为 scoped 主线程具名 N-API；scheme 在 engine 初始化前声明；默认挂载当前 module root，也可传 `parentHandle` |
 | `clipboard_write_image` | `plugin-clipboard` / `ohos.clipboard` | async + `[]`；RGBA 长度校验 `width*height*4`，10s 超时 |
 | autostart 状态 / 打开应用启动管理设置 | `plugin-autostart` / `ohos.autostart` | async + `ability`；API 21+ 查询，普通应用不承诺直接切换开关 |
