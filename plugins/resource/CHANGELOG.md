@@ -1,7 +1,10 @@
 # Unreleased
 
 - **Breaking**: replace the shared `EagerPlugin` wrapper with a session-scoped `LazyPlugin`
-  instance; Rust continues to own the process-wide native manager pointer.
+  instance; `PluginBase` rejects reuse across modules/sessions.
+- Push the manager from Ability-scoped `onInstall`, without requiring a WindowStage or component.
+- **Breaking**: move the native manager from a cross-module global into the registered Rust
+  `ResourceBridgePlugin` instance.
 
 ---
 

@@ -35,11 +35,11 @@ rg -n "BridgeJson|call_json|bridgeJson|requireBridgeJson|JSON\.stringify|JSON\.p
 ## Architecture
 
 ```
-ArkTS UI (UIAbility / DefaultXComponent / BridgeNodeHost)
+ArkTS UI (UIAbility / DefaultXComponent)
    │  owns platform objects: UIAbilityContext, WindowStage, UIContext,
    │  WebviewController, FrameNodes, lifecycle listeners
    ▼
-NativeAbility (BridgeHost, BridgeNodeSlot, BridgePluginFactory registry)
+NativeAbility (BridgeHost, per-module component root, BridgePluginFactory registry)
    │  async via TSFN (Promise→future); worker→main sync via TSFN; events inside active napi_env
    │  transport: named N-API values only (typeName-validated at the boundary)
    ▼
@@ -61,17 +61,17 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 | `crates/plugin-webview` | `ohos.webview` — WebView create, controller, custom protocol, JS proxy, callbacks |
 | `crates/plugin-files` | `ohos.files` — file dialogs (open/save/folder) |
 | `crates/plugin-url` | `ohos.url` — `context.openLink` |
-| `crates/plugin-resource` | `ohos.resource` — inbound-only: ArkTS pushes `resourceManager` at ability-create; no outbound actions |
+| `crates/plugin-resource` | `ohos.resource` — inbound-only: ArkTS pushes `resourceManager` from Ability-scoped `onInstall`; no outbound actions |
 
 Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate.
 
 ### Startup Flow
 
-1. `NativeAbility.onCreate` opens the module/session `BridgeHost`, creates factories, emits `ability-create`.
+1. `NativeAbility.onCreate` opens each module/session `BridgeHost`, injects that module's bridge transport independently from rendering, creates factories, then emits `ability-create`.
 2. `NativeAbility.onWindowStageCreate` provides the `WindowStage`, emits `window-stage-create`.
-3. `DefaultXComponent.aboutToAppear` attaches the native event sink and default node slot `xcomponent-overlay`, emits `ui-context-ready` (plugins install here and may immediately use scoped callbacks or mount nodes).
+3. Each `DefaultXComponent.aboutToAppear` binds one distinct native module, resolves and observes that component's actual `Window`, injects that module's root `FrameNode`, then emits its `ui-context-ready`. One Ability may host multiple components/modules, including across windows; the same module cannot back two components concurrently.
 4. Rust entry: `#[ability] fn init(app: OpenHarmonyApp)` → `app.register_plugin(P)…` then `app.run_loop(|event| …)`.
-5. Teardown order: `ui-context-destroy` → detach slots/sink → `window-stage-destroy` → `ability-destroy` → dispose session.
+5. Per-module teardown order: `ui-context-destroy` → component detach → `window-stage-destroy` → `ability-destroy` → dispose host/session.
 
 ### Key Patterns
 
@@ -79,8 +79,9 @@ Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` tha
 - **`impl_bridge_napi_type!(T, "ohos.<plugin>.<TypeName>")`** — pins a stable ABI typeName for `#[napi(object)]` structs; ArkTS validates the same string at parse and backfills it on response.
 - **Async mode** — Rust worker calls `BridgeRuntime::call_async::<P, Req, Resp>("action", req, options)`; data must be `Send + 'static`; the TSFN turns the ArkTS Promise into a future.
 - **Sync mode** — main thread: inside an active N-API callback, `app.with_main_thread_bridge(env, |b| b.call_sync::<P, Req, Resp>(…))`; workers: `BridgeRuntime::call_sync_from_worker` (TSFN, execution still on the main thread, must not be called from the N-API main thread). `BridgeMainThread` is `!Send + !Sync`, never cached.
-- **Platform callbacks** — ArkTS calls `context.invokeNativeSync(event, reqTypeName, respTypeName, value)`; Rust answers in `BridgePlugin::on_main_thread_event` within the same callback. Fail-open (navigation) vs fail-closed (download) per event.
-- **One session node tree** — `DefaultXComponent` owns a single root `FrameNode`, injected before `ui-context-ready`; plugins mount via `context.appendChild(key, node, cleanup)` / `removeChild(key)`. Built-in `ohos.node` plugin (`create-container` / `append-child` / `mount-into-root` / `dispose`) gives Rust opaque u32 handles to compose trees; `FrameNode` values never cross N-API. No slots, registries, or readiness waiters.
+- **Platform callbacks** — ArkTS normally calls module-scoped `context.invokeNativeSync(event, reqTypeName, respTypeName, value)`; Rust answers in `BridgePlugin::on_main_thread_event` within the same callback. Only genuinely process-global transitions (ArkWeb engine initialization) use `invokeNativeSyncAcrossModules`. Fail-open (navigation) vs fail-closed (download) per event.
+- **One component tree per native module** — each `DefaultXComponent` owns the single root `FrameNode` for its module, injected before that host's `ui-context-ready`; plugins mount via `context.appendChild(key, node, cleanup)` / `removeChild(key)`. Multiple components/windows use multiple modules, while multiple WebViews in one component use distinct IDs. Built-in `ohos.node` gives Rust opaque u32 handles; `FrameNode` values never cross N-API.
+- **Component-window routing** — `windowStageEvent` remains Ability-scoped, but size/rect/avoid-area/keyboard listeners are attached to the actual `Window` resolved from each component's `UIContext`; those events are never broadcast from the main window to sub-window modules.
 
 ## Plugin Contract Rules
 

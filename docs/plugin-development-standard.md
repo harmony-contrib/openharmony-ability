@@ -31,6 +31,11 @@
 - 应用入口显式同时组合 Rust 插件 facade 与 ArkTS factory；core 不能反向 import 任意
   `plugin-*` crate/HAR。
 - 一个插件只能管理自己的资源、回调和节点。布局、业务页面状态和其他插件资源仍由应用拥有。
+- 一个 `DefaultXComponent` 必须对应一个独立 native module/动态库；同一 native module 同时只能归属
+  一个活动 Ability session，且在该 session 中最多绑定一个组件。一个 Ability 可以通过多个 module
+  放置多个 `DefaultXComponent`，这些组件既可以位于同一窗口，也可以分布在多个窗口。
+- 一个 module/component 内可以创建多个 WebView；WebView 的复数能力由唯一 controller ID 和节点
+  mount key 实现，不能通过给同一个 module 再挂第二个 `DefaultXComponent` 实现。
 
 目录骨架如下：
 
@@ -193,15 +198,8 @@ class LoginPlugin implements AsyncBridgePlugin {
   }
 }
 
-export function createLoginPlugin(): BridgePluginFactory {
-  return {
-    id: "account.login",
-    version: 1,
-    execution: "async",
-    requires: ["ability"],
-    create: (_context: BridgePluginContext): AsyncBridgePlugin => new LoginPlugin(),
-  };
-}
+// HAR exports LoginPlugin. The Ability creates a fresh instance through LazyPlugin.
+export { LoginPlugin };
 ```
 
 ### 3.3 既有内置插件的契约基线
@@ -213,7 +211,7 @@ export function createLoginPlugin(): BridgePluginFactory {
 | --- | --- | --- |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
-| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | sync / `window-stage` |
+| `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | sync / `ui-context`；查询当前 module/component 所在窗口 |
 | `ohos.webview` / `create` | `ohos.webview.CreateRequest { id, parentHandle? }` → `ohos.webview.CreateResponse { id }` | async / `ui-context` |
 | `ohos.node`（内置） / `create-container` | `ohos.node.CreateContainerRequest` → `ohos.node.HandleResponse { handle }` | async / `ui-context` |
 | `ohos.node`（内置） / `append-child` | `ohos.node.AppendChildRequest { parentHandle, childHandle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
@@ -315,8 +313,8 @@ ArkTS 平台回调进入 Rust 的 `on_main_thread_event` 是**入站 scoped call
 | requirement | 就绪时点 | 适合的能力 |
 | --- | --- | --- |
 | `ability` | `NativeAbility.onCreate` 已建立 Ability context | 权限、应用控制、登录会话 |
-| `window-stage` | `NativeAbility.onWindowStageCreate` | 窗口与避让区 |
-| `ui-context` | `DefaultXComponent.aboutToAppear` 已建立 UI context 并注入 session 根 `FrameNode` | WebView、任意 ArkUI/FrameNode 插件 |
+| `window-stage` | `NativeAbility.onWindowStageCreate` | 只依赖 Ability `WindowStage` 的 stage 级能力 |
+| `ui-context` | 该 native module 唯一的 `DefaultXComponent` 已建立 UI context、实际 Window 并注入根 `FrameNode` | 组件窗口/避让区、WebView、任意 ArkUI/FrameNode 插件 |
 
 `BridgeHost` 只会在 requirements 都就绪后调用 `onInstall`，并向延迟激活的插件重放有限的生命周期
 历史。插件如需监听销毁、配置或内存事件，应在 ArkTS `onLifecycle` 或 Rust
@@ -333,24 +331,30 @@ UIContext 和销毁事件不能相互穿插。单个插件的 lifecycle/onDispos
 session 开始关闭后必须拒绝新调用并取消未完成调用。
 
 1. `NativeAbility.onCreate` 先预创建 module/session 对应的 `BridgeHost` 和 plugin instance，但不执行
-   hook；native module 完成 `init`、Rust lifecycle/event sink 均已 attach、Rust 已收到
+   hook；随后把通用 `BridgeRuntime`/主线程 endpoint 作为 module/session transport 注入 native
+   module，再完成 `init`。该 transport 与组件 render 生命周期解耦，使用独立 `bridgeOwner` 防止旧
+   session 清理新 endpoint；Rust lifecycle/event sink 均已 attach、Rust 已收到
    `AbilityCreated` 后，Host 才把 `ability` 标记为 ready，执行 `onInstall` 并发出
-   `ability-create`。因此 ability-only plugin 的 `onInstall` 可以安全调用 `invokeNativeSync`。
-2. `NativeAbility.onWindowStageCreate` 先提供 `WindowStage`，再发出 `window-stage-create`；窗口事件
-   仍要同时转发给原 native module lifecycle。Stage create/destroy 使用 generation token：已入队的
-   create 在 destroy 后不得重新把 context 标记为 ready。自定义页面通过
+   `ability-create`。因此 ability-only plugin 的 `onInstall` 可以安全调用 `invokeNativeSync`，Rust
+   ability-only 出站调用也不需要等待 `DefaultXComponent` appearance。
+2. `NativeAbility.onWindowStageCreate` 先提供 Ability 级 `WindowStage`，再发出
+   `window-stage-create`；`windowStageEvent` 仍分发给每个 module。size/rect/avoid-area/keyboard
+   不是 Stage 广播：每个 Host 必须从自己组件的 `UIContext.getWindowName()` 解析实际 Window，独立
+   注册监听，并只转发给该 module 的原 Rust lifecycle。Stage create/destroy 使用 generation token：
+   已入队的 create 在 destroy 后不得重新把 context 标记为 ready。自定义页面通过
    `loadWindowStageContent` 加入这个受控事务，不得从平台回调启动脱离队列的 Promise。
-3. `DefaultXComponent.aboutToAppear` 先挂接 native event sink，以本次 appearance 唯一的
-   `renderOwner` 保存 Rust `RootNode`，再按 `windowKey` 注册窗口表面
-   （UIContext + 根 `FrameNode`，根先于 `ui-context-ready` 存在）；`"main"` 窗口注册后通知 Rust
-   `ui-context-ready`。这样 plugin `onInstall` 期间已经可以安全发起 scoped 回调或挂载节点，无需
-   任何等待。子窗口实例（唯一 `windowKey`）只登记自己的表面，不重发 ready。
-4. UI 消失时，`detachWindow` 先发出带 `windowKey` 的 `window-detached`，再发出
-   `ui-context-destroy`（仅 `"main"`），并卸载该窗口的 keyed
-   节点与句柄节点。WindowStage 销毁时 detach 所有窗口并发出
+3. generic bridge transport 与 native event/lifecycle sink 均由 `NativeAbility` 按 module/session 管理，
+   不依赖组件 appearance；组件 detach 也不得清空 transport。
+   `DefaultXComponent.aboutToAppear` 只以本次 appearance 唯一的 `renderOwner` 保存 Rust `RootNode`，
+   再向该 module 的 `BridgeHost` 注入 UIContext + 根 `FrameNode` 并通知 `ui-context-ready`。Host 必须
+   拒绝第二个组件并提示改用不同 native module。一个 Ability 的多个 module/Host 各自拥有独立 ready
+   状态和根树。
+4. UI 消失时，`detachComponent` 发出该 module 的 `ui-context-destroy`，并卸载 keyed 节点与句柄
+   节点。WindowStage 销毁时每个 module 都 detach 自己的组件并发出
    `window-stage-destroy`；Ability 销毁时发出 `ability-destroy` 并 dispose 整个 session（session
-   销毁时由 `BridgeHost` 级联卸载全部窗口的节点，根 `FrameNode` 本身由各 `DefaultXComponent`
-   在等待 Host 清理屏障后销毁）。Event sink 属于 module/session，只在 session dispose 时解除。
+   销毁时由各 `BridgeHost` 级联卸载本 module 的节点，根 `FrameNode` 本身由 `DefaultXComponent`
+   在等待 Host 清理屏障后销毁）。Event sink 和 bridge transport 都属于 module/session，只在 session
+   dispose 时分别解除；transport 的 `bridgeOwner` 与组件的 `renderOwner` 不得混用。
 5. `configuration-updated`、`memory-level`、window-stage event 等保持由 `NativeAbility` 原有链路
    分发，同时作为受控 lifecycle event 交给已安装插件。
 
@@ -359,8 +363,9 @@ WindowStage 已先销毁，它仍必须收到该 session 后续的 `ui-context-d
 `window-stage-destroy` 和 `ability-destroy`。下一次 `ability-create` 必须清空上一 session 的 readiness
 和 lifecycle history，再从新会话开始重放，禁止把旧 Ability 事件带入新实例。
 
-ArkTS context 是 module + session 范围的。插件不得假设多个 module 共用一个 controller、根节点或
-状态表；所有跨页面状态键必须至少包含 `sessionId` 与 `moduleName`。
+ArkTS context 是 module + session 范围的。插件不得假设多个 module 共用 controller、根节点或
+状态表；一个 Host 的 context 永远只指向该 module 的唯一组件。所有跨页面状态键必须至少包含
+`sessionId` 与 `moduleName`。
 
 规则如下：
 
@@ -371,6 +376,9 @@ ArkTS context 是 module + session 范围的。插件不得假设多个 module �
   callback 重试。
 - `onDispose` 必须幂等，负责移除平台 delegate、取消订阅、卸载节点、清空 controller/tag 映射。
   单个插件释放失败不能阻断其余插件释放。
+- 普通反向事件必须使用 module-scoped `invokeNativeSync`。只有 ArkWeb engine 这类平台明确为进程级的
+  状态转换，才可使用 `invokeNativeSyncAcrossModules` 同步通知所有已激活且装配同一插件的 native
+  module；广播仍必须使用具名 request/response，且任一 module 拒绝都应中止初始化。
 - `onInstall` / `onLifecycle` / `onDispose` 在独立的 bounded hook scope 中执行；scope 通过
   `BridgePluginHookContext.onCancel` 通知取消，默认 watchdog 为 5 秒。插件不得忽略取消后继续挂载
   节点或回写平台状态；单个 hook 超时只会把该插件标记失败并继续 session teardown。
@@ -389,12 +397,12 @@ context.appendChild(
 );
 ```
 
-## 6. ArkUI 节点树与挂载（一棵树模型）
+## 6. ArkUI 节点树与挂载（每 module/component 一棵树）
 
 需要渲染内容的插件（WebView、地图、相机、视频等）都是 **FrameNode 提供者**：它们把节点挂进
-目标窗口唯一的一棵根树，不写进 `DefaultXComponent`，也没有 WebView 专用插槽。
+目标 native module 唯一组件的根树，不写进 `DefaultXComponent`，也没有 WebView 专用插槽。
 
-- 每个 module/session/windowKey 只有一棵根树。`DefaultXComponent` 在 `aboutToAppear` 中先创建根
+- 每个 module/session 只有一棵根树和至多一个已 attach 的 `DefaultXComponent`。组件先创建根
   `FrameNode` 并注入 `BridgeHost`，再发出 `ui-context-ready`；因此插件在 `onInstall` 里可以直接
   `context.appendChild(...)`，**不存在命名插槽、注册表、waitFor/require 或就绪计时器**。
 - `context.appendChild(key, node, cleanup)` / `context.removeChild(key)`：key 必须以插件 ID 为前缀
@@ -419,26 +427,35 @@ Stack() {
 这套规则同时保留 WebView 与 XComponent 的混合接入，并允许任意插件（以及 Rust 组树）接入 node
 节点；没有命名插槽、注册表或对业务布局的隐式所有权。
 
-### 6.1 多窗口
+### 6.1 多 XComponent 与多窗口
 
-每个窗口各有一个 `DefaultXComponent` 实例，各自持有独立的节点树。`DefaultXComponent` 通过
-`windowKey` 属性（缺省 `"main"`）注册窗口表面；`BridgeHost` 按窗口键分桶持有 UIContext、根节点、
-挂载表与 `ohos.node` 句柄表，互不覆盖。
+多组件由多 native module 实现，不在一个 Host 内再建立 window/surface 子注册表。例如 Ability 声明
+`moduleName = ["main_native", "sub_native"]`，主窗口组件使用 `main_native`，子窗口组件使用
+`sub_native`。两个 module 各自拥有独立 Rust `OpenHarmonyApp`、BridgeHost、插件实例、UIContext、
+根节点、挂载表和 `ohos.node` 句柄表。
 
-- 只有 `"main"` 窗口的注册会发出 `ui-context-ready` / `ui-context-destroy`（插件安装与 session
-  生命周期仍以主窗口为准）；子窗口注册只登记状态。
-- 每个窗口都会发出 `window-attached` / `window-detached`，payload 携带 `windowKey`。拥有 controller、
-  delegate 或异步 waiter 的插件必须按该 key 建表并在 detach 时清理对应窗口，禁止用主窗口的
-  `ui-context-destroy` 一次性清空其他仍存活窗口。
-- 每次 `DefaultXComponent` appearance 都有独立 `renderOwner`；Rust derive 层按 owner 保存多个
-  `RootNode`。组件快速消失会使 generation 失效并取消 pending attach，旧异步 continuation 不得重新
-  挂载已经消失的窗口。
-- 插件默认操作 `"main"` 窗口；子窗口内容用 `context.windowScope(windowKey)` 获取窗口作用域：
-  `getUIContext()` / `getRootFrameNode()` / `appendChild` / `removeChild` / `getFrameNode`。
-- Rust 侧：`ohos.node` 的四个 action 与 `WebviewCreateRequest` 都支持 `window_key` 字段（缺省
-  `main`）。`app.node()?.create_container_in_window(Some("float"), ...)` 在子窗口建容器。
-- 子窗口页面放置第二个 `DefaultXComponent` 时必须传唯一 `windowKey`（如 `windowId` 字符串），
-  否则 `attachWindow` 拒绝重复注册。
+- `DefaultXComponent` 不提供 `windowKey`/`surfaceKey`；`moduleName` 就是组件的唯一所有权边界。
+- 同一个 module 的第二次并发 attach 必须失败；组件正常 disappear 完成 detach 后可以由同 module
+  后续 appearance 重新 attach。
+- 每个 module 独立发出 `ui-context-ready` / `ui-context-destroy`。一个窗口/组件销毁不得清空其他
+  module 仍存活的 WebView、controller 或节点。
+- 每次 `DefaultXComponent` appearance 都有独立 `renderOwner`；Rust derive 层只保存当前 module
+  唯一的 `RootNode`，并在 native 导出边界拒绝第二次并发 render。owner 只用于防止旧组件的清理误删
+  后续 appearance，同时必须贯穿 XComponent surface/input/frame callback，防止旧 surface 的延迟
+  回调覆盖新组件的 raw window、IME 或尺寸。组件快速消失会使 generation 失效并取消 pending
+  attach，旧异步 continuation 不得重新挂载已经消失的组件。
+- `BridgePluginContext` 的 `getUIContext` / `getRootFrameNode` / `appendChild` / `removeChild` /
+  `getFrameNode` 均只操作当前 module 的组件，不接受窗口 key；`getWindow()` 通过该 UIContext 定位
+  组件实际所在窗口，不能用 Ability 的主窗口替代 sub window。
+- Window size/rect/avoid-area/keyboard listener 与组件 attach/detach 同寿命，回调必须校验当前
+  组件状态；主窗口事件不得广播给 sub-window module，旧窗口的延迟回调也不得命中新 appearance。
+- `ohos.node` action 与 `WebviewCreateRequest` 不携带 `window_key`；要在另一个窗口操作，调用该窗口
+  对应 native module 导出的 Rust API。
+- 一个 module/component 内的 `WebviewSurface.entries` 按 WebView ID 保存多个 controller；不同 ID
+  必须并存并使用独立 mount key，同 ID 的重新 create 才替换旧实例。所有 controller 平台回调都要
+  携带内部 native tag，并在 Rust 分发前校验当前 generation，禁止旧实例的延迟回调命中替代实例。
+- ArkTS factory 可用 `LazyPlugin(..., modules)` 限定适用 module；多 module Ability 不应把会主动向
+  Rust 发送事件的插件装到没有注册对应 Rust facade 的 module。
 
 ## 7. 平台回调与 WebView 特例
 
@@ -461,6 +478,10 @@ WebView 插件还必须遵守：
 
 - 自定义 scheme 通过 `WebviewProtocol::register` 在 Web engine 初始化前声明；初始化后不允许
   再新增 scheme。
+- ArkWeb engine 是进程级资源，而每个 native module 有独立 Rust static 状态。首次 WebView create
+  负责初始化 engine；之后每个创建 WebView 的 module 仍必须收到 `engine-initialized`。晚于 engine
+  启动才加载的 module 只能复用进程已注册且 options 完全相同的 scheme；新增或冲突声明必须确定性
+  失败，普通 WebView/controller 不受影响。
 - tag 对应的自定义 protocol、JavaScript proxy 和回调订阅应在 `create` 前声明。controller attach 后，
   必须先安装 delegate/protocol/proxy，再启动首次导航。
 - 自定义 protocol 处理 URL 请求；页面 JS proxy 处理 `window.<object>.<method>()` 调用，两者不能
@@ -472,13 +493,13 @@ WebView 插件还必须遵守：
 
 ### 7.1 WebView 回调契约与失败策略
 
-WebView 的 callback builder 必须在 `WebviewClient::create` 前按 webview tag 声明。Rust 保存的是
+WebView 的 callback builder 必须在 `WebviewClient::create` 前按 module-local WebView ID 声明。Rust 保存的是
 `Send + Sync + 'static` closure，而不是 ArkTS 函数；ArkTS 在创建时只拿到订阅快照，以决定是否安装
 对应 ArkWeb delegate。
 
 | ArkWeb 时点 | Rust 事件/契约 | 默认或错误语义 |
 | --- | --- | --- |
-| engine 初始化前/后 | `EngineLifecycleEvent` → `EventAcknowledgement` | 初始化前 flush scheme，初始化后封存 scheme 声明 |
+| engine 初始化前/后 | `EngineLifecycleEvent` → `EngineLifecycleResponse` | 初始化前 flush scheme，跨 module 校验同名 scheme options，初始化后封存声明 |
 | controller attach/remove | `ControllerEvent` → `EventAcknowledgement` | attach 时安装 proxy/protocol，remove 时清理状态 |
 | `onLoadIntercept` | `NavigationRequest` → `NavigationResponse` | 未订阅或 handler 失败时 `intercept = false`，fail-open |
 | `WebDownloadDelegate.onBeforeDownload` | `DownloadStartRequest` → `DownloadStartResponse` | 失败时取消下载，fail-closed；允许改写临时保存路径 |
@@ -496,10 +517,20 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 webview ta
 
 1. 应用在 `#[ability]` 初始化期间通过 `WebviewProtocol::register` 声明 scheme 及 option；该步骤
    必须早于 `WebviewController.initializeWebEngine()`。
-2. ArkTS `WebviewPlugin.onInstall` 发出 `before-engine-init`；Rust flush 全部 scheme 声明后，ArkTS
-   才初始化 engine，并以 `engine-initialized` 封存声明集。封存后新增 scheme 必须确定性失败。
+2. 第一个 WebView create 在初始化 ArkWeb engine 前，通过 `invokeNativeSyncAcrossModules` 向所有已
+   激活、装配 `ohos.webview` 的 native module 广播 `seal-engine-schemes`，先冻结并聚合校验所有
+   scheme/options；校验通过后才广播 `before-engine-init`，由各 module 的 Rust facade flush 自己的
+   scheme 声明。ArkTS 随后初始化 engine，再广播 `engine-initialized` 封存声明集。
+   `EngineLifecycleEvent` 必须携带已封存的进程级 scheme/options 集合。该 engine 事件只依赖
+   `ability`，controller 等其余事件仍依赖 `ui-context`。封存后新增 scheme 必须确定性失败；Ability
+   重建或后加载 module 重复声明完全相同的 scheme + options 是幂等操作。每个 module
+   必须在具名 `EngineLifecycleResponse` 返回自己的 scheme/options；同名 scheme 的 options 不一致时
+   ArkTS 必须在调用 `initializeWebEngine()` 前确定性中止。
 3. 业务在 `WebviewClient::create` 前按 tag 调用 `custom_protocol`、注册 JS proxy 和 callback；Rust
-   只保存 tag/scheme/closure 声明，不能保存 ArkTS controller。
+   只保存业务 ID/scheme/closure 声明，不能保存 ArkTS controller。业务 ID 只需在当前 native module
+   内唯一；ArkTS host 必须为每次 controller 创建生成包含 session + module 的进程唯一 native tag，
+   并通过具名 `ControllerEvent { id, nativeTag }` 让 Rust 用 native tag 安装 ArkWeb protocol/proxy。
+   平台回调继续向业务暴露原 ID，禁止把 native tag 泄漏成公共 controller ID。
 4. controller attach 后先通过 scoped direct event 安装 protocol、proxy 与 delegate，再开始首次
    `loadUrl`。若 handler 在 controller 存在后增量注册，应立即绑定；JS proxy 如需重新生效则刷新页面。
 
@@ -516,7 +547,7 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 webview ta
 | --- | --- | --- |
 | `requestPermission` | `plugin-permission` / `ohos.permission` | async + `ability`；结果顺序与失败码保持不变 |
 | `exit` | `plugin-app-control` / `ohos.app-control` | sync + 当前主线程 `Env` |
-| `getWindowAvoidArea` | `plugin-window` / `ohos.window` | sync + `window-stage`；返回完整避让区 |
+| `getWindowAvoidArea` | `plugin-window` / `ohos.window` | sync + `ui-context`；查询 module/component 所在窗口并返回完整避让区 |
 | `createWebview`、嵌入式 WebView、custom protocol、导航/下载/标题回调 | `plugin-webview` / `ohos.webview` | 出站 async + `ui-context`；入站为 scoped 主线程具名 N-API；scheme 在 engine 初始化前声明 |
 | `Loadable` | `runtime/NativeModuleLoader` | framework 内部 runtime，不是能力 bridge |
 | `openURL` | `plugin-url` / `ohos.url` | async + `ability`；`context.openLink` |
@@ -540,38 +571,47 @@ fn configure_ability(app: OpenHarmonyApp) {
 }
 ```
 
-native module 可能跨越多个 UIAbility 实例继续存活，因此 `#[ability]` 初始化器对同一 module 的
-进程级 `OpenHarmonyApp` 只执行一次；每次 Ability 重建仍会刷新 `AbilityInitContext` 并创建新的
+native module 可能跨越同一 UIAbility 的多次重建继续存活，因此 `#[ability]` 初始化器对同一 module
+的 `OpenHarmonyApp` 只执行一次；每次 Ability 重建仍会刷新 `AbilityInitContext` 并创建新的
 lifecycle handle。初始化器应只做插件、protocol 和 run loop 等进程级配置，session 资源必须通过
 lifecycle 创建与释放，不能依赖重复执行初始化器。
 
-ArkTS HAR 导出唯一 factory，应用通过 `NativeAbility.bridgePlugins` 显式装配：
+同一个 module 不得同时服务多个 Ability，也不得同时绑定两个 `DefaultXComponent`。多个 Ability 或
+同一 Ability 内的多个组件都要使用不同 module 名称/动态库；`NativeAbility.moduleName` 数组负责预加载
+本 Ability 的所有 module，每个组件再通过自己的 `moduleName` 选择对应 Host。
+
+ArkTS HAR 导出 plugin class，应用通过 `LazyPlugin` 为每个 module/session 创建独立实例：
 
 ```ts
-import { createAppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
-import { createLoginPlugin } from "@ohos-rs/ability-plugin-login";
-import { createPermissionPlugin } from "@ohos-rs/ability-plugin-permission";
-import { createWebviewPlugin } from "@ohos-rs/ability-plugin-webview";
-import { createWindowPlugin } from "@ohos-rs/ability-plugin-window";
+import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
+import { LoginPlugin } from "@ohos-rs/ability-plugin-login";
+import { PermissionPlugin } from "@ohos-rs/ability-plugin-permission";
+import { WebviewPlugin } from "@ohos-rs/ability-plugin-webview";
+import { WindowPlugin } from "@ohos-rs/ability-plugin-window";
 
 export default class EntryAbility extends NativeAbility {
   bridgePlugins = [
-    createPermissionPlugin(),
-    createAppControlPlugin(),
-    createWindowPlugin(),
-    createWebviewPlugin(),
-    createLoginPlugin(),
+    new LazyPlugin(() => new PermissionPlugin()),
+    new LazyPlugin(() => new AppControlPlugin()),
+    new LazyPlugin(() => new WindowPlugin()),
+    new LazyPlugin(() => new WebviewPlugin()),
+    new LazyPlugin(() => new LoginPlugin()),
   ];
 }
 ```
 
-factory 可以用 `modules` 限制适用的 native module。未装配、版本不匹配、模式不匹配和类型不匹配
+`LazyPlugin` 的第二个参数可以用 `modules` 限制适用的 native module。未装配、版本不匹配、模式不匹配和类型不匹配
 都应在桥接边界确定性报错，不得悄悄回退到 helper 或 JSON 兼容路径。
 
 `LazyPlugin` 在 `BridgeHost.registerFactories` 时为每个 native module 和 Ability session 创建独立
 实例。禁止跨 module/session 共享 ArkTS plugin instance：`attachContext`、hook cancellation 和
-controller/window 映射都是 session 状态。真正的进程级资源必须由 native/Rust 单例持有，ArkTS
-wrapper 仍保持 session-scoped。
+controller 映射都是 session 状态，`PluginBase.attachContext` 会拒绝复用。module 级状态应由注册到
+该 `OpenHarmonyApp` 的具体 Rust plugin instance 持有；例如 ResourceManager 通过
+`registered_plugin::<ResourceBridgePlugin>()` 读取，而不是使用跨 module 全局变量。只有平台本身明确
+进程级的资源才使用进程级状态。即使 `requires = []`，插件仍在 Ability ready 后安装并属于当前
+module/session；空 requirements 只表示不额外依赖 WindowStage/UIContext，不表示可以恢复共享
+`EagerPlugin` 实例。
 
 ## 9. 实现、Demo 与验收
 
@@ -583,11 +623,13 @@ wrapper 仍保持 session-scoped。
 | 异步 action | Rust worker 可以发起调用；ArkTS Promise 完成后 Rust 收到具名 response，不存在 JSON encode/decode |
 | 主线程同步 action（如有） | 在 `#[napi]` callback 的 `Env` 内成功；`call_sync` 不能从 worker 直接调用（无 `Env`）；没有 Promise 或阻塞等待 |
 | 子线程同步 action（TSFN，如有） | 从 Rust worker 调用 `call_sync_from_worker` 成功拿到具名 response；从 N-API 主线程调用被立即拒绝（防死锁） |
-| context 延迟 | async 调用会等待真正的 context/根节点就绪；sync 调用在未就绪时立即失败 |
+| context 延迟 | async 调用会等待本 module 唯一组件的 context/根节点就绪；sync 调用在未就绪时立即失败 |
 | 生命周期销毁 | timeout、Ability/session destroy 会取消调用；UI/WindowStage detach 会触发生命周期 cleanup，临时节点、delegate、waiter 和映射被释放或失效 |
 | 原生节点（如有） | 插件能 `appendChild` 到 session 根或经 `ohos.node` 句柄组合子树；业务 underlay/foreground 由页面 `Stack` 声明顺序决定，行为不变 |
 | 平台回调（如有） | 在当前回调栈完成 Rust 决策，并覆盖明确的 fail-open/fail-closed 语义 |
 | WebView（如有） | custom scheme、首次导航前安装、透明背景、导航、下载、标题和 JS script/proxy 均覆盖 |
+| 多组件/多窗口 | 一个 Ability 以两个不同 native module 挂两个 `DefaultXComponent`；同 module 第二次并发 attach 被拒绝，两个 module 的销毁互不影响 |
+| 多 WebView | 同一 module/component 内不同 WebView ID 可同时存在、独立控制和清理；同 ID recreate 语义明确 |
 
 建议在 demo 中同时保留三个最小参考能力：异步登录、主线程同步调用、以及 `String`、`Vec<u8>`、
 `#[napi(object)]` 三种具名 N-API 值的 raw transport。这样新插件可以直接验证类型边界而非依赖 JSON。

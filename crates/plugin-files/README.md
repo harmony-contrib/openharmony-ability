@@ -40,7 +40,7 @@ export default class EntryAbility extends NativeAbility {
 }
 ```
 
-同时在应用 `oh-package.json5` 添加 `@ohos-rs/ability-plugin-files`。HAR 的具体依赖和 factory 说明见
+同时在应用 `oh-package.json5` 添加 `@ohos-rs/ability-plugin-files`。HAR 的具体依赖和 plugin 说明见
 [ArkTS README](../../plugins/files/README.md)。
 
 ## Rust 使用方式

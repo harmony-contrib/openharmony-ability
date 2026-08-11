@@ -36,14 +36,14 @@ ArkTS HAR `@ohos-rs/ability-plugin-permission` 成对使用：Rust 发起强类�
    ```
 
 2. 在应用的 `oh-package.json5` 中加入 `@ohos-rs/ability-plugin-permission`，并在继承
-   `NativeAbility` 的入口显式装配 `createPermissionPlugin()`：
+   `NativeAbility` 的入口通过 `LazyPlugin` 显式装配 `PermissionPlugin`：
 
    ```ts
-   import { NativeAbility } from "@ohos-rs/ability";
-   import { createPermissionPlugin } from "@ohos-rs/ability-plugin-permission";
+   import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+   import { PermissionPlugin } from "@ohos-rs/ability-plugin-permission";
 
    export default class EntryAbility extends NativeAbility {
-     public bridgePlugins = [createPermissionPlugin()];
+     public bridgePlugins = [new LazyPlugin(() => new PermissionPlugin())];
    }
    ```
 

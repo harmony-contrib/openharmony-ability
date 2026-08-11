@@ -9,9 +9,9 @@
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-window` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-window` |
-| 插件 ID / bridge 版本 | `ohos.window` / `1` |
+| 插件 ID / bridge 版本 | `ohos.window` / `2` |
 | 执行模式 | 主线程同步：`MainThreadSyncBridge` / `invokeSync` |
-| 前置 context | `window-stage` |
+| 前置 context | `ui-context` |
 | action | `get-avoid-area` |
 | request → response | `ohos.window.AvoidAreaRequest` → `ohos.window.AvoidAreaResponse` |
 
@@ -33,11 +33,11 @@ fn configure_ability(app: OpenHarmonyApp) {
 ```
 
 ```ts
-import { NativeAbility } from "@ohos-rs/ability";
-import { createWindowPlugin } from "@ohos-rs/ability-plugin-window";
+import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { WindowPlugin } from "@ohos-rs/ability-plugin-window";
 
 export default class EntryAbility extends NativeAbility {
-  public bridgePlugins = [createWindowPlugin()];
+  public bridgePlugins = [new LazyPlugin(() => new WindowPlugin())];
 }
 ```
 
@@ -66,10 +66,10 @@ pub fn keyboard_insets(env: Env) -> Result<i32> {
 ## 调用限制
 
 - 查询是同步主线程调用：`Env` 必须来自当前导出的 N-API callback，不能从 worker 保存后使用。
-- `window-stage` 必须已经建立。应在 `NativeAbility.onWindowStageCreate` 之后、且 native bridge 已 render
-  后的 callback 中调用；未就绪时同步失败而不是等待 Promise。
-- ArkTS 使用 `context.getWindowStage().getMainWindowSync()` 与
-  `getWindowAvoidArea(areaType)`，平台错误会原样变成 bridge 错误。
+- 当前 module 的 `DefaultXComponent` 必须已经建立 `UIContext`。同步调用不会等待组件出现，未就绪时
+  直接失败。
+- ArkTS 通过 `context.getWindow()` 获取该组件实际所在窗口，再调用
+  `getWindowAvoidArea(areaType)`；因此主窗口和 sub window 会各自返回自己的避让区。
 - request/response 为具名 N-API object；Rust `area_type` 会映射为 ArkTS `areaType`，不使用 JSON。
 
 完整的线程、生命周期和契约变更要求见
