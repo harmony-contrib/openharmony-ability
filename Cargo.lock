@@ -487,7 +487,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "futures-channel",
  "napi-derive-ohos",
@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-derive"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-app-control"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-files"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -527,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-permission"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-resource"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-url"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -556,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-webview"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "http",
  "napi-derive-ohos",
@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-window"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",

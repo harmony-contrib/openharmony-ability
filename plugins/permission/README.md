@@ -17,8 +17,8 @@ ohpm install @ohos-rs/ability-plugin-permission
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "1.0.0-beta.0",
-    "@ohos-rs/ability-plugin-permission": "1.0.0-beta.0"
+    "@ohos-rs/ability": "1.0.0-beta.2",
+    "@ohos-rs/ability-plugin-permission": "1.0.0-beta.1"
   }
 }
 ```

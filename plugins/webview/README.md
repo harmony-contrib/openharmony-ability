@@ -18,8 +18,8 @@ ohpm install @ohos-rs/ability-plugin-webview
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "1.0.0-beta.0",
-    "@ohos-rs/ability-plugin-webview": "1.0.0-beta.0",
+    "@ohos-rs/ability": "1.0.0-beta.2",
+    "@ohos-rs/ability-plugin-webview": "1.0.0-beta.2",
   },
 }
 ```

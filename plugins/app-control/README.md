@@ -15,8 +15,8 @@ ohpm install @ohos-rs/ability-plugin-app-control
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "1.0.0-beta.0",
-    "@ohos-rs/ability-plugin-app-control": "1.0.0-beta.0"
+    "@ohos-rs/ability": "1.0.0-beta.2",
+    "@ohos-rs/ability-plugin-app-control": "1.0.0-beta.1"
   }
 }
 ```

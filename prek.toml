@@ -4,6 +4,7 @@
 repo = "local"
 hooks = [
   { id = "rustfmt", name = "rustfmt", entry = "cargo fmt --all -- --check", language = "system", files = "\\.rs$", pass_filenames = false },
-  { id = "oxk-format", name = "oxk format", entry = "oxk format -t=10", language = "system", files = "\\.(ets|js|ts|json5)$" },
-  { id = "oxk-lint", name = "oxk lint", entry = "oxk lint --config .oxlintrc.jsonc --threads=10", language = "system", files = "\\.(ets|js|ts)$" },
+  { id = "oxk-format", name = "oxk format", entry = "pnpm run format:oxk", language = "system", files = "\\.(ets|js|ts|json5)$", pass_filenames =
+  false },
+  { id = "oxk-lint", name = "oxk lint", entry = "pnpm run lint:oxk", language = "system", files = "\\.(ets|js|ts)$", pass_filenames = false },
 ]
