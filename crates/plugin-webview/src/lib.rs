@@ -289,6 +289,9 @@ pub struct WebviewCreateRequest {
     pub html: Option<String>,
     pub style: WebviewStyle,
     pub javascript_enabled: Option<bool>,
+    /// Enables ArkWeb DOM storage (localStorage/sessionStorage), which ArkWeb disables by
+    /// default. The ArkTS host defaults this to enabled to match Android/iOS WebView behavior.
+    pub dom_storage_access: Option<bool>,
     pub devtools: Option<bool>,
     pub user_agent: Option<String>,
     pub autoplay: Option<bool>,
@@ -312,6 +315,7 @@ impl WebviewCreateRequest {
             html: None,
             style: WebviewStyle::default(),
             javascript_enabled: None,
+            dom_storage_access: None,
             devtools: None,
             user_agent: None,
             autoplay: None,
@@ -347,6 +351,12 @@ impl WebviewCreateRequest {
     /// Uses a transparent background when no explicit style background color was supplied.
     pub fn transparent(mut self, transparent: bool) -> Self {
         self.transparent = Some(transparent);
+        self
+    }
+
+    /// Enables ArkWeb DOM storage (localStorage/sessionStorage).
+    pub fn dom_storage_access(mut self, enabled: bool) -> Self {
+        self.dom_storage_access = Some(enabled);
         self
     }
 
@@ -914,6 +924,7 @@ mod tests {
         let request = WebviewCreateRequest::new("webview")
             .parent_node(7)
             .transparent(true)
+            .dom_storage_access(true)
             .url("https://example.test");
         assert_eq!(request.id, "webview");
         assert_eq!(request.parent_handle, Some(7));
@@ -921,6 +932,7 @@ mod tests {
         assert!(request.html.is_none());
         assert!(request.headers.is_none());
         assert_eq!(request.transparent, Some(true));
+        assert_eq!(request.dom_storage_access, Some(true));
     }
 
     #[test]

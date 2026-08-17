@@ -102,7 +102,7 @@ async fn composed_webview(app: &OpenHarmonyApp) -> Result<()> {
 }
 ```
 
-`WebviewCreateRequest` 支持 URL/HTML、`parent_node` 组合、样式、JavaScript 开关、devtools、
+`WebviewCreateRequest` 支持 URL/HTML、`parent_node` 组合、样式、JavaScript 开关、DOM storage、devtools、
 user agent、autoplay、document-start initialization scripts、headers 和 `transparent`。
 `transparent(true)` 是创建时语义：若没有显式 background color，ArkTS 使用透明背景；显式颜色优先。
 

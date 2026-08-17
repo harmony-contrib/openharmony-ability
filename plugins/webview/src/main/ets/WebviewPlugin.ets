@@ -78,6 +78,7 @@ interface WebviewCreatePayload {
   html?: string | null;
   style?: WebviewStyle | null;
   javascriptEnabled?: boolean | null;
+  domStorageAccess?: boolean | null;
   devtools?: boolean | null;
   userAgent?: string | null;
   autoplay?: boolean | null;
@@ -742,6 +743,7 @@ function BuildWebview(data: ManagedWebview) {
     .backgroundColor(data.style.backgroundColor ?? undefined)
     .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
     .javaScriptAccess(data.javascriptEnabled ?? true)
+    .domStorageAccess(data.domStorageAccess ?? true)
     .mediaPlayGestureAccess(data.autoplay === true ? false : true)
     .javaScriptOnDocumentStart(data.initializationScripts ?? [])
     .onControllerAttached(() => {
@@ -808,6 +810,7 @@ class WebviewSurface {
       url: payload.url,
       html: payload.html,
       javascriptEnabled: payload.javascriptEnabled,
+      domStorageAccess: payload.domStorageAccess,
       devtools: payload.devtools,
       userAgent: payload.userAgent,
       autoplay: payload.autoplay,

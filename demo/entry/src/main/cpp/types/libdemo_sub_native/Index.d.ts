@@ -50,6 +50,11 @@ export interface WebviewCreateRequest {
   html?: string;
   style: WebviewStyle;
   javascriptEnabled?: boolean;
+  /**
+   * Enables ArkWeb DOM storage (localStorage/sessionStorage), which ArkWeb disables by
+   * default. The ArkTS host defaults this to enabled to match Android/iOS WebView behavior.
+   */
+  domStorageAccess?: boolean;
   devtools?: boolean;
   userAgent?: string;
   autoplay?: boolean;
