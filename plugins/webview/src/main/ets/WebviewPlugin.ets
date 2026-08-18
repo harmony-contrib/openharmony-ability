@@ -743,7 +743,7 @@ function BuildWebview(data: ManagedWebview) {
     .backgroundColor(data.style.backgroundColor ?? undefined)
     .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
     .javaScriptAccess(data.javascriptEnabled ?? true)
-    .domStorageAccess(data.domStorageAccess ?? true)
+    .domStorageAccess(data.domStorageAccess ?? false)
     .mediaPlayGestureAccess(data.autoplay === true ? false : true)
     .javaScriptOnDocumentStart(data.initializationScripts ?? [])
     .onControllerAttached(() => {

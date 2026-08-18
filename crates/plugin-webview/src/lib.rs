@@ -289,8 +289,8 @@ pub struct WebviewCreateRequest {
     pub html: Option<String>,
     pub style: WebviewStyle,
     pub javascript_enabled: Option<bool>,
-    /// Enables ArkWeb DOM storage (localStorage/sessionStorage), which ArkWeb disables by
-    /// default. The ArkTS host defaults this to enabled to match Android/iOS WebView behavior.
+    /// Enables ArkWeb DOM storage (localStorage/sessionStorage). ArkWeb disables it by
+    /// default; when unset, DOM storage stays disabled, so callers opt in with `true`.
     pub dom_storage_access: Option<bool>,
     pub devtools: Option<bool>,
     pub user_agent: Option<String>,
