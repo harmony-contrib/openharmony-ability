@@ -3,6 +3,7 @@ import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import * as Entry from "../components/MainPage";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
+import { Log } from "../runtime/Log";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { AbilityStateCodec } from "../runtime/AbilityStateCodec";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
@@ -41,7 +42,7 @@ export class NativeAbility extends UIAbility {
   private moduleRuntimes: NativeModuleRuntime[] = [];
   private bridgeSessionId: string = "";
   private readonly lifecycleQueue = new SerialTaskQueue((label: string, error: Error): void => {
-    console.error(`[NativeAbility] lifecycle operation '${label}' failed: ${String(error)}`);
+    Log.error(`[NativeAbility] lifecycle operation '${label}' failed: ${String(error)}`);
   });
   private acceptingLifecycle: boolean = false;
   private abilityGeneration: number = 0;
@@ -76,7 +77,11 @@ export class NativeAbility extends UIAbility {
     for (const runtime of this.moduleRuntimes) {
       try {
         handler(runtime.lifecycle);
-      } catch {}
+      } catch (error) {
+        Log.error(
+          `[NativeAbility] Rust lifecycle callback failed for ${runtime.moduleName}: ${String(error)}`,
+        );
+      }
     }
   }
 
@@ -209,7 +214,7 @@ export class NativeAbility extends UIAbility {
       try {
         runtime.module.disposeBridge(runtime.bridgeOwner);
       } catch (error) {
-        console.error(
+        Log.error(
           `[NativeAbility] failed to release bridge for ${runtime.moduleName}: ${String(error)}`,
         );
       }
@@ -236,7 +241,7 @@ export class NativeAbility extends UIAbility {
     try {
       await BridgeHostRegistry.emitLifecycle(sessionId, moduleName, event);
     } catch (error) {
-      console.error(
+      Log.error(
         `[NativeAbility] bridge lifecycle '${event.kind}' failed for ${moduleName}: ${String(error)}`,
       );
     }
@@ -264,7 +269,11 @@ export class NativeAbility extends UIAbility {
         for (const runtime of this.moduleRuntimes) {
           try {
             runtime.module.disposeAllRenders();
-          } catch {}
+          } catch (error) {
+            Log.error(
+              `[NativeAbility] failed to release renders for ${runtime.moduleName}: ${String(error)}`,
+            );
+          }
         }
         this.releaseModuleBridges(this.moduleRuntimes);
         await BridgeHostRegistry.dispose(previousSessionId);
@@ -318,7 +327,7 @@ export class NativeAbility extends UIAbility {
         try {
           lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
         } catch (error) {
-          console.error(
+          Log.error(
             `[NativeAbility] Rust ability-create failed for ${loaded.moduleName}: ${String(error)}`,
           );
         }
@@ -348,7 +357,11 @@ export class NativeAbility extends UIAbility {
       for (const runtime of initializedRuntimes.slice().reverse()) {
         try {
           runtime.lifecycle.windowStageEventCallback.onAbilityDestroy();
-        } catch {}
+        } catch (destroyError) {
+          Log.error(
+            `[NativeAbility] Rust ability-destroy failed for ${runtime.moduleName} during rollback: ${String(destroyError)}`,
+          );
+        }
       }
       this.releaseModuleBridges(initializedRuntimes);
       await BridgeHostRegistry.dispose(sessionId);
@@ -389,6 +402,22 @@ export class NativeAbility extends UIAbility {
     });
   }
 
+  onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    if (!this.acceptingLifecycle) {
+      return;
+    }
+    const uri = want.uri ?? "";
+    void this.enqueueLifecycleOperation("ability-new-want", async (): Promise<void> => {
+      this.forEachLifecycle((lifecycle) => {
+        // Optional for native modules built before the new-want callback existed.
+        const callback = lifecycle.windowStageEventCallback.onAbilityNewWant;
+        if (callback !== undefined) {
+          callback(uri);
+        }
+      });
+    });
+  }
+
   onWindowStageCreate(windowStage: window.WindowStage): void {
     if (!this.acceptingLifecycle) {
       return;
@@ -400,6 +429,9 @@ export class NativeAbility extends UIAbility {
       if (!sessionId) {
         throw new Error("Bridge session is unavailable during window-stage-create");
       }
+      // Mark the stage as needing teardown before any await: if creation is cancelled midway,
+      // destroyWindowStageIfActive must still clear the WindowStage handed to the hosts below.
+      this.windowStageActive = true;
 
       // First inject the ArkTS WindowStage object. Rust readiness is then advanced before ArkTS
       // plugin installation/lifecycle delivery can emit a synchronous event back into Rust.
@@ -414,7 +446,6 @@ export class NativeAbility extends UIAbility {
       this.forEachLifecycle((lifecycle) =>
         lifecycle.windowStageEventCallback.onWindowStageCreate(),
       );
-      this.windowStageActive = true;
       await this.notifyBridgeLifecycle({
         kind: "window-stage-create",
         payload: new BridgeEmptyLifecyclePayload(),
@@ -424,7 +455,11 @@ export class NativeAbility extends UIAbility {
       try {
         this.observedWindowStage = windowStage;
         windowStage.on("windowStageEvent", this.onWindowStageEvent);
-      } catch {}
+      } catch (error) {
+        Log.error(
+          `[NativeAbility] windowStageEvent subscription failed; stage events will not reach Rust: ${String(error)}`,
+        );
+      }
 
       await this.loadWindowStageContent(windowStage);
       this.assertWindowStageActive(generation);
@@ -464,14 +499,26 @@ export class NativeAbility extends UIAbility {
     if (sessionId) {
       const stageClears: Promise<void>[] = [];
       for (const runtime of this.moduleRuntimes) {
-        stageClears.push(BridgeHostRegistry.clearWindowStage(sessionId, runtime.moduleName));
+        // Forced teardown keeps the per-module contract order: `ui-context-destroy` →
+        // native component detach → `window-stage-destroy`. The host runs this hook between
+        // the two lifecycle deliveries.
+        stageClears.push(
+          BridgeHostRegistry.clearWindowStage(sessionId, runtime.moduleName, (): void => {
+            runtime.module.disposeAllRenders();
+          }),
+        );
       }
       await Promise.all(stageClears);
     }
+    // Safety net for hosts that were already disposed and skipped the detach hook above.
     for (const runtime of this.moduleRuntimes) {
       try {
         runtime.module.disposeAllRenders();
-      } catch {}
+      } catch (error) {
+        Log.error(
+          `[NativeAbility] failed to release renders for ${runtime.moduleName}: ${String(error)}`,
+        );
+      }
     }
     this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy());
   }
@@ -482,7 +529,9 @@ export class NativeAbility extends UIAbility {
     if (windowStage !== undefined) {
       try {
         windowStage.off("windowStageEvent", this.onWindowStageEvent);
-      } catch {}
+      } catch (error) {
+        Log.warn(`[NativeAbility] windowStageEvent unsubscription failed: ${String(error)}`);
+      }
     }
   }
 
@@ -559,7 +608,11 @@ export class NativeAbility extends UIAbility {
       try {
         stateMap[runtime.moduleName] =
           runtime.lifecycle.windowStageEventCallback.onAbilitySaveState() ?? "";
-      } catch {}
+      } catch (error) {
+        Log.error(
+          `[NativeAbility] Rust save-state failed for ${runtime.moduleName}: ${String(error)}`,
+        );
+      }
     }
 
     const stateValues = Object.values(stateMap);

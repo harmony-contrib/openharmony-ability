@@ -436,7 +436,10 @@ impl WindowExt for OpenHarmonyApp {
 mod tests {
     use super::{
         validate_platform_integer, validate_window_id, AvoidAreaRequest, AvoidAreaResponse,
-        RawAvoidArea, RawRect, WindowBridgePlugin, MAX_SAFE_JAVASCRIPT_INTEGER,
+        RawAvoidArea, RawRect, WindowAcknowledgement, WindowBlurRequest, WindowBridgePlugin,
+        WindowColorRequest, WindowCreateRequest, WindowCreateResponse, WindowDecorationsRequest,
+        WindowFocusableRequest, WindowIdRequest, WindowMoveRequest, WindowResizeRequest,
+        WindowStateResponse, MAX_SAFE_JAVASCRIPT_INTEGER,
     };
     use openharmony_ability::{
         AvoidArea, BridgeContextRequirement, BridgeNapiType, BridgePlugin, Rect,
@@ -460,6 +463,54 @@ mod tests {
         assert_eq!(
             <AvoidAreaResponse as BridgeNapiType>::TYPE_NAME,
             "ohos.window.AvoidAreaResponse"
+        );
+    }
+
+    #[test]
+    fn multi_window_actions_use_stable_named_napi_contracts() {
+        assert_eq!(
+            <WindowCreateRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.CreateRequest"
+        );
+        assert_eq!(
+            <WindowCreateResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.CreateResponse"
+        );
+        assert_eq!(
+            <WindowIdRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.WindowIdRequest"
+        );
+        assert_eq!(
+            <WindowDecorationsRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.DecorationsRequest"
+        );
+        assert_eq!(
+            <WindowColorRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.ColorRequest"
+        );
+        assert_eq!(
+            <WindowBlurRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.BlurRequest"
+        );
+        assert_eq!(
+            <WindowMoveRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.MoveRequest"
+        );
+        assert_eq!(
+            <WindowResizeRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.ResizeRequest"
+        );
+        assert_eq!(
+            <WindowFocusableRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.FocusableRequest"
+        );
+        assert_eq!(
+            <WindowAcknowledgement as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.Acknowledgement"
+        );
+        assert_eq!(
+            <WindowStateResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.StateResponse"
         );
     }
 

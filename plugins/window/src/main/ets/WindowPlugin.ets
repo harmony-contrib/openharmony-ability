@@ -1,3 +1,4 @@
+import hilog from "@ohos.hilog";
 import window from "@ohos.window";
 import {
   BridgeCallContext,
@@ -6,6 +7,9 @@ import {
   BridgeContextRequirement,
   AsyncPluginBase,
 } from "@ohos-rs/ability";
+
+const LOG_DOMAIN = 0x52ab;
+const LOG_TAG = "ohos.window";
 
 const AVOID_AREA_REQUEST_TYPE = "ohos.window.AvoidAreaRequest";
 const AVOID_AREA_RESPONSE_TYPE = "ohos.window.AvoidAreaResponse";
@@ -335,7 +339,14 @@ export class WindowPlugin extends AsyncPluginBase {
         if (created !== undefined) {
           try {
             await created.destroyWindow();
-          } catch {}
+          } catch (destroyError) {
+            hilog.warn(
+              LOG_DOMAIN,
+              LOG_TAG,
+              "%{public}s",
+              `failed to destroy partially created window: ${String(destroyError)}`,
+            );
+          }
         }
         throw new Error(`createSubWindow failed: ${String(error)}`);
       }
@@ -523,7 +534,15 @@ export class WindowPlugin extends AsyncPluginBase {
       windows.map(async (win: window.Window): Promise<void> => {
         try {
           await win.destroyWindow();
-        } catch {}
+        } catch (error) {
+          // Dispose stays idempotent and never blocks other plugins; the failure is only logged.
+          hilog.warn(
+            LOG_DOMAIN,
+            LOG_TAG,
+            "%{public}s",
+            `failed to destroy sub-window during dispose: ${String(error)}`,
+          );
+        }
       }),
     );
   }

@@ -14,7 +14,11 @@ type ImeCallback = (
     ThreadsafeFunction<i32, (), i32, Status, false>,
 );
 
-pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result<ImeCallback> {
+pub(crate) fn ime_ts_fn(
+    env: &Env,
+    app: OpenHarmonyApp,
+    render_owner: String,
+) -> Result<ImeCallback> {
     // insert event
     let on_insert_text_app = app.clone();
     let on_insert_text_owner = render_owner.clone();
@@ -23,12 +27,10 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
             if !on_insert_text_app.is_render_surface_active(&on_insert_text_owner) {
                 return Ok(());
             }
-            let s = ctx.first_arg::<String>().unwrap();
-            if let Some(ref mut h) = *on_insert_text_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::ImeEvent(
-                    ImeEvent::TextInputEvent(TextInputEventData { text: s }),
-                )))
-            }
+            let text = ctx.first_arg::<String>()?;
+            on_insert_text_app.emit_event(Event::Input(InputEvent::ImeEvent(
+                ImeEvent::TextInputEvent(TextInputEventData { text }),
+            )));
             Ok(())
         })?;
 
@@ -45,18 +47,16 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
             if !on_ime_hide_app.is_render_surface_active(&on_ime_hide_owner) {
                 return Ok(());
             }
-            let value = ctx.first_arg::<u32>().unwrap();
+            let value = ctx.first_arg::<u32>()?;
 
             let status = KeyboardStatus::from(value);
             if matches!(status, KeyboardStatus::Hide) {
                 // Keep native IME lifecycle aligned with hide callbacks.
                 on_ime_hide_app.hide_keyboard();
             }
-            if let Some(ref mut h) = *on_ime_hide_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::ImeEvent(
-                    ImeEvent::ImeStatusEvent(status),
-                )))
-            }
+            on_ime_hide_app.emit_event(Event::Input(InputEvent::ImeEvent(
+                ImeEvent::ImeStatusEvent(status),
+            )));
             Ok(())
         })?;
 
@@ -72,12 +72,10 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
             if !on_backspace_app.is_render_surface_active(&on_backspace_owner) {
                 return Ok(());
             }
-            let value = ctx.first_arg::<i32>().unwrap();
-            if let Some(ref mut h) = *on_backspace_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::ImeEvent(
-                    ImeEvent::BackspaceEvent(value),
-                )))
-            }
+            let value = ctx.first_arg::<i32>()?;
+            on_backspace_app.emit_event(Event::Input(InputEvent::ImeEvent(
+                ImeEvent::BackspaceEvent(value),
+            )));
             Ok(())
         })?;
 
@@ -93,12 +91,10 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
             if !on_ime_enter_app.is_render_surface_active(&on_ime_enter_owner) {
                 return Ok(());
             }
-            let value = ctx.first_arg::<i32>().unwrap();
-            if let Some(ref mut h) = *on_ime_enter_app.event_loop.borrow_mut() {
-                h(Event::Input(InputEvent::ImeEvent(ImeEvent::EnterEvent(
-                    value,
-                ))))
-            }
+            let value = ctx.first_arg::<i32>()?;
+            on_ime_enter_app.emit_event(Event::Input(InputEvent::ImeEvent(ImeEvent::EnterEvent(
+                value,
+            ))));
             Ok(())
         })?;
 

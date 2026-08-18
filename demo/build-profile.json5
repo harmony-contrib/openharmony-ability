@@ -3,7 +3,6 @@
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
         "compatibleSdkVersion": "5.0.0(12)",
         "targetSdkVersion": "5.0.0(12)",
         "runtimeOS": "HarmonyOS",
@@ -23,21 +22,9 @@
         "name": "release",
       },
     ],
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "/Users/ranger/.ohos/config/default_demo_yyjiCVAYks5mJoCjAMZ-6HF1H5m1uKXWecIn5uDJwdE=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001B165E7B106C3365DE78329D65754C69AF5D15D34F5AD953726B117AAB736E515277624D3A407C3E",
-          "profile": "/Users/ranger/.ohos/config/default_demo_yyjiCVAYks5mJoCjAMZ-6HF1H5m1uKXWecIn5uDJwdE=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "/Users/ranger/.ohos/config/default_demo_yyjiCVAYks5mJoCjAMZ-6HF1H5m1uKXWecIn5uDJwdE=.p12",
-          "storePassword": "0000001BB2469C4F096DEE4DF743016517039A9F42DAE8A1D49512630DD230FC4820EA60C5D43BC99D3139",
-        },
-      },
-    ],
+    // Signing material is machine-local and must never be committed. DevEco Studio regenerates
+    // this block ("File > Project Structure > Signing Configs") for local signed builds.
+    "signingConfigs": [],
   },
   "modules": [
     {

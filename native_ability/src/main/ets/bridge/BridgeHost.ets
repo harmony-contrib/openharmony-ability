@@ -17,6 +17,7 @@ import {
   BridgePluginFactory,
   BridgePluginHookContext,
 } from "../ability/type";
+import { Log } from "../runtime/Log";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import { CancellableTaskScope, TaskCancellationSignal } from "../runtime/CancellableTaskScope";
 
@@ -249,7 +250,7 @@ class BridgeHost {
   private disposed: boolean = false;
   private disposePromise?: Promise<void>;
   private readonly lifecycleQueue = new SerialTaskQueue((label: string, error: Error): void => {
-    console.error(
+    Log.error(
       `[BridgeHost:${this.moduleName}] lifecycle operation '${label}' failed: ${String(error)}`,
     );
   });
@@ -397,7 +398,16 @@ class BridgeHost {
           `DefaultXComponent cannot attach without an active WindowStage for '${this.moduleName}'`,
         );
       }
-      this.attachComponentWindow(pending.state);
+      // A component whose Window cannot be resolved still attaches in a degraded mode: plugins
+      // and rendering keep working, only the window-scoped size/rect/avoid-area/keyboard events
+      // are unavailable. `getWindow()` continues to resolve lazily for plugins that need it.
+      try {
+        this.attachComponentWindow(pending.state);
+      } catch (error) {
+        Log.error(
+          `Component Window for '${this.moduleName}' could not be observed; window-scoped events are disabled: ${String(error)}`,
+        );
+      }
       this.component = pending.state;
       this.uiContextReady = true;
       this.notifyContextChanged();
@@ -565,37 +575,35 @@ class BridgeHost {
       return;
     }
     const componentWindow = this.requireComponentWindow(state);
-    const onSizeChange = (size: window.Size): void => {
+    const deliver = (event: string, notify: () => void): void => {
       if (this.component !== state || this.closing || this.disposed) {
         return;
       }
       try {
-        this.applicationLifecycle?.windowStageEventCallback.onWindowSizeChange(size);
-      } catch {}
+        notify();
+      } catch (error) {
+        Log.error(`Rust '${event}' delivery failed for '${this.moduleName}': ${String(error)}`);
+      }
+    };
+    const onSizeChange = (size: window.Size): void => {
+      deliver("window-size-change", () =>
+        this.applicationLifecycle?.windowStageEventCallback.onWindowSizeChange(size),
+      );
     };
     const onRectChange = (options: window.RectChangeOptions): void => {
-      if (this.component !== state || this.closing || this.disposed) {
-        return;
-      }
-      try {
-        this.applicationLifecycle?.windowStageEventCallback.onWindowRectChange(options);
-      } catch {}
+      deliver("window-rect-change", () =>
+        this.applicationLifecycle?.windowStageEventCallback.onWindowRectChange(options),
+      );
     };
     const onAvoidAreaChange = (options: window.AvoidAreaOptions): void => {
-      if (this.component !== state || this.closing || this.disposed) {
-        return;
-      }
-      try {
-        this.applicationLifecycle?.windowStageEventCallback.onAvoidAreaChange(options);
-      } catch {}
+      deliver("avoid-area-change", () =>
+        this.applicationLifecycle?.windowStageEventCallback.onAvoidAreaChange(options),
+      );
     };
     const onKeyboardHeightChange = (height: number): void => {
-      if (this.component !== state || this.closing || this.disposed) {
-        return;
-      }
-      try {
-        this.applicationLifecycle?.keyboardEventCallback.onKeyboardHeightChange(height);
-      } catch {}
+      deliver("keyboard-height-change", () =>
+        this.applicationLifecycle?.keyboardEventCallback.onKeyboardHeightChange(height),
+      );
     };
     state.windowBinding = {
       componentWindow,
@@ -604,18 +612,21 @@ class BridgeHost {
       onAvoidAreaChange,
       onKeyboardHeightChange,
     };
-    try {
-      componentWindow.on("windowSizeChange", onSizeChange);
-    } catch {}
-    try {
-      componentWindow.on("windowRectChange", onRectChange);
-    } catch {}
-    try {
-      componentWindow.on("avoidAreaChange", onAvoidAreaChange);
-    } catch {}
-    try {
-      componentWindow.on("keyboardHeightChange", onKeyboardHeightChange);
-    } catch {}
+    const subscribe = (event: string, register: () => void): void => {
+      try {
+        register();
+      } catch (error) {
+        Log.warn(
+          `Window '${event}' subscription failed for '${this.moduleName}'; the event will not reach Rust: ${String(error)}`,
+        );
+      }
+    };
+    subscribe("windowSizeChange", () => componentWindow.on("windowSizeChange", onSizeChange));
+    subscribe("windowRectChange", () => componentWindow.on("windowRectChange", onRectChange));
+    subscribe("avoidAreaChange", () => componentWindow.on("avoidAreaChange", onAvoidAreaChange));
+    subscribe("keyboardHeightChange", () =>
+      componentWindow.on("keyboardHeightChange", onKeyboardHeightChange),
+    );
   }
 
   private detachComponentWindow(state: HostComponentState): void {
@@ -742,7 +753,7 @@ class BridgeHost {
     });
   }
 
-  async clearWindowStage(): Promise<void> {
+  async clearWindowStage(onComponentDetached?: () => void): Promise<void> {
     if (this.disposed) {
       return;
     }
@@ -771,6 +782,17 @@ class BridgeHost {
         });
         this.disposeComponentState(state);
         this.notifyRustLifecycle("ui-context-destroy");
+      }
+      // Keep the documented teardown order on forced WindowStage teardown: the caller releases
+      // this module's native render tree after ui-context-destroy and before window-stage-destroy.
+      if (onComponentDetached !== undefined) {
+        try {
+          onComponentDetached();
+        } catch (error) {
+          Log.error(
+            `Native render teardown failed for '${this.moduleName}' during window-stage clear: ${String(error)}`,
+          );
+        }
       }
       await this.deliverLifecycle({
         kind: "window-stage-destroy",
@@ -843,7 +865,7 @@ class BridgeHost {
       );
     } catch (error) {
       this.recordHookFailure(entry, error);
-      console.error(
+      Log.error(
         `[BridgeHost:${this.moduleName}] plugin '${entry.plugin.id}' failed lifecycle '${event.kind}': ${String(error)}`,
       );
     }
@@ -1083,7 +1105,7 @@ class BridgeHost {
         );
       }
     } catch (error) {
-      console.error(
+      Log.error(
         `[BridgeHost:${this.moduleName}] plugin '${entry.plugin.id}' failed dispose: ${String(error)}`,
       );
     }
@@ -1117,7 +1139,7 @@ class BridgeHost {
     try {
       await this.activate(entry);
     } catch (error) {
-      console.error(
+      Log.error(
         `[BridgeHost:${this.moduleName}] plugin '${entry.plugin.id}' failed to install: ${String(error)}`,
       );
     }
@@ -1181,7 +1203,7 @@ class BridgeHost {
         );
       } catch (error) {
         this.recordHookFailure(entry, error);
-        console.error(
+        Log.error(
           `[BridgeHost:${this.moduleName}] plugin '${entry.plugin.id}' failed replay lifecycle '${event.kind}': ${String(error)}`,
         );
         if (entry.hookError !== undefined) {
@@ -1434,7 +1456,7 @@ class BridgeHost {
     try {
       sink(kind);
     } catch (error) {
-      console.error(
+      Log.error(
         `[BridgeHost:${this.moduleName}] Rust lifecycle '${kind}' failed: ${String(error)}`,
       );
     }
@@ -1860,8 +1882,12 @@ export class BridgeHostRegistry {
     await BridgeHostRegistry.host(sessionId, moduleName).setWindowStage(windowStage);
   }
 
-  static async clearWindowStage(sessionId: string, moduleName: string): Promise<void> {
-    await BridgeHostRegistry.host(sessionId, moduleName).clearWindowStage();
+  static async clearWindowStage(
+    sessionId: string,
+    moduleName: string,
+    onComponentDetached?: () => void,
+  ): Promise<void> {
+    await BridgeHostRegistry.host(sessionId, moduleName).clearWindowStage(onComponentDetached);
   }
 
   static invalidateWindowStage(sessionId: string, moduleName: string): void {

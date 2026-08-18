@@ -22,7 +22,7 @@ openharmony-ability-plugin-webview = { workspace = true }
 openharmony-ability-plugin-window = { workspace = true }
 ohos-hilog-binding = { workspace = true }
 futures-channel = { workspace = true }
-futures-executor = "0.3"
+futures-executor = { workspace = true }
 http = { workspace = true }
 
 [build-dependencies]

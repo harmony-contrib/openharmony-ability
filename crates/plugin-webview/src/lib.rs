@@ -20,8 +20,8 @@ mod controller;
 mod js_proxy;
 mod protocol;
 
-pub use callbacks::WebviewCallbacksBuilder;
-pub use js_proxy::WebviewJavascriptProxyBuilder;
+pub use callbacks::{remove_webview_callbacks, WebviewCallbacksBuilder};
+pub use js_proxy::{remove_javascript_proxies, WebviewJavascriptProxyBuilder};
 pub use protocol::{
     bind_custom_protocol, bind_custom_protocol_async, WebviewProtocol, WebviewProtocolOptions,
     WebviewProtocolRequest, WebviewProtocolResponder, WebviewProtocolResponse,

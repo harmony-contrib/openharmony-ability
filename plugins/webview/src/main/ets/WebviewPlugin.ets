@@ -1217,7 +1217,7 @@ export class WebviewPlugin extends AsyncPluginBase {
     return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(accepted) };
   }
 
-  onDispose(): void {
+  override onDispose(_context: BridgePluginHookContext): void {
     const surface = this.surface;
     this.surface = undefined;
     surface?.dispose();

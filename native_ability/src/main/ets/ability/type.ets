@@ -25,7 +25,11 @@ export interface WindowStageEventCallback {
   onWindowStageCreate: () => void;
   onWindowStageDestroy: () => void;
   onAbilityCreate: (arg: string) => void;
+  /** Singleton re-entry with a new Want; receives `want.uri` (empty when the Want has no uri).
+   * Optional for native modules built before this callback existed. */
+  onAbilityNewWant?: (uri: string) => void;
   onAbilityDestroy: () => void;
+  /** Returns the module's saved state string for persistence into the platform Want. */
   onAbilitySaveState: () => string;
   onWindowStageEvent: (arg: number) => void;
   onWindowSizeChange: (arg: object) => void;

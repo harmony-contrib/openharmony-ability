@@ -48,5 +48,6 @@ fn openharmony_app(app: OpenHarmonyApp) {
         .expect("sub-window WebView facade must be registered");
     app.register_plugin(WindowBridgePlugin)
         .expect("sub-window Window facade must be registered");
-    app.run_loop(|_event| {});
+    app.run_loop(|_event| {})
+        .expect("sub-window event loop must be registered once");
 }

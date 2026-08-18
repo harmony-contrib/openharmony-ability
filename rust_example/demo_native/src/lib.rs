@@ -401,7 +401,7 @@ fn openharmony_app(app: OpenHarmonyApp) {
         intercept
     });
 
-    app.clone().run_loop(move |event| match event {
+    let run_loop_result = app.clone().run_loop(move |event| match event {
         Event::SurfaceCreate => {
             hilog_info!("ohos-rs surface_create");
             if !PERMISSION_REQUESTED.swap(true, Ordering::SeqCst) {
@@ -445,6 +445,9 @@ fn openharmony_app(app: OpenHarmonyApp) {
             hilog_info!(format!("ohos-rs: {}", event.as_str()).as_str());
         }
     });
+    if let Err(error) = run_loop_result {
+        hilog_info!(format!("failed to register the event loop: {error}").as_str());
+    }
 }
 
 /// PR #65 capability demo: open an external URL through `ohos.url`.

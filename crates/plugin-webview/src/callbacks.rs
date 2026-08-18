@@ -127,6 +127,19 @@ impl WebviewCallbacksBuilder {
     }
 }
 
+/// Removes the callback declaration for `webview_id`, releasing its business closures.
+///
+/// Declarations intentionally survive remove/create cycles and Ability recreation, because
+/// application initialization runs once per process. Call this when a WebView ID retires for
+/// good so its closures do not stay resident. Returns `true` when a declaration existed.
+pub fn remove_webview_callbacks(webview_id: impl AsRef<str>) -> Result<bool> {
+    Ok(CALLBACKS
+        .write()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .remove(webview_id.as_ref())
+        .is_some())
+}
+
 pub(crate) fn options_for(webview_id: &str) -> Result<WebviewCallbackOptions> {
     let callbacks = CALLBACKS
         .read()

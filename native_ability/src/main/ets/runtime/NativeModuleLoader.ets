@@ -1,4 +1,5 @@
 import { Module } from "../ability/type";
+import { Log } from "./Log";
 
 /** Module loading is framework runtime infrastructure, not a capability Helper. */
 export class NativeModuleLoader {
@@ -93,7 +94,7 @@ export class NativeModuleLoader {
         return module.on_back_press_intercept();
       }
     } catch (error) {
-      console.error(`Native back-press interceptor failed: ${String(error)}`);
+      Log.error(`Native back-press interceptor failed: ${String(error)}`);
     }
     return false;
   }

@@ -6,6 +6,7 @@ use std::{
         atomic::{AtomicBool, AtomicI64},
         Arc, Mutex, RwLock,
     },
+    thread::ThreadId,
 };
 
 use napi_derive_ohos::napi;
@@ -16,10 +17,11 @@ use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
-    bridge::MainThreadBridgeEndpoint, AvoidArea, AvoidAreaType, BridgeMainThread,
-    BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration, BridgePluginRegistry,
-    BridgeRuntime, Configuration, Event, MainThreadScheduler, OpenHarmonyWaker,
-    PluginLifecycleEvent, Rect, WAKER,
+    bridge::{BridgePluginRegistry, MainThreadBridgeEndpoint},
+    waker::WAKER,
+    AvoidArea, AvoidAreaType, BridgeMainThread, BridgeMainThreadEvent, BridgePlugin,
+    BridgePluginDeclaration, BridgeRuntime, Configuration, Event, MainThreadScheduler,
+    OpenHarmonyWaker, PluginLifecycleEvent, Rect,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -51,7 +53,7 @@ impl AbilityInitContext {
 }
 
 #[derive(Clone)]
-pub struct OpenHarmonyAppInner {
+pub(crate) struct OpenHarmonyAppInner {
     pub(crate) raw_window: Option<RawWindow>,
     pub(crate) xcomponent: Option<XComponent>,
     /// Owner token of this native module's one active DefaultXComponent render.
@@ -139,11 +141,12 @@ impl OpenHarmonyAppInner {
     /// save current app state
     pub fn save(&mut self, state: Vec<u8>) {
         self.state = state;
+        self.save_state = true;
     }
 
     pub fn create_waker(&self) -> OpenHarmonyWaker {
-        let guard = (*WAKER).read().expect("Failed to read WAKER");
-        OpenHarmonyWaker::new((*guard).clone())
+        let waker = (*WAKER).read().ok().and_then(|guard| (*guard).clone());
+        OpenHarmonyWaker::new(waker)
     }
 
     pub fn config(&self) -> Configuration {
@@ -152,10 +155,12 @@ impl OpenHarmonyAppInner {
 
     pub fn set_frame_rate(&self, min: i32, max: i32, expected: i32) {
         if let Some(xcomponent) = self.xcomponent.as_ref() {
-            xcomponent
+            if let Err(error) = xcomponent
                 .native_xcomponent()
                 .set_frame_rate(min, max, expected)
-                .expect("Failed to set frame rate");
+            {
+                crate::log::warn(&format!("Failed to set frame rate: {error}"));
+            }
         }
     }
 
@@ -250,8 +255,65 @@ impl OpenHarmonyAppInner {
     }
 }
 
-type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event) + Sync + Send>>>>;
-type BackPressInterceptor = Arc<RefCell<Option<Box<dyn FnMut() -> bool + Sync + Send>>>>;
+type EventHandler = Box<dyn FnMut(Event) + Send + 'static>;
+type EventLoop = Arc<Mutex<Option<EventHandler>>>;
+type BackPressHandler = Box<dyn FnMut() -> bool + Send + 'static>;
+type BackPressInterceptor = Arc<Mutex<Option<BackPressHandler>>>;
+
+/// A slot bound to the thread that created it — in practice the ArkTS/N-API main thread, where
+/// `OpenHarmonyApp` is constructed during module initialization.
+///
+/// The wrapped platform object (`IME`) is only ever created and used inside main-thread platform
+/// callbacks. Cross-thread access is rejected at runtime instead of racing, which is what makes
+/// the `Send`/`Sync` implementations below sound: no other thread can ever reach the inner
+/// `RefCell`.
+pub(crate) struct MainThreadCell<T> {
+    owner: ThreadId,
+    value: RefCell<Option<T>>,
+}
+
+impl<T> MainThreadCell<T> {
+    fn new() -> Self {
+        Self {
+            owner: std::thread::current().id(),
+            value: RefCell::new(None),
+        }
+    }
+
+    fn is_owner_thread(&self) -> bool {
+        std::thread::current().id() == self.owner
+    }
+
+    /// Runs `f` with a shared borrow of the slot. Returns `None` off the owner thread.
+    pub(crate) fn with_ref<R>(&self, f: impl FnOnce(Option<&T>) -> R) -> Option<R> {
+        if !self.is_owner_thread() {
+            return None;
+        }
+        Some(f(self.value.borrow().as_ref()))
+    }
+
+    /// Replaces the slot content. Returns `false` off the owner thread.
+    pub(crate) fn set(&self, value: T) -> bool {
+        if !self.is_owner_thread() {
+            return false;
+        }
+        *self.value.borrow_mut() = Some(value);
+        true
+    }
+
+    /// Clears the slot. Returns `None` off the owner thread or when the slot was empty.
+    pub(crate) fn take(&self) -> Option<T> {
+        if !self.is_owner_thread() {
+            return None;
+        }
+        self.value.borrow_mut().take()
+    }
+}
+
+// SAFETY: every access path checks the owning thread first, so the non-`Sync` interior can never
+// be observed concurrently and the wrapped value never actually moves to another thread.
+unsafe impl<T> Send for MainThreadCell<T> {}
+unsafe impl<T> Sync for MainThreadCell<T> {}
 
 /// Transport endpoints owned by one NativeAbility/module session. This lifetime is deliberately
 /// independent from the module's optional DefaultXComponent render surface.
@@ -266,17 +328,15 @@ pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: EventLoop,
     pub(crate) back_press_interceptor: BackPressInterceptor,
-    pub(crate) ime: Arc<RefCell<Option<IME>>>,
+    pub(crate) ime: Arc<MainThreadCell<IME>>,
     bridge_session: Arc<RwLock<Option<ActiveBridgeSession>>>,
     bridge_plugins: Arc<BridgePluginRegistry>,
-    is_keyboard_show: Arc<Mutex<bool>>,
 }
 
 impl Debug for OpenHarmonyApp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpenHarmonyApp")
-            .field("id", &self.inner.read().unwrap().id)
-            .finish()
+        let id = self.inner.read().map(|inner| inner.id).unwrap_or(-1);
+        f.debug_struct("OpenHarmonyApp").field("id", &id).finish()
     }
 }
 
@@ -302,9 +362,8 @@ impl PartialOrd for OpenHarmonyApp {
 
 impl Ord for OpenHarmonyApp {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let self_id = self.inner.read().unwrap().id;
-        let other_id = other.inner.read().unwrap().id;
-        self_id.cmp(&other_id)
+        // Pointer identity keeps `Ord` consistent with `PartialEq`/`Hash` without taking locks.
+        Arc::as_ptr(&self.inner).cmp(&Arc::as_ptr(&other.inner))
     }
 }
 
@@ -313,15 +372,11 @@ impl OpenHarmonyApp {
         Self {
             #[allow(clippy::arc_with_non_send_sync)]
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
-            #[allow(clippy::arc_with_non_send_sync)]
-            event_loop: Arc::new(RefCell::new(None)),
-            #[allow(clippy::arc_with_non_send_sync)]
-            back_press_interceptor: Arc::new(RefCell::new(None)),
-            #[allow(clippy::arc_with_non_send_sync)]
-            ime: Arc::new(RefCell::new(None)),
+            event_loop: Arc::new(Mutex::new(None)),
+            back_press_interceptor: Arc::new(Mutex::new(None)),
+            ime: Arc::new(MainThreadCell::new()),
             bridge_session: Arc::new(RwLock::new(None)),
             bridge_plugins: Arc::new(BridgePluginRegistry::default()),
-            is_keyboard_show: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -331,6 +386,16 @@ impl OpenHarmonyApp {
 
     pub fn load(&self) -> Option<Vec<u8>> {
         self.inner.read().unwrap().load()
+    }
+
+    /// Installs state recovered from the platform's saved Want so that `Event::Resume` and
+    /// `Event::Create` handlers can read it through [`SaveLoader::load`].
+    pub(crate) fn restore_saved_state(&self, state: Vec<u8>) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.save(state);
+        } else {
+            crate::log::warn("Failed to restore saved state: application state is poisoned");
+        }
     }
 
     pub fn set_frame_rate(&self, min: i32, max: i32, expected: i32) {
@@ -418,7 +483,7 @@ impl OpenHarmonyApp {
             .map(|mut inner| inner.deactivate_surface(owner))
             .unwrap_or(false);
         if deactivated {
-            self.ime.borrow_mut().take();
+            self.ime.take();
         }
         deactivated
     }
@@ -435,15 +500,32 @@ impl OpenHarmonyApp {
         let Some(surface_was_active) = surface_was_active else {
             return;
         };
-        self.ime.borrow_mut().take();
+        self.ime.take();
         if surface_was_active {
             self.dispatch_surface_destroy();
         }
     }
 
     pub(crate) fn dispatch_surface_destroy(&self) {
-        if let Some(ref mut handler) = *self.event_loop.borrow_mut() {
-            handler(Event::SurfaceDestroy);
+        self.emit_event(Event::SurfaceDestroy);
+    }
+
+    /// Delivers one event to the `run_loop` handler. Events originate from main-thread platform
+    /// callbacks; a reentrant emit (an event raised while the handler is still running) is
+    /// dropped with a log instead of deadlocking.
+    pub(crate) fn emit_event(&self, event: Event<'_>) {
+        match self.event_loop.try_lock() {
+            Ok(mut guard) => {
+                if let Some(handler) = guard.as_mut() {
+                    handler(event);
+                }
+            }
+            Err(_) => {
+                crate::log::warn(&format!(
+                    "Dropped '{}' event: the run_loop handler is already running or poisoned",
+                    event.as_str()
+                ));
+            }
         }
     }
 
@@ -582,22 +664,29 @@ impl OpenHarmonyApp {
         }
     }
 
+    /// Shows the soft keyboard. The IME is a main-thread platform object, so this is a no-op
+    /// (with a warning) when called from any other thread.
     pub fn show_keyboard(&self) {
-        let _guard = self
-            .is_keyboard_show
-            .lock()
-            .expect("Failed to lock is_keyboard_show");
-        if let Some(ime) = self.ime.borrow().as_ref() {
-            ime.show_keyboard();
+        let dispatched = self.ime.with_ref(|ime| {
+            if let Some(ime) = ime {
+                ime.show_keyboard();
+            }
+        });
+        if dispatched.is_none() {
+            crate::log::warn("show_keyboard is only available on the ArkTS main thread");
         }
     }
+
+    /// Hides the soft keyboard. The IME is a main-thread platform object, so this is a no-op
+    /// (with a warning) when called from any other thread.
     pub fn hide_keyboard(&self) {
-        let _guard = self
-            .is_keyboard_show
-            .lock()
-            .expect("Failed to lock is_keyboard_show");
-        if let Some(ime) = self.ime.borrow().as_ref() {
-            ime.hide_keyboard();
+        let dispatched = self.ime.with_ref(|ime| {
+            if let Some(ime) = ime {
+                ime.hide_keyboard();
+            }
+        });
+        if dispatched.is_none() {
+            crate::log::warn("hide_keyboard is only available on the ArkTS main thread");
         }
     }
     pub fn create_waker(&self) -> OpenHarmonyWaker {
@@ -630,44 +719,51 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().scale()
     }
 
-    pub fn run_loop<'a, F: FnMut(Event) + 'a>(&self, mut event_handle: F) {
-        if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
-            return;
+    /// Registers the application's event handler. Events are delivered on the ArkTS/N-API main
+    /// thread. The handler must be `'static` because it outlives the registering call; it must be
+    /// `Send` because it is installed from the module-initialization thread and later invoked
+    /// from main-thread platform callbacks.
+    ///
+    /// Returns an error when a handler is already installed for this native module; the
+    /// framework never silently ignores or replaces application event routing.
+    pub fn run_loop<F>(&self, event_handle: F) -> Result<()>
+    where
+        F: FnMut(Event) + Send + 'static,
+    {
+        if HAS_EVENT.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::from_reason(
+                "run_loop was already called for this native module",
+            ));
         }
 
-        let static_handler = unsafe {
-            std::mem::transmute::<
-                Box<dyn FnMut(Event) + 'a>,
-                Box<dyn FnMut(Event) + 'static + Sync + Send>,
-            >(Box::new(move |event| {
-                event_handle(event);
-            }))
-        };
-
-        self.event_loop.replace(Some(static_handler));
-        HAS_EVENT.store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut guard = self.event_loop.lock().map_err(|_| {
+            Error::from_reason("Failed to install the run_loop handler: event loop is poisoned")
+        })?;
+        *guard = Some(Box::new(event_handle));
+        Ok(())
     }
 
     /// Register back press interceptor. Return `true` to intercept back action, `false` to pass through.
-    pub fn on_back_press_intercept<'a, F: FnMut() -> bool + 'a>(&self, interceptor: F) {
-        let static_handler = unsafe {
-            std::mem::transmute::<
-                Box<dyn FnMut() -> bool + 'a>,
-                Box<dyn FnMut() -> bool + 'static + Sync + Send>,
-            >(Box::new(interceptor))
-        };
-
-        self.back_press_interceptor.replace(Some(static_handler));
+    pub fn on_back_press_intercept<F>(&self, interceptor: F)
+    where
+        F: FnMut() -> bool + Send + 'static,
+    {
+        if let Ok(mut guard) = self.back_press_interceptor.lock() {
+            *guard = Some(Box::new(interceptor));
+        } else {
+            crate::log::warn("Failed to install the back-press interceptor: lock is poisoned");
+        }
     }
 
-    /// Get back press interceptor result
-    /// Returns true to intercept back press, false to pass through
+    /// Runs the registered back-press interceptor.
+    ///
+    /// Returns `false` (let ArkUI perform its default back navigation) when no interceptor has
+    /// been registered, so applications keep the platform back behavior until they opt in.
     pub fn get_back_press_interceptor(&self) -> bool {
-        self.back_press_interceptor
-            .borrow_mut()
-            .as_mut()
-            .map(|h| h())
-            .unwrap_or(true)
+        match self.back_press_interceptor.try_lock() {
+            Ok(mut guard) => guard.as_mut().map(|h| h()).unwrap_or(false),
+            Err(_) => false,
+        }
     }
 }
 
@@ -677,7 +773,13 @@ impl Default for OpenHarmonyApp {
     }
 }
 
-// TODO: Can we remove this?
+// SAFETY: `OpenHarmonyApp` is a bundle of `Arc` handles whose shared state is individually
+// protected: `event_loop` and `back_press_interceptor` are `Mutex`-guarded `Send` closures,
+// `ime` is a `MainThreadCell` that rejects cross-thread access at runtime, and the bridge
+// session/plugin registries use `RwLock`. The remaining non-auto-`Send` members are the
+// `RawWindow`/`XComponent` handles inside `inner`: `RawWindow` is an opaque `OHNativeWindow`
+// pointer that OpenHarmony explicitly supports handing to render threads (EGL/Vulkan), and the
+// `XComponent` handle is only mutated from main-thread surface callbacks behind the `RwLock`.
 unsafe impl Send for OpenHarmonyApp {}
 unsafe impl Sync for OpenHarmonyApp {}
 

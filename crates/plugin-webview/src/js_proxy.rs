@@ -165,6 +165,20 @@ pub(crate) fn on_controller_removed(webview_id: &str, native_tag: &str) -> Resul
     Ok(())
 }
 
+/// Removes every queued proxy declaration for `webview_id`, releasing its business closures.
+///
+/// Proxies already installed into a live ArkWeb controller stay owned by ArkWeb until that
+/// WebView is destroyed; this only stops future controllers from re-installing them. Returns
+/// `true` when at least one declaration existed.
+pub fn remove_javascript_proxies(webview_id: impl AsRef<str>) -> Result<bool> {
+    Ok(PROXY_STATE
+        .lock()
+        .map_err(|_| Error::from_reason("Failed to lock WebView JavaScript proxy state"))?
+        .declarations
+        .remove(webview_id.as_ref())
+        .is_some())
+}
+
 /// Clears controller-generation state at component/session teardown. Proxy declarations remain
 /// available for a later controller created with the same module-local business ID.
 pub(crate) fn clear_attached() -> Result<()> {
@@ -187,9 +201,12 @@ fn install(
         let callback = Arc::clone(&method.callback);
         let callback_webview_id = webview_id.clone();
         builder = builder.add_method(method.name, move |_native_tag, arguments| {
-            if let Ok(mut callback) = callback.lock() {
-                callback(callback_webview_id.clone(), arguments);
-            }
+            // Recover from a poisoned lock instead of silently dropping the page call: the
+            // business callback stays reachable even after a previous invocation panicked.
+            let mut callback = callback
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            callback(callback_webview_id.clone(), arguments);
         });
     }
 

@@ -70,7 +70,10 @@ export class PermissionPlugin extends AsyncPluginBase {
         codes[index] = authResults[index] ?? REQUEST_FAILED;
       }
     } catch (error) {
+      // A platform failure must stay distinguishable from a user denial: reject the bridge call
+      // instead of fabricating an all-denied response.
       hilog.error(0x0000, TAG, `request failed: ${String(error)}`);
+      throw new Error(`requestPermissionsFromUser failed: ${String(error)}`);
     }
     if (!context.isActive()) {
       throw new Error("Ability was destroyed while permission request was pending");

@@ -5,7 +5,7 @@ use ohos_xcomponent_binding::{KeyEventData, MouseEventData, TouchEventData};
 
 mod ime;
 mod text_input;
-pub use ime::*;
+pub(crate) use ime::ime_ts_fn;
 pub use text_input::*;
 
 #[derive(Clone)]

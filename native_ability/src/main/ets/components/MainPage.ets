@@ -1,4 +1,5 @@
 import { DefaultXComponent } from "./DefaultXComponent";
+import { Log } from "../runtime/Log";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { invokeNativeBackPressInterceptor } from "../runtime/BackPress";
 
@@ -11,7 +12,14 @@ struct Index {
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
   @State private primaryModuleName: string = "";
 
-  async aboutToAppear(): Promise<void> {
+  aboutToAppear(): void {
+    // ArkUI never awaits lifecycle callbacks; supervise the module load explicitly.
+    void this.loadPrimaryModule().catch((error: Error) => {
+      Log.error(`[MainPage] failed to load the primary native module: ${String(error)}`);
+    });
+  }
+
+  private async loadPrimaryModule(): Promise<void> {
     const moduleName = NativeModuleLoader.resolveModuleNames(this.moduleNames)[0] ?? "";
     if (!moduleName) {
       throw new Error("dynamic moduleName is empty");

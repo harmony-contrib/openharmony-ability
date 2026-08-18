@@ -3,9 +3,8 @@ import { FrameNode, NodeController } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import { Module } from "../ability/type";
 import { BridgeHostRegistry } from "../bridge/BridgeHost";
+import { Log } from "../runtime/Log";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
-
-export const RouteName = "NativeAbility";
 
 let nextRenderOwnerId: number = 1;
 
@@ -36,8 +35,19 @@ export struct DefaultXComponent {
   private attachment?: ComponentAttachment;
   private releasePromise: Promise<void> = Promise.resolve();
 
-  async aboutToAppear(): Promise<void> {
+  aboutToAppear(): void {
+    // ArkUI never awaits lifecycle callbacks: keep the callback synchronous and run the actual
+    // attachment as a supervised task so a failure surfaces in hilog instead of becoming an
+    // unhandled Promise rejection.
     const generation = ++this.appearanceGeneration;
+    void this.attachForAppearance(generation).catch((error: Error) => {
+      Log.error(
+        `[DefaultXComponent] failed to attach native module '${this.moduleName}': ${String(error)}`,
+      );
+    });
+  }
+
+  private async attachForAppearance(generation: number): Promise<void> {
     await this.releasePromise;
     if (generation !== this.appearanceGeneration) {
       return;
@@ -124,7 +134,11 @@ export struct DefaultXComponent {
       attachment.moduleName,
       attachment.renderOwner,
     )
-      .catch(() => {})
+      .catch((error: Error) => {
+        Log.error(
+          `[DefaultXComponent] failed to detach native module '${attachment.moduleName}': ${String(error)}`,
+        );
+      })
       .finally(() => {
         this.nodeController.disposeRoot();
       });
@@ -168,6 +182,8 @@ class BridgeRootNodeController extends NodeController {
     this.root = null;
     try {
       root?.dispose();
-    } catch {}
+    } catch (error) {
+      Log.warn(`[DefaultXComponent] root FrameNode dispose failed: ${String(error)}`);
+    }
   }
 }

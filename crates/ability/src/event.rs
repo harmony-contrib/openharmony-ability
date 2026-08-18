@@ -69,6 +69,10 @@ pub enum Event<'a> {
     /// alias onAbilityCreate
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitycreate
     Create,
+    /// singleton ability re-entry with a new Want
+    /// alias onNewWant; carries `want.uri` (empty when the Want has no uri)
+    /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-uiability-V5#uiabilityonnewwant
+    NewWant(String),
     /// ability destroy event
     /// alias onAbilityDestroy
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonabilitydestroy
@@ -112,6 +116,7 @@ impl<'a> Event<'a> {
             Event::Stop => "Stop",
             Event::SaveState(_) => "SaveState",
             Event::Create => "Create",
+            Event::NewWant(_) => "NewWant",
             Event::Destroy => "Destroy",
             Event::SurfaceCreate => "SurfaceCreate",
             Event::SurfaceDestroy => "SurfaceDestroy",
