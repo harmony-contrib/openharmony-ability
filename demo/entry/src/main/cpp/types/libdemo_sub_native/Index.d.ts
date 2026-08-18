@@ -50,6 +50,11 @@ export interface WebviewCreateRequest {
   html?: string;
   style: WebviewStyle;
   javascriptEnabled?: boolean;
+  /**
+   * Enables ArkWeb DOM storage (localStorage/sessionStorage). ArkWeb disables it by
+   * default; when unset, DOM storage stays disabled, so callers opt in with `true`.
+   */
+  domStorageAccess?: boolean;
   devtools?: boolean;
   userAgent?: string;
   autoplay?: boolean;
