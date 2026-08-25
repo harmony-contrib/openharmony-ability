@@ -434,6 +434,12 @@ fn openharmony_app(app: OpenHarmonyApp) {
             InputEvent::MouseEvent(mouse) => {
                 hilog_info!(format!("ohos-rs mouse: {mouse:?}").as_str());
             }
+            InputEvent::AxisEvent(axis) => {
+                hilog_info!(format!("ohos-rs axis scroll: {axis:?}").as_str());
+            }
+            InputEvent::GestureEvent(gesture) => {
+                hilog_info!(format!("ohos-rs system gesture: {gesture:?}").as_str());
+            }
             _ => {
                 hilog_info!("ohos-rs input");
             }
