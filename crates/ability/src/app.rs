@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     fmt::Debug,
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicI64},
         Arc, Mutex, RwLock,
@@ -10,6 +11,8 @@ use std::{
 
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Env, Error, Result};
+use ohos_arkui_binding::component::attribute::ArkUIGesture;
+use ohos_arkui_binding::gesture::inner_gesture::Gesture;
 use ohos_arkui_binding::XComponent;
 use ohos_display_binding::default_display_scaled_density;
 use ohos_ime_binding::IME;
@@ -25,6 +28,26 @@ use crate::{
 static ID: AtomicI64 = AtomicI64::new(0);
 
 pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Default)]
+struct RenderGestures {
+    handles: Rc<RefCell<Vec<Gesture>>>,
+}
+
+impl RenderGestures {
+    fn replace(&self, gestures: Vec<Gesture>) {
+        *self.handles.borrow_mut() = gestures;
+    }
+
+    fn release(&self, xcomponent: Option<&XComponent>) {
+        for gesture in self.handles.borrow_mut().drain(..) {
+            if let Some(xcomponent) = xcomponent {
+                let _ = xcomponent.remove_gesture(&gesture);
+            }
+            let _ = gesture.dispose();
+        }
+    }
+}
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
@@ -54,6 +77,8 @@ impl AbilityInitContext {
 pub struct OpenHarmonyAppInner {
     pub(crate) raw_window: Option<RawWindow>,
     pub(crate) xcomponent: Option<XComponent>,
+    /// ArkUI system gesture handles attached to the active render XComponent.
+    render_gestures: RenderGestures,
     /// Owner token of this native module's one active DefaultXComponent render.
     render_owner: Option<String>,
     surface_active: bool,
@@ -114,6 +139,7 @@ impl OpenHarmonyAppInner {
         OpenHarmonyAppInner {
             raw_window: None,
             xcomponent: None,
+            render_gestures: RenderGestures::default(),
             render_owner: None,
             surface_active: false,
             state: vec![],
@@ -207,6 +233,10 @@ impl OpenHarmonyAppInner {
             return None;
         }
         let surface_was_active = self.surface_active;
+        self.render_gestures.release(self.xcomponent.as_ref());
+        if let Some(xcomponent) = self.xcomponent.as_ref() {
+            xcomponent.native_xcomponent().unregister_callbacks();
+        }
         self.render_owner = None;
         self.surface_active = false;
         self.raw_window = None;
@@ -382,6 +412,20 @@ impl OpenHarmonyApp {
             .map_err(|_| Error::from_reason("Failed to claim native render owner"))?;
         inner.claim_render_owner(owner)?;
         inner.xcomponent = Some(xcomponent);
+        Ok(())
+    }
+
+    pub(crate) fn set_render_gestures(&self, owner: &str, gestures: Vec<Gesture>) -> Result<()> {
+        let inner = self
+            .inner
+            .write()
+            .map_err(|_| Error::from_reason("Failed to store native render gestures"))?;
+        if !inner.owns_render(owner) {
+            return Err(Error::from_reason(
+                "Cannot attach gestures to a stale DefaultXComponent render owner",
+            ));
+        }
+        inner.render_gestures.replace(gestures);
         Ok(())
     }
 

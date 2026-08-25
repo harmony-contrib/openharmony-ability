@@ -1,10 +1,200 @@
+use std::{cell::RefCell, rc::Rc};
+
 use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
 use napi_ohos::{Env, Error, Result};
-use ohos_arkui_binding::component::attribute::ArkUICommonAttribute;
+use ohos_arkui_binding::component::attribute::{ArkUICommonAttribute, ArkUIGesture};
+use ohos_arkui_binding::gesture::{gesture_data::GestureData, inner_gesture::Gesture};
+use ohos_arkui_binding::types::{
+    gesture_direction::GestureDirection, gesture_event::GestureEventAction,
+};
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
-use crate::{input, Event, InputEvent, IntervalInfo, OpenHarmonyApp, Rect, Size};
+use crate::{
+    input, AxisEventData, Event, GestureEvent, GesturePhase, InputEvent, IntervalInfo,
+    OpenHarmonyApp, PanGestureEvent, Rect, Size, SwipeGestureEvent,
+};
+
+const PAN_GESTURE_DISTANCE: f64 = 8.0;
+const SWIPE_GESTURE_MIN_SPEED: f64 = 100.0;
+
+#[derive(Default)]
+struct PanDeltaTracker {
+    previous_offset: Option<(f32, f32)>,
+}
+
+struct RenderOwnerGuard {
+    app: OpenHarmonyApp,
+    owner: String,
+    armed: bool,
+}
+
+impl RenderOwnerGuard {
+    fn new(app: OpenHarmonyApp, owner: String) -> Self {
+        Self {
+            app,
+            owner,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for RenderOwnerGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.app.release_render(&self.owner);
+        }
+    }
+}
+
+impl PanDeltaTracker {
+    fn next(&mut self, phase: GesturePhase, offset_x: f32, offset_y: f32) -> (f32, f32) {
+        if phase == GesturePhase::Cancel {
+            self.previous_offset = None;
+            return (0.0, 0.0);
+        }
+
+        let (previous_x, previous_y) = self.previous_offset.unwrap_or_default();
+        let delta = (offset_x - previous_x, offset_y - previous_y);
+        self.previous_offset = if phase == GesturePhase::End {
+            None
+        } else {
+            Some((offset_x, offset_y))
+        };
+        delta
+    }
+}
+
+fn gesture_phase(action: &GestureEventAction) -> Option<GesturePhase> {
+    if action.contains(GestureEventAction::Accept) {
+        Some(GesturePhase::Start)
+    } else if action.contains(GestureEventAction::Update) {
+        Some(GesturePhase::Update)
+    } else if action.contains(GestureEventAction::End) {
+        Some(GesturePhase::End)
+    } else if action.contains(GestureEventAction::Cancel) {
+        Some(GesturePhase::Cancel)
+    } else {
+        None
+    }
+}
+
+fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
+    if !app.is_render_surface_active(owner) {
+        return;
+    }
+    if let Some(ref mut handler) = *app.event_loop.borrow_mut() {
+        handler(Event::Input(event));
+    }
+}
+
+fn release_gestures(xcomponent: &XComponent, gestures: &mut Vec<Gesture>) {
+    for gesture in gestures.drain(..) {
+        let _ = xcomponent.remove_gesture(&gesture);
+        let _ = gesture.dispose();
+    }
+}
+
+fn register_gestures(
+    xcomponent: &XComponent,
+    render_owner: &str,
+    app: &OpenHarmonyApp,
+) -> Result<Vec<Gesture>> {
+    let mut gestures = Vec::with_capacity(3);
+
+    let tap_app = app.clone();
+    let tap_owner = render_owner.to_owned();
+    let tap = xcomponent
+        .on_tap_gesture(1, 1, move |_| {
+            dispatch_input(
+                &tap_app,
+                &tap_owner,
+                InputEvent::GestureEvent(GestureEvent::Tap),
+            );
+        })
+        .map_err(|error| Error::from_reason(error.reason.to_string()))?;
+    gestures.push(tap);
+
+    let pan_app = app.clone();
+    let pan_owner = render_owner.to_owned();
+    let pan_tracker = Rc::new(RefCell::new(PanDeltaTracker::default()));
+    let pan = match xcomponent.on_pan_gesture(
+        1,
+        GestureDirection::All,
+        PAN_GESTURE_DISTANCE,
+        move |event| {
+            let Some(phase) = gesture_phase(&event.event_action_type) else {
+                return;
+            };
+            let GestureData::Pan(data) = event.event_action_data else {
+                return;
+            };
+            let (delta_x, delta_y) =
+                pan_tracker
+                    .borrow_mut()
+                    .next(phase, data.offset_x, data.offset_y);
+            dispatch_input(
+                &pan_app,
+                &pan_owner,
+                InputEvent::GestureEvent(GestureEvent::Pan(PanGestureEvent {
+                    phase,
+                    delta_x,
+                    delta_y,
+                    offset_x: data.offset_x,
+                    offset_y: data.offset_y,
+                    velocity: data.velocity,
+                    velocity_x: data.velocity_x,
+                    velocity_y: data.velocity_y,
+                })),
+            );
+        },
+    ) {
+        Ok(pan) => pan,
+        Err(error) => {
+            release_gestures(xcomponent, &mut gestures);
+            return Err(Error::from_reason(error.reason.to_string()));
+        }
+    };
+    gestures.push(pan);
+
+    let swipe_app = app.clone();
+    let swipe_owner = render_owner.to_owned();
+    let swipe = match xcomponent.on_swipe_gesture(
+        1,
+        GestureDirection::All,
+        SWIPE_GESTURE_MIN_SPEED,
+        move |event| {
+            let Some(phase) = gesture_phase(&event.event_action_type) else {
+                return;
+            };
+            let GestureData::Swipe(data) = event.event_action_data else {
+                return;
+            };
+            dispatch_input(
+                &swipe_app,
+                &swipe_owner,
+                InputEvent::GestureEvent(GestureEvent::Swipe(SwipeGestureEvent {
+                    phase,
+                    angle: data.angle,
+                    velocity: data.velocity,
+                })),
+            );
+        },
+    ) {
+        Ok(swipe) => swipe,
+        Err(error) => {
+            release_gestures(xcomponent, &mut gestures);
+            return Err(Error::from_reason(error.reason.to_string()));
+        }
+    };
+    gestures.push(swipe);
+
+    Ok(gestures)
+}
 
 /// create lifecycle object and return to arkts
 pub fn render(
@@ -21,6 +211,9 @@ pub fn render(
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
 
     let xcomponent = xcomponent_native.native_xcomponent();
+
+    app.begin_render(&render_owner, xcomponent_native.clone())?;
+    let mut render_guard = RenderOwnerGuard::new(app.clone(), render_owner.clone());
 
     let xc = xcomponent.clone();
 
@@ -132,47 +325,88 @@ pub fn render(
     let on_touch_event_app = app.clone();
     let on_touch_event_owner = render_owner.clone();
     xcomponent.on_touch_event(move |_, _, data| {
-        if !on_touch_event_app.is_render_surface_active(&on_touch_event_owner) {
-            return Ok(());
-        }
-        if let Some(ref mut h) = *on_touch_event_app.event_loop.borrow_mut() {
-            h(Event::Input(InputEvent::TouchEvent(data)))
-        }
+        dispatch_input(
+            &on_touch_event_app,
+            &on_touch_event_owner,
+            InputEvent::TouchEvent(data),
+        );
         Ok(())
     });
 
     let on_key_event_app = app.clone();
     let on_key_event_owner = render_owner.clone();
     let _ = xcomponent.on_key_event(move |_, _, data| {
-        if !on_key_event_app.is_render_surface_active(&on_key_event_owner) {
-            return Ok(());
-        }
-        if let Some(ref mut h) = *on_key_event_app.event_loop.borrow_mut() {
-            h(Event::Input(InputEvent::KeyEvent(data)));
-        }
+        dispatch_input(
+            &on_key_event_app,
+            &on_key_event_owner,
+            InputEvent::KeyEvent(data),
+        );
         Ok(())
     });
 
     let on_mouse_event_app = app.clone();
     let on_mouse_event_owner = render_owner.clone();
     xcomponent.on_mouse_event(move |_, _, data| {
-        if !on_mouse_event_app.is_render_surface_active(&on_mouse_event_owner) {
-            return Ok(());
-        }
-        if let Some(ref mut h) = *on_mouse_event_app.event_loop.borrow_mut() {
-            h(Event::Input(InputEvent::MouseEvent(data)));
-        }
+        dispatch_input(
+            &on_mouse_event_app,
+            &on_mouse_event_owner,
+            InputEvent::MouseEvent(data),
+        );
         Ok(())
     })?;
     xcomponent.register_mouse_event_callback()?;
 
+    let on_axis_event_app = app.clone();
+    let on_axis_event_owner = render_owner.clone();
+    xcomponent.on_ui_input_event(move |_, data| {
+        let event = AxisEventData {
+            delta_x: data.get_scroll_delta_x().unwrap_or_default(),
+            delta_y: data.get_scroll_delta_y().unwrap_or_default(),
+            timestamp: data.event_time(),
+            action: data.action,
+            source_type: data.source_type,
+            tool_type: data.tool_type,
+        };
+        dispatch_input(
+            &on_axis_event_app,
+            &on_axis_event_owner,
+            InputEvent::AxisEvent(event),
+        );
+        Ok(())
+    })?;
+
+    let gestures = register_gestures(&xcomponent_native, &render_owner, &app)?;
+    app.set_render_gestures(&render_owner, gestures)?;
+
     xcomponent.register_callback()?;
 
-    app.begin_render(&render_owner, xcomponent_native.clone())?;
-    if let Err(error) = root.mount(xcomponent_native) {
-        app.release_render(&render_owner);
-        return Err(Error::from_reason(error.reason.to_string()));
-    }
+    root.mount(xcomponent_native)
+        .map_err(|error| Error::from_reason(error.reason.to_string()))?;
+    render_guard.disarm();
 
     Ok(root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pan_delta_tracker_converts_cumulative_offsets() {
+        let mut tracker = PanDeltaTracker::default();
+
+        assert_eq!(tracker.next(GesturePhase::Start, 3.0, 5.0), (3.0, 5.0));
+        assert_eq!(tracker.next(GesturePhase::Update, 7.0, 4.0), (4.0, -1.0));
+        assert_eq!(tracker.next(GesturePhase::End, 9.0, 10.0), (2.0, 6.0));
+        assert_eq!(tracker.next(GesturePhase::Start, 1.0, 2.0), (1.0, 2.0));
+    }
+
+    #[test]
+    fn cancelled_pan_resets_delta_state() {
+        let mut tracker = PanDeltaTracker::default();
+        tracker.next(GesturePhase::Start, 4.0, 8.0);
+
+        assert_eq!(tracker.next(GesturePhase::Cancel, 6.0, 9.0), (0.0, 0.0));
+        assert_eq!(tracker.next(GesturePhase::Start, 2.0, 3.0), (2.0, 3.0));
+    }
 }
