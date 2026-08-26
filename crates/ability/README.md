@@ -10,14 +10,17 @@ openharmony-ability is the Rust runtime crate in this repository. It provides li
 
 ## XComponent Input
 
-`Event::Input` keeps the original key, mouse, and touch events and also exposes native ArkUI semantics:
+`Event::Input` separates raw XComponent input from owned ArkUI semantics:
 
-- `InputEvent::AxisEvent` owns the horizontal and vertical delta reported for a mouse wheel,
-  touchpad, or rotary axis. The callback-scoped ArkUI input pointer never escapes into application
-  state.
-- `InputEvent::GestureEvent` reports system-recognized tap, pan, and swipe gestures in parallel
-  with raw touch delivery. Pan events include both cumulative offsets and per-callback deltas plus
-  velocity, so rendering frameworks do not need to derive scrolling from XComponent touch points.
+- `InputEvent::XComponent` contains the original key, mouse, and optionally touch events.
+- `InputEvent::ArkUi` contains self-contained axis and system-recognized gesture events. The
+  callback-scoped ArkUI pointer never escapes into application state; every event snapshots the
+  pointer position, device/tool metadata, timestamp, contact count, and primary pointer ID.
+- `OpenHarmonyApp::set_touch_input_delivery` selects raw XComponent touch, ArkUI gestures, or both
+  before rendering. Mouse/key and axis delivery are independent of this touch-only selection.
+
+Pan events include cumulative offsets, per-callback deltas, and velocity, so rendering frameworks
+do not need to derive gesture recognition from XComponent touch points.
 
 Gesture handles are owned by the active render and are detached and disposed with that render.
 

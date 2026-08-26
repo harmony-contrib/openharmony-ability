@@ -11,8 +11,9 @@ use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 
 use crate::{
-    input, AxisEventData, Event, GestureEvent, GesturePhase, InputEvent, IntervalInfo,
-    OpenHarmonyApp, PanGestureEvent, Rect, Size, SwipeGestureEvent,
+    input, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase, InputEvent,
+    IntervalInfo, OpenHarmonyApp, PanGestureEvent, PointerInputData, Rect, Size, SwipeGestureEvent,
+    TapGestureEvent, XComponentInputEvent,
 };
 
 const PAN_GESTURE_DISTANCE: f64 = 8.0;
@@ -108,15 +109,33 @@ fn register_gestures(
 
     let tap_app = app.clone();
     let tap_owner = render_owner.to_owned();
-    let tap = xcomponent
-        .on_tap_gesture(1, 1, move |_| {
-            dispatch_input(
-                &tap_app,
-                &tap_owner,
-                InputEvent::GestureEvent(GestureEvent::Tap),
-            );
-        })
-        .map_err(|error| Error::from_reason(error.reason.to_string()))?;
+    let tap = match Gesture::create_tap_gesture_with_distance_threshold(1, 1, PAN_GESTURE_DISTANCE)
+    {
+        Ok(tap) => tap,
+        Err(_) => Gesture::create_tap_gesture(1, 1)
+            .map_err(|error| Error::from_reason(error.reason.to_string()))?,
+    };
+    if let Err(error) = tap.on_gesture(GestureEventAction::Accept, move |event| {
+        let Some(pointer) = event.input.map(PointerInputData::from) else {
+            return;
+        };
+        dispatch_input(
+            &tap_app,
+            &tap_owner,
+            InputEvent::ArkUi(ArkUiInputEvent::Gesture(GestureEvent::Tap(
+                TapGestureEvent { pointer },
+            ))),
+        );
+    }) {
+        tap.dispose()
+            .map_err(|dispose_error| Error::from_reason(dispose_error.reason.to_string()))?;
+        return Err(Error::from_reason(error.reason.to_string()));
+    }
+    if let Err(error) = xcomponent.add_gesture_ref(&tap, None, None) {
+        tap.dispose()
+            .map_err(|dispose_error| Error::from_reason(dispose_error.reason.to_string()))?;
+        return Err(Error::from_reason(error.reason.to_string()));
+    }
     gestures.push(tap);
 
     let pan_app = app.clone();
@@ -130,6 +149,9 @@ fn register_gestures(
             let Some(phase) = gesture_phase(&event.event_action_type) else {
                 return;
             };
+            let Some(pointer) = event.input.map(PointerInputData::from) else {
+                return;
+            };
             let GestureData::Pan(data) = event.event_action_data else {
                 return;
             };
@@ -140,16 +162,19 @@ fn register_gestures(
             dispatch_input(
                 &pan_app,
                 &pan_owner,
-                InputEvent::GestureEvent(GestureEvent::Pan(PanGestureEvent {
-                    phase,
-                    delta_x,
-                    delta_y,
-                    offset_x: data.offset_x,
-                    offset_y: data.offset_y,
-                    velocity: data.velocity,
-                    velocity_x: data.velocity_x,
-                    velocity_y: data.velocity_y,
-                })),
+                InputEvent::ArkUi(ArkUiInputEvent::Gesture(GestureEvent::Pan(
+                    PanGestureEvent {
+                        pointer,
+                        phase,
+                        delta_x,
+                        delta_y,
+                        offset_x: data.offset_x,
+                        offset_y: data.offset_y,
+                        velocity: data.velocity,
+                        velocity_x: data.velocity_x,
+                        velocity_y: data.velocity_y,
+                    },
+                ))),
             );
         },
     ) {
@@ -171,17 +196,23 @@ fn register_gestures(
             let Some(phase) = gesture_phase(&event.event_action_type) else {
                 return;
             };
+            let Some(pointer) = event.input.map(PointerInputData::from) else {
+                return;
+            };
             let GestureData::Swipe(data) = event.event_action_data else {
                 return;
             };
             dispatch_input(
                 &swipe_app,
                 &swipe_owner,
-                InputEvent::GestureEvent(GestureEvent::Swipe(SwipeGestureEvent {
-                    phase,
-                    angle: data.angle,
-                    velocity: data.velocity,
-                })),
+                InputEvent::ArkUi(ArkUiInputEvent::Gesture(GestureEvent::Swipe(
+                    SwipeGestureEvent {
+                        pointer,
+                        phase,
+                        angle: data.angle,
+                        velocity: data.velocity,
+                    },
+                ))),
             );
         },
     ) {
@@ -212,7 +243,7 @@ pub fn render(
 
     let xcomponent = xcomponent_native.native_xcomponent();
 
-    app.begin_render(&render_owner, xcomponent_native.clone())?;
+    let touch_input_delivery = app.begin_render(&render_owner, xcomponent_native.clone())?;
     let mut render_guard = RenderOwnerGuard::new(app.clone(), render_owner.clone());
 
     let xc = xcomponent.clone();
@@ -322,16 +353,18 @@ pub fn render(
         Ok(())
     });
 
-    let on_touch_event_app = app.clone();
-    let on_touch_event_owner = render_owner.clone();
-    xcomponent.on_touch_event(move |_, _, data| {
-        dispatch_input(
-            &on_touch_event_app,
-            &on_touch_event_owner,
-            InputEvent::TouchEvent(data),
-        );
-        Ok(())
-    });
+    if touch_input_delivery.delivers_raw_touch() {
+        let on_touch_event_app = app.clone();
+        let on_touch_event_owner = render_owner.clone();
+        xcomponent.on_touch_event(move |_, _, data| {
+            dispatch_input(
+                &on_touch_event_app,
+                &on_touch_event_owner,
+                InputEvent::XComponent(XComponentInputEvent::Touch(data)),
+            );
+            Ok(())
+        });
+    }
 
     let on_key_event_app = app.clone();
     let on_key_event_owner = render_owner.clone();
@@ -339,7 +372,7 @@ pub fn render(
         dispatch_input(
             &on_key_event_app,
             &on_key_event_owner,
-            InputEvent::KeyEvent(data),
+            InputEvent::XComponent(XComponentInputEvent::Key(data)),
         );
         Ok(())
     });
@@ -350,7 +383,7 @@ pub fn render(
         dispatch_input(
             &on_mouse_event_app,
             &on_mouse_event_owner,
-            InputEvent::MouseEvent(data),
+            InputEvent::XComponent(XComponentInputEvent::Mouse(data)),
         );
         Ok(())
     })?;
@@ -360,23 +393,22 @@ pub fn render(
     let on_axis_event_owner = render_owner.clone();
     xcomponent.on_ui_input_event(move |_, data| {
         let event = AxisEventData {
+            pointer: PointerInputData::from_arkui_event(&data),
             delta_x: data.get_scroll_delta_x().unwrap_or_default(),
             delta_y: data.get_scroll_delta_y().unwrap_or_default(),
-            timestamp: data.event_time(),
-            action: data.action,
-            source_type: data.source_type,
-            tool_type: data.tool_type,
         };
         dispatch_input(
             &on_axis_event_app,
             &on_axis_event_owner,
-            InputEvent::AxisEvent(event),
+            InputEvent::ArkUi(ArkUiInputEvent::Axis(event)),
         );
         Ok(())
     })?;
 
-    let gestures = register_gestures(&xcomponent_native, &render_owner, &app)?;
-    app.set_render_gestures(&render_owner, gestures)?;
+    if touch_input_delivery.delivers_arkui_gestures() {
+        let gestures = register_gestures(&xcomponent_native, &render_owner, &app)?;
+        app.set_render_gestures(&render_owner, gestures)?;
+    }
 
     xcomponent.register_callback()?;
 

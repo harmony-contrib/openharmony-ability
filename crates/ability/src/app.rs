@@ -22,7 +22,7 @@ use crate::{
     bridge::MainThreadBridgeEndpoint, AvoidArea, AvoidAreaType, BridgeMainThread,
     BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration, BridgePluginRegistry,
     BridgeRuntime, Configuration, Event, MainThreadScheduler, OpenHarmonyWaker,
-    PluginLifecycleEvent, Rect, WAKER,
+    PluginLifecycleEvent, Rect, TouchInputDelivery, WAKER,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -81,6 +81,7 @@ pub struct OpenHarmonyAppInner {
     render_gestures: RenderGestures,
     /// Owner token of this native module's one active DefaultXComponent render.
     render_owner: Option<String>,
+    touch_input_delivery: TouchInputDelivery,
     surface_active: bool,
 
     state: Vec<u8>,
@@ -141,6 +142,7 @@ impl OpenHarmonyAppInner {
             xcomponent: None,
             render_gestures: RenderGestures::default(),
             render_owner: None,
+            touch_input_delivery: TouchInputDelivery::default(),
             surface_active: false,
             state: vec![],
             save_state: false,
@@ -395,7 +397,36 @@ impl OpenHarmonyApp {
         self.init_context().preferred_locales
     }
 
-    pub(crate) fn begin_render(&self, owner: &str, xcomponent: XComponent) -> Result<()> {
+    /// Selects the touch representation delivered by future XComponent renders.
+    ///
+    /// Delivery is frozen for an active render so one physical pointer sequence cannot switch
+    /// representations between its start and end events.
+    pub fn set_touch_input_delivery(&self, delivery: TouchInputDelivery) -> Result<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|_| Error::from_reason("Failed to configure touch input delivery"))?;
+        if inner.render_owner.is_some() {
+            return Err(Error::from_reason(
+                "Touch input delivery cannot change while a DefaultXComponent render is active",
+            ));
+        }
+        inner.touch_input_delivery = delivery;
+        Ok(())
+    }
+
+    pub fn touch_input_delivery(&self) -> TouchInputDelivery {
+        self.inner
+            .read()
+            .map(|inner| inner.touch_input_delivery)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn begin_render(
+        &self,
+        owner: &str,
+        xcomponent: XComponent,
+    ) -> Result<TouchInputDelivery> {
         let bridge_active = self
             .bridge_session
             .read()
@@ -412,7 +443,7 @@ impl OpenHarmonyApp {
             .map_err(|_| Error::from_reason("Failed to claim native render owner"))?;
         inner.claim_render_owner(owner)?;
         inner.xcomponent = Some(xcomponent);
-        Ok(())
+        Ok(inner.touch_input_delivery)
     }
 
     pub(crate) fn set_render_gestures(&self, owner: &str, gestures: Vec<Gesture>) -> Result<()> {
@@ -749,8 +780,37 @@ impl<'a> SaveLoader<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::OpenHarmonyAppInner;
-    use crate::{AvoidArea, AvoidAreaType, Rect};
+    use super::{OpenHarmonyApp, OpenHarmonyAppInner};
+    use crate::{AvoidArea, AvoidAreaType, Rect, TouchInputDelivery};
+
+    #[test]
+    fn touch_input_delivery_is_frozen_during_render() {
+        let app = OpenHarmonyApp::new();
+        assert_eq!(
+            app.touch_input_delivery(),
+            TouchInputDelivery::RawXComponent
+        );
+        app.set_touch_input_delivery(TouchInputDelivery::ArkUiGestures)
+            .unwrap();
+        app.inner
+            .write()
+            .unwrap()
+            .claim_render_owner("owner")
+            .unwrap();
+
+        assert!(app
+            .set_touch_input_delivery(TouchInputDelivery::Both)
+            .is_err());
+        assert_eq!(
+            app.touch_input_delivery(),
+            TouchInputDelivery::ArkUiGestures
+        );
+
+        app.inner.write().unwrap().release_render_owner("owner");
+        app.set_touch_input_delivery(TouchInputDelivery::Both)
+            .unwrap();
+        assert_eq!(app.touch_input_delivery(), TouchInputDelivery::Both);
+    }
 
     #[test]
     fn render_owner_rejects_overlap_and_ignores_stale_surface_callbacks() {
