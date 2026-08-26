@@ -22,9 +22,9 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { version = "0.2" }
-ohos-xcomponent-binding = { version = "0.3" }
-ohos-ime-binding = { version = "0.2" }
+ohos-arkui-binding = { version = "0.3" }
+ohos-xcomponent-binding = { version = "0.4" }
+ohos-ime-binding = { version = "0.3" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
 ohos-resource-manager-binding = { version = "0.3" }

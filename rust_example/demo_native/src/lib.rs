@@ -17,7 +17,10 @@ use futures_channel::oneshot;
 use napi_derive_ohos::napi;
 use napi_ohos::{Either, Env, Error, Result};
 use ohos_hilog_binding::hilog_info;
-use openharmony_ability::{Event, InputEvent, NodeExt, OpenHarmonyApp};
+use openharmony_ability::{
+    ArkUiInputEvent, Event, InputEvent, NodeExt, OpenHarmonyApp, TouchInputDelivery,
+    XComponentInputEvent,
+};
 use openharmony_ability_derive::ability;
 use openharmony_ability_plugin_app_control::AppControlBridgePlugin;
 use openharmony_ability_plugin_files::{
@@ -351,6 +354,9 @@ pub async fn set_visible(visible: bool) -> Result<()> {
 #[ability]
 fn openharmony_app(app: OpenHarmonyApp) {
     INNER_APP.write().unwrap().replace(app.clone());
+    if let Err(error) = app.set_touch_input_delivery(TouchInputDelivery::Both) {
+        hilog_info!(format!("failed to configure demo touch input: {error}").as_str());
+    }
     WebviewProtocol::register(
         WEB_SCHEME,
         WebviewProtocolOptions::Standard
@@ -428,11 +434,17 @@ fn openharmony_app(app: OpenHarmonyApp) {
             }
         }
         Event::Input(input) => match input {
-            InputEvent::ImeEvent(text) => {
+            InputEvent::Ime(text) => {
                 hilog_info!(format!("ohos-rs input_text: {text:?}").as_str());
             }
-            InputEvent::MouseEvent(mouse) => {
+            InputEvent::XComponent(XComponentInputEvent::Mouse(mouse)) => {
                 hilog_info!(format!("ohos-rs mouse: {mouse:?}").as_str());
+            }
+            InputEvent::ArkUi(ArkUiInputEvent::Axis(axis)) => {
+                hilog_info!(format!("ohos-rs axis scroll: {axis:?}").as_str());
+            }
+            InputEvent::ArkUi(ArkUiInputEvent::Gesture(gesture)) => {
+                hilog_info!(format!("ohos-rs system gesture: {gesture:?}").as_str());
             }
             _ => {
                 hilog_info!("ohos-rs input");
