@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
 use napi_ohos::{Env, Error, Result};
@@ -259,6 +259,10 @@ pub fn render(
         on_backspace_callback_tsfn,
         on_ime_enter_callback_tsfn,
     ) = input::ime_ts_fn(env, app.clone(), render_owner.clone())?;
+    let insert_text_callback_tsfn = Arc::new(insert_text_callback_tsfn);
+    let on_ime_hide_callback_tsfn = Arc::new(on_ime_hide_callback_tsfn);
+    let on_backspace_callback_tsfn = Arc::new(on_backspace_callback_tsfn);
+    let on_ime_enter_callback_tsfn = Arc::new(on_ime_enter_callback_tsfn);
 
     xcomponent.on_surface_created(move |xc_raw, win| {
         let size = xc_raw.size(win).unwrap();
@@ -282,17 +286,22 @@ pub fn render(
         *on_surface_created_app.ime.borrow_mut() = Some(ime);
 
         if let Some(b_ime) = insert_text_app.ime.borrow().as_ref() {
+            let insert_text_callback_tsfn = insert_text_callback_tsfn.clone();
+            let on_ime_hide_callback_tsfn = on_ime_hide_callback_tsfn.clone();
+            let on_backspace_callback_tsfn = on_backspace_callback_tsfn.clone();
+            let on_ime_enter_callback_tsfn = on_ime_enter_callback_tsfn.clone();
+
             // // run in other thread
-            b_ime.insert_text(|s| {
+            b_ime.insert_text(move |s| {
                 insert_text_callback_tsfn.call(s, NonBlocking);
             });
-            b_ime.on_status_change(|s| {
+            b_ime.on_status_change(move |s| {
                 on_ime_hide_callback_tsfn.call(s.into(), NonBlocking);
             });
-            b_ime.on_backspace(|len| {
+            b_ime.on_backspace(move |len| {
                 on_backspace_callback_tsfn.call(len, NonBlocking);
             });
-            b_ime.on_enter(|key| {
+            b_ime.on_enter(move |key| {
                 on_ime_enter_callback_tsfn.call(key as i32, NonBlocking);
             });
         }

@@ -22,12 +22,9 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-# The XComponent gesture helpers landed after the 0.2.5/0.3.2 releases. Keep
-# both crates on the same upstream revision because ArkUI returns XComponent
-# values from the binding package that it was built with.
-ohos-arkui-binding = { version = "0.2.5", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "381b2906a78fb8ce7c8fd326aa9af24e73fa98fb" }
-ohos-xcomponent-binding = { version = "0.3.2", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "381b2906a78fb8ce7c8fd326aa9af24e73fa98fb" }
-ohos-ime-binding = { version = "0.2" }
+ohos-arkui-binding = { version = "0.3" }
+ohos-xcomponent-binding = { version = "0.4" }
+ohos-ime-binding = { version = "0.3" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
 ohos-resource-manager-binding = { version = "0.3" }
