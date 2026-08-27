@@ -4,13 +4,13 @@ resolver = "2"
 
 [workspace.dependencies]
 openharmony-ability-derive = { version = "1.0.0-beta.1", path = "crates/derive" }
-openharmony-ability = { version = "1.0.0-beta.1", path = "crates/ability" }
+openharmony-ability = { version = "1.0.0-beta.2", path = "crates/ability" }
 openharmony-ability-plugin-app-control = { version = "1.0.0-beta.1", path = "crates/plugin-app-control" }
 openharmony-ability-plugin-files = { version = "1.0.0-beta.1", path = "crates/plugin-files" }
 openharmony-ability-plugin-permission = { version = "1.0.0-beta.1", path = "crates/plugin-permission" }
 openharmony-ability-plugin-resource = { version = "1.0.0-beta.1", path = "crates/plugin-resource" }
 openharmony-ability-plugin-url = { version = "1.0.0-beta.1", path = "crates/plugin-url" }
-openharmony-ability-plugin-webview = { version = "1.0.0-beta.1", path = "crates/plugin-webview" }
+openharmony-ability-plugin-webview = { version = "1.0.0-beta.2", path = "crates/plugin-webview" }
 openharmony-ability-plugin-window = { version = "1.0.0-beta.1", path = "crates/plugin-window" }
 
 napi-sys-ohos = { version = "1.2", features = ["napi8"] }

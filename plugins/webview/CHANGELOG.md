@@ -1,3 +1,10 @@
+# 1.0.0-beta.3
+
+- Add optional `domStorageAccess` to the named `ohos.webview.CreateRequest` contract and apply it
+  when constructing ArkWeb content; DOM storage remains disabled when the option is omitted.
+
+---
+
 # 1.0.0-beta.2
 
 - **Breaking**: the bridge contract removes `windowKey`; each native module owns one

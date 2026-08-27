@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "futures-channel",
  "napi-derive-ohos",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-webview"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.2"
 dependencies = [
  "http",
  "napi-derive-ohos",
