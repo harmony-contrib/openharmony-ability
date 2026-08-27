@@ -48,3 +48,33 @@ jobs:
 
       - name: Check
         run: pnpm check
+
+  # Pure C module (c_module): compile the framework and demo for arm64-v8a with the OHOS SDK.
+  # The SDK-bundled cmake/ninja are used so no extra tooling is required.
+  C-Module:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: Setup OpenHarmony SDK
+        uses: openharmony-rs/setup-ohos-sdk@v0.1
+        id: setup-ohos
+        with:
+          version: "5.0.0"
+
+      - name: Build
+        run: |
+          # setup-ohos-sdk exports OHOS_SDK_NATIVE (native SDK root); fall back to $OHOS_SDK/native.
+          SDK_NATIVE="${OHOS_SDK_NATIVE:-${OHOS_SDK}/native}"
+          if [ -x "$SDK_NATIVE/build-tools/cmake/bin/cmake" ]; then
+            CMAKE="$SDK_NATIVE/build-tools/cmake/bin/cmake"
+            PATH="$SDK_NATIVE/build-tools/cmake/bin:$PATH"
+          else
+            CMAKE="$(command -v cmake)"
+          fi
+          "$CMAKE" -S c_module -B c_module/build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$SDK_NATIVE/build/cmake/ohos.toolchain.cmake" \
+            -DOHOS_ARCH=arm64-v8a
+          "$CMAKE" --build c_module/build
+          test -f c_module/build/example/demo_native/libdemo_native.so

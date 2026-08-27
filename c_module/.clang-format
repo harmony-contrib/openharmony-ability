@@ -1,0 +1,7 @@
+# Formatting for the pure C framework and demo (clang-format).
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+# Keep explicit include blocks: the pixelmap_native.h header must precede arkui/native_node.h
+# in this SDK (missing OH_PixelmapNative declaration), which alphabetical sorting would break.
+IncludeBlocks: Preserve

@@ -11,3 +11,11 @@ package/libs
 dist
 oh_modules
 build/
+c_module/build*/
+
+# logs and build metadata
+*.log
+*.tmp
+compile_commands.json
+.cxx/
+cmake-build-*/

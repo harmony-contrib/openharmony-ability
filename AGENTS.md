@@ -27,6 +27,11 @@ pnpm run prek
 # Build the native demo cdylib for a device
 cd rust_example/demo_native && ohrs build --arch arm64
 
+# Build the pure C demo module (c_module) without touching the demo app
+scripts/build-c-demo.sh
+# ...and install it into demo/entry/libs (replaces the Rust-built libdemo_native.so)
+scripts/build-c-demo.sh --install
+
 # Forbidden JSON-bridge scan — must stay empty
 rg -n "BridgeJson|call_json|bridgeJson|requireBridgeJson|JSON\.stringify|JSON\.parse" \
   crates/plugin-* plugins/*/src native_ability
@@ -65,6 +70,20 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 
 Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate.
 
+### Pure C Framework (`c_module`)
+
+`c_module/ability` is the C99 counterpart of `crates/ability`: it implements the same five native
+module exports (`init`/`render`/`onBackPressIntercept`/`onBridgeSyncEvent`/`onBridgeLifecycle`)
+and exposes an SDL-style application model (`OHAbility_StartApp` + AppInit/AppEvent/AppIterate/
+AppQuit callbacks; the application thread starts on the first XComponent surface).
+`c_module/example/demo_native` is the pure C demo module reusing the `demo_native` name and the
+Rust demo's export surface (Index.d.ts), so the demo app is unchanged when its
+`libdemo_native.so` is swapped. Read `c_module/README.md` before touching the C module.
+Non-negotiable rules that carry over: no napi values across threads or in statics (builders and
+responders run on the ArkTS main thread), identifier validation `^[A-Za-z0-9._-]+$`,
+fail-closed sync-event dispatch, and every queued TSFN request must be freed by its call-js
+callback (including the env==NULL abort drain).
+
 ### Startup Flow
 
 1. `NativeAbility.onCreate` opens each module/session `BridgeHost`, injects that module's bridge transport independently from rendering, then uses the Rust registry's `{ id, execution, requires }` declarations to select matching ArkTS factories before emitting `ability-create`. Plugins and application registration never select by module.
@@ -102,4 +121,4 @@ Follow the local spec `docs/plugin-development-standard.md` (§1 creation order,
 
 - **N-API bridge**: `napi-ohos`, `napi-derive-ohos`, `napi-build-ohos`, `napi-sys-ohos` (1.2, napi8)
 - **OHOS bindings**: `ohos-arkui-binding`, `ohos-xcomponent-binding`, `ohos-web-binding`, `ohos-ime-binding`, `ohos-display-binding`, `ohos-hilog-binding`, `ohos-resource-manager-binding`
-- **Tooling**: pnpm@10.22.0; `@ohos-rs/oxk` (oxk format/lint for ets/js/ts/json5); `@j178/prek` hooks; `ohrs` for native module builds
+- **Tooling**: pnpm@10.22.0; `@ohos-rs/oxk` (oxk format/lint for ets/js/ts/json5); `@j178/prek` hooks; `ohrs` for native module builds; OHOS SDK cmake/ninja + `ohos.toolchain.cmake` for `c_module` builds (CI job `C-Module` compiles it on every PR)
