@@ -7,6 +7,8 @@
 
 #include <napi/native_api.h>
 
+int demo_register_url_plugin(void);
+
 /* demoOpenUrl(): Promise<void> */
 napi_value demo_open_url(napi_env env, napi_callback_info info);
 

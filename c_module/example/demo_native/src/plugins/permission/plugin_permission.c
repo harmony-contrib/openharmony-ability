@@ -2,14 +2,23 @@
  * ohos.permission plugin (OH_ABILITY_PLUGIN_PERMISSION, default ON).
  *
  * Wire contract (verified against the ArkTS PermissionPlugin):
- *   ohos.permission "request" ohos.permission.PermissionRequestPayload{permissions} ->
- *                             ohos.permission.PermissionResponsePayload{codes}
+ *   ohos.permission "request" ohos.permission.PermissionRequest{permissions} ->
+ *                             ohos.permission.PermissionResponse{codes}
  */
 #include <stdlib.h>
 
 #include "demo_common.h"
 
 #ifdef OH_ABILITY_PLUGIN_PERMISSION
+
+static const OHAbility_Plugin PERMISSION_PLUGIN = {
+    .execution = OH_ABILITY_PLUGIN_ASYNC,
+    .required_contexts = OH_ABILITY_PLUGIN_CONTEXT_ABILITY,
+};
+
+int demo_register_permission_plugin(void) {
+    return OHAbility_RegisterPlugin("ohos.permission", &PERMISSION_PLUGIN, NULL);
+}
 
 static int demo_build_permission_request(napi_env env, napi_value *out, void *data) {
     (void)data;
@@ -53,10 +62,10 @@ napi_value demo_request_permission(napi_env env, napi_callback_info info) {
     if (ctx == NULL) {
         return NULL;
     }
-    int rc = OHAbility_CallAsync(
-        "ohos.permission", 1, "request", "ohos.permission.PermissionRequestPayload",
-        "ohos.permission.PermissionResponsePayload", demo_build_permission_request, NULL,
-        demo_responder_codes, ctx, 60000);
+    int rc =
+        OHAbility_CallAsync("ohos.permission", "request", "ohos.permission.PermissionRequest",
+                            "ohos.permission.PermissionResponse", demo_build_permission_request,
+                            NULL, demo_responder_codes, ctx, 60000);
     if (rc != OH_ABILITY_ERROR_OK) {
         demo_deferred_reject(ctx, env, "bridge not ready");
         free(ctx);
@@ -65,6 +74,8 @@ napi_value demo_request_permission(napi_env env, napi_callback_info info) {
 }
 
 #else /* !OH_ABILITY_PLUGIN_PERMISSION */
+
+int demo_register_permission_plugin(void) { return OH_ABILITY_ERROR_OK; }
 
 napi_value demo_request_permission(napi_env env, napi_callback_info info) {
     (void)info;

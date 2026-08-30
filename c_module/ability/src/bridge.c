@@ -28,7 +28,6 @@ static void oh_dispatch_call_js(napi_env env, napi_value js_callback, void *cont
 
 typedef struct OHAbility_AsyncRequest {
     char plugin_id[OHABILITY_MAX_STRING_LEN];
-    uint32_t version;
     char action[OHABILITY_MAX_STRING_LEN];
     char request_type[OHABILITY_MAX_STRING_LEN];
     char response_type[OHABILITY_MAX_STRING_LEN];
@@ -44,16 +43,15 @@ typedef struct OHAbility_AsyncRequest {
     OHAbility_Waiter *waiter; /* worker-sync mode: caller blocks on this */
 } OHAbility_AsyncRequest;
 
-static OHAbility_AsyncRequest *oh_request_alloc(const char *plugin_id, uint32_t version,
-                                                const char *action, const char *request_type,
-                                                const char *response_type,
+static OHAbility_AsyncRequest *oh_request_alloc(const char *plugin_id, const char *action,
+                                                const char *request_type, const char *response_type,
                                                 OHAbility_ValueBuilder builder, void *builder_data,
                                                 OHAbility_ValueResponder responder,
                                                 void *responder_data, uint32_t timeout_ms) {
     if (!oh_validate_identifier("plugin id", plugin_id) ||
         !oh_validate_identifier("action", action) ||
         !oh_validate_identifier("request type", request_type) ||
-        !oh_validate_identifier("response type", response_type) || version == 0) {
+        !oh_validate_identifier("response type", response_type)) {
         return NULL;
     }
 
@@ -65,7 +63,6 @@ static OHAbility_AsyncRequest *oh_request_alloc(const char *plugin_id, uint32_t 
     snprintf(req->action, sizeof(req->action), "%s", action);
     snprintf(req->request_type, sizeof(req->request_type), "%s", request_type);
     snprintf(req->response_type, sizeof(req->response_type), "%s", response_type);
-    req->version = version;
     req->builder = builder;
     req->builder_data = builder_data;
     req->responder = responder;
@@ -114,7 +111,7 @@ static int oh_create_tsfn(napi_env env, napi_value function, const char *name,
 }
 
 /* ------------------------------------------------------------------ */
-/* Bindings (set by render, torn down on re-init/re-render/cleanup)   */
+/* Bindings (set by init, torn down by disposeBridge/re-init/cleanup) */
 /* ------------------------------------------------------------------ */
 
 void oh_bindings_teardown(void) {
@@ -147,7 +144,7 @@ void oh_bindings_teardown(void) {
     }
 }
 
-void oh_bindings_replace(napi_env env, napi_value bindings) {
+int oh_bindings_replace(napi_env env, napi_value bindings) {
     napi_value invoke_fn;
     napi_value invoke_sync_fn;
     napi_value dispatch_fn;
@@ -155,8 +152,8 @@ void oh_bindings_replace(napi_env env, napi_value bindings) {
         napi_get_named_property(env, bindings, "bridgeInvokeSync", &invoke_sync_fn) != napi_ok ||
         napi_get_named_property(env, bindings, "bridgeDispatch", &dispatch_fn) != napi_ok) {
         OHABILITY_LOG(LOG_ERROR,
-                      "render: bindings missing bridgeInvoke/bridgeInvokeSync/bridgeDispatch");
-        return;
+                      "init: bindings missing bridgeInvoke/bridgeInvokeSync/bridgeDispatch");
+        return OH_ABILITY_ERROR_INVALID_ARG;
     }
 
     napi_threadsafe_function invoke = NULL;
@@ -181,8 +178,11 @@ void oh_bindings_replace(napi_env env, napi_value bindings) {
         if (dispatch != NULL) {
             napi_release_threadsafe_function(dispatch, napi_tsfn_abort);
         }
-        OHABILITY_LOG(LOG_ERROR, "render: failed to build bridge transports");
-        return;
+        if (sync_ref != NULL) {
+            napi_delete_reference(env, sync_ref);
+        }
+        OHABILITY_LOG(LOG_ERROR, "init: failed to build bridge transports");
+        return OH_ABILITY_ERROR_BRIDGE;
     }
 
     oh_bindings_teardown();
@@ -195,6 +195,7 @@ void oh_bindings_replace(napi_env env, napi_value bindings) {
     g_oh_state.bindings_thread = pthread_self();
     g_oh_state.bindings_valid = 1;
     oh_state_unlock();
+    return OH_ABILITY_ERROR_OK;
 }
 
 napi_threadsafe_function oh_bridge_invoke_tsfn(void) {
@@ -429,17 +430,16 @@ static void oh_async_call_js(napi_env env, napi_value js_callback, void *context
     napi_value global;
     napi_get_global(env, &global);
 
-    napi_value args[7];
+    napi_value args[6];
     napi_create_string_utf8(env, req->plugin_id, NAPI_AUTO_LENGTH, &args[0]);
-    napi_create_uint32(env, req->version, &args[1]);
-    napi_create_string_utf8(env, req->action, NAPI_AUTO_LENGTH, &args[2]);
-    napi_create_string_utf8(env, req->request_type, NAPI_AUTO_LENGTH, &args[3]);
-    napi_create_string_utf8(env, req->response_type, NAPI_AUTO_LENGTH, &args[4]);
-    args[5] = request_value;
-    napi_create_uint32(env, req->timeout_ms, &args[6]);
+    napi_create_string_utf8(env, req->action, NAPI_AUTO_LENGTH, &args[1]);
+    napi_create_string_utf8(env, req->request_type, NAPI_AUTO_LENGTH, &args[2]);
+    napi_create_string_utf8(env, req->response_type, NAPI_AUTO_LENGTH, &args[3]);
+    args[4] = request_value;
+    napi_create_uint32(env, req->timeout_ms, &args[5]);
 
     napi_value result = NULL;
-    if (napi_call_function(env, global, js_callback, 7, args, &result) != napi_ok ||
+    if (napi_call_function(env, global, js_callback, 6, args, &result) != napi_ok ||
         result == NULL) {
         oh_request_fail(req, "bridgeInvoke call failed");
         free(req);
@@ -471,32 +471,29 @@ static void oh_async_call_js(napi_env env, napi_value js_callback, void *context
     /* From here the Promise handlers own the request. */
 }
 
-int OHAbility_CallAsync(const char *plugin_id, uint32_t version, const char *action,
-                        const char *request_type, const char *response_type,
-                        OHAbility_ValueBuilder builder, void *builder_data,
-                        OHAbility_ValueResponder responder, void *responder_data,
-                        uint32_t timeout_ms) {
+int OHAbility_CallAsync(const char *plugin_id, const char *action, const char *request_type,
+                        const char *response_type, OHAbility_ValueBuilder builder,
+                        void *builder_data, OHAbility_ValueResponder responder,
+                        void *responder_data, uint32_t timeout_ms) {
     if (responder == NULL) {
         return OH_ABILITY_ERROR_INVALID_ARG;
     }
     OHAbility_AsyncRequest *req =
-        oh_request_alloc(plugin_id, version, action, request_type, response_type, builder,
-                         builder_data, responder, responder_data, timeout_ms);
+        oh_request_alloc(plugin_id, action, request_type, response_type, builder, builder_data,
+                         responder, responder_data, timeout_ms);
     if (req == NULL) {
         return OH_ABILITY_ERROR_INVALID_ARG;
     }
 
     napi_threadsafe_function tsfn = oh_bridge_invoke_tsfn();
     if (tsfn == NULL) {
-        free(req->builder_data);
         free(req);
         return OH_ABILITY_ERROR_NOT_READY;
     }
     napi_status status = napi_call_threadsafe_function(tsfn, req, napi_tsfn_nonblocking);
     if (status != napi_ok) {
-        /* The TSFN refused the item (closing): fail the request and free it here. */
-        oh_request_fail(req, "bridge transport rejected the request");
-        free(req->builder_data);
+        /* The item was never accepted. Preserve the documented call boundary: the caller keeps
+         * both data pointers and no callback runs when OHAbility_CallAsync returns an error. */
         free(req);
         return OH_ABILITY_ERROR_BRIDGE;
     }
@@ -521,10 +518,10 @@ static int oh_promise_builder(napi_env env, napi_value *out_value, void *data) {
     return wrapped->builder(env, out_value, wrapped->data);
 }
 
-napi_value OHAbility_CallAsyncPromise(napi_env env, const char *plugin_id, uint32_t version,
-                                      const char *action, const char *request_type,
-                                      const char *response_type, OHAbility_ValueBuilder builder,
-                                      void *builder_data, uint32_t timeout_ms) {
+napi_value OHAbility_CallAsyncPromise(napi_env env, const char *plugin_id, const char *action,
+                                      const char *request_type, const char *response_type,
+                                      OHAbility_ValueBuilder builder, void *builder_data,
+                                      uint32_t timeout_ms) {
     if (env == NULL) {
         return NULL;
     }
@@ -544,8 +541,8 @@ napi_value OHAbility_CallAsyncPromise(napi_env env, const char *plugin_id, uint3
     wrapped->data = builder_data;
 
     OHAbility_AsyncRequest *req =
-        oh_request_alloc(plugin_id, version, action, request_type, response_type,
-                         oh_promise_builder, wrapped, NULL, NULL, timeout_ms);
+        oh_request_alloc(plugin_id, action, request_type, response_type, oh_promise_builder,
+                         wrapped, NULL, NULL, timeout_ms);
     if (req == NULL) {
         free(wrapped);
         return NULL;
@@ -556,7 +553,7 @@ napi_value OHAbility_CallAsyncPromise(napi_env env, const char *plugin_id, uint3
 
     napi_threadsafe_function tsfn = oh_bridge_invoke_tsfn();
     if (tsfn == NULL) {
-        oh_request_fail(req, "bridge is not ready (module not rendered)");
+        oh_request_fail(req, "bridge is not ready (no active Ability session)");
         free(req->builder_data); /* the wrapped builder */
         free(req);
         return promise;
@@ -574,9 +571,9 @@ napi_value OHAbility_CallAsyncPromise(napi_env env, const char *plugin_id, uint3
 /* Main-thread sync transport                                         */
 /* ------------------------------------------------------------------ */
 
-napi_value OHAbility_CallSync(napi_env env, const char *plugin_id, uint32_t version,
-                              const char *action, const char *request_type,
-                              const char *response_type, napi_value request) {
+napi_value OHAbility_CallSync(napi_env env, const char *plugin_id, const char *action,
+                              const char *request_type, const char *response_type,
+                              napi_value request) {
     if (!oh_bridge_validate_env(env)) {
         napi_throw_error(env, "oh_ability/env",
                          "OHAbility_CallSync requires the ArkTS main-thread environment");
@@ -585,7 +582,7 @@ napi_value OHAbility_CallSync(napi_env env, const char *plugin_id, uint32_t vers
     if (!oh_validate_identifier("plugin id", plugin_id) ||
         !oh_validate_identifier("action", action) ||
         !oh_validate_identifier("request type", request_type) ||
-        !oh_validate_identifier("response type", response_type) || version == 0) {
+        !oh_validate_identifier("response type", response_type)) {
         napi_throw_error(env, "oh_ability/identifier", "invalid plugin id, action or type name");
         return NULL;
     }
@@ -593,7 +590,7 @@ napi_value OHAbility_CallSync(napi_env env, const char *plugin_id, uint32_t vers
     napi_ref sync_ref = oh_bridge_invoke_sync_ref();
     if (sync_ref == NULL) {
         napi_throw_error(env, "oh_ability/not_ready",
-                         "synchronous bridge is not ready (module not rendered)");
+                         "synchronous bridge is not ready (no active Ability session)");
         return NULL;
     }
     napi_value invoke_sync;
@@ -605,20 +602,19 @@ napi_value OHAbility_CallSync(napi_env env, const char *plugin_id, uint32_t vers
     napi_value global;
     napi_get_global(env, &global);
 
-    napi_value args[6];
+    napi_value args[5];
     napi_create_string_utf8(env, plugin_id, NAPI_AUTO_LENGTH, &args[0]);
-    napi_create_uint32(env, version, &args[1]);
-    napi_create_string_utf8(env, action, NAPI_AUTO_LENGTH, &args[2]);
-    napi_create_string_utf8(env, request_type, NAPI_AUTO_LENGTH, &args[3]);
-    napi_create_string_utf8(env, response_type, NAPI_AUTO_LENGTH, &args[4]);
+    napi_create_string_utf8(env, action, NAPI_AUTO_LENGTH, &args[1]);
+    napi_create_string_utf8(env, request_type, NAPI_AUTO_LENGTH, &args[2]);
+    napi_create_string_utf8(env, response_type, NAPI_AUTO_LENGTH, &args[3]);
     if (request == NULL) {
-        napi_get_undefined(env, &args[5]);
+        napi_get_undefined(env, &args[4]);
     } else {
-        args[5] = request;
+        args[4] = request;
     }
 
     napi_value result = NULL;
-    if (napi_call_function(env, global, invoke_sync, 6, args, &result) != napi_ok) {
+    if (napi_call_function(env, global, invoke_sync, 5, args, &result) != napi_ok) {
         napi_throw_error(env, "oh_ability/bridge", "bridgeInvokeSync call failed");
         return NULL;
     }
@@ -670,16 +666,15 @@ static void oh_worker_sync_call_js(napi_env env, napi_value js_callback, void *c
     napi_value global;
     napi_get_global(env, &global);
 
-    napi_value args[6];
+    napi_value args[5];
     napi_create_string_utf8(env, req->plugin_id, NAPI_AUTO_LENGTH, &args[0]);
-    napi_create_uint32(env, req->version, &args[1]);
-    napi_create_string_utf8(env, req->action, NAPI_AUTO_LENGTH, &args[2]);
-    napi_create_string_utf8(env, req->request_type, NAPI_AUTO_LENGTH, &args[3]);
-    napi_create_string_utf8(env, req->response_type, NAPI_AUTO_LENGTH, &args[4]);
-    args[5] = request_value;
+    napi_create_string_utf8(env, req->action, NAPI_AUTO_LENGTH, &args[1]);
+    napi_create_string_utf8(env, req->request_type, NAPI_AUTO_LENGTH, &args[2]);
+    napi_create_string_utf8(env, req->response_type, NAPI_AUTO_LENGTH, &args[3]);
+    args[4] = request_value;
 
     napi_value result = NULL;
-    napi_status status = napi_call_function(env, global, js_callback, 6, args, &result);
+    napi_status status = napi_call_function(env, global, js_callback, 5, args, &result);
     if (status != napi_ok || result == NULL) {
         if (req->responder != NULL) {
             req->responder(env, OH_ABILITY_ERROR_BRIDGE, NULL, "bridgeInvokeSync call failed",
@@ -704,7 +699,7 @@ static void oh_worker_sync_call_js(napi_env env, napi_value js_callback, void *c
     free(req);
 }
 
-int OHAbility_CallSyncFromWorker(const char *plugin_id, uint32_t version, const char *action,
+int OHAbility_CallSyncFromWorker(const char *plugin_id, const char *action,
                                  const char *request_type, const char *response_type,
                                  OHAbility_ValueBuilder builder, void *builder_data,
                                  OHAbility_ValueResponder responder, void *responder_data) {
@@ -721,8 +716,8 @@ int OHAbility_CallSyncFromWorker(const char *plugin_id, uint32_t version, const 
     }
 
     OHAbility_AsyncRequest *req =
-        oh_request_alloc(plugin_id, version, action, request_type, response_type, builder,
-                         builder_data, responder, responder_data, OH_ABILITY_MAX_TIMEOUT_MS);
+        oh_request_alloc(plugin_id, action, request_type, response_type, builder, builder_data,
+                         responder, responder_data, OH_ABILITY_MAX_TIMEOUT_MS);
     if (req == NULL) {
         return OH_ABILITY_ERROR_INVALID_ARG;
     }

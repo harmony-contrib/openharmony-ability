@@ -10,8 +10,8 @@ use napi_derive_ohos::napi;
 use napi_ohos::Result;
 use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{
-    impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgePlugin, BridgeRuntime,
-    PluginLifecycleEvent,
+    impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement, BridgePlugin,
+    BridgeRuntime, PluginLifecycleEvent,
 };
 
 pub struct DemoLoginPlugin;
@@ -20,6 +20,8 @@ impl BridgePlugin for DemoLoginPlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "demo.login";
+    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
+        &[BridgeContextRequirement::UiContext];
 
     fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
         hilog_info!(format!("demo.login lifecycle => {event:?}").as_str());

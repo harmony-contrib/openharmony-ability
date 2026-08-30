@@ -4,7 +4,7 @@
 # installs it into the demo app, replacing the Rust-built libdemo_native.so.
 #
 # Usage:
-#   scripts/build-c-demo.sh [--install] [--arch arm64-v8a|x86_64] [--clean]
+#   scripts/build-c-demo.sh [--install] [--arch=arm64-v8a|x86_64] [--clean]
 #
 # Without --install the artifact is left in c_module/build/example/demo_native/ and the demo
 # app keeps its current libdemo_native.so untouched.
@@ -34,6 +34,12 @@ done
 find_sdk() {
   if [[ -n "${OHOS_SDK:-}" && -d "$OHOS_SDK/native" ]]; then
     echo "$OHOS_SDK/native"
+    return
+  fi
+  # Standard DevEco Studio installation on macOS.
+  local standard_deveco="/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native"
+  if [[ -d "$standard_deveco" ]]; then
+    echo "$standard_deveco"
     return
   fi
   # Prefer the newest versioned DevEco Studio installation.

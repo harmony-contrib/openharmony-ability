@@ -5,8 +5,8 @@
  * engine-initialized / controller-attached / controller-removed / navigation-request /
  * download-start / download-end / title-change), installs the custom "demoweb" scheme handler
  * and the window.test JavaScript proxy on controller-attached.
- * Outbound: the webview demo exports (create / composed / bottom / sub-window / evaluate /
- * style ops) call the ohos.webview plugin actions through the bridge.
+ * Outbound: the webview demo exports (create / composed / bottom / evaluate / style ops) call
+ * the ohos.webview plugin actions through the bridge.
  */
 #ifndef PLUGIN_WEBVIEW_H
 #define PLUGIN_WEBVIEW_H
@@ -21,7 +21,6 @@ napi_value demo_set_visible(napi_env env, napi_callback_info info);
 napi_value demo_create_webview(napi_env env, napi_callback_info info);
 napi_value demo_create_composed_webview(napi_env env, napi_callback_info info);
 napi_value demo_create_bottom_webview(napi_env env, napi_callback_info info);
-napi_value demo_create_sub_window_webview(napi_env env, napi_callback_info info);
 napi_value demo_evaluate_webview_script(napi_env env, napi_callback_info info);
 
 #endif /* PLUGIN_WEBVIEW_H */

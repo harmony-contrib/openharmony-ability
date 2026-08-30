@@ -14,17 +14,23 @@
 /* ------------------------------------------------------------------ */
 
 static void oh_session_reset(void) {
+    oh_bindings_teardown();
+
     oh_state_lock();
 
+    free(g_oh_state.bridge_owner);
     free(g_oh_state.base_path);
     free(g_oh_state.pref_path);
     free(g_oh_state.preferred_locales);
     free(g_oh_state.module_name);
+    free(g_oh_state.restored_state);
     free(g_oh_state.saved_state);
+    g_oh_state.bridge_owner = NULL;
     g_oh_state.base_path = NULL;
     g_oh_state.pref_path = NULL;
     g_oh_state.preferred_locales = NULL;
     g_oh_state.module_name = NULL;
+    g_oh_state.restored_state = NULL;
     g_oh_state.saved_state = NULL;
 
     oh_configuration_free(&g_oh_state.configuration);
@@ -37,10 +43,6 @@ static void oh_session_reset(void) {
 
     g_oh_state.session_generation++;
     oh_state_unlock();
-
-    /* The previous ability session's bridge bindings are dead: abort them now so the app
-     * thread cannot call into a disposed BridgeHost between init and the next render. */
-    oh_bindings_teardown();
 }
 
 /* ------------------------------------------------------------------ */
@@ -110,18 +112,7 @@ static napi_value oh_napi_on_memory_level(napi_env env, napi_callback_info info)
         napi_get_value_int32(env, args[0], &level);
     }
 
-    oh_state_lock();
-    for (size_t i = 0; i < g_oh_state.plugin_count; i++) {
-        OHAbility_PluginEntry *entry = &g_oh_state.plugins[i];
-        if (entry->plugin.on_lifecycle != NULL) {
-            OHAbility_LifecycleEvent event = {
-                .kind = "memory-level",
-                .memory_level = level,
-            };
-            entry->plugin.on_lifecycle(&event, entry->userdata);
-        }
-    }
-    oh_state_unlock();
+    oh_plugins_dispatch_lifecycle("memory-level", 0, level);
 
     OHAbility_Event event;
     memset(&event, 0, sizeof(event));
@@ -158,13 +149,26 @@ static napi_value oh_napi_on_ability_create(napi_env env, napi_callback_info inf
     napi_value args[1] = {NULL};
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
+    char *saved_state = argc >= 1 ? oh_napi_get_string(env, args[0]) : oh_strdup("");
+    char *restored_state = oh_strdup(saved_state);
+    if (saved_state == NULL || restored_state == NULL) {
+        free(saved_state);
+        free(restored_state);
+        napi_throw_error(env, "oh_ability/state", "failed to retain restored Ability state");
+        return NULL;
+    }
+    oh_state_lock();
+    free(g_oh_state.saved_state);
+    free(g_oh_state.restored_state);
+    g_oh_state.saved_state = saved_state;
+    g_oh_state.restored_state = restored_state;
+    oh_state_unlock();
+
     oh_dispatch_plugin_lifecycle("ability-create");
 
     OHAbility_Event event = {0};
     event.kind = OH_ABILITY_EVENT_CREATE;
     oh_event_post(&event);
-    (void)argc;
-    (void)args;
     return oh_undefined(env);
 }
 
@@ -195,19 +199,6 @@ static napi_value oh_napi_on_ability_save_state(napi_env env, napi_callback_info
     napi_create_string_utf8(env, state, NAPI_AUTO_LENGTH, &result);
     oh_state_unlock();
     return result;
-}
-
-/* Parity with the Rust lifecycle object: the ArkTS host never calls this callback. */
-static napi_value oh_napi_on_ability_restore_state(napi_env env, napi_callback_info info) {
-    (void)info;
-    oh_state_lock();
-    const char *state = g_oh_state.saved_state != NULL ? g_oh_state.saved_state : "";
-    OHAbility_Event event = {0};
-    event.kind = OH_ABILITY_EVENT_RESUME;
-    event.data.resume.saved_state = state; /* deep-copied by the queue */
-    oh_event_post(&event);
-    oh_state_unlock();
-    return oh_undefined(env);
 }
 
 /* Stage event mapping — mirrors crates/ability/src/stage/event.rs. */
@@ -383,7 +374,6 @@ static const OHAbility_CallbackEntry WINDOW_STAGE_CALLBACKS[] = {
     {"onAbilityCreate", oh_napi_on_ability_create},
     {"onAbilityDestroy", oh_napi_on_ability_destroy},
     {"onAbilitySaveState", oh_napi_on_ability_save_state},
-    {"onAbilityRestoreState", oh_napi_on_ability_restore_state},
     {"onWindowStageEvent", oh_napi_on_window_stage_event},
     {"onWindowSizeChange", oh_napi_on_window_size_change},
     {"onWindowRectChange", oh_napi_on_window_rect_change},
@@ -409,16 +399,49 @@ static napi_value oh_attach_callback_group(napi_env env, const OHAbility_Callbac
 }
 
 napi_value oh_napi_init(napi_env env, napi_callback_info info) {
-    size_t argc = 1;
-    napi_value args[1] = {NULL};
+    size_t argc = 3;
+    napi_value args[3] = {NULL, NULL, NULL};
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
+    if (argc < 2) {
+        napi_throw_error(env, "oh_ability/argc", "init requires (bindings, bridgeOwner, context?)");
+        return NULL;
+    }
+    char *bridge_owner = oh_napi_get_string(env, args[1]);
+    if (bridge_owner == NULL || bridge_owner[0] == '\0') {
+        free(bridge_owner);
+        napi_throw_error(env, "oh_ability/owner", "bridgeOwner must not be empty");
+        return NULL;
+    }
+    oh_state_lock();
+    int bridge_active = g_oh_state.bridge_owner != NULL;
+    oh_state_unlock();
+    if (bridge_active) {
+        free(bridge_owner);
+        napi_throw_error(env, "oh_ability/owner",
+                         "this native module already owns an active Ability bridge session");
+        return NULL;
+    }
+
     oh_session_reset();
+    if (oh_bindings_replace(env, args[0]) != OH_ABILITY_ERROR_OK) {
+        free(bridge_owner);
+        napi_throw_error(env, "oh_ability/bridge", "failed to attach Ability bridge bindings");
+        return NULL;
+    }
+    oh_state_lock();
+    g_oh_state.bridge_owner = bridge_owner;
+    oh_state_unlock();
 
     /* Parse AbilityInitContext (optional; all fields may be absent). */
-    if (argc >= 1) {
+    if (argc >= 3) {
+        napi_valuetype context_type;
+        napi_typeof(env, args[2], &context_type);
+        if (context_type != napi_object) {
+            goto lifecycle_object;
+        }
         napi_value value;
-        if (napi_get_named_property(env, args[0], "basePath", &value) == napi_ok) {
+        if (napi_get_named_property(env, args[2], "basePath", &value) == napi_ok) {
             napi_valuetype type;
             napi_typeof(env, value, &type);
             if (type == napi_string) {
@@ -428,7 +451,7 @@ napi_value oh_napi_init(napi_env env, napi_callback_info info) {
                 oh_state_unlock();
             }
         }
-        if (napi_get_named_property(env, args[0], "prefPath", &value) == napi_ok) {
+        if (napi_get_named_property(env, args[2], "prefPath", &value) == napi_ok) {
             napi_valuetype type;
             napi_typeof(env, value, &type);
             if (type == napi_string) {
@@ -438,7 +461,7 @@ napi_value oh_napi_init(napi_env env, napi_callback_info info) {
                 oh_state_unlock();
             }
         }
-        if (napi_get_named_property(env, args[0], "preferredLocales", &value) == napi_ok) {
+        if (napi_get_named_property(env, args[2], "preferredLocales", &value) == napi_ok) {
             napi_valuetype type;
             napi_typeof(env, value, &type);
             if (type == napi_string) {
@@ -448,7 +471,7 @@ napi_value oh_napi_init(napi_env env, napi_callback_info info) {
                 oh_state_unlock();
             }
         }
-        if (napi_get_named_property(env, args[0], "moduleName", &value) == napi_ok) {
+        if (napi_get_named_property(env, args[2], "moduleName", &value) == napi_ok) {
             napi_valuetype type;
             napi_typeof(env, value, &type);
             if (type == napi_string) {
@@ -461,7 +484,7 @@ napi_value oh_napi_init(napi_env env, napi_callback_info info) {
         /* Defensive: the ArkTS host also pushes the resource manager through the ohos.resource
          * plugin on ability-create; converting it here too is cheap and gives business code a
          * valid handle even without registering that plugin. */
-        if (napi_get_named_property(env, args[0], "resourceManager", &value) == napi_ok) {
+        if (napi_get_named_property(env, args[2], "resourceManager", &value) == napi_ok) {
             napi_valuetype type;
             napi_typeof(env, value, &type);
             if (type == napi_object) {
@@ -476,7 +499,8 @@ napi_value oh_napi_init(napi_env env, napi_callback_info info) {
         }
     }
 
-    /* Assemble ApplicationLifecycle: three callback groups. */
+lifecycle_object:;
+    /* Assemble ApplicationLifecycle: plugin declarations plus three callback groups. */
     napi_value lifecycle;
     napi_create_object(env, &lifecycle);
 
@@ -492,7 +516,32 @@ napi_value oh_napi_init(napi_env env, napi_callback_info info) {
     napi_set_named_property(env, lifecycle, "environmentCallback", environment);
     napi_set_named_property(env, lifecycle, "windowStageEventCallback", window_stage);
     napi_set_named_property(env, lifecycle, "keyboardEventCallback", keyboard);
+    napi_set_named_property(env, lifecycle, "bridgePlugins", oh_plugins_declarations(env));
 
     OHABILITY_LOG(LOG_INFO, "init: lifecycle object returned to ArkTS");
     return lifecycle;
+}
+
+napi_value oh_napi_dispose_bridge(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {NULL};
+    napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+    if (argc < 1) {
+        return oh_undefined(env);
+    }
+    char *owner = oh_napi_get_string(env, args[0]);
+    oh_state_lock();
+    int matches = owner != NULL && g_oh_state.bridge_owner != NULL &&
+                  strcmp(g_oh_state.bridge_owner, owner) == 0;
+    if (matches) {
+        free(g_oh_state.bridge_owner);
+        g_oh_state.bridge_owner = NULL;
+    }
+    oh_state_unlock();
+    free(owner);
+    if (matches) {
+        oh_bindings_teardown();
+        oh_waiter_abort_all(OH_ABILITY_ERROR_CANCELLED);
+    }
+    return oh_undefined(env);
 }

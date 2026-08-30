@@ -5,8 +5,8 @@
  *   inbound event "resource-manager-ready" (ohos.resource.ResourceManagerRef, the
  *   resourceManager object) -> ohos.resource.ResourceManagerReadyResponse{accepted}
  *
- * The native resource manager is process-global (EagerPlugin on the ArkTS side), so this plugin
- * installs it once; the conversion must happen inside the same N-API callback.
+ * The native resource manager is Ability/session-scoped. The conversion must happen inside the
+ * same N-API callback and the C plugin releases its native handle at session boundaries.
  */
 #include <stdlib.h>
 #include <string.h>
@@ -26,12 +26,14 @@ static NativeResourceManager *g_pushed_resource_manager;
 static int demo_resource_sync_event(napi_env env, const char *event, const char *request_type,
                                     napi_value value, const char *response_type,
                                     napi_value *out_response, void *userdata) {
-    (void)request_type;
-    (void)response_type;
     (void)userdata;
 
     if (strcmp(event, "resource-manager-ready") != 0) {
         return OH_ABILITY_ERROR_NOT_FOUND;
+    }
+    if (strcmp(request_type, "ohos.resource.ResourceManagerRef") != 0 ||
+        strcmp(response_type, "ohos.resource.ResourceManagerReadyResponse") != 0) {
+        return OH_ABILITY_ERROR_INVALID_ARG;
     }
 
     NativeResourceManager *manager = OH_ResourceManager_InitNativeResourceManager(env, value);
@@ -53,10 +55,22 @@ static int demo_resource_sync_event(napi_env env, const char *event, const char 
     return OH_ABILITY_ERROR_OK;
 }
 
+static void demo_resource_lifecycle(const OHAbility_LifecycleEvent *event, void *userdata) {
+    (void)userdata;
+    if (strcmp(event->kind, "ability-create") != 0 && strcmp(event->kind, "ability-destroy") != 0) {
+        return;
+    }
+    if (g_pushed_resource_manager != NULL) {
+        OH_ResourceManager_ReleaseNativeResourceManager(g_pushed_resource_manager);
+        g_pushed_resource_manager = NULL;
+    }
+}
+
 static const OHAbility_Plugin RESOURCE_PLUGIN = {
-    .version = 1,
+    .execution = OH_ABILITY_PLUGIN_ASYNC,
+    .required_contexts = OH_ABILITY_PLUGIN_CONTEXT_ABILITY,
     .on_sync_event = demo_resource_sync_event,
-    .on_lifecycle = NULL,
+    .on_lifecycle = demo_resource_lifecycle,
 };
 
 int demo_register_resource_plugin(void) {
@@ -66,7 +80,7 @@ int demo_register_resource_plugin(void) {
 /* demoResourceManagerReady(): boolean — a native resource manager is available. */
 napi_value demo_resource_manager_ready(napi_env env, napi_callback_info info) {
     (void)info;
-    bool ready = OHAbility_GetResourceManager() != NULL;
+    bool ready = g_pushed_resource_manager != NULL;
     napi_value result;
     napi_get_boolean(env, ready, &result);
     return result;
@@ -76,7 +90,7 @@ napi_value demo_resource_manager_ready(napi_env env, napi_callback_info info) {
 napi_value demo_resource_raw_dir_count(napi_env env, napi_callback_info info) {
     (void)info;
     int32_t count = -1;
-    NativeResourceManager *manager = OHAbility_GetResourceManager();
+    NativeResourceManager *manager = g_pushed_resource_manager;
     if (manager != NULL) {
         RawDir *dir = OH_ResourceManager_OpenRawDir(manager, "");
         if (dir != NULL) {

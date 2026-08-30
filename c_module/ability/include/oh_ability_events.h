@@ -180,6 +180,61 @@ typedef struct OHAbility_MouseEvent {
     OHAbility_MouseButton button;
 } OHAbility_MouseEvent;
 
+/* Owned ArkUI pointer metadata used by axis and semantic gesture events. Raw integer values
+ * mirror the corresponding ArkUI_UIInputEvent enums so newer platform values remain observable. */
+typedef struct OHAbility_ArkUIPointerEvent {
+    int32_t event_type;
+    int32_t action;
+    int32_t source_type;
+    int32_t tool_type;
+    float x;
+    float y;
+    float window_x;
+    float window_y;
+    float display_x;
+    float display_y;
+    int64_t time_stamp;
+    uint32_t pointer_count;
+    int32_t pointer_id;
+    bool has_pointer_id;
+} OHAbility_ArkUIPointerEvent;
+
+typedef struct OHAbility_AxisEvent {
+    OHAbility_ArkUIPointerEvent pointer;
+    double delta_x;
+    double delta_y;
+} OHAbility_AxisEvent;
+
+typedef enum OHAbility_GesturePhase {
+    OH_ABILITY_GESTURE_START = 0,
+    OH_ABILITY_GESTURE_UPDATE = 1,
+    OH_ABILITY_GESTURE_END = 2,
+    OH_ABILITY_GESTURE_CANCEL = 3,
+} OHAbility_GesturePhase;
+
+typedef struct OHAbility_TapGestureEvent {
+    OHAbility_ArkUIPointerEvent pointer;
+} OHAbility_TapGestureEvent;
+
+typedef struct OHAbility_PanGestureEvent {
+    OHAbility_ArkUIPointerEvent pointer;
+    OHAbility_GesturePhase phase;
+    float delta_x;
+    float delta_y;
+    float offset_x;
+    float offset_y;
+    float velocity;
+    float velocity_x;
+    float velocity_y;
+} OHAbility_PanGestureEvent;
+
+typedef struct OHAbility_SwipeGestureEvent {
+    OHAbility_ArkUIPointerEvent pointer;
+    OHAbility_GesturePhase phase;
+    float angle;
+    float velocity;
+} OHAbility_SwipeGestureEvent;
+
 /* IME status — mirrors ohos-ime-binding KeyboardStatus */
 typedef enum OHAbility_ImeStatus {
     OH_ABILITY_IME_STATUS_NONE = 0,
@@ -254,6 +309,12 @@ typedef enum OHAbility_EventKind {
     OH_ABILITY_EVENT_INPUT_MOUSE,
     OH_ABILITY_EVENT_INPUT_HOVER,
 
+    /* ArkUI axis input and system-recognized touch gestures. */
+    OH_ABILITY_EVENT_INPUT_AXIS,
+    OH_ABILITY_EVENT_GESTURE_TAP,
+    OH_ABILITY_EVENT_GESTURE_PAN,
+    OH_ABILITY_EVENT_GESTURE_SWIPE,
+
     /* IME */
     OH_ABILITY_EVENT_IME_TEXT_INPUT,
     OH_ABILITY_EVENT_IME_BACKSPACE,
@@ -310,6 +371,18 @@ typedef struct OHAbility_Event {
         struct {
             bool entered;
         } input_hover;
+        struct {
+            OHAbility_AxisEvent axis;
+        } input_axis;
+        struct {
+            OHAbility_TapGestureEvent tap;
+        } gesture_tap;
+        struct {
+            OHAbility_PanGestureEvent pan;
+        } gesture_pan;
+        struct {
+            OHAbility_SwipeGestureEvent swipe;
+        } gesture_swipe;
         struct {
             OHAbility_ImeTextInputEvent text_input;
         } ime_text_input;

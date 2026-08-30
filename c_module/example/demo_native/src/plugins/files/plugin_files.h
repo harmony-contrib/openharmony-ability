@@ -7,6 +7,8 @@
 
 #include <napi/native_api.h>
 
+int demo_register_files_plugin(void);
+
 /* demoFileDialogOpen()/Save(): Promise<string[]> */
 napi_value demo_file_dialog_open(napi_env env, napi_callback_info info);
 napi_value demo_file_dialog_save(napi_env env, napi_callback_info info);

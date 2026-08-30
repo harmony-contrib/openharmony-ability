@@ -162,7 +162,6 @@ static int demo_build_inspect_request(napi_env env, napi_value *out, void *data)
 /* ------------------------------------------------------------------ */
 
 static napi_value demo_format_inspect(napi_env env, napi_value response, const char *prefix) {
-    char *module = demo_object_get_string(env, response, "module");
     char *session = demo_object_get_string(env, response, "sessionId");
     napi_value ready_value;
     napi_get_named_property(env, response, "uiContextReady", &ready_value);
@@ -171,10 +170,9 @@ static napi_value demo_format_inspect(napi_env env, napi_value response, const c
     char *execution = demo_object_get_string(env, response, "execution");
 
     char buffer[256];
-    snprintf(buffer, sizeof(buffer), "%smodule=%s, session=%s, uiContextReady=%s, execution=%s",
-             prefix, module != NULL ? module : "", session != NULL ? session : "",
-             ready ? "true" : "false", execution != NULL ? execution : "");
-    free(module);
+    snprintf(buffer, sizeof(buffer), "%ssession=%s, uiContextReady=%s, execution=%s", prefix,
+             session != NULL ? session : "", ready ? "true" : "false",
+             execution != NULL ? execution : "");
     free(session);
     free(execution);
 
@@ -195,10 +193,16 @@ static napi_value demo_plugin_string(napi_env env, napi_callback_info info) {
     if (ctx == NULL) {
         return NULL;
     }
-    int rc = OHAbility_CallAsync("demo.raw", 1, "echo-string", "std.string", "std.string",
-                                 demo_build_string, strdup("hello from Rust"),
-                                 demo_responder_string, ctx, 0);
+    char *message = strdup("hello from C");
+    if (message == NULL) {
+        demo_deferred_reject(ctx, env, "demo.raw: out of memory");
+        free(ctx);
+        return promise;
+    }
+    int rc = OHAbility_CallAsync("demo.raw", "echo-string", "std.string", "std.string",
+                                 demo_build_string, message, demo_responder_string, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
+        free(message);
         demo_deferred_reject(ctx, env, "bridge not ready");
         free(ctx);
     }
@@ -213,7 +217,7 @@ static napi_value demo_plugin_bytes(napi_env env, napi_callback_info info) {
     if (ctx == NULL) {
         return NULL;
     }
-    int rc = OHAbility_CallAsync("demo.raw", 1, "reverse-bytes", "std.bytes", "std.bytes",
+    int rc = OHAbility_CallAsync("demo.raw", "reverse-bytes", "std.bytes", "std.bytes",
                                  demo_build_bytes, NULL, demo_responder_string, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
         demo_deferred_reject(ctx, env, "bridge not ready");
@@ -230,7 +234,7 @@ static napi_value demo_plugin_profile(napi_env env, napi_callback_info info) {
     if (ctx == NULL) {
         return NULL;
     }
-    int rc = OHAbility_CallAsync("demo.raw", 1, "bump-profile", "demo.Profile", "demo.Profile",
+    int rc = OHAbility_CallAsync("demo.raw", "bump-profile", "demo.Profile", "demo.Profile",
                                  demo_build_profile, NULL, demo_responder_string, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
         demo_deferred_reject(ctx, env, "bridge not ready");
@@ -290,7 +294,7 @@ static void demo_login_authorize_responder(napi_env env, int status, napi_value 
     publish_ctx->access_token = strdup(login->access_token);
     free(ctx);
 
-    int rc = OHAbility_CallAsync("demo.login", 1, "publish", "demo.login.LoginResponse",
+    int rc = OHAbility_CallAsync("demo.login", "publish", "demo.login.LoginResponse",
                                  "demo.login.LoginPublishResponse", demo_build_publish_request,
                                  login, demo_login_publish_responder, publish_ctx, 10000);
     if (rc != OH_ABILITY_ERROR_OK) {
@@ -309,7 +313,7 @@ static napi_value demo_plugin_login(napi_env env, napi_callback_info info) {
     if (ctx == NULL) {
         return NULL;
     }
-    int rc = OHAbility_CallAsync("demo.login", 1, "authorize", "demo.login.LoginRequest",
+    int rc = OHAbility_CallAsync("demo.login", "authorize", "demo.login.LoginRequest",
                                  "demo.login.LoginResponse", demo_build_login_request, NULL,
                                  demo_login_authorize_responder, ctx, 10000);
     if (rc != OH_ABILITY_ERROR_OK) {
@@ -330,7 +334,7 @@ static napi_value demo_plugin_sync_context(napi_env env, napi_callback_info info
     napi_create_object(env, &request);
     demo_object_bool(env, request, "requested", true);
     napi_value response =
-        OHAbility_CallSync(env, "demo.main-thread", 1, "inspect", "demo.main-thread.InspectRequest",
+        OHAbility_CallSync(env, "demo.main-thread", "inspect", "demo.main-thread.InspectRequest",
                            "demo.main-thread.InspectResponse", request);
     if (response == NULL) {
         return NULL; /* the thrown exception propagates to ArkTS */
@@ -358,7 +362,7 @@ static void demo_responder_inspect_resolve(napi_env env, int status, napi_value 
 static void *demo_sync_worker_main(void *arg) {
     DemoSyncWorkerContext *ctx = (DemoSyncWorkerContext *)arg;
     int rc = OHAbility_CallSyncFromWorker(
-        "demo.main-thread", 1, "inspect", "demo.main-thread.InspectRequest",
+        "demo.main-thread", "inspect", "demo.main-thread.InspectRequest",
         "demo.main-thread.InspectResponse", demo_build_inspect_request, NULL,
         demo_responder_inspect_resolve, ctx);
     if (rc != OH_ABILITY_ERROR_OK) {
@@ -407,6 +411,30 @@ static napi_value demo_toggle_back_press(napi_env env, napi_callback_info info) 
 /* Export table                                                        */
 /* ------------------------------------------------------------------ */
 
+int demo_register_bridge_plugins(void) {
+    static const OHAbility_Plugin RAW_PLUGIN = {
+        .execution = OH_ABILITY_PLUGIN_ASYNC,
+        .required_contexts = OH_ABILITY_PLUGIN_CONTEXT_ABILITY,
+    };
+    static const OHAbility_Plugin LOGIN_PLUGIN = {
+        .execution = OH_ABILITY_PLUGIN_ASYNC,
+        .required_contexts = OH_ABILITY_PLUGIN_CONTEXT_UI,
+    };
+    static const OHAbility_Plugin MAIN_THREAD_PLUGIN = {
+        .execution = OH_ABILITY_PLUGIN_SYNC_MAIN_THREAD,
+        .required_contexts = OH_ABILITY_PLUGIN_CONTEXT_UI,
+    };
+    int rc = OHAbility_RegisterPlugin("demo.raw", &RAW_PLUGIN, NULL);
+    if (rc != OH_ABILITY_ERROR_OK) {
+        return rc;
+    }
+    rc = OHAbility_RegisterPlugin("demo.login", &LOGIN_PLUGIN, NULL);
+    if (rc != OH_ABILITY_ERROR_OK) {
+        return rc;
+    }
+    return OHAbility_RegisterPlugin("demo.main-thread", &MAIN_THREAD_PLUGIN, NULL);
+}
+
 int demo_register_exported_functions(napi_env env, napi_value exports) {
     static const napi_property_descriptor EXPORTS[] = {
         /* demo.* (entry-module plugins) */
@@ -441,8 +469,6 @@ int demo_register_exported_functions(napi_env env, napi_value exports) {
         {"createComposedDemoWebview", NULL, demo_create_composed_webview, NULL, NULL, NULL,
          napi_default, NULL},
         {"createBottomDemoWebview", NULL, demo_create_bottom_webview, NULL, NULL, NULL,
-         napi_default, NULL},
-        {"createSubWindowWebview", NULL, demo_create_sub_window_webview, NULL, NULL, NULL,
          napi_default, NULL},
         {"evaluateDemoWebviewScript", NULL, demo_evaluate_webview_script, NULL, NULL, NULL,
          napi_default, NULL},

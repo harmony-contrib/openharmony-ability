@@ -2,13 +2,14 @@
  * Pure C framework for hosting business code inside the `@ohos-rs/ability` ArkTS package.
  *
  * The ArkTS host (`NativeAbility` + `DefaultXComponent`) loads one native module per session and
- * drives it through five N-API exports. This library implements that contract in C99 and exposes
+ * drives it through eight N-API exports. This library implements that contract in C99 and exposes
  * an SDL-style application model on top:
  *
  *   1. The business NAPI module calls `OHAbility_RegisterModule()` from its module init.
- *   2. `init(context)` -> the framework returns the lifecycle callback object to ArkTS.
- *   3. `render(bindings, slot)` -> the framework keeps the bridge functions, mounts the
- *      XComponent, and starts the application thread once a surface exists.
+ *   2. `init(bindings, bridgeOwner, context)` opens the Ability-session transport and returns the
+ *      lifecycle callback object plus this module's plugin declarations to ArkTS.
+ *   3. `render(slot, renderOwner)` mounts this module's one XComponent and starts the application
+ *      thread once a surface exists. Bridge and render owners have independent lifetimes.
  *   4. The application thread runs `AppInit` once, then `AppEvent`/`AppIterate` in a loop
  *      (SDL_AppInit / SDL_AppEvent / SDL_AppIterate / SDL_AppQuit model).
  *
@@ -75,8 +76,9 @@ typedef enum OHAbility_Error {
 /* ------------------------------------------------------------------ */
 
 /**
- * Registers the five module exports consumed by `@ohos-rs/ability`:
- * `init`, `render`, `onBackPressIntercept`, `onBridgeSyncEvent`, `onBridgeLifecycle`.
+ * Registers the eight module exports consumed by `@ohos-rs/ability`: `init`, `disposeBridge`,
+ * `render`, `disposeRender`, `disposeAllRenders`, `onBackPressIntercept`, `onBridgeSyncEvent`,
+ * and `onBridgeLifecycle`.
  * Call this once from the business NAPI module init (`napi_register_module_v1` register func).
  * Returns OH_ABILITY_ERROR_OK on success, a negative OHAbility_Error otherwise.
  */
@@ -132,6 +134,17 @@ const char *OHAbility_GetSavedState(void);
 
 /** Native window of the latest mounted XComponent surface, or NULL before surface creation. */
 OHNativeWindow *OHAbility_GetNativeWindow(void);
+
+/** Selects which touch representation future renders deliver. Mouse/key and ArkUI axis events
+ * are unaffected. Configuration is frozen while a render is active. */
+typedef enum OHAbility_TouchInputDelivery {
+    OH_ABILITY_TOUCH_INPUT_RAW_XCOMPONENT = 0,
+    OH_ABILITY_TOUCH_INPUT_ARKUI_GESTURES = 1,
+    OH_ABILITY_TOUCH_INPUT_BOTH = 2,
+} OHAbility_TouchInputDelivery;
+
+int OHAbility_SetTouchInputDelivery(OHAbility_TouchInputDelivery delivery);
+OHAbility_TouchInputDelivery OHAbility_GetTouchInputDelivery(void);
 
 /** Requests an XComponent frame rate range; applied to the current mount. */
 int OHAbility_SetFrameRate(int32_t min, int32_t max, int32_t preferred);
@@ -190,12 +203,28 @@ typedef struct OHAbility_LifecycleEvent {
      *  "window-stage-destroy", "window-stage-event", "ui-context-ready",
      *  "ui-context-destroy", "configuration-updated", "memory-level". */
     const char *kind;
+    const char *restored_state; /* valid when kind == "ability-create" */
     int32_t window_stage_event; /* valid when kind == "window-stage-event" */
     int32_t memory_level;       /* valid when kind == "memory-level" */
 } OHAbility_LifecycleEvent;
 
+typedef enum OHAbility_PluginExecution {
+    OH_ABILITY_PLUGIN_ASYNC = 0,
+    OH_ABILITY_PLUGIN_SYNC_MAIN_THREAD = 1,
+} OHAbility_PluginExecution;
+
+typedef enum OHAbility_PluginContext {
+    OH_ABILITY_PLUGIN_CONTEXT_NONE = 0,
+    OH_ABILITY_PLUGIN_CONTEXT_ABILITY = 1u << 0,
+    OH_ABILITY_PLUGIN_CONTEXT_WINDOW_STAGE = 1u << 1,
+    OH_ABILITY_PLUGIN_CONTEXT_UI = 1u << 2,
+} OHAbility_PluginContext;
+
 typedef struct OHAbility_Plugin {
-    uint32_t version; /* must be > 0 and match the ArkTS plugin declaration */
+    /** Must match the ArkTS plugin's `execution` declaration. */
+    OHAbility_PluginExecution execution;
+    /** Bitwise OR of OHAbility_PluginContext values; must match ArkTS `requires`. */
+    uint32_t required_contexts;
     /**
      * Handles a synchronous event emitted by an ArkTS plugin through
      * `context.invokeNativeSync(...)`. Runs on the ArkTS main thread inside the active N-API
@@ -205,14 +234,18 @@ typedef struct OHAbility_Plugin {
     int (*on_sync_event)(napi_env env, const char *event, const char *request_type,
                          napi_value value, const char *response_type, napi_value *out_response,
                          void *userdata);
+    /** Optional per-event context override for process-global callbacks such as ArkWeb init. */
+    uint32_t (*required_contexts_for_event)(const char *event, void *userdata);
     /** Receives lifecycle transitions (see OHAbility_LifecycleEvent). May be NULL. */
     void (*on_lifecycle)(const OHAbility_LifecycleEvent *event, void *userdata);
 } OHAbility_Plugin;
 
 /**
  * Registers a C plugin under a stable identifier (e.g. "ohos.webview"). The identifier must match
- * `^[A-Za-z0-9._-]+$`; duplicate registration fails. `plugin` and `userdata` are retained by
- * reference; the plugin must outlive the module.
+ * `^[A-Za-z0-9._-]+$`; duplicate or late registration fails. The ID, execution and required
+ * contexts are exported from `init()` and hard-validated against the matching ArkTS factory.
+ * `on_sync_event` may be NULL for outbound-only plugins. `plugin` and `userdata` are copied into
+ * the process-lifetime registry.
  */
 int OHAbility_RegisterPlugin(const char *plugin_id, const OHAbility_Plugin *plugin, void *userdata);
 
@@ -230,33 +263,37 @@ typedef void (*OHAbility_ValueResponder)(napi_env env, int status, napi_value va
  * `builder` runs on the ArkTS main thread to produce the request value; `responder` runs on the
  * main thread with the resolved response value (or an error). `timeout_ms` is enforced by the
  * ArkTS host (BridgeHost); pass 0 for the host default. The builder/responder must not retain
- * napi values.
+ * napi values. Ownership of `builder_data` transfers to the framework only when this function
+ * returns OH_ABILITY_ERROR_OK; the framework releases it with `free()` after the builder runs.
+ * When the function returns an error, neither callback is invoked and the caller retains both
+ * data pointers.
  */
-int OHAbility_CallAsync(const char *plugin_id, uint32_t version, const char *action,
-                        const char *request_type, const char *response_type,
-                        OHAbility_ValueBuilder builder, void *builder_data,
-                        OHAbility_ValueResponder responder, void *responder_data,
-                        uint32_t timeout_ms);
+int OHAbility_CallAsync(const char *plugin_id, const char *action, const char *request_type,
+                        const char *response_type, OHAbility_ValueBuilder builder,
+                        void *builder_data, OHAbility_ValueResponder responder,
+                        void *responder_data, uint32_t timeout_ms);
 
 /**
  * Async bridge call that resolves/rejects a JS Promise instead of a responder.
  * Must be called from an N-API callback (an env is required to create the promise); the promise
  * is resolved on the main thread with the raw response value, or rejected with the error message.
  * Returns the Promise value (never NULL when the call is accepted).
+ * `builder_data` must be either NULL or remain valid until the builder runs; unlike
+ * OHAbility_CallAsync, this convenience form does not take ownership of it.
  */
-napi_value OHAbility_CallAsyncPromise(napi_env env, const char *plugin_id, uint32_t version,
-                                      const char *action, const char *request_type,
-                                      const char *response_type, OHAbility_ValueBuilder builder,
-                                      void *builder_data, uint32_t timeout_ms);
+napi_value OHAbility_CallAsyncPromise(napi_env env, const char *plugin_id, const char *action,
+                                      const char *request_type, const char *response_type,
+                                      OHAbility_ValueBuilder builder, void *builder_data,
+                                      uint32_t timeout_ms);
 
 /**
  * Synchronous bridge call for main-thread-only plugins. Only valid inside an active N-API
  * callback on the main thread (the stored bridge env must match). Returns the raw response value.
  * Never returns NULL on success.
  */
-napi_value OHAbility_CallSync(napi_env env, const char *plugin_id, uint32_t version,
-                              const char *action, const char *request_type,
-                              const char *response_type, napi_value request);
+napi_value OHAbility_CallSync(napi_env env, const char *plugin_id, const char *action,
+                              const char *request_type, const char *response_type,
+                              napi_value request);
 
 /**
  * Worker -> main-thread synchronous bridge call. The caller thread blocks until `responder` has
@@ -264,7 +301,7 @@ napi_value OHAbility_CallSync(napi_env env, const char *plugin_id, uint32_t vers
  * OHAbility_CallSync). Must NOT be called from the ArkTS main thread (deadlock guard); the
  * responder runs with a live env and may, for example, resolve a deferred.
  */
-int OHAbility_CallSyncFromWorker(const char *plugin_id, uint32_t version, const char *action,
+int OHAbility_CallSyncFromWorker(const char *plugin_id, const char *action,
                                  const char *request_type, const char *response_type,
                                  OHAbility_ValueBuilder builder, void *builder_data,
                                  OHAbility_ValueResponder responder, void *responder_data);
@@ -286,32 +323,20 @@ int OHAbility_WithMainThread(void (*fn)(void *data), void *data);
  * compose the session FrameNode tree through opaque handles (FrameNode values never cross
  * N-API). Each call is an `ohos.node` action; responders run on the ArkTS main thread.
  *
- * For `OHAbility_NodeCreateContainer`/`...InWindow`, the responder receives the opaque handle
- * as a number value (`status == OH_ABILITY_ERROR_OK`). For the other actions the responder
+ * For `OHAbility_NodeCreateContainer`, the responder receives the opaque handle as a number
+ * value (`status == OH_ABILITY_ERROR_OK`). For the other actions the responder
  * receives NULL and `status == OH_ABILITY_ERROR_OK` only when ArkTS acknowledged the operation;
  * a rejected operation arrives as an error (mirrors the Rust `ensure()`).
  */
 int OHAbility_NodeCreateContainer(OHAbility_ValueResponder responder, void *responder_data,
                                   uint32_t timeout_ms);
-int OHAbility_NodeCreateContainerInWindow(const char *window_key,
-                                          OHAbility_ValueResponder responder, void *responder_data,
-                                          uint32_t timeout_ms);
 int OHAbility_NodeAppendChild(uint32_t parent_handle, uint32_t child_handle,
                               OHAbility_ValueResponder responder, void *responder_data,
                               uint32_t timeout_ms);
-int OHAbility_NodeAppendChildInWindow(const char *window_key, uint32_t parent_handle,
-                                      uint32_t child_handle, OHAbility_ValueResponder responder,
-                                      void *responder_data, uint32_t timeout_ms);
 int OHAbility_NodeMountIntoRoot(uint32_t handle, OHAbility_ValueResponder responder,
                                 void *responder_data, uint32_t timeout_ms);
-int OHAbility_NodeMountIntoRootInWindow(const char *window_key, uint32_t handle,
-                                        OHAbility_ValueResponder responder, void *responder_data,
-                                        uint32_t timeout_ms);
 int OHAbility_NodeDispose(uint32_t handle, OHAbility_ValueResponder responder, void *responder_data,
                           uint32_t timeout_ms);
-int OHAbility_NodeDisposeInWindow(const char *window_key, uint32_t handle,
-                                  OHAbility_ValueResponder responder, void *responder_data,
-                                  uint32_t timeout_ms);
 #endif /* OH_ABILITY_PLUGIN_NODE */
 
 /* ------------------------------------------------------------------ */

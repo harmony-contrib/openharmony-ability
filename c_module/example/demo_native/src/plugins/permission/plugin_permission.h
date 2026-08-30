@@ -8,6 +8,8 @@
 
 #include <napi/native_api.h>
 
+int demo_register_permission_plugin(void);
+
 /* demoRequestPermissionFromMainThread(): Promise<number[]> */
 napi_value demo_request_permission(napi_env env, napi_callback_info info);
 

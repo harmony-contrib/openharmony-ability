@@ -37,6 +37,7 @@ int demo_toggle_back_press_intercept(void);
 napi_value demo_disabled_promise(napi_env env, const char *plugin);
 
 /* Demo exports (exports.c). */
+int demo_register_bridge_plugins(void);
 int demo_register_exported_functions(napi_env env, napi_value exports);
 
 #endif /* DEMO_COMMON_H */

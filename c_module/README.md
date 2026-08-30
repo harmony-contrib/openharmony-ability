@@ -2,9 +2,10 @@
 
 This directory adds a **pure C** path to the `@ohos-rs/ability` ArkTS host, mirroring how the
 [richerfu/SDL](https://github.com/richerfu/SDL) OHOS backend integrates: business code written in
-C99 implements the same native module contract (`init` / `render` / `onBackPressIntercept` /
+C99 implements the same eight-function native module contract (`init` / `disposeBridge` /
+`render` / `disposeRender` / `disposeAllRenders` / `onBackPressIntercept` /
 `onBridgeSyncEvent` / `onBridgeLifecycle`) and drives the existing ArkTS plugins through the
-typed N-API bridge — no Rust, no C++ ABI.
+typed N-API bridge — no Rust, no C++ ABI and no JSON transport.
 
 ```
 c_module/
@@ -31,9 +32,10 @@ c_module/
 
 ## What the framework provides
 
-- **Module contract** — `OHAbility_RegisterModule(env, exports)` exports the five functions the
-  ArkTS host expects; `init()` returns the `ApplicationLifecycle` object; `render()` mounts the
-  XComponent and keeps the bridge bindings.
+- **Module contract** — `OHAbility_RegisterModule(env, exports)` exports the eight functions the
+  ArkTS host expects. `init(bindings, bridgeOwner, context?)` owns the Ability bridge session and
+  returns `ApplicationLifecycle`; `render(slot, renderOwner)` independently owns one component
+  tree, with stale-owner-safe teardown on both sides.
 - **SDL-style application model** — `OHAbility_StartApp()` with
   `AppInit` / `AppIterate` / `AppEvent` / `AppQuit` callbacks. The application thread starts
   automatically when the first XComponent surface is created.
@@ -42,17 +44,19 @@ c_module/
     response handlers run on the ArkTS main thread),
   - `OHAbility_CallSync` (main-thread N-API callbacks only),
   - `OHAbility_CallSyncFromWorker` (worker blocks; execution on the main thread).
-- **C plugins** — `OHAbility_RegisterPlugin(id, version, on_sync_event, on_lifecycle)` receives
-  ArkTS-originated main-thread events (`context.invokeNativeSync(...)`) and lifecycle
-  notifications.
+- **C plugins** — `OHAbility_RegisterPlugin(id, plugin, userdata)` declares the same closed
+  execution mode and required contexts as ArkTS, receives named N-API main-thread events
+  (`context.invokeNativeSync(...)`), and activates only after its contexts are ready. There is no
+  numeric plugin version and no module filter.
 - **Built-in `ohos.node` surface plugin** — `OHAbility_NodeCreateContainer` /
-  `OHAbility_NodeAppendChild` / `OHAbility_NodeMountIntoRoot` / `OHAbility_NodeDispose` (+
-  `...InWindow` variants) compose the session FrameNode tree through opaque handles. The plugin
+  `OHAbility_NodeAppendChild` / `OHAbility_NodeMountIntoRoot` / `OHAbility_NodeDispose` compose
+  this module's component tree through opaque handles. The plugin
   is installed automatically by the ArkTS BridgeHost; the C side is outbound-only (Rust
   `NodeExt` / `NodeSurface` parity), and acknowledgement rejection surfaces as an error.
-- **Event surface** — lifecycle, window stage, configuration, memory, surface, touch/key/mouse/
-  hover, frame callbacks, IME, keyboard height, avoid areas; delivered as a tagged union
-  (`oh_ability_events.h`).
+- **Event surface** — lifecycle, window stage, configuration, memory, surface, raw touch,
+  key/mouse/hover, ArkUI axis, tap/pan/swipe gestures, frame callbacks, IME, keyboard height and
+  avoid areas; delivered as a tagged union (`oh_ability_events.h`). Raw touch versus semantic
+  gesture delivery is selected with `OHAbility_SetTouchInputDelivery` before render.
 - **Platform access** — init context (`basePath` / `prefPath` / `preferredLocales` /
   `moduleName`), native `resourceManager`, `OHNativeWindow`, frame-rate ranges, back-press
   interception, saved-state slot, IME show/hide, `OHAbility_Wake`.
@@ -85,7 +89,7 @@ stubs so the demo Index page still imports cleanly, and their platform libraries
 | `OH_ABILITY_PLUGIN_WINDOW` | demo | reserved (no demo surface yet) |
 | `OH_ABILITY_PLUGIN_APP_CONTROL` | demo | reserved (no demo surface yet) |
 | `OH_ABILITY_ENABLE_IME` | framework | IME support not compiled; `libohinputmethod` not linked |
-| `OH_ABILITY_ENABLE_DISPLAY` | framework | `OHAbility_GetScale` returns 1.0; `libnative_display_manager` not linked |
+| `OH_ABILITY_ENABLE_DISPLAY` | framework | display accessor is not declared; `libnative_display_manager` not linked |
 
 ```bash
 # Build with plugins disabled
@@ -128,16 +132,16 @@ backend. Every `demo*` export is a thin wrapper over the bridge:
 | `demoRequestPermissionFromMainThread` | `ohos.permission` request |
 | `demoOpenUrl` | `ohos.url` open-url |
 | `demoFileDialogOpen` / `demoFileDialogSave` | `ohos.files` file-dialog |
-| `createDemoWebview` / composed / bottom / sub-window | `ohos.webview` create (+ `ohos.node` for composed) |
+| `createDemoWebview` / composed / bottom | `ohos.webview` create (+ `ohos.node` for composed) |
 | `setBackgroundColor` / `setVisible` / `evaluateDemoWebviewScript` | `ohos.webview` controller actions |
 | `demoResourceManagerReady` / `demoResourceRawDirCount` | native `resourceManager` (rawfile) |
 | `toggleBackPressIntercept` | framework back-press interceptor |
 
-The module also registers two C plugins: `ohos.resource` (answers the ArkTS-pushed
-`resource-manager-ready` event) and `ohos.webview` (answers the sync events the WebView plugin
-emits: `before-engine-init`, `engine-initialized`, `controller-attached`/`removed`,
-`navigation-request`, `download-start`, `download-end`, `title-change` — with event logging
-aligned to the Rust demo).
+The module registers matching declarations for every plugin it calls. `ohos.resource` answers the
+ArkTS-pushed `resource-manager-ready` event, while `ohos.webview` answers `seal-engine-schemes`,
+`before-engine-init`, `engine-initialized`, `controller-attached`/`removed`,
+`navigation-request`, `download-start`, `download-end`, and `title-change`. Engine-global events
+use the Ability requirement; controller events require the module's UI context.
 
 WebView parity with the Rust demo:
 

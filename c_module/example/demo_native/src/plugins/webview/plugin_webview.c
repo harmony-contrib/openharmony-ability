@@ -2,12 +2,12 @@
  * WebView demos, aligned with the Rust demo: an ohos.webview C plugin answering the
  * ArkTS-originated sync events, the custom "demoweb" scheme (registered at module import,
  * handled natively on the IO thread), the window.test JavaScript proxy (installed on
- * controller-attached), and the webview export surface (create / composed / bottom /
- * sub-window / evaluate / style ops).
+ * controller-attached), and the webview export surface (create / composed / bottom / evaluate /
+ * style ops).
  *
  * Contract facts (verified against plugins/webview/src/main/ets/WebviewPlugin.ets):
  *   ohos.webview "create"
- * ohos.webview.CreateRequest{id,html|url,style,transparent,windowKey,parentHandle}
+ * ohos.webview.CreateRequest{id,html|url,style,transparent,domStorageAccess,parentHandle}
  *                          -> ohos.webview.CreateResponse{id}
  *   ohos.webview "evaluate-script" ohos.webview.ScriptRequest{id,script} ->
  * ohos.webview.ScriptResponse{result} ohos.webview "set-background-color"/"set-visible"
@@ -36,9 +36,12 @@
 #define DEMO_WEB_TAG "demo_webview"
 #define DEMO_COMPOSED_WEB_TAG "demo_composed_webview"
 #define DEMO_BOTTOM_WEB_TAG "demo_bottom_webview"
-#define DEMO_SUB_WINDOW_WEB_TAG "demo_sub_window_webview"
 #define DEMO_WEB_SCHEME "demoweb"
 #define DEMO_WEB_URL "demoweb://index"
+#define DEMO_WEB_SCHEME_OPTIONS                                                                    \
+    (ARKWEB_SCHEME_OPTION_STANDARD | ARKWEB_SCHEME_OPTION_CORS_ENABLED |                           \
+     ARKWEB_SCHEME_OPTION_CSP_BYPASSING | ARKWEB_SCHEME_OPTION_FETCH_ENABLED |                     \
+     ARKWEB_SCHEME_OPTION_CODE_CACHE_ENABLED)
 
 /* Compile-time switch: OH_ABILITY_PLUGIN_WEBVIEW (default ON) compiles the full plugin,
  * scheme handler and JS proxy; OFF keeps the export surface as explicit-error stubs and drops
@@ -111,10 +114,7 @@ static int demo_register_webview_scheme(void) {
     if (g_scheme_handler != NULL) {
         return OH_ABILITY_ERROR_OK;
     }
-    int32_t option = ARKWEB_SCHEME_OPTION_STANDARD | ARKWEB_SCHEME_OPTION_CORS_ENABLED |
-                     ARKWEB_SCHEME_OPTION_CSP_BYPASSING | ARKWEB_SCHEME_OPTION_FETCH_ENABLED |
-                     ARKWEB_SCHEME_OPTION_CODE_CACHE_ENABLED;
-    if (OH_ArkWeb_RegisterCustomSchemes(DEMO_WEB_SCHEME, option) != 0) {
+    if (OH_ArkWeb_RegisterCustomSchemes(DEMO_WEB_SCHEME, DEMO_WEB_SCHEME_OPTIONS) != 0) {
         DEMO_LOG(LOG_ERROR, "failed to register custom scheme '%s'", DEMO_WEB_SCHEME);
         return OH_ABILITY_ERROR_BRIDGE;
     }
@@ -154,6 +154,97 @@ static void demo_install_webview_services(const char *web_tag) {
     DEMO_LOG(LOG_INFO, "webview services installed for tag '%s'", web_tag);
 }
 
+static int demo_webview_event_types_match(const char *event, const char *request_type,
+                                          const char *response_type) {
+    const char *expected_request = NULL;
+    const char *expected_response = NULL;
+    if (strcmp(event, "seal-engine-schemes") == 0 || strcmp(event, "before-engine-init") == 0 ||
+        strcmp(event, "engine-initialized") == 0) {
+        expected_request = "ohos.webview.EngineLifecycleEvent";
+        expected_response = "ohos.webview.EngineLifecycleResponse";
+    } else if (strcmp(event, "controller-attached") == 0 ||
+               strcmp(event, "controller-removed") == 0) {
+        expected_request = "ohos.webview.ControllerEvent";
+        expected_response = "ohos.webview.EventAcknowledgement";
+    } else if (strcmp(event, "navigation-request") == 0) {
+        expected_request = "ohos.webview.NavigationRequest";
+        expected_response = "ohos.webview.NavigationResponse";
+    } else if (strcmp(event, "download-start") == 0) {
+        expected_request = "ohos.webview.DownloadStartRequest";
+        expected_response = "ohos.webview.DownloadStartResponse";
+    } else if (strcmp(event, "download-end") == 0) {
+        expected_request = "ohos.webview.DownloadEndEvent";
+        expected_response = "ohos.webview.EventAcknowledgement";
+    } else if (strcmp(event, "title-change") == 0) {
+        expected_request = "ohos.webview.TitleChangeEvent";
+        expected_response = "ohos.webview.EventAcknowledgement";
+    } else {
+        return OH_ABILITY_ERROR_NOT_FOUND;
+    }
+    return strcmp(request_type, expected_request) == 0 &&
+                   strcmp(response_type, expected_response) == 0
+               ? OH_ABILITY_ERROR_OK
+               : OH_ABILITY_ERROR_INVALID_ARG;
+}
+
+static int demo_engine_event_validate(napi_env env, const char *event, napi_value value) {
+    char *phase = demo_object_get_string(env, value, "phase");
+    int valid = phase != NULL && strcmp(phase, event) == 0;
+    free(phase);
+    if (!valid) {
+        return OH_ABILITY_ERROR_INVALID_ARG;
+    }
+    if (strcmp(event, "seal-engine-schemes") == 0) {
+        return OH_ABILITY_ERROR_OK;
+    }
+
+    napi_value schemes;
+    bool is_array = false;
+    uint32_t length = 0;
+    if (napi_get_named_property(env, value, "schemes", &schemes) != napi_ok ||
+        napi_is_array(env, schemes, &is_array) != napi_ok || !is_array ||
+        napi_get_array_length(env, schemes, &length) != napi_ok) {
+        return OH_ABILITY_ERROR_INVALID_ARG;
+    }
+    for (uint32_t i = 0; i < length; i++) {
+        napi_value declaration;
+        if (napi_get_element(env, schemes, i, &declaration) != napi_ok) {
+            continue;
+        }
+        char *scheme = demo_object_get_string(env, declaration, "scheme");
+        if (scheme != NULL && strcmp(scheme, DEMO_WEB_SCHEME) == 0) {
+            napi_value options_value;
+            uint32_t options = 0;
+            int matches =
+                napi_get_named_property(env, declaration, "options", &options_value) == napi_ok &&
+                napi_get_value_uint32(env, options_value, &options) == napi_ok &&
+                options == (uint32_t)DEMO_WEB_SCHEME_OPTIONS;
+            free(scheme);
+            return matches ? OH_ABILITY_ERROR_OK : OH_ABILITY_ERROR_INVALID_ARG;
+        }
+        free(scheme);
+    }
+    return OH_ABILITY_ERROR_INVALID_ARG;
+}
+
+static int demo_engine_response(napi_env env, napi_value response) {
+    demo_object_bool(env, response, "accepted", true);
+    napi_value schemes;
+    napi_value declaration;
+    napi_value value;
+    if (napi_create_array_with_length(env, 1, &schemes) != napi_ok ||
+        napi_create_object(env, &declaration) != napi_ok ||
+        napi_create_string_utf8(env, DEMO_WEB_SCHEME, NAPI_AUTO_LENGTH, &value) != napi_ok ||
+        napi_set_named_property(env, declaration, "scheme", value) != napi_ok ||
+        napi_create_uint32(env, (uint32_t)DEMO_WEB_SCHEME_OPTIONS, &value) != napi_ok ||
+        napi_set_named_property(env, declaration, "options", value) != napi_ok ||
+        napi_set_element(env, schemes, 0, declaration) != napi_ok ||
+        napi_set_named_property(env, response, "schemes", schemes) != napi_ok) {
+        return OH_ABILITY_ERROR_BRIDGE;
+    }
+    return OH_ABILITY_ERROR_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* ohos.webview C plugin: ArkTS-originated sync events                 */
 /* ------------------------------------------------------------------ */
@@ -161,9 +252,12 @@ static void demo_install_webview_services(const char *web_tag) {
 static int demo_webview_sync_event(napi_env env, const char *event, const char *request_type,
                                    napi_value value, const char *response_type,
                                    napi_value *out_response, void *userdata) {
-    (void)request_type;
-    (void)response_type;
     (void)userdata;
+
+    int type_status = demo_webview_event_types_match(event, request_type, response_type);
+    if (type_status != OH_ABILITY_ERROR_OK) {
+        return type_status;
+    }
 
     napi_value response;
     if (napi_create_object(env, &response) != napi_ok) {
@@ -195,11 +289,11 @@ static int demo_webview_sync_event(napi_env env, const char *event, const char *
         return OH_ABILITY_ERROR_OK;
     }
     if (strcmp(event, "controller-attached") == 0) {
-        char *id = demo_object_get_string(env, value, "id");
-        if (id != NULL && id[0] != '\0') {
-            demo_install_webview_services(id);
+        char *native_tag = demo_object_get_string(env, value, "nativeTag");
+        if (native_tag != NULL && native_tag[0] != '\0') {
+            demo_install_webview_services(native_tag);
         }
-        free(id);
+        free(native_tag);
         demo_object_bool(env, response, "accepted", true);
         *out_response = response;
         return OH_ABILITY_ERROR_OK;
@@ -212,9 +306,17 @@ static int demo_webview_sync_event(napi_env env, const char *event, const char *
         *out_response = response;
         return OH_ABILITY_ERROR_OK;
     }
-    if (strcmp(event, "before-engine-init") == 0 || strcmp(event, "engine-initialized") == 0) {
+    if (strcmp(event, "seal-engine-schemes") == 0 || strcmp(event, "before-engine-init") == 0 ||
+        strcmp(event, "engine-initialized") == 0) {
+        int status = demo_engine_event_validate(env, event, value);
+        if (status != OH_ABILITY_ERROR_OK) {
+            return status;
+        }
         DEMO_LOG(LOG_INFO, "ohos.webview %s", event);
-        demo_object_bool(env, response, "accepted", true);
+        status = demo_engine_response(env, response);
+        if (status != OH_ABILITY_ERROR_OK) {
+            return status;
+        }
         *out_response = response;
         return OH_ABILITY_ERROR_OK;
     }
@@ -241,9 +343,20 @@ static int demo_webview_sync_event(napi_env env, const char *event, const char *
     return OH_ABILITY_ERROR_NOT_FOUND;
 }
 
+static uint32_t demo_webview_required_contexts(const char *event, void *userdata) {
+    (void)userdata;
+    if (strcmp(event, "seal-engine-schemes") == 0 || strcmp(event, "before-engine-init") == 0 ||
+        strcmp(event, "engine-initialized") == 0) {
+        return OH_ABILITY_PLUGIN_CONTEXT_ABILITY;
+    }
+    return OH_ABILITY_PLUGIN_CONTEXT_UI;
+}
+
 static const OHAbility_Plugin WEBVIEW_PLUGIN = {
-    .version = 1,
+    .execution = OH_ABILITY_PLUGIN_ASYNC,
+    .required_contexts = OH_ABILITY_PLUGIN_CONTEXT_UI,
     .on_sync_event = demo_webview_sync_event,
+    .required_contexts_for_event = demo_webview_required_contexts,
     .on_lifecycle = NULL,
 };
 
@@ -261,7 +374,6 @@ int demo_register_webview_plugin(void) {
 
 typedef struct DemoWebviewCreateArgs {
     char id[64];
-    char window_key[64];
     int32_t parent_handle; /* -1 = none */
     int32_t transparent;
     int32_t bottom_style;
@@ -276,12 +388,17 @@ static int demo_build_create_request(napi_env env, napi_value *out, void *data) 
     demo_object_string(env, request, "id", args->id);
     demo_object_string(env, request, "url", DEMO_WEB_URL);
     demo_object_bool(env, request, "transparent", args->transparent != 0);
+    demo_object_bool(env, request, "domStorageAccess", true);
     if (args->parent_handle >= 0) {
         demo_object_int32(env, request, "parentHandle", args->parent_handle);
     }
-    if (args->window_key[0] != '\0') {
-        demo_object_string(env, request, "windowKey", args->window_key);
-    }
+    napi_value event_options;
+    napi_create_object(env, &event_options);
+    demo_object_bool(env, event_options, "navigationIntercept", true);
+    demo_object_bool(env, event_options, "downloadStart", true);
+    demo_object_bool(env, event_options, "downloadEnd", true);
+    demo_object_bool(env, event_options, "titleChange", true);
+    napi_set_named_property(env, request, "eventOptions", event_options);
     if (args->bottom_style) {
         napi_value style;
         napi_create_object(env, &style);
@@ -423,7 +540,7 @@ napi_value demo_set_background_color(napi_env env, napi_callback_info info) {
         free(color);
     }
 
-    int rc = OHAbility_CallAsync("ohos.webview", 1, "set-background-color",
+    int rc = OHAbility_CallAsync("ohos.webview", "set-background-color",
                                  "ohos.webview.ControllerRequest", "ohos.webview.Acknowledgement",
                                  demo_build_controller_string, build_args,
                                  demo_webview_ack_responder, ctx, 0);
@@ -456,7 +573,7 @@ napi_value demo_set_visible(napi_env env, napi_callback_info info) {
         napi_get_value_bool(env, args[0], (bool *)&build_args->value);
     }
 
-    int rc = OHAbility_CallAsync("ohos.webview", 1, "set-visible", "ohos.webview.ControllerRequest",
+    int rc = OHAbility_CallAsync("ohos.webview", "set-visible", "ohos.webview.ControllerRequest",
                                  "ohos.webview.Acknowledgement", demo_build_controller_bool,
                                  build_args, demo_webview_ack_responder, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
@@ -484,7 +601,7 @@ napi_value demo_create_webview(napi_env env, napi_callback_info info) {
     build_args->parent_handle = -1;
     build_args->transparent = 1;
 
-    int rc = OHAbility_CallAsync("ohos.webview", 1, "create", "ohos.webview.CreateRequest",
+    int rc = OHAbility_CallAsync("ohos.webview", "create", "ohos.webview.CreateRequest",
                                  "ohos.webview.CreateResponse", demo_build_create_request,
                                  build_args, demo_webview_ack_responder, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
@@ -512,36 +629,7 @@ napi_value demo_create_bottom_webview(napi_env env, napi_callback_info info) {
     build_args->parent_handle = -1;
     build_args->bottom_style = 1;
 
-    int rc = OHAbility_CallAsync("ohos.webview", 1, "create", "ohos.webview.CreateRequest",
-                                 "ohos.webview.CreateResponse", demo_build_create_request,
-                                 build_args, demo_webview_ack_responder, ctx, 0);
-    if (rc != OH_ABILITY_ERROR_OK) {
-        free(build_args);
-        demo_deferred_reject(ctx, env, "bridge not ready");
-        free(ctx);
-    }
-    return promise;
-}
-
-/* createSubWindowWebview(): Promise<void> — mounts into the "sub" window surface. */
-napi_value demo_create_sub_window_webview(napi_env env, napi_callback_info info) {
-    (void)info;
-    napi_value promise;
-    DemoDeferred *ctx = demo_deferred_new(env, &promise);
-    if (ctx == NULL) {
-        return NULL;
-    }
-    DemoWebviewCreateArgs *build_args = (DemoWebviewCreateArgs *)calloc(1, sizeof(*build_args));
-    if (build_args == NULL) {
-        free(ctx);
-        return NULL;
-    }
-    snprintf(build_args->id, sizeof(build_args->id), "%s", DEMO_SUB_WINDOW_WEB_TAG);
-    snprintf(build_args->window_key, sizeof(build_args->window_key), "%s", "sub");
-    build_args->parent_handle = -1;
-    build_args->transparent = 1;
-
-    int rc = OHAbility_CallAsync("ohos.webview", 1, "create", "ohos.webview.CreateRequest",
+    int rc = OHAbility_CallAsync("ohos.webview", "create", "ohos.webview.CreateRequest",
                                  "ohos.webview.CreateResponse", demo_build_create_request,
                                  build_args, demo_webview_ack_responder, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
@@ -621,7 +709,7 @@ static void demo_compose_created(napi_env env, int status, napi_value value, con
     build_args->parent_handle = ctx->handle;
     build_args->transparent = 1;
 
-    int rc = OHAbility_CallAsync("ohos.webview", 1, "create", "ohos.webview.CreateRequest",
+    int rc = OHAbility_CallAsync("ohos.webview", "create", "ohos.webview.CreateRequest",
                                  "ohos.webview.CreateResponse", demo_build_create_request,
                                  build_args, demo_compose_mount, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
@@ -679,7 +767,7 @@ napi_value demo_evaluate_webview_script(napi_env env, napi_callback_info info) {
     snprintf(build_args->id, sizeof(build_args->id), "%s", DEMO_WEB_TAG);
     snprintf(build_args->script, sizeof(build_args->script), "%s", "document.title");
 
-    int rc = OHAbility_CallAsync("ohos.webview", 1, "evaluate-script", "ohos.webview.ScriptRequest",
+    int rc = OHAbility_CallAsync("ohos.webview", "evaluate-script", "ohos.webview.ScriptRequest",
                                  "ohos.webview.ScriptResponse", demo_build_script_request,
                                  build_args, demo_script_responder, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
@@ -721,9 +809,6 @@ napi_value demo_create_composed_webview(napi_env env, napi_callback_info info) {
     return demo_webview_disabled_stub(env, info);
 }
 napi_value demo_create_bottom_webview(napi_env env, napi_callback_info info) {
-    return demo_webview_disabled_stub(env, info);
-}
-napi_value demo_create_sub_window_webview(napi_env env, napi_callback_info info) {
     return demo_webview_disabled_stub(env, info);
 }
 napi_value demo_evaluate_webview_script(napi_env env, napi_callback_info info) {

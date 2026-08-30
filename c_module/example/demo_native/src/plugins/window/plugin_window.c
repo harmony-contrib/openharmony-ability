@@ -8,8 +8,11 @@
 
 int demo_register_window_plugin(void) {
 #ifdef OH_ABILITY_PLUGIN_WINDOW
-    /* Placeholder: the demo does not exercise the ohos.window plugin yet. */
-    return OH_ABILITY_ERROR_OK;
+    static const OHAbility_Plugin plugin = {
+        .execution = OH_ABILITY_PLUGIN_ASYNC,
+        .required_contexts = OH_ABILITY_PLUGIN_CONTEXT_UI,
+    };
+    return OHAbility_RegisterPlugin("ohos.window", &plugin, NULL);
 #else
     return OH_ABILITY_ERROR_OK;
 #endif

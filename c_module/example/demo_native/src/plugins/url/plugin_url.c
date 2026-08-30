@@ -10,6 +10,15 @@
 
 #ifdef OH_ABILITY_PLUGIN_URL
 
+static const OHAbility_Plugin URL_PLUGIN = {
+    .execution = OH_ABILITY_PLUGIN_ASYNC,
+    .required_contexts = OH_ABILITY_PLUGIN_CONTEXT_ABILITY,
+};
+
+int demo_register_url_plugin(void) {
+    return OHAbility_RegisterPlugin("ohos.url", &URL_PLUGIN, NULL);
+}
+
 static int demo_build_url_request(napi_env env, napi_value *out, void *data) {
     (void)data;
     napi_value request;
@@ -41,9 +50,9 @@ napi_value demo_open_url(napi_env env, napi_callback_info info) {
     if (ctx == NULL) {
         return NULL;
     }
-    int rc = OHAbility_CallAsync("ohos.url", 1, "open-url", "ohos.url.OpenRequest",
-                                 "ohos.url.OpenResponse", demo_build_url_request, NULL,
-                                 demo_responder_void, ctx, 0);
+    int rc =
+        OHAbility_CallAsync("ohos.url", "open-url", "ohos.url.OpenRequest", "ohos.url.OpenResponse",
+                            demo_build_url_request, NULL, demo_responder_void, ctx, 0);
     if (rc != OH_ABILITY_ERROR_OK) {
         demo_deferred_reject(ctx, env, "bridge not ready");
         free(ctx);
@@ -52,6 +61,8 @@ napi_value demo_open_url(napi_env env, napi_callback_info info) {
 }
 
 #else /* !OH_ABILITY_PLUGIN_URL */
+
+int demo_register_url_plugin(void) { return OH_ABILITY_ERROR_OK; }
 
 napi_value demo_open_url(napi_env env, napi_callback_info info) {
     (void)info;

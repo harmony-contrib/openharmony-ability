@@ -19,7 +19,10 @@
 
 #include "demo_common.h"
 #include "plugin_app_control.h"
+#include "plugin_files.h"
+#include "plugin_permission.h"
 #include "plugin_resource.h"
+#include "plugin_url.h"
 #include "plugin_webview.h"
 #include "plugin_window.h"
 
@@ -33,7 +36,11 @@ int demo_register_app_callbacks(void);
 /* Registers every C plugin; each is gated by its OH_ABILITY_PLUGIN_* macro inside its own
  * directory under src/plugins/. */
 static int demo_register_plugins(void) {
-    int rc = demo_register_resource_plugin();
+    int rc = demo_register_bridge_plugins();
+    if (rc != OH_ABILITY_ERROR_OK) {
+        return rc;
+    }
+    rc = demo_register_resource_plugin();
     if (rc != OH_ABILITY_ERROR_OK) {
         return rc;
     }
@@ -45,7 +52,19 @@ static int demo_register_plugins(void) {
     if (rc != OH_ABILITY_ERROR_OK) {
         return rc;
     }
-    return demo_register_app_control_plugin();
+    rc = demo_register_app_control_plugin();
+    if (rc != OH_ABILITY_ERROR_OK) {
+        return rc;
+    }
+    rc = demo_register_permission_plugin();
+    if (rc != OH_ABILITY_ERROR_OK) {
+        return rc;
+    }
+    rc = demo_register_files_plugin();
+    if (rc != OH_ABILITY_ERROR_OK) {
+        return rc;
+    }
+    return demo_register_url_plugin();
 }
 
 /* ------------------------------------------------------------------ */
@@ -94,6 +113,10 @@ static const char *demo_event_name(OHAbility_EventKind kind) {
         "InputKey",
         "InputMouse",
         "InputHover",
+        "InputAxis",
+        "GestureTap",
+        "GesturePan",
+        "GestureSwipe",
         "ImeTextInput",
         "ImeBackspace",
         "ImeStatus",
@@ -125,6 +148,25 @@ static void demo_app_event(void *appstate, const OHAbility_Event *event) {
         }
         break;
     }
+    case OH_ABILITY_EVENT_INPUT_AXIS:
+        DEMO_LOG(LOG_INFO, "event InputAxis: delta=(%.2f,%.2f) at (%.1f,%.1f)",
+                 event->data.input_axis.axis.delta_x, event->data.input_axis.axis.delta_y,
+                 event->data.input_axis.axis.pointer.x, event->data.input_axis.axis.pointer.y);
+        break;
+    case OH_ABILITY_EVENT_GESTURE_TAP:
+        DEMO_LOG(LOG_INFO, "event GestureTap: at (%.1f,%.1f)",
+                 event->data.gesture_tap.tap.pointer.x, event->data.gesture_tap.tap.pointer.y);
+        break;
+    case OH_ABILITY_EVENT_GESTURE_PAN:
+        DEMO_LOG(LOG_INFO, "event GesturePan: phase=%d delta=(%.1f,%.1f) velocity=%.1f",
+                 (int)event->data.gesture_pan.pan.phase, event->data.gesture_pan.pan.delta_x,
+                 event->data.gesture_pan.pan.delta_y, event->data.gesture_pan.pan.velocity);
+        break;
+    case OH_ABILITY_EVENT_GESTURE_SWIPE:
+        DEMO_LOG(LOG_INFO, "event GestureSwipe: phase=%d angle=%.1f velocity=%.1f",
+                 (int)event->data.gesture_swipe.swipe.phase, event->data.gesture_swipe.swipe.angle,
+                 event->data.gesture_swipe.swipe.velocity);
+        break;
     case OH_ABILITY_EVENT_IME_TEXT_INPUT:
         DEMO_LOG(LOG_INFO, "event ImeTextInput: '%s'", event->data.ime_text_input.text_input.text);
         break;
@@ -165,7 +207,8 @@ int demo_register_app_callbacks(void) {
         .event = demo_app_event,
         .quit = demo_app_quit,
     };
-    return OHAbility_StartApp(&callbacks);
+    int rc = OHAbility_SetTouchInputDelivery(OH_ABILITY_TOUCH_INPUT_BOTH);
+    return rc == OH_ABILITY_ERROR_OK ? OHAbility_StartApp(&callbacks) : rc;
 }
 
 /* ------------------------------------------------------------------ */

@@ -1,5 +1,5 @@
 /*
- * Module glue: registers the five exports consumed by the @ohos-rs/ability host and owns the
+ * Module glue: registers the eight exports consumed by the @ohos-rs/ability host and owns the
  * environment cleanup hook. The export implementations live in lifecycle.c (init), xcomponent.c
  * (render), registry.c (onBridgeSyncEvent) and here (onBackPressIntercept / onBridgeLifecycle).
  */
@@ -9,9 +9,8 @@
 #include <string.h>
 
 static const char *const OH_ABILITY_LIFECYCLE_KINDS[] = {
-    "ability-create",       "ability-destroy",       "window-stage-create",
-    "window-stage-destroy", "window-stage-event",    "ui-context-ready",
-    "ui-context-destroy",   "configuration-updated", "memory-level",
+    "ui-context-ready",
+    "ui-context-destroy",
 };
 
 static int oh_is_lifecycle_kind(const char *kind) {
@@ -51,7 +50,8 @@ static napi_value oh_napi_on_bridge_lifecycle(napi_env env, napi_callback_info i
     if (argc >= 1) {
         char *kind = oh_napi_get_string(env, args[0]);
         if (!oh_is_lifecycle_kind(kind)) {
-            OHABILITY_LOG(LOG_WARN, "ignoring unknown bridge lifecycle kind '%s'", kind);
+            napi_throw_error(env, "oh_ability/lifecycle",
+                             "unsupported ArkTS bridge lifecycle event");
         } else {
             /* ArkTS only emits ui-context-ready / ui-context-destroy through this port; the
              * remaining kinds are synthesized by the framework in lifecycle.c. */
@@ -76,6 +76,7 @@ static void oh_env_cleanup(void *arg) {
     /* Abort the bridge transports first: queued requests drain through call-js with env == NULL
      * and wake the worker-sync waiters instead of leaving them blocked. */
     oh_bindings_teardown();
+    oh_render_cleanup(g_oh_state.env);
 
     oh_state_lock();
 
@@ -83,11 +84,17 @@ static void oh_env_cleanup(void *arg) {
     free(g_oh_state.pref_path);
     free(g_oh_state.preferred_locales);
     free(g_oh_state.module_name);
+    free(g_oh_state.restored_state);
     free(g_oh_state.saved_state);
+    free(g_oh_state.bridge_owner);
+    free(g_oh_state.render_owner);
     g_oh_state.base_path = NULL;
     g_oh_state.pref_path = NULL;
     g_oh_state.preferred_locales = NULL;
     g_oh_state.module_name = NULL;
+    g_oh_state.restored_state = NULL;
+    g_oh_state.bridge_owner = NULL;
+    g_oh_state.render_owner = NULL;
 
     oh_configuration_free(&g_oh_state.configuration);
     memset(g_oh_state.avoid_area_present, 0, sizeof(g_oh_state.avoid_area_present));
@@ -104,6 +111,9 @@ static void oh_env_cleanup(void *arg) {
     g_oh_state.native_window = NULL;
     g_oh_state.env = NULL;
     g_oh_state.plugin_count = 0;
+    g_oh_state.plugins_frozen = 0;
+    g_oh_state.plugin_session_active = 0;
+    g_oh_state.lifecycle_history_count = 0;
     g_oh_state.cleanup_registered = 0;
 
     oh_state_unlock();
@@ -141,7 +151,10 @@ int OHAbility_RegisterModule(napi_env env, napi_value exports) {
         napi_callback callback;
     } exports_table[] = {
         {"init", oh_napi_init},
+        {"disposeBridge", oh_napi_dispose_bridge},
         {"render", oh_napi_render},
+        {"disposeRender", oh_napi_dispose_render},
+        {"disposeAllRenders", oh_napi_dispose_all_renders},
         {"onBackPressIntercept", oh_napi_on_back_press_intercept},
         {"onBridgeSyncEvent", oh_napi_on_bridge_sync_event},
         {"onBridgeLifecycle", oh_napi_on_bridge_lifecycle},
@@ -163,7 +176,8 @@ int OHAbility_RegisterModule(napi_env env, napi_value exports) {
         }
     }
 
-    OHABILITY_LOG(LOG_INFO, "module registered (exports: init/render/onBackPressIntercept/"
-                            "onBridgeSyncEvent/onBridgeLifecycle)");
+    OHABILITY_LOG(LOG_INFO,
+                  "module registered (exports: init/disposeBridge/render/disposeRender/"
+                  "disposeAllRenders/onBackPressIntercept/onBridgeSyncEvent/onBridgeLifecycle)");
     return OH_ABILITY_ERROR_OK;
 }

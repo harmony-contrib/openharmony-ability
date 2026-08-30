@@ -1,5 +1,5 @@
 /*
- * C plugin registry: identifiers, versioned registration, lifecycle fan-out, and the
+ * C plugin registry: module-agnostic declarations, context-gated lifecycle replay, and the
  * `onBridgeSyncEvent` export that delivers ArkTS-originated main-thread events to plugins.
  * Dispatch is fail-closed: an unknown plugin id or a handler error throws into ArkTS, matching
  * the Rust `BridgePluginRegistry` semantics.
@@ -16,11 +16,20 @@ int OHAbility_RegisterPlugin(const char *plugin_id, const OHAbility_Plugin *plug
     if (plugin_id == NULL || plugin == NULL || !oh_validate_identifier("plugin id", plugin_id)) {
         return OH_ABILITY_ERROR_INVALID_ARG;
     }
-    if (plugin->version == 0 || plugin->on_sync_event == NULL) {
+    const uint32_t valid_contexts = OH_ABILITY_PLUGIN_CONTEXT_ABILITY |
+                                    OH_ABILITY_PLUGIN_CONTEXT_WINDOW_STAGE |
+                                    OH_ABILITY_PLUGIN_CONTEXT_UI;
+    if ((plugin->execution != OH_ABILITY_PLUGIN_ASYNC &&
+         plugin->execution != OH_ABILITY_PLUGIN_SYNC_MAIN_THREAD) ||
+        (plugin->required_contexts & ~valid_contexts) != 0) {
         return OH_ABILITY_ERROR_INVALID_ARG;
     }
 
     oh_state_lock();
+    if (g_oh_state.plugins_frozen) {
+        oh_state_unlock();
+        return OH_ABILITY_ERROR_NOT_READY;
+    }
     for (size_t i = 0; i < g_oh_state.plugin_count; i++) {
         if (strcmp(g_oh_state.plugins[i].id, plugin_id) == 0) {
             oh_state_unlock();
@@ -36,29 +45,189 @@ int OHAbility_RegisterPlugin(const char *plugin_id, const OHAbility_Plugin *plug
     snprintf(entry->id, sizeof(entry->id), "%s", plugin_id);
     entry->plugin = *plugin;
     entry->userdata = userdata;
+    entry->activated = 0;
     oh_state_unlock();
 
-    OHABILITY_LOG(LOG_INFO, "plugin registered: %s (version %u)", plugin_id, plugin->version);
+    OHABILITY_LOG(LOG_INFO, "plugin registered: %s (%s)", plugin_id,
+                  plugin->execution == OH_ABILITY_PLUGIN_ASYNC ? "async" : "sync-main-thread");
     return OH_ABILITY_ERROR_OK;
 }
 
+static int oh_plugin_contexts_ready(uint32_t requirements) {
+    return ((requirements & OH_ABILITY_PLUGIN_CONTEXT_ABILITY) == 0 || g_oh_state.ability_ready) &&
+           ((requirements & OH_ABILITY_PLUGIN_CONTEXT_WINDOW_STAGE) == 0 ||
+            g_oh_state.window_stage_ready) &&
+           ((requirements & OH_ABILITY_PLUGIN_CONTEXT_UI) == 0 || g_oh_state.ui_context_ready);
+}
+
+static void oh_observe_lifecycle(const char *kind) {
+    if (strcmp(kind, "ability-create") == 0) {
+        g_oh_state.ability_ready = 1;
+    } else if (strcmp(kind, "ability-destroy") == 0) {
+        g_oh_state.ability_ready = 0;
+        g_oh_state.window_stage_ready = 0;
+        g_oh_state.ui_context_ready = 0;
+    } else if (strcmp(kind, "window-stage-create") == 0) {
+        g_oh_state.window_stage_ready = 1;
+    } else if (strcmp(kind, "window-stage-destroy") == 0) {
+        g_oh_state.window_stage_ready = 0;
+        g_oh_state.ui_context_ready = 0;
+    } else if (strcmp(kind, "ui-context-ready") == 0) {
+        g_oh_state.ui_context_ready = 1;
+    } else if (strcmp(kind, "ui-context-destroy") == 0) {
+        g_oh_state.ui_context_ready = 0;
+    }
+}
+
+typedef struct OHAbility_LifecycleDelivery {
+    void (*callback)(const OHAbility_LifecycleEvent *event, void *userdata);
+    void *userdata;
+    OHAbility_LifecycleEvent event;
+} OHAbility_LifecycleDelivery;
+
 void oh_plugins_dispatch_lifecycle(const char *kind, int32_t window_stage_event,
                                    int32_t memory_level) {
-    /* Copy the entries under the lock, call user code outside it. */
+    if (kind == NULL) {
+        return;
+    }
+
+    OHAbility_LifecycleDelivery deliveries[OHABILITY_MAX_PLUGINS * OHABILITY_MAX_LIFECYCLE_HISTORY];
+    size_t delivery_count = 0;
+
     oh_state_lock();
-    size_t count = g_oh_state.plugin_count;
-    OHAbility_PluginEntry *entries = g_oh_state.plugins;
+    if (strcmp(kind, "ability-create") == 0) {
+        g_oh_state.plugin_session_active = 1;
+        g_oh_state.ability_ready = 0;
+        g_oh_state.window_stage_ready = 0;
+        g_oh_state.ui_context_ready = 0;
+        g_oh_state.lifecycle_history_count = 0;
+        for (size_t i = 0; i < g_oh_state.plugin_count; i++) {
+            g_oh_state.plugins[i].activated = 0;
+        }
+    } else if (!g_oh_state.plugin_session_active) {
+        oh_state_unlock();
+        return;
+    }
+
+    oh_observe_lifecycle(kind);
     OHAbility_LifecycleEvent event = {
         .kind = kind,
+        .restored_state = strcmp(kind, "ability-create") == 0
+                              ? (g_oh_state.restored_state != NULL ? g_oh_state.restored_state : "")
+                              : NULL,
         .window_stage_event = window_stage_event,
         .memory_level = memory_level,
     };
-    for (size_t i = 0; i < count; i++) {
-        if (entries[i].plugin.on_lifecycle != NULL) {
-            entries[i].plugin.on_lifecycle(&event, entries[i].userdata);
+
+    if (g_oh_state.lifecycle_history_count >= OHABILITY_MAX_LIFECYCLE_HISTORY) {
+        size_t drop = g_oh_state.lifecycle_history_count > 1 ? 1 : 0;
+        for (size_t i = 0; i < g_oh_state.lifecycle_history_count; i++) {
+            const char *recorded_kind = g_oh_state.lifecycle_history[i].kind;
+            if (strcmp(recorded_kind, "configuration-updated") == 0 ||
+                strcmp(recorded_kind, "memory-level") == 0 ||
+                strcmp(recorded_kind, "window-stage-event") == 0) {
+                drop = i;
+                break;
+            }
+        }
+        memmove(&g_oh_state.lifecycle_history[drop], &g_oh_state.lifecycle_history[drop + 1],
+                (g_oh_state.lifecycle_history_count - drop - 1) * sizeof(OHAbility_LifecycleEvent));
+        g_oh_state.lifecycle_history_count--;
+    }
+    g_oh_state.lifecycle_history[g_oh_state.lifecycle_history_count++] = event;
+
+    for (size_t i = 0; i < g_oh_state.plugin_count; i++) {
+        OHAbility_PluginEntry *entry = &g_oh_state.plugins[i];
+        if (entry->plugin.on_lifecycle == NULL) {
+            if (!entry->activated && oh_plugin_contexts_ready(entry->plugin.required_contexts)) {
+                entry->activated = 1;
+            }
+            continue;
+        }
+        size_t begin = g_oh_state.lifecycle_history_count - 1;
+        if (!entry->activated && oh_plugin_contexts_ready(entry->plugin.required_contexts)) {
+            entry->activated = 1;
+            begin = 0;
+        } else if (!entry->activated) {
+            continue;
+        }
+        for (size_t history = begin; history < g_oh_state.lifecycle_history_count; history++) {
+            deliveries[delivery_count++] = (OHAbility_LifecycleDelivery){
+                .callback = entry->plugin.on_lifecycle,
+                .userdata = entry->userdata,
+                .event = g_oh_state.lifecycle_history[history],
+            };
+        }
+    }
+
+    if (strcmp(kind, "ability-destroy") == 0) {
+        g_oh_state.plugin_session_active = 0;
+        g_oh_state.lifecycle_history_count = 0;
+        for (size_t i = 0; i < g_oh_state.plugin_count; i++) {
+            g_oh_state.plugins[i].activated = 0;
         }
     }
     oh_state_unlock();
+
+    for (size_t i = 0; i < delivery_count; i++) {
+        deliveries[i].callback(&deliveries[i].event, deliveries[i].userdata);
+    }
+}
+
+napi_value oh_plugins_declarations(napi_env env) {
+    OHAbility_PluginEntry entries[OHABILITY_MAX_PLUGINS];
+    size_t count;
+    oh_state_lock();
+    g_oh_state.plugins_frozen = 1;
+    count = g_oh_state.plugin_count;
+    memcpy(entries, g_oh_state.plugins, count * sizeof(OHAbility_PluginEntry));
+    oh_state_unlock();
+
+    for (size_t i = 1; i < count; i++) {
+        OHAbility_PluginEntry entry = entries[i];
+        size_t j = i;
+        while (j > 0 && strcmp(entries[j - 1].id, entry.id) > 0) {
+            entries[j] = entries[j - 1];
+            j--;
+        }
+        entries[j] = entry;
+    }
+
+    napi_value declarations;
+    napi_create_array_with_length(env, count, &declarations);
+    for (size_t i = 0; i < count; i++) {
+        napi_value declaration;
+        napi_value value;
+        napi_create_object(env, &declaration);
+        napi_create_string_utf8(env, entries[i].id, NAPI_AUTO_LENGTH, &value);
+        napi_set_named_property(env, declaration, "id", value);
+        const char *execution =
+            entries[i].plugin.execution == OH_ABILITY_PLUGIN_ASYNC ? "async" : "sync-main-thread";
+        napi_create_string_utf8(env, execution, NAPI_AUTO_LENGTH, &value);
+        napi_set_named_property(env, declaration, "execution", value);
+
+        napi_value requirements;
+        napi_create_array(env, &requirements);
+        uint32_t requirement_index = 0;
+        static const struct {
+            uint32_t bit;
+            const char *name;
+        } contexts[] = {
+            {OH_ABILITY_PLUGIN_CONTEXT_ABILITY, "ability"},
+            {OH_ABILITY_PLUGIN_CONTEXT_WINDOW_STAGE, "window-stage"},
+            {OH_ABILITY_PLUGIN_CONTEXT_UI, "ui-context"},
+        };
+        for (size_t context = 0; context < sizeof(contexts) / sizeof(contexts[0]); context++) {
+            if ((entries[i].plugin.required_contexts & contexts[context].bit) == 0) {
+                continue;
+            }
+            napi_create_string_utf8(env, contexts[context].name, NAPI_AUTO_LENGTH, &value);
+            napi_set_element(env, requirements, requirement_index++, value);
+        }
+        napi_set_named_property(env, declaration, "requires", requirements);
+        napi_set_element(env, declarations, (uint32_t)i, declaration);
+    }
+    return declarations;
 }
 
 napi_value oh_napi_on_bridge_sync_event(napi_env env, napi_callback_info info) {
@@ -104,7 +273,22 @@ napi_value oh_napi_on_bridge_sync_event(napi_env env, napi_callback_info info) {
         goto done;
     }
     OHAbility_PluginEntry entry = *match;
+    uint32_t requirements = entry.plugin.required_contexts_for_event != NULL
+                                ? entry.plugin.required_contexts_for_event(event, entry.userdata)
+                                : entry.plugin.required_contexts;
+    int ready = g_oh_state.plugin_session_active && oh_plugin_contexts_ready(requirements);
     oh_state_unlock();
+
+    if (!ready) {
+        napi_throw_error(env, "oh_ability/not_ready",
+                         "C plugin received an event before its required context was ready");
+        goto done;
+    }
+    if (entry.plugin.on_sync_event == NULL) {
+        napi_throw_error(env, "oh_ability/not_found",
+                         "C plugin does not support main-thread events");
+        goto done;
+    }
 
     /* The handler runs inside the active N-API callback and must respond synchronously. */
     int rc = entry.plugin.on_sync_event(env, event, request_type, value, response_type, &result,

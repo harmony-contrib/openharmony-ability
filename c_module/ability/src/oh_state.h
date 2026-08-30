@@ -13,6 +13,7 @@
 /* Must precede arkui/native_node.h in this SDK (missing OH_PixelmapNative declaration). */
 #include <multimedia/image_framework/image/pixelmap_native.h>
 
+#include <arkui/native_gesture.h>
 #include <arkui/native_interface.h>
 #include <arkui/native_node.h>
 #include <arkui/native_node_napi.h>
@@ -33,6 +34,7 @@ typedef struct OH_NativeXComponent OH_NativeXComponent;
 #define OHABILITY_QUEUE_CAPACITY 128
 #define OHABILITY_MAX_PLUGINS 16
 #define OHABILITY_MAX_STRING_LEN 128
+#define OHABILITY_MAX_LIFECYCLE_HISTORY 16
 
 /* Waiters for worker -> main-thread synchronous bridge calls.
  * refs starts at 2 (calling worker + completion side); the last release frees the waiter, so a
@@ -52,6 +54,7 @@ typedef struct OHAbility_PluginEntry {
     char id[OHABILITY_MAX_STRING_LEN];
     OHAbility_Plugin plugin;
     void *userdata;
+    int activated;
 } OHAbility_PluginEntry;
 
 typedef struct OHAbility_State {
@@ -63,11 +66,13 @@ typedef struct OHAbility_State {
 
     /* Per-init (ability session) state. */
     uint64_t session_generation;
+    char *bridge_owner;
     char *base_path;
     char *pref_path;
     char *preferred_locales;
     char *module_name;
     NativeResourceManager *resource_manager;
+    char *restored_state;
     char *saved_state;
 
     /* Snapshot state, kept in sync with the Rust OpenHarmonyApp (app.config() / content_rect() /
@@ -81,16 +86,25 @@ typedef struct OHAbility_State {
 
     /* Per-render (mount) state. */
     uint64_t mount_generation;
+    char *render_owner;
+    int surface_active;
     OH_NativeXComponent *mounted_component; /* current mount; stale callbacks check identity */
     ArkUI_NodeHandle mounted_node;
     ArkUI_NodeContentHandle mounted_slot;
     OHNativeWindow *native_window;
+    OHAbility_TouchInputDelivery touch_input_delivery;
+    ArkUI_GestureRecognizer *gestures[3];
+    size_t gesture_count;
+    int axis_event_registered;
+    float pan_previous_x;
+    float pan_previous_y;
+    int pan_has_previous;
     int32_t frame_rate_min;
     int32_t frame_rate_max;
     int32_t frame_rate_preferred;
     int frame_rate_set;
 
-    /* Bridge bindings (replaced on every render). */
+    /* Bridge bindings owned by one Ability/module session, independently of rendering. */
     napi_threadsafe_function invoke_tsfn;      /* bridgeInvoke (async + promise) */
     napi_threadsafe_function invoke_sync_tsfn; /* bridgeInvokeSync from worker threads */
     napi_threadsafe_function dispatch_tsfn;    /* bridgeDispatch main-thread scheduler */
@@ -124,6 +138,13 @@ typedef struct OHAbility_State {
     /* Registered C plugins. */
     OHAbility_PluginEntry plugins[OHABILITY_MAX_PLUGINS];
     size_t plugin_count;
+    int plugins_frozen;
+    int plugin_session_active;
+    int ability_ready;
+    int window_stage_ready;
+    int ui_context_ready;
+    OHAbility_LifecycleEvent lifecycle_history[OHABILITY_MAX_LIFECYCLE_HISTORY];
+    size_t lifecycle_history_count;
 } OHAbility_State;
 
 extern OHAbility_State g_oh_state;
@@ -167,15 +188,20 @@ void oh_waiter_abort_all(int status);
 /* Lifecycle dispatch to registered C plugins (main thread). */
 void oh_plugins_dispatch_lifecycle(const char *kind, int32_t window_stage_event,
                                    int32_t memory_level);
+napi_value oh_plugins_declarations(napi_env env);
 
 /* N-API module exports (declared here; implemented across the framework files). */
 napi_value oh_napi_init(napi_env env, napi_callback_info info);                 /* lifecycle.c */
 napi_value oh_napi_render(napi_env env, napi_callback_info info);               /* xcomponent.c */
+napi_value oh_napi_dispose_render(napi_env env, napi_callback_info info);       /* xcomponent.c */
+napi_value oh_napi_dispose_all_renders(napi_env env, napi_callback_info info);  /* xcomponent.c */
+void oh_render_cleanup(napi_env env);                                           /* xcomponent.c */
+napi_value oh_napi_dispose_bridge(napi_env env, napi_callback_info info);       /* lifecycle.c */
 napi_value oh_napi_on_bridge_sync_event(napi_env env, napi_callback_info info); /* registry.c */
 
 /* Bridge bindings teardown/replacement (module.c / lifecycle.c / xcomponent.c). */
 void oh_bindings_teardown(void);
-void oh_bindings_replace(napi_env env, napi_value bindings);
+int oh_bindings_replace(napi_env env, napi_value bindings);
 
 /* Configuration object parsing (configuration.c). */
 int oh_configuration_from_object(napi_env env, napi_value object, OHAbility_Configuration *out);
