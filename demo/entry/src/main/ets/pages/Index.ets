@@ -1,5 +1,9 @@
 import { DefaultXComponent, invokeNativeBackPressInterceptor } from "@ohos-rs/ability";
-import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/EntryAbility";
+import {
+  demoWindowStage,
+  SDL_NATIVE_MODULE,
+  SUB_WINDOW_NATIVE_MODULE,
+} from "../entryability/EntryAbility";
 import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
   createBottomDemoWebview,
@@ -45,7 +49,7 @@ struct Index {
   @State fileDialogResult: string = "";
   @State resourceStatus: string = "";
 
-  private tabs: string[] = ["XComponent", "WebView", "Platform", "Resource"];
+  private tabs: string[] = ["XComponent", "WebView", "Platform", "Resource", "SDL3"];
 
   // ---------- status helpers ----------
 
@@ -610,6 +614,44 @@ struct Index {
   }
 
   @Builder
+  SDL3Demo() {
+    Column({ space: 12 }) {
+      DemoCard({
+        title: "SDL3 native surface",
+        hint: "SDL renderer + current module/render-owner lifecycle",
+        statusText: "✓ touch, mouse, wheel, key and ArkUI gestures are wired",
+        statusColor: $r("app.color.status_success"),
+        busy: false,
+        buttons: [],
+      })
+      Stack() {
+        DefaultXComponent({ moduleName: SDL_NATIVE_MODULE })
+          .width("100%")
+          .height("100%")
+        Column({ space: 4 }) {
+          Text("Interactive SDL3 demo")
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(Color.White)
+          Text("Touch/drag/scroll or use a hardware key; counters are rendered by SDL.")
+            .fontSize(11)
+            .fontColor("#ddffffff")
+        }
+        .alignItems(HorizontalAlign.Start)
+        .padding(10)
+        .backgroundColor("#66000000")
+        .alignSelf(ItemAlign.Start)
+      }
+      .layoutWeight(1)
+      .width("100%")
+      .borderRadius(12)
+    }
+    .width("100%")
+    .height("100%")
+    .padding({ top: 4 });
+  }
+
+  @Builder
   WebviewUnderlay() {
     Column() {
       Text("Business-owned content below the session node tree.")
@@ -654,6 +696,9 @@ struct Index {
       }
       if (this.currentDemo === 3) {
         this.ResourceDemo();
+      }
+      if (this.currentDemo === 4) {
+        this.SDL3Demo();
       }
     }
     .width("100%")
