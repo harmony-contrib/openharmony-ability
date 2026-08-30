@@ -20,7 +20,8 @@ export let demoWindowStage: window.WindowStage | null = null;
 
 const MAIN_NATIVE_MODULE = "demo_native";
 export const SUB_WINDOW_NATIVE_MODULE = "demo_sub_native";
-const NATIVE_MODULES = [MAIN_NATIVE_MODULE, SUB_WINDOW_NATIVE_MODULE];
+export const SDL_NATIVE_MODULE = "sdl_demo_native";
+const NATIVE_MODULES = [MAIN_NATIVE_MODULE, SUB_WINDOW_NATIVE_MODULE, SDL_NATIVE_MODULE];
 
 export default class EntryAbility extends NativeAbility {
   public moduleName: string[] = NATIVE_MODULES;

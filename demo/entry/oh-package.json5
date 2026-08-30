@@ -9,6 +9,7 @@
     "libentry.so": "file:./src/main/cpp/types/libentry",
     "libdemo_native.so": "file:./src/main/cpp/types/libdemo_native",
     "libdemo_sub_native.so": "file:./src/main/cpp/types/libdemo_sub_native",
+    "libsdl_demo_native.so": "file:./src/main/cpp/types/libsdl_demo_native",
     "@ohos-rs/ability": "file:../../native_ability",
     "@ohos-rs/ability-plugin-app-control": "file:../../plugins/app-control",
     "@ohos-rs/ability-plugin-permission": "file:../../plugins/permission",

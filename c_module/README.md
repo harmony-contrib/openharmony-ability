@@ -14,7 +14,7 @@ c_module/
 │   │   ├── oh_ability.h      # Public C API (SDL-style entry model)
 │   │   └── oh_ability_events.h
 │   └── src/                  # module/lifecycle/bridge/registry/xcomponent/ime/node/...
-└── example/demo_native/      # Pure C demo native module (libdemo_native.so)
+├── example/demo_native/      # Pure C demo native module (libdemo_native.so)
     ├── src/
     │   ├── main.c            # NAPI entry + application callbacks + plugin assembly
     │   ├── exports.c         # export table (demo.* exports + plugin exports)
@@ -27,7 +27,8 @@ c_module/
     │       ├── webview/      # ohos.webview (inbound plugin + scheme + JS proxy)
     │       ├── window/       # ohos.window (reserved)
     │       └── app-control/  # ohos.app-control (reserved)
-    └── types/libdemo_native/ # Index.d.ts aligned with the Rust demo's export surface
+│   └── types/libdemo_native/ # Index.d.ts aligned with the Rust demo's export surface
+└── example/sdl_demo_native/  # SDL3 validation module (libsdl_demo_native.so)
 ```
 
 ## What the framework provides
@@ -110,6 +111,12 @@ scripts/build-c-demo.sh --install
 
 # Other ABIs / clean
 scripts/build-c-demo.sh --arch=x86_64 --clean
+
+# Build the SDL3 adapter/demo from /Volumes/PSSD/sdl/SDL
+scripts/build-sdl-demo.sh
+
+# Build and copy libsdl_demo_native.so into the demo HAP's native libs
+scripts/build-sdl-demo.sh --install
 ```
 
 The script resolves the OHOS SDK from `$OHOS_SDK` or the newest DevEco Studio installation and
@@ -156,11 +163,32 @@ WebView parity with the Rust demo:
 The application thread runs the SDL-style callbacks and logs events; state saving uses the
 framework's saved-state slot.
 
+### SDL3 integration demo
+
+The checkout selected by `OH_ABILITY_SDL_SOURCE_DIR` (the build script defaults to
+`/Volumes/PSSD/sdl/SDL`) owns the integration template at
+`examples/ohos/oh_ability`. This repository keeps only the validation demo. SDL no longer has a
+standalone N-API/XComponent owner: `oh_ability` owns the current eight-export contract and the
+single XComponent, while the SDL-side adapter binds `OHAbility_GetNativeWindow()` and forwards
+lifecycle, resize, content-rect, avoid-area, keyboard-height, touch, mouse, wheel, hardware-key
+and IME events.
+
+The SDL-side template also migrates the previous ArkTS helpers to the mainline named plugin
+contracts (`ohos.permission`, `ohos.files`, `ohos.url`, `ohos.resource`,
+`ohos.app-control`). Request and response values are named N-API objects; no JSON bridge or
+compatibility entry remains.
+
+`c_module/example/sdl_demo_native` uses SDL3's renderer to draw an animated surface and live input
+counters. The Demo app exposes it as the separate `sdl_demo_native` module on the **SDL3** tab, so
+it also validates the mainline rule that each `DefaultXComponent` has a distinct native module.
+
 ## Verification
 
 ```bash
 scripts/build-c-demo.sh            # builds libdemo_native.so
 scripts/build-c-demo.sh --install  # installs it into demo/entry/libs/arm64-v8a/
+scripts/build-sdl-demo.sh          # builds libsdl_demo_native.so against SDL3
+scripts/build-sdl-demo.sh --install
 ```
 
 Then build the demo app (DevEco Studio or `hvigorw assembleHap`) and run it on a device:
