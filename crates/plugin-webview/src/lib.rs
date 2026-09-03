@@ -744,8 +744,9 @@ impl_bridge_napi_type!(WebviewSnapshotResponse, "ohos.webview.SnapshotResponse")
 
 // ── capture-webview / pick-color ────────────────────────────────────────────────
 
-/// Response for `capture-webview`: the full-page snapshot encoded as a base64 PNG string
-/// plus its pixel dimensions. base64 (not raw bytes) — a `Vec<u8>` in a napi object would
+/// Response for `capture-webview`: the viewport snapshot (the on-screen area, not the
+/// full scrollable page) encoded as a base64 PNG string plus its pixel dimensions.
+/// base64 (not raw bytes) — a `Vec<u8>` in a napi object would
 /// serialize as `Array<number>`, inflating a multi-hundred-KB PNG ~8x in memory.
 /// Requests reuse [`WebviewControllerRequest`].
 #[napi(object)]
@@ -968,14 +969,34 @@ impl WebviewClient {
         Request: BridgeNapiType,
         Response: BridgeNapiType,
     {
-        self.bridge
-            .call_async::<WebviewBridgePlugin, Request, Response>(
-                action,
-                request,
-                BridgeCallOptions::default(),
-            )
+        self.call_with_options(action, request, BridgeCallOptions::default())
             .await
     }
+
+    /// Like [`call`] with an explicit per-call policy — heavy actions override the
+    /// 15s default timeout via [`snapshot_call_options`].
+    async fn call_with_options<Request, Response>(
+        &self,
+        action: &str,
+        request: Request,
+        options: BridgeCallOptions,
+    ) -> Result<Response>
+    where
+        Request: BridgeNapiType,
+        Response: BridgeNapiType,
+    {
+        self.bridge
+            .call_async::<WebviewBridgePlugin, Request, Response>(action, request, options)
+            .await
+    }
+}
+
+/// Snapshot actions run a 10s-capped ArkWeb capture (up to 3 retries) plus, for
+/// `capture-webview`, PNG packing of a potentially multi-MB image; give them a wider
+/// budget than the 15s bridge default (aligned with the plugin-files/plugin-permission
+/// precedent of 60s for heavy actions).
+fn snapshot_call_options() -> BridgeCallOptions {
+    BridgeCallOptions::default().with_timeout_ms(60_000)
 }
 
 pub trait WebviewExt {
@@ -1363,11 +1384,12 @@ impl WebviewHandle {
     pub async fn web_page_snapshot(&self) -> Result<WebviewSnapshotResponse> {
         let response = self
             .client
-            .call::<_, WebviewSnapshotResponse>(
+            .call_with_options::<_, WebviewSnapshotResponse>(
                 "web-page-snapshot",
                 WebviewSnapshotRequest {
                     id: self.id.clone(),
                 },
+                snapshot_call_options(),
             )
             .await?;
         if response.success {
@@ -1386,7 +1408,11 @@ impl WebviewHandle {
     /// `image.ImagePacker`. The PixelMap and ImagePacker are released on the ArkTS side.
     pub async fn capture_webview(&self) -> Result<WebviewCaptureResponse> {
         self.client
-            .call::<_, WebviewCaptureResponse>("capture-webview", self.controller_request())
+            .call_with_options::<_, WebviewCaptureResponse>(
+                "capture-webview",
+                self.controller_request(),
+                snapshot_call_options(),
+            )
             .await
     }
 
@@ -1400,7 +1426,11 @@ impl WebviewHandle {
         request.x = Some(x as f64);
         request.y = Some(y as f64);
         self.client
-            .call::<_, WebviewPickColorResponse>("pick-color", request)
+            .call_with_options::<_, WebviewPickColorResponse>(
+                "pick-color",
+                request,
+                snapshot_call_options(),
+            )
             .await
     }
     ///

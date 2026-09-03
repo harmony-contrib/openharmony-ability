@@ -14,7 +14,8 @@ use napi_ohos::{Error, Result};
 use openharmony_ability::OpenHarmonyApp;
 use openharmony_ability_plugin_webview::{WebviewCaptureResponse, WebviewClient, WebviewPickColorResponse};
 
-/// A full-page webview screenshot: a base64-encoded PNG plus its pixel dimensions.
+/// A viewport webview screenshot (the on-screen area, not the full scrollable page):
+/// a base64-encoded PNG plus its pixel dimensions.
 ///
 /// base64 (not raw bytes) — a `Vec<u8>` in a napi object would serialize as
 /// `Array<number>`, inflating a multi-hundred-KB PNG ~8x in memory.

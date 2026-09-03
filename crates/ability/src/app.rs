@@ -1270,8 +1270,21 @@ pub fn peek_continue_snapshot() -> String {
 mod continuation_tests {
     use super::*;
 
+    /// Rust runs this module's tests in parallel while every test mutates the same
+    /// process-global statics — serialize them explicitly (the restore/data tests
+    /// share CONTINUATION_RESTORE/CONTINUATION_DATA, the snapshot tests share
+    /// CONTINUATION_SNAPSHOT).
+    static SERIALIZE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        SERIALIZE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn test_take_continuation_data_drains() {
+        let _guard = lock();
         store_continuation(true, r#"{"scrollOffset":120,"route":"/article/42"}"#);
         assert_eq!(
             take_continuation_data(),
@@ -1287,6 +1300,7 @@ mod continuation_tests {
 
     #[test]
     fn test_non_continuation_launch_clears_stale_payload() {
+        let _guard = lock();
         store_continuation(true, r#"{"stale":true}"#);
         // A plain relaunch stores isContinuation=false — must clear both.
         store_continuation(false, r#"{}"#);
@@ -1296,6 +1310,7 @@ mod continuation_tests {
 
     #[test]
     fn test_is_continuation_restore_idempotent() {
+        let _guard = lock();
         store_continuation(true, r#"{"a":1}"#);
         assert!(is_continuation_restore());
         assert!(is_continuation_restore());
@@ -1308,16 +1323,24 @@ mod continuation_tests {
 
     #[test]
     fn test_continue_snapshot_peek_does_not_drain() {
+        let _guard = lock();
         store_continue_snapshot(r#"{"route":"/editor","draft":42}"#);
         // Repeated peeks (a cancelled migration retried) read the same value.
-        assert_eq!(peek_continue_snapshot(), r#"{"route":"/editor","draft":42}"#);
-        assert_eq!(peek_continue_snapshot(), r#"{"route":"/editor","draft":42}"#);
+        assert_eq!(
+            peek_continue_snapshot(),
+            r#"{"route":"/editor","draft":42}"#
+        );
+        assert_eq!(
+            peek_continue_snapshot(),
+            r#"{"route":"/editor","draft":42}"#
+        );
         // Clean up for other tests sharing the static.
         store_continue_snapshot("");
     }
 
     #[test]
     fn test_continue_snapshot_overwrites() {
+        let _guard = lock();
         store_continue_snapshot("first");
         store_continue_snapshot("second");
         assert_eq!(peek_continue_snapshot(), "second");
@@ -1327,6 +1350,7 @@ mod continuation_tests {
 
     #[test]
     fn test_continue_snapshot_empty_clears() {
+        let _guard = lock();
         store_continue_snapshot("value");
         // Empty string clears (onContinue refuses with MISMATCH on empty).
         store_continue_snapshot("");

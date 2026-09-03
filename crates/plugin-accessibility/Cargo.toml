@@ -9,3 +9,5 @@ description = "Accessibility bridge plugin facade for openharmony-ability"
 openharmony-ability = { workspace = true }
 napi-ohos = { workspace = true }
 napi-derive-ohos = { workspace = true }
+futures-executor = { workspace = true }
+log = "0.4"

@@ -1671,6 +1671,10 @@ class BridgeHost {
     if (value === undefined || typeof value === "function" || typeof value === "symbol") {
       throw new Error(`Bridge ${role} '${payload.typeName}' is not an N-API data value`);
     }
+    // The size cap only applies to BARE top-level string/Uint8Array values.
+    // Object payloads are deliberately exempt: actions like capture-webview return
+    // a multi-hundred-KB base64 wrapped in an object ({ pngBase64, width, height }),
+    // and the Rust side applies no equivalent cap.
     if (
       (typeof value === "string" || value instanceof Uint8Array) &&
       value.length > MAX_PAYLOAD_BYTES

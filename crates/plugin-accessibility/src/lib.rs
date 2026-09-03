@@ -13,9 +13,69 @@ use napi_ohos::{bindgen_prelude::Unknown, Error, Result};
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeMainThreadEvent, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
+    PluginLifecycleEvent,
 };
 
-pub struct AccessibilityBridgePlugin;
+/// Carries the app handle so [`Self::on_lifecycle`] can re-issue bridge calls
+/// against the **current** session after an Ability rebuild (the previous
+/// session's runtime is released on teardown).
+pub struct AccessibilityBridgePlugin {
+    app: OpenHarmonyApp,
+}
+
+impl AccessibilityBridgePlugin {
+    pub fn new(app: &OpenHarmonyApp) -> Self {
+        Self { app: app.clone() }
+    }
+
+    /// Re-issues the state-change subscription after an Ability session rebuild.
+    ///
+    /// The process can outlive one Ability instance: on recreation the ArkTS
+    /// plugin instance is new (the previous instance removed the system listener
+    /// in `onDispose`) while the process-wide Rust setup never runs again, so a
+    /// one-shot subscription would silently die with the first session. The
+    /// handler slot survives across sessions — when it is empty the app never
+    /// subscribed and there is nothing to replay.
+    ///
+    /// Lifecycle dispatch runs on the NAPI main thread, so the bridge call is
+    /// issued from a spawned worker (blocking here could deadlock the TSFN
+    /// response loop). The ArkTS side is idempotent, so racing the app's initial
+    /// subscribe on the first session is harmless.
+    fn replay_subscription_after_session_rebuild(&self) {
+        let subscribed = STATE_CHANGE_HANDLER
+            .read()
+            .map(|slot| slot.is_some())
+            .unwrap_or(false);
+        if !subscribed {
+            return;
+        }
+
+        let app = self.app.clone();
+        let spawned = std::thread::Builder::new()
+            .name("accessibility-resubscribe".to_string())
+            .spawn(move || {
+                let client = match app.accessibility() {
+                    Ok(client) => client,
+                    Err(e) => {
+                        log::error!(
+                            "[accessibility] session rebuild: bridge client unavailable: {}",
+                            e.reason
+                        );
+                        return;
+                    }
+                };
+                if let Err(e) = futures_executor::block_on(client.issue_subscribe()) {
+                    log::error!(
+                        "[accessibility] session rebuild: state-change resubscribe failed: {}",
+                        e.reason
+                    );
+                }
+            });
+        if spawned.is_err() {
+            log::error!("[accessibility] session rebuild: failed to spawn resubscribe worker");
+        }
+    }
+}
 
 impl BridgePlugin for AccessibilityBridgePlugin {
     type Mode = AsyncBridge;
@@ -39,6 +99,13 @@ impl BridgePlugin for AccessibilityBridgePlugin {
                 event.name()
             ))),
         }
+    }
+
+    fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
+        if matches!(event, PluginLifecycleEvent::AbilityCreated { .. }) {
+            self.replay_subscription_after_session_rebuild();
+        }
+        Ok(())
     }
 }
 
@@ -338,34 +405,49 @@ impl AccessibilityClient {
     where
         F: Fn(bool) + Send + Sync + 'static,
     {
+        // Annotate through the trait-object alias so Arc::clone/ptr_eq below
+        // operate on the slot's type (Arc<F> would not coerce at those call sites).
+        let handler: StateChangeHandler = Arc::new(handler);
         {
             let mut slot = STATE_CHANGE_HANDLER
                 .write()
                 .map_err(|_| Error::from_reason("accessibility state-change lock poisoned"))?;
-            *slot = Some(Arc::new(handler));
+            *slot = Some(Arc::clone(&handler));
         }
-        let response = self
-            .call::<AccessibilitySubscribeRequest, AccessibilitySubscribeResponse>(
-                "subscribe-state-change",
-                AccessibilitySubscribeRequest {},
-            )
-            .await;
-        // On failure drop the handler again — a stale slot would receive events from a
-        // subscription that never completed.
-        if let Err(e) = &response {
-            if let Ok(mut slot) = STATE_CHANGE_HANDLER.write() {
-                *slot = None;
-            }
-            return Err(Error::from(AccessibilityError::from_reason(&e.reason)));
-        }
-        let response = response.expect("checked Err above");
-        if response.accepted {
-            Ok(())
-        } else {
-            Err(Error::from_reason(
+        match self.issue_subscribe().await {
+            Ok(response) if response.accepted => Ok(()),
+            Ok(_) => Err(Error::from_reason(
                 "Accessibility plugin rejected subscribe-state-change",
-            ))
+            )),
+            Err(e) => {
+                // On failure drop the handler again — a stale slot would receive
+                // events from a subscription that never completed. Only clear it
+                // while the slot still holds OUR handler: a later subscribe may
+                // have already replaced it, and clearing that one would silently
+                // kill a live subscription.
+                if let Ok(mut slot) = STATE_CHANGE_HANDLER.write() {
+                    if slot
+                        .as_ref()
+                        .is_some_and(|current| Arc::ptr_eq(current, &handler))
+                    {
+                        *slot = None;
+                    }
+                }
+                Err(Error::from(AccessibilityError::from_reason(&e.reason)))
+            }
         }
+    }
+
+    /// Issues the `subscribe-state-change` bridge call without touching the
+    /// registered handler slot. The ArkTS side is idempotent, so this is also
+    /// the session-rebuild replay path — the handler survives across sessions
+    /// and must not be replaced or cleared by a replay.
+    async fn issue_subscribe(&self) -> Result<AccessibilitySubscribeResponse> {
+        self.call::<AccessibilitySubscribeRequest, AccessibilitySubscribeResponse>(
+            "subscribe-state-change",
+            AccessibilitySubscribeRequest {},
+        )
+        .await
     }
 
     /// Unsubscribes from screen-reader state changes and drops the handler.

@@ -2239,6 +2239,9 @@ class WebviewSurface {
         // Array<number>, inflating a multi-hundred-KB PNG ~8x in memory.
         const pngBase64 = buffer.from(arrayBuffer).toString("base64");
         return new WebviewCaptureResponse(pngBase64, info.size.width, info.size.height);
+      } catch (e) {
+        console.error(`[WebviewPlugin] PNG packing failed: ${String(e)}`);
+        throw e;
       } finally {
         try {
           packer.release();
@@ -2327,8 +2330,14 @@ class WebviewSurface {
             (error: BusinessError, result: webview.SnapshotResult) => {
               if (error) {
                 if (retriesLeft > 0) {
+                  console.warn(
+                    `[WebviewPlugin] webPageSnapshot retry (${retriesLeft} left): ${error.message}`
+                  );
                   setTimeout(() => attempt(retriesLeft - 1), 500);
                 } else {
+                  console.error(
+                    `[WebviewPlugin] webPageSnapshot failed: ${error.code} - ${error.message}`
+                  );
                   done(() =>
                     reject(new Error(`webPageSnapshot failed: ${error.code} - ${error.message}`))
                   );
@@ -2336,7 +2345,14 @@ class WebviewSurface {
                 return;
               }
               if (!result || result.status !== true || !result.imagePixelMap) {
+                console.error("[WebviewPlugin] webPageSnapshot returned empty or failed result");
                 done(() => reject(new Error("webPageSnapshot returned empty or failed result")));
+                return;
+              }
+              if (settled) {
+                // A late success racing the 10s timeout: nobody will consume this
+                // PixelMap — release it instead of leaking it.
+                this.releasePixelMap(result.imagePixelMap);
                 return;
               }
               done(() => resolve(result.imagePixelMap));
@@ -2344,8 +2360,12 @@ class WebviewSurface {
           );
         } catch (e) {
           if (retriesLeft > 0) {
+            console.warn(
+              `[WebviewPlugin] webPageSnapshot exception (${retriesLeft} left): ${String(e)}`
+            );
             setTimeout(() => attempt(retriesLeft - 1), 500);
           } else {
+            console.error(`[WebviewPlugin] webPageSnapshot exception: ${String(e)}`);
             done(() => reject(new Error(`webPageSnapshot exception: ${String(e)}`)));
           }
         }

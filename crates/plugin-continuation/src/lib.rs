@@ -21,8 +21,13 @@ use openharmony_ability::OpenHarmonyApp;
 
 /// Sync facade for app-continuation restore queries.
 ///
-/// Zero-cost: holds no bridge handle and performs no ArkTS round-trips. All
-/// data was already captured by the lifecycle callbacks at launch time.
+/// Zero-cost: holds no bridge handle and performs no ArkTS round-trips. The
+/// continuation signal is captured by the lifecycle callbacks in
+/// `onAbilityCreateWithWant`, which runs AFTER the embedding runtime's entry
+/// (`module.init` builds and runs the Tauri app first) — queries made from a
+/// plugin `setup`/initialize hook during a continuation cold start still read
+/// `false`/`""`. JS callers are unaffected (webviews load much later); Rust
+/// callers must query after setup completes.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ContinuationClient {}
 

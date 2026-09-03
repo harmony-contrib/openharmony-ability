@@ -516,15 +516,20 @@ export class NativeAbility extends UIAbility {
     }
   }
 
-  // 应用接续（continuation）目标端恢复入口。系统在接续拉起目标 Ability 时调用
-  // onWindowStageRestore 而非 onWindowStageCreate（实测 MateBook Pro OpenHarmony 6.1.0
-  // 冷启动接续亦走此回调）。Tauri 不使用 ArkUI 页面栈自动恢复——接续数据是自定义 JSON
-  // route（源端 onContinue→continuationData，目标端 onCreate→onAbilityCreateWithWant
-  // 存入 Rust），故必须像 onWindowStageCreate 一样手动 loadContentByName + 接线 bridge
-  // windowStage，否则窗口无内容 → SetUIContent timeout → 白屏（只剩 app 图标）。
-  // 冷启动接续：windowStageActive=false（onCreate 不置位）→ 全量 setup；
-  // 热启动接续：windowStageActive=true（原 onWindowStageCreate 已 setup）→ 跳过避免重复 load。
-  // 签名必须与基类 UIAbility.onWindowStageRestore 一致：(windowStage) => void（无 want/launchParam，非 async）。
+  // App-continuation target-side restore entry. When the system launches the target
+  // Ability for a continuation it calls onWindowStageRestore instead of
+  // onWindowStageCreate (verified on MateBook Pro OpenHarmony 6.1.0: cold-start
+  // continuation also goes through this callback). Tauri does not use ArkUI
+  // page-stack auto-restore — the continuation payload is a custom JSON route
+  // (source onContinue → continuationData, target onCreate → onAbilityCreateWithWant
+  // stores it in Rust) — so this must do the same loadContentByName + bridge
+  // windowStage wiring as onWindowStageCreate, or the window stays empty →
+  // SetUIContent timeout → white screen (app icon only).
+  // Cold-start continuation: windowStageActive=false (onCreate does not set it) →
+  // full setup. Warm continuation: windowStageActive=true (onWindowStageCreate
+  // already ran the setup) → skip to avoid a duplicate load.
+  // The signature must match the base UIAbility.onWindowStageRestore:
+  // (windowStage) => void (no want/launchParam, not async).
   onWindowStageRestore(windowStage: window.WindowStage): void {
     if (this.windowStageActive) {
       hilog.info(DOMAIN, 'NativeAbility', 'onWindowStageRestore: stage already active (warm continuation), skipping full setup');
