@@ -31,12 +31,8 @@ pub mod version;
 pub mod window;
 
 
-#[cfg(feature = "menu")]
-pub mod menu;
-
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
-
 
 #[cfg(feature = "global_shortcut")]
 pub mod global_shortcut;
@@ -121,19 +117,13 @@ pub use version::*;
 #[cfg(feature = "window")]
 pub use window::*;
 
-
 /// Re-exported for [`impl_bridge_napi_type!`](crate::impl_bridge_napi_type) expansions in
 /// application/plugin crates.
 #[doc(hidden)]
 pub use napi_ohos;
 
-#[cfg(feature = "menu")]
-pub use menu::{on_menu_request, MenuRequestData, notify_menubar_visibility};
-
 #[cfg(feature = "global_shortcut")]
-pub use global_shortcut::{
-    ShortcutEvent, ShortcutState, ShortcutKey, ShortcutModifier,
-};
+pub use global_shortcut::{ShortcutEvent, ShortcutKey, ShortcutModifier, ShortcutState};
 
 // re-export arkui and avoid the need to import it in the lib.rs
 pub use napi_ohos::Either;

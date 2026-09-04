@@ -9,11 +9,10 @@ description = "Binding Rust application on Harmony with Ability"
 # `updater` is a core-privileged capability (see `OpenHarmonyApp::updater()`).
 # Retained in default features: the updater plugin consumes it via
 # `tauri::ohos::APP` without an explicit feature declaration, and the tauri
-# crate's dependency (features = ["menu"], default features on) propagates the
-# default set. Moving it out requires synchronizing tauri/crates/tauri/Cargo.toml.
+# crate's dependency (default features on) propagates the default set. Moving
+# it out requires synchronizing tauri/crates/tauri/Cargo.toml.
 default = ["log", "updater", "window"]
 account = []
-menu = []
 clipboard = ["log"]
 log = ["dep:log", "dep:ohos-hilog-binding"]
 updater = []
