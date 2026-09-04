@@ -3,10 +3,10 @@ use napi_ohos::{Env, Error, Result};
 use ohos_arkui_binding::component::attribute::ArkUICommonAttribute;
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
+use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
 
 use crate::{
-    input, set_main_thread_env,
-    Event, InputEvent, IntervalInfo, OpenHarmonyApp, Rect, Size,
+    input, set_main_thread_env, Event, InputEvent, IntervalInfo, OpenHarmonyApp, Rect, Size,
 };
 
 /// create lifecycle object and return to arkts
@@ -53,8 +53,17 @@ pub fn render(
     ) = input::ime_ts_fn(env, app.clone(), render_owner.clone())?;
 
     xcomponent.on_surface_created(move |xc_raw, win| {
-        let size = xc_raw.size(win).unwrap();
-        let offset = xc_raw.offset(win).unwrap();
+        // NDK callback boundary: a panic here aborts the process (no unwinding
+        // across "extern C"). Degrade to 0x0 + warn instead (issue #87 minor-2);
+        // a subsequent on_surface_changed carries the real geometry.
+        let size = xc_raw.size(win).unwrap_or_else(|e| {
+            crate::warn!("on_surface_created: size() failed: {e:?}, degrading to 0x0");
+            XComponentSize { width: 0, height: 0 }
+        });
+        let offset = xc_raw.offset(win).unwrap_or_else(|e| {
+            crate::warn!("on_surface_created: offset() failed: {e:?}, degrading to 0,0");
+            XComponentOffset { x: 0.0, y: 0.0 }
+        });
         let rect = Rect {
             top: offset.y as _,
             left: offset.x as _,
@@ -124,8 +133,24 @@ pub fn render(
     let on_surface_changed_app = app.clone();
     let on_surface_changed_owner = render_owner.clone();
     xcomponent.on_surface_changed(move |xc, win| {
-        let size = xc.size(win).unwrap();
-        let offset = xc.offset(win).unwrap();
+        // NDK callback boundary: never panic (issue #87 minor-2). If the geometry
+        // can't be read, skip this change event rather than dispatching a bogus
+        // 0x0 WindowResize into tao — the next surface-changed callback carries
+        // the real values.
+        let size = match xc.size(win) {
+            Ok(size) => size,
+            Err(e) => {
+                crate::warn!("on_surface_changed: size() failed: {e:?}, skipping rect update");
+                return Ok(());
+            }
+        };
+        let offset = match xc.offset(win) {
+            Ok(offset) => offset,
+            Err(e) => {
+                crate::warn!("on_surface_changed: offset() failed: {e:?}, skipping rect update");
+                return Ok(());
+            }
+        };
         if on_surface_changed_app.update_render_surface_rect(
             &on_surface_changed_owner,
             Rect {

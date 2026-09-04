@@ -28,9 +28,16 @@
 
 use std::sync::{Arc, LazyLock, RwLock};
 
-use napi_ohos::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use napi_ohos::{
+    threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
+    Status,
+};
 
-type WakerType = LazyLock<RwLock<Option<Arc<ThreadsafeFunction<(), ()>>>>>;
+// callee_handled = false, matching every other TSFN in this crate (window/mod.rs,
+// ime.rs, bridge/mod.rs) — issue #87 minor-1. The waker closure provably always
+// returns Ok(()), so the error-first null argument the `true` variant passes is
+// never observed by anyone.
+type WakerType = LazyLock<RwLock<Option<Arc<ThreadsafeFunction<(), (), (), Status, false>>>>>;
 
 pub(crate) static WAKER: WakerType = LazyLock::new(|| RwLock::new(None));
 
@@ -52,13 +59,12 @@ impl OpenHarmonyWaker {
         // Read `WAKER` live rather than using a construction-time snapshot.
         // Clone the `Arc<TSFN>` out and drop the read guard before calling, so
         // we never hold the lock across the (non-blocking) TSFN call.
-        let tsfn = (*WAKER)
-            .read()
-            .ok()
-            .and_then(|guard| guard.clone());
+        let tsfn = (*WAKER).read().ok().and_then(|guard| guard.clone());
         match tsfn {
             Some(waker) => {
-                waker.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+                // callee_handled=false call(): the raw value, no Result wrapper
+                // (see the WakerType note above).
+                waker.call((), ThreadsafeFunctionCallMode::NonBlocking);
             }
             None => {
                 // `WAKER` not yet populated (lifecycle setup incomplete) or the
