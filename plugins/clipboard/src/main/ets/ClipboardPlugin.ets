@@ -6,6 +6,7 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
 const READ_TEXT_REQUEST_TYPE = "ohos.clipboard.ReadTextRequest";
@@ -75,17 +76,6 @@ class ClearResponse {
   }
 }
 
-function expectRequestType(
-  payload: BridgeTypedValue,
-  action: string,
-  typeName: string,
-): ESObject {
-  if (payload.typeName !== typeName || payload.value === null || typeof payload.value !== "object") {
-    throw new Error(`ohos.clipboard.${action} requires bridge type ${typeName}`);
-  }
-  return payload.value as ESObject;
-}
-
 export class ClipboardPlugin extends AsyncPluginBase {
   readonly id = "ohos.clipboard";
   readonly requires: BridgeContextRequirement[] = ["ability"];
@@ -100,7 +90,7 @@ export class ClipboardPlugin extends AsyncPluginBase {
     }
 
     if (action === "read-text") {
-      expectRequestType(payload, action, READ_TEXT_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.clipboard", action, READ_TEXT_REQUEST_TYPE);
       const systemPasteboard = pasteboard.getSystemPasteboard();
       const data = await systemPasteboard.getData();
       let text: string = "";
@@ -122,7 +112,7 @@ export class ClipboardPlugin extends AsyncPluginBase {
     }
 
     if (action === "write-text") {
-      const request = expectRequestType(payload, action, WRITE_TEXT_REQUEST_TYPE) as WriteTextRequest;
+      const request = expectBridgeRequestType(payload, "ohos.clipboard", action, WRITE_TEXT_REQUEST_TYPE) as WriteTextRequest;
       if (typeof request.text !== "string") {
         throw new Error("write-text.text must be a string");
       }
@@ -141,7 +131,7 @@ export class ClipboardPlugin extends AsyncPluginBase {
     }
 
     if (action === "write-image") {
-      const request = expectRequestType(payload, action, WRITE_IMAGE_REQUEST_TYPE) as WriteImageRequest;
+      const request = expectBridgeRequestType(payload, "ohos.clipboard", action, WRITE_IMAGE_REQUEST_TYPE) as WriteImageRequest;
       // NAPI Vec<u8> inside #[napi(object)] arrives as Array<number>, not Uint8Array — convert
       let rgbaData: Uint8Array;
       if (request.rgba instanceof Uint8Array) {
@@ -168,7 +158,7 @@ export class ClipboardPlugin extends AsyncPluginBase {
     }
 
     if (action === "write-html") {
-      const request = expectRequestType(payload, action, WRITE_HTML_REQUEST_TYPE) as WriteHtmlRequest;
+      const request = expectBridgeRequestType(payload, "ohos.clipboard", action, WRITE_HTML_REQUEST_TYPE) as WriteHtmlRequest;
       if (typeof request.html !== "string") {
         throw new Error("write-html.html must be a string");
       }
@@ -182,7 +172,7 @@ export class ClipboardPlugin extends AsyncPluginBase {
     }
 
     if (action === "clear") {
-      expectRequestType(payload, action, CLEAR_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.clipboard", action, CLEAR_REQUEST_TYPE);
       const systemPasteboard = pasteboard.getSystemPasteboard();
       await systemPasteboard.clearData();
       return {

@@ -6,9 +6,10 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  BridgeAcknowledgement,
+  DOMAIN,
+  expectBridgeRequestType,
 } from "@ohos-rs/ability";
-
-const DOMAIN: number = 0x1999;
 
 // ── Bridge type name contracts ────────────────────────────────────────────────
 // These must match the Rust-side `impl_bridge_napi_type!` TYPE_NAME values.
@@ -87,14 +88,6 @@ interface UnregisterRequestPayload {
   id: number;
 }
 
-class ShortcutAcknowledgement {
-  readonly accepted: boolean;
-
-  constructor(accepted: boolean) {
-    this.accepted = accepted;
-  }
-}
-
 class ShortcutTriggeredEventPayload {
   readonly id: number;
   readonly state: string;
@@ -110,25 +103,10 @@ interface RegisteredHotkey {
   callback: (hotkey: inputConsumer.HotkeyOptions) => void;
 }
 
-function expectRequestType(
-  payload: BridgeTypedValue,
-  action: string,
-  typeName: string,
-): ESObject {
-  if (
-    payload.typeName !== typeName ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(`ohos.global-shortcut.${action} requires bridge type ${typeName}`);
-  }
-  return payload.value as ESObject;
-}
-
 function ack(accepted: boolean): BridgeTypedValue {
   return {
     typeName: ACKNOWLEDGEMENT_TYPE,
-    value: new ShortcutAcknowledgement(accepted),
+    value: new BridgeAcknowledgement(accepted),
   };
 }
 
@@ -148,21 +126,21 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
     }
 
     if (action === "register") {
-      const request = expectRequestType(payload, action, REGISTER_REQUEST_TYPE) as RegisterRequestPayload;
+      const request = expectBridgeRequestType(payload, "ohos.global-shortcut", action, REGISTER_REQUEST_TYPE) as RegisterRequestPayload;
       hilog.info(DOMAIN, "GlobalShortcut", "register ENTER id=%{public}d key=%{public}s modifiers=[%{public}s]",
         request.id, request.key, request.modifiers.join(','));
       return ack(this.registerHotkey(request));
     }
 
     if (action === "unregister") {
-      const request = expectRequestType(payload, action, UNREGISTER_REQUEST_TYPE) as UnregisterRequestPayload;
+      const request = expectBridgeRequestType(payload, "ohos.global-shortcut", action, UNREGISTER_REQUEST_TYPE) as UnregisterRequestPayload;
       hilog.info(DOMAIN, "GlobalShortcut", "unregister id=%{public}d", request.id);
       return ack(this.unregisterHotkey(request.id));
     }
 
     if (action === "unregister-all") {
       hilog.info(DOMAIN, "GlobalShortcut", "unregister-all");
-      expectRequestType(payload, action, UNREGISTER_ALL_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.global-shortcut", action, UNREGISTER_ALL_REQUEST_TYPE);
       return ack(this.unregisterAllHotkeys());
     }
 

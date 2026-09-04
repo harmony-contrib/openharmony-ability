@@ -181,6 +181,25 @@ export interface Module {
   onBackPressIntercept?: () => boolean;
   /** Legacy N-API spelling retained for modules built before camel-case code generation. */
   on_back_press_intercept?: () => boolean;
+  // ─── Optional NAPI free-function exports (issue #87 minor-4) ───
+  // Crate-level `#[napi]` fns that the platform layer calls directly. Declared
+  // optional: pre-pluginize legacy modules lack them, so callers keep their
+  // typeof-probes before invoking. These used to be duck-typed via `as ESObject`.
+  /** `is_desktop_device` — desktop form-factor probe (setupMenuPopup guard,
+   *  FloatPage `__openharmony_ability_is_desktop__`). */
+  isDesktopDevice?: () => boolean;
+  /** `notify_window_close` — Float close-button / FloatPage aboutToDisappear. */
+  notifyWindowClose?: (windowId: number) => void;
+  /** `notify_window_status` — NativeAbility windowStatusChange fan-in. */
+  notifyWindowStatus?: (windowId: number, status: number) => void;
+  /** `read_continue_snapshot` — onContinue source-side snapshot read. */
+  readContinueSnapshot?: () => string;
+  /** `update_cursor_position` — MainPage onMouse cursor tracking. */
+  updateCursorPosition?: (x: number, y: number) => void;
+  /** `register_create_sub_window_tsfn` — legacy create_os_window path hookup. */
+  registerCreateSubWindowTsfn?: (
+    createSubWindow: (config: ESObject) => Promise<number>,
+  ) => void;
   /**
    * Synchronous ArkTS platform callback -> Rust plugin decision. The value is a named N-API
    * object and must be returned before the platform callback resumes.
@@ -366,17 +385,12 @@ export interface BridgePluginContext {
   ) => ESObject[];
 }
 
-export interface BridgeCallContext extends BridgePluginContext {
+// Extends BridgePluginHookContext (not BridgePluginContext directly) so the
+// cancellation members are declared exactly once (issue #87 minor-5). The
+// member set is unchanged for every consumer.
+export interface BridgeCallContext extends BridgePluginHookContext {
   action: string;
   timeoutMs: number;
-  isCancelled: () => boolean;
-  /**
-   * Registers a listener that is invoked once when this asynchronous call is cancelled (for
-   * example because its caller timed out or its Ability session was disposed). The returned
-   * function removes the listener. This is the lifecycle signal for waits on ArkUI state; it is
-   * deliberately separate from a timer-based readiness heuristic.
-   */
-  onCancel: (listener: () => void) => () => void;
 }
 
 /**

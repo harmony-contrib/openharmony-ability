@@ -406,17 +406,17 @@ class BridgeHost {
     };
     this.pendingComponent = pending;
 
-    console.info(`[DBG-AC] attachComponent ENTER mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady} stageDefined=${this.windowStage !== undefined}`);
+    console.debug(`[DBG- attachComponent ENTER mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady} stageDefined=${this.windowStage !== undefined}`);
     return this.enqueueLifecycle("attach component", async (): Promise<void> => {
       if (this.pendingComponent === pending) {
         this.pendingComponent = undefined;
       }
       if (pending.cancelled) {
-        console.info(`[DBG-AC] attachComponent OP cancelled mod=${this.moduleName}`);
+        console.debug(`[DBG- attachComponent OP cancelled mod=${this.moduleName}`);
         return;
       }
       this.assertActive();
-      console.info(`[DBG-AC] attachComponent OP start mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady} stageDefined=${this.windowStage !== undefined} stageGen=${this.windowStageGeneration} disposed=${this.disposed}`);
+      console.debug(`[DBG- attachComponent OP start mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady} stageDefined=${this.windowStage !== undefined} stageGen=${this.windowStageGeneration} disposed=${this.disposed}`);
       if (!this.windowStageReady) {
         throw new Error(
           `DefaultXComponent cannot attach without an active WindowStage for '${this.moduleName}'`,
@@ -777,20 +777,20 @@ class BridgeHost {
   async setWindowStage(windowStage: window.WindowStage): Promise<void> {
     this.assertActive();
     const generation = ++this.windowStageGeneration;
-    console.info(`[DBG-WS] setWindowStage ENTER mod=${this.moduleName} sess=${this.sessionId} gen=${generation} prevReady=${this.windowStageReady}`);
+    console.debug(`[DBG- setWindowStage ENTER mod=${this.moduleName} sess=${this.sessionId} gen=${generation} prevReady=${this.windowStageReady}`);
     await this.enqueueLifecycle("window-stage-create", async (): Promise<void> => {
       this.assertActive();
-      console.info(`[DBG-WS] setWindowStage OP start mod=${this.moduleName} sess=${this.sessionId} gen=${generation} windowStageGeneration=${this.windowStageGeneration} prevReady=${this.windowStageReady}`);
+      console.debug(`[DBG- setWindowStage OP start mod=${this.moduleName} sess=${this.sessionId} gen=${generation} windowStageGeneration=${this.windowStageGeneration} prevReady=${this.windowStageReady}`);
       if (generation !== this.windowStageGeneration) {
-        console.info(`[DBG-WS] setWindowStage OP SKIP (gen mismatch) mod=${this.moduleName}`);
+        console.debug(`[DBG- setWindowStage OP SKIP (gen mismatch) mod=${this.moduleName}`);
         return;
       }
       this.windowStage = windowStage;
       this.windowStageReady = true;
-      console.info(`[DBG-WS] setWindowStage OP done mod=${this.moduleName} sess=${this.sessionId} ready=true`);
+      console.debug(`[DBG- setWindowStage OP done mod=${this.moduleName} sess=${this.sessionId} ready=true`);
       this.notifyContextChanged();
     });
-    console.info(`[DBG-WS] setWindowStage EXIT mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady}`);
+    console.debug(`[DBG- setWindowStage EXIT mod=${this.moduleName} sess=${this.sessionId} ready=${this.windowStageReady}`);
   }
 
   async clearWindowStage(): Promise<void> {
@@ -1390,41 +1390,59 @@ class BridgeHost {
     };
   }
 
-  private pluginHookContext(
-    pluginId: string,
-    signal: TaskCancellationSignal,
+  // Shared builder for the cancellable-context family (issue #87 minor-5): the
+  // platform members are delegated from a base pluginContext, the three
+  // cancellation members are injected — pluginHookContext used to duplicate all
+  // of this field-by-field. (callContext keeps its own literal: ArkTS forbids
+  // assigning a BridgePluginHookContext value to the BridgeCallContext return
+  // type, so its extra action/timeoutMs members rule out the factory.)
+  private cancellableContext(
+    base: BridgePluginContext,
+    isActive: () => boolean,
+    isCancelled: () => boolean,
+    onCancel: (listener: () => void) => (() => void),
   ): BridgePluginHookContext {
-    const context = this.pluginContext(pluginId);
     return {
-      pluginId,
-      sessionId: this.sessionId,
-      abilityContext: this.abilityContext,
-      isActive: (): boolean => context.isActive() && !signal.isCancelled(),
-      isCancelled: (): boolean => signal.isCancelled() || this.disposed,
-      onCancel: (listener: () => void): (() => void) => signal.onCancel(listener),
-      getWindowStage: (): window.WindowStage => context.getWindowStage(),
-      getWindow: (): window.Window => context.getWindow(),
-      getUIContext: (): UIContext => context.getUIContext(),
-      getRootFrameNode: (): FrameNode => context.getRootFrameNode(),
+      pluginId: base.pluginId,
+      sessionId: base.sessionId,
+      abilityContext: base.abilityContext,
+      isActive,
+      isCancelled,
+      onCancel,
+      getWindowStage: (): window.WindowStage => base.getWindowStage(),
+      getWindow: (): window.Window => base.getWindow(),
+      getUIContext: (): UIContext => base.getUIContext(),
+      getRootFrameNode: (): FrameNode => base.getRootFrameNode(),
       appendChild: (key: string, node: FrameNode, cleanup?: () => void): void =>
-        context.appendChild(key, node, cleanup),
-      removeChild: (key: string): void => context.removeChild(key),
-      getFrameNode: (handle: number): FrameNode => context.getFrameNode(handle),
+        base.appendChild(key, node, cleanup),
+      removeChild: (key: string): void => base.removeChild(key),
+      getFrameNode: (handle: number): FrameNode => base.getFrameNode(handle),
       invokeNativeSync: (
         event: string,
         requestTypeName: string,
         responseTypeName: string,
         value: ESObject,
-      ): ESObject =>
-        this.invokeNativeSync(pluginId, event, requestTypeName, responseTypeName, value),
+      ): ESObject => base.invokeNativeSync(event, requestTypeName, responseTypeName, value),
       invokeNativeSyncProcessWide: (
         event: string,
         requestTypeName: string,
         responseTypeName: string,
         value: ESObject,
-      ): ESObject[] =>
-        context.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
+      ): ESObject[] => base.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
     };
+  }
+
+  private pluginHookContext(
+    pluginId: string,
+    signal: TaskCancellationSignal,
+  ): BridgePluginHookContext {
+    const base = this.pluginContext(pluginId);
+    return this.cancellableContext(
+      base,
+      (): boolean => base.isActive() && !signal.isCancelled(),
+      (): boolean => signal.isCancelled() || this.disposed,
+      (listener: () => void): (() => void) => signal.onCancel(listener),
+    );
   }
 
   private async runPluginHook(
