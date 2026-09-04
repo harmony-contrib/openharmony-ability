@@ -25,7 +25,10 @@ pub enum Event<'a> {
     /// >0 = Float sub-window). Populated by the window_resize lifecycle closure
     /// from the `windowId` field ArkTS wraps into the options (design.md D2/D6).
     /// Phase 3: tao's run_loop routes the event by this id.
-    WindowResize { window_id: i64, size: Size },
+    WindowResize {
+        window_id: i64,
+        size: Size,
+    },
     /// window rect change event
     /// alias window.on("windowRectChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowrectchange12
@@ -98,7 +101,9 @@ pub enum Event<'a> {
     /// ability new want event (deep link / URL scheme)
     /// alias onNewWant
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-uiAbility-V5#uiabilityonnewwant
-    NewWant { uri: String },
+    NewWant {
+        uri: String,
+    },
 
     UserEvent,
 }

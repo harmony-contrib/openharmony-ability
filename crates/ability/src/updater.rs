@@ -151,10 +151,7 @@ impl Updater {
     /// Returns `Ok(Some(result))` if an update is available, `Ok(None)` otherwise.
     pub async fn check(&self) -> Result<Option<CheckResult>> {
         let response = self
-            .call::<UpdaterCheckRequest, UpdaterCheckResponse>(
-                "check",
-                UpdaterCheckRequest {},
-            )
+            .call::<UpdaterCheckRequest, UpdaterCheckResponse>("check", UpdaterCheckRequest {})
             .await?;
         if !response.update_available {
             return Ok(None);
@@ -178,15 +175,13 @@ impl Updater {
         if response.accepted {
             Ok(())
         } else {
-            Err(Error::from_reason("updater downloadAndInstall rejected by plugin"))
+            Err(Error::from_reason(
+                "updater downloadAndInstall rejected by plugin",
+            ))
         }
     }
 
-    async fn call<Request, Response>(
-        &self,
-        action: &str,
-        request: Request,
-    ) -> Result<Response>
+    async fn call<Request, Response>(&self, action: &str, request: Request) -> Result<Response>
     where
         Request: BridgeNapiType,
         Response: BridgeNapiType,

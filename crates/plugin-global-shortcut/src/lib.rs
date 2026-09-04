@@ -58,10 +58,15 @@ impl BridgePlugin for GlobalShortcutBridgePlugin {
 
 // ── Crossbeam event channel ───────────────────────────────────────────────────
 
-static SHORTCUT_EVENT_CHANNEL: OnceLock<(Sender<ShortcutTriggeredEvent>, Receiver<ShortcutTriggeredEvent>)> =
-    OnceLock::new();
+static SHORTCUT_EVENT_CHANNEL: OnceLock<(
+    Sender<ShortcutTriggeredEvent>,
+    Receiver<ShortcutTriggeredEvent>,
+)> = OnceLock::new();
 
-fn shortcut_event_channel() -> &'static (Sender<ShortcutTriggeredEvent>, Receiver<ShortcutTriggeredEvent>) {
+fn shortcut_event_channel() -> &'static (
+    Sender<ShortcutTriggeredEvent>,
+    Receiver<ShortcutTriggeredEvent>,
+) {
     SHORTCUT_EVENT_CHANNEL.get_or_init(unbounded)
 }
 
@@ -78,7 +83,10 @@ pub struct ShortcutRegisterRequest {
     pub key: String,
 }
 
-impl_bridge_napi_type!(ShortcutRegisterRequest, "ohos.global-shortcut.RegisterRequest");
+impl_bridge_napi_type!(
+    ShortcutRegisterRequest,
+    "ohos.global-shortcut.RegisterRequest"
+);
 
 // ── unregister ─────────────────────────────────────────────────────────────────
 
@@ -88,7 +96,10 @@ pub struct ShortcutUnregisterRequest {
     pub id: u32,
 }
 
-impl_bridge_napi_type!(ShortcutUnregisterRequest, "ohos.global-shortcut.UnregisterRequest");
+impl_bridge_napi_type!(
+    ShortcutUnregisterRequest,
+    "ohos.global-shortcut.UnregisterRequest"
+);
 
 // ── unregister-all ────────────────────────────────────────────────────────────
 
@@ -109,7 +120,10 @@ pub struct ShortcutAcknowledgement {
     pub accepted: bool,
 }
 
-impl_bridge_napi_type!(ShortcutAcknowledgement, "ohos.global-shortcut.Acknowledgement");
+impl_bridge_napi_type!(
+    ShortcutAcknowledgement,
+    "ohos.global-shortcut.Acknowledgement"
+);
 
 impl ShortcutAcknowledgement {
     fn ensure(self) -> Result<()> {
@@ -133,7 +147,10 @@ pub struct ShortcutTriggeredEvent {
     pub state: String,
 }
 
-impl_bridge_napi_type!(ShortcutTriggeredEvent, "ohos.global-shortcut.TriggeredEvent");
+impl_bridge_napi_type!(
+    ShortcutTriggeredEvent,
+    "ohos.global-shortcut.TriggeredEvent"
+);
 
 // ── Modifier validation ────────────────────────────────────────────────────────
 
@@ -145,9 +162,7 @@ impl_bridge_napi_type!(ShortcutTriggeredEvent, "ohos.global-shortcut.TriggeredEv
 ///   matching the legacy `dedup()` behavior.
 fn validate_and_dedup_modifiers(modifiers: &[String]) -> Result<Vec<String>> {
     if modifiers.is_empty() {
-        return Err(Error::from_reason(
-            "At least 1 modifier key is required",
-        ));
+        return Err(Error::from_reason("At least 1 modifier key is required"));
     }
     if modifiers.len() > MAX_MODIFIERS {
         return Err(Error::from_reason(format!(
@@ -303,11 +318,7 @@ mod tests {
 
     #[test]
     fn modifier_validation_rejects_more_than_two() {
-        let mods = vec![
-            "Control".to_owned(),
-            "Shift".to_owned(),
-            "Alt".to_owned(),
-        ];
+        let mods = vec!["Control".to_owned(), "Shift".to_owned(), "Alt".to_owned()];
         assert!(validate_and_dedup_modifiers(&mods).is_err());
     }
 
@@ -327,7 +338,11 @@ mod tests {
 
     #[test]
     fn modifier_validation_does_not_dedup_non_consecutive() {
-        let mods = vec!["Control".to_owned(), "Shift".to_owned(), "Control".to_owned()];
+        let mods = vec![
+            "Control".to_owned(),
+            "Shift".to_owned(),
+            "Control".to_owned(),
+        ];
         assert!(validate_and_dedup_modifiers(&mods).is_err());
     }
 }

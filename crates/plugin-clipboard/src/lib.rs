@@ -67,7 +67,10 @@ pub struct ClipboardWriteImageRequest {
     pub height: u32,
 }
 
-impl_bridge_napi_type!(ClipboardWriteImageRequest, "ohos.clipboard.WriteImageRequest");
+impl_bridge_napi_type!(
+    ClipboardWriteImageRequest,
+    "ohos.clipboard.WriteImageRequest"
+);
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -161,17 +164,13 @@ impl ClipboardClient {
         let response = self
             .call::<ClipboardWriteTextRequest, ClipboardWriteTextResponse>(
                 "write-text",
-                ClipboardWriteTextRequest {
-                    text: text.into(),
-                },
+                ClipboardWriteTextRequest { text: text.into() },
             )
             .await?;
         if response.accepted {
             Ok(())
         } else {
-            Err(Error::from_reason(
-                "Clipboard plugin rejected write-text",
-            ))
+            Err(Error::from_reason("Clipboard plugin rejected write-text"))
         }
     }
 
@@ -192,9 +191,7 @@ impl ClipboardClient {
         if response.accepted {
             Ok(())
         } else {
-            Err(Error::from_reason(
-                "Clipboard plugin rejected write-image",
-            ))
+            Err(Error::from_reason("Clipboard plugin rejected write-image"))
         }
     }
 
@@ -203,17 +200,13 @@ impl ClipboardClient {
         let response = self
             .call::<ClipboardWriteHtmlRequest, ClipboardWriteHtmlResponse>(
                 "write-html",
-                ClipboardWriteHtmlRequest {
-                    html: html.into(),
-                },
+                ClipboardWriteHtmlRequest { html: html.into() },
             )
             .await?;
         if response.accepted {
             Ok(())
         } else {
-            Err(Error::from_reason(
-                "Clipboard plugin rejected write-html",
-            ))
+            Err(Error::from_reason("Clipboard plugin rejected write-html"))
         }
     }
 

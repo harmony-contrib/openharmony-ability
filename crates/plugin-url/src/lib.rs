@@ -92,7 +92,10 @@ pub trait UrlExt {
     /// absolute **real filesystem path** of the directory (the file's parent),
     /// not a `file://` URI — the ArkTS side maps it to the file-manager
     /// virtual uri and starts the explicit file-manager Want.
-    fn reveal_in_dir(&self, path: impl Into<String>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+    fn reveal_in_dir(
+        &self,
+        path: impl Into<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 }
 
 impl UrlExt for OpenHarmonyApp {
@@ -114,7 +117,10 @@ impl UrlExt for OpenHarmonyApp {
         })
     }
 
-    fn reveal_in_dir(&self, path: impl Into<String>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+    fn reveal_in_dir(
+        &self,
+        path: impl Into<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         let path = path.into();
         if let Err(error) = validate_path(&path) {
             return Box::pin(async move { Err(error) });
