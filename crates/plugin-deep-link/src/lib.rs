@@ -47,12 +47,16 @@ impl_bridge_napi_type!(DeepLinkGetUriResponse, "ohos.deep-link.GetUriResponse");
 #[derive(Clone)]
 pub struct DeepLinkClient {
     bridge: BridgeRuntime,
+    /// App handle for the Rust-side want state (issue #87 major-9: migrated
+    /// from module statics into `OpenHarmonyAppInner`).
+    app: OpenHarmonyApp,
 }
 
 impl DeepLinkClient {
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
+            app: app.clone(),
         })
     }
 
@@ -99,23 +103,23 @@ impl DeepLinkClient {
         Ok(normalize_uri(response.uri))
     }
 
-    /// Returns the cold-start `want.uri` from the Rust-side Mutex, then clears it.
+    /// Returns the cold-start `want.uri` from the app's session state, then clears it.
     ///
-    /// This is a **synchronous** Mutex read — safe to call from any thread including the
+    /// This is a **synchronous** RwLock read — safe to call from any thread including the
     /// main thread. Unlike [`get_initial_uri`](Self::get_initial_uri), this does NOT go
     /// through the bridge and will not deadlock when called from a sync/main-thread context.
     ///
     /// The value is populated by `onAbilityCreateWithWant` via the lifecycle callback.
     pub fn take_initial_uri(&self) -> String {
-        openharmony_ability::take_initial_want_uri()
+        self.app.take_initial_want_uri()
     }
 
     /// Returns the latest `want.parameters` JSON from `onNewWant`, then clears it.
     ///
-    /// This is a **synchronous** Mutex read — safe to call from any thread including the
+    /// This is a **synchronous** RwLock read — safe to call from any thread including the
     /// main thread. The value is populated by the `on_new_want` lifecycle callback.
     pub fn take_want_parameters(&self) -> String {
-        openharmony_ability::take_want_parameters()
+        self.app.take_want_parameters()
     }
 }
 

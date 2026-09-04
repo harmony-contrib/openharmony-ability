@@ -76,7 +76,10 @@ pub fn create_lifecycle_handle<'a>(
 
     let tsfn = waker
         .build_threadsafe_function()
-        .callee_handled::<true>()
+        // false matches every other TSFN in this crate (issue #87 minor-1);
+        // the closure always returns Ok(()) so the callee-handled error-first
+        // argument was never observed.
+        .callee_handled::<false>()
         .build()?;
 
     {
@@ -202,9 +205,7 @@ pub fn create_lifecycle_handle<'a>(
             let rect = parse_rect(options.get_named_property::<Object>("rect")?)?;
             // windowId is optional-with-fallback: missing or wrong type degrades to 0
             // (main window) rather than failing the callback.
-            let window_id = options
-                .get_named_property::<i64>("windowId")
-                .unwrap_or(0);
+            let window_id = options.get_named_property::<i64>("windowId").unwrap_or(0);
             window_rect_app.set_window_rect(window_id, rect);
 
             if let Some(ref mut h) = *window_rect_app.event_loop.borrow_mut() {
@@ -332,29 +333,36 @@ pub fn create_lifecycle_handle<'a>(
         let data = ctx.first_arg::<Object>()?;
         let uri = data.get_named_property::<String>("uri")?;
         let parameters_json = data.get_named_property::<String>("parametersJson")?;
-        crate::app::store_want_parameters(&parameters_json);
+        // Session state rides the app instance now (issue #87 major-9).
+        on_new_want_app.store_want_parameters(&parameters_json);
         // isContinuation is optional-with-fallback: missing or wrong type
         // (older HAR payload) degrades to false rather than failing the callback.
-        let is_continuation = data.get_named_property::<bool>("isContinuation").unwrap_or(false);
-        crate::app::store_continuation(is_continuation, &parameters_json);
+        let is_continuation = data
+            .get_named_property::<bool>("isContinuation")
+            .unwrap_or(false);
+        on_new_want_app.store_continuation(is_continuation, &parameters_json);
         if let Some(ref mut h) = *on_new_want_app.event_loop.borrow_mut() {
             h(Event::NewWant { uri })
         }
         Ok(())
     })?;
 
+    let on_ability_create_with_want_app = app.clone();
     let on_ability_create_with_want =
         env.create_function_from_closure("on_ability_create_with_want", move |ctx| {
             let data = ctx.first_arg::<Object>()?;
             let uri = data.get_named_property::<String>("uri")?;
-            crate::app::store_initial_want_uri(&uri);
+            on_ability_create_with_want_app.store_initial_want_uri(&uri);
             // Continuation fields are optional-with-fallback: missing or wrong
             // type (older HAR payload) degrades to false / empty rather than
             // failing the callback.
-            let is_continuation = data.get_named_property::<bool>("isContinuation").unwrap_or(false);
-            let parameters_json =
-                data.get_named_property::<String>("parametersJson").unwrap_or_default();
-            crate::app::store_continuation(is_continuation, &parameters_json);
+            let is_continuation = data
+                .get_named_property::<bool>("isContinuation")
+                .unwrap_or(false);
+            let parameters_json = data
+                .get_named_property::<String>("parametersJson")
+                .unwrap_or_default();
+            on_ability_create_with_want_app.store_continuation(is_continuation, &parameters_json);
             Ok(())
         })?;
 
