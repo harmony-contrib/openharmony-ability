@@ -16,6 +16,9 @@ account = []
 clipboard = ["log"]
 log = ["dep:log", "dep:ohos-hilog-binding"]
 updater = []
+# Process control (restart via appRecovery) — consumed by tauri-plugin-process,
+# which declares `features = ["process"]` on its OHOS target dependency.
+process = []
 window = []
 global_shortcut = []
 fault-injection = []

@@ -15,6 +15,7 @@ import { WebviewPlugin } from "@ohos-rs/ability-plugin-webview";
 import { WindowPlugin } from "@ohos-rs/ability-plugin-window";
 import { MenuPlugin } from "@ohos-rs/ability-plugin-menu";
 import { StatusbarPlugin } from "@ohos-rs/ability-plugin-statusbar";
+import { ProcessPlugin } from "@ohos-rs/ability-plugin-process";
 import {
   DemoLoginPlugin,
   DemoIdentityProvider,
@@ -49,6 +50,7 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => new StatusbarPlugin()),
     new LazyPlugin(() => new AccountPlugin()),
     new LazyPlugin(() => new UpdaterPlugin()),
+    new LazyPlugin(() => new ProcessPlugin()),
     new LazyPlugin(() => new DemoLoginPlugin(new DemoIdentityProvider())),
     new LazyPlugin(() => new DemoMainThreadPlugin()),
     new LazyPlugin(() => new DemoTypedPlugin()),

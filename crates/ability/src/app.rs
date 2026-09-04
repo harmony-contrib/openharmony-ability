@@ -1044,6 +1044,26 @@ impl OpenHarmonyApp {
         super::updater::Updater::new(self)
     }
 
+    /// Get a process handle for app-level process control via the bridge.
+    ///
+    /// Core-privileged OHOS capability (not Tauri-shaped).
+    ///
+    /// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
+    /// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
+    /// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+    ///
+    /// `Process::restart` dispatches `appRecovery.restartApp()` and returns
+    /// `Ok(0)` on success. The process is then hard-killed by the system
+    /// (`onDestroy` is NOT triggered) — callers should block afterwards and
+    /// let the runtime terminate them, same pattern as the non-OHOS restart
+    /// path. Requires the app's Ability to be recoverable (`recoverable: true`
+    /// in module.json5); recovery is enabled right before the restart call on
+    /// the ArkTS side.
+    #[cfg(feature = "process")]
+    pub fn process(&self) -> Result<super::process::Process> {
+        super::process::Process::new(self)
+    }
+
     // ── Fault injection facade (coverage testing only) ─────────────────────────
     //
     // Feature-gated: when `fault-injection` is off, these methods do not exist.
