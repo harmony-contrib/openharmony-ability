@@ -5,9 +5,11 @@
 //! creation uses `create_os_window` / `WindowCreateParams` — a runtime
 //! integration-layer API consumed directly by the embedding runtime.
 
-use napi_ohos::bindgen_prelude::*;
-use napi_ohos::threadsafe_function::{ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive_ohos::napi;
+use napi_ohos::bindgen_prelude::*;
+use napi_ohos::threadsafe_function::{
+    ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
+};
 use napi_ohos::Env;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::OnceLock;
@@ -83,7 +85,7 @@ pub fn generate_window_id() -> i64 {
 /// serialized on the ArkTS UI thread and createSubWindow is dispatched first.
 pub fn create_os_window(params: WindowCreateParams) -> napi_ohos::Result<i64> {
     let id = NEXT_WINDOW_ID.fetch_add(1, Ordering::SeqCst);
-    crate::info!("create_os_window: Pre-allocated window ID: {}", id);
+    crate::debug!("create_os_window: Pre-allocated window ID: {}", id);
 
     let tsfn = match TSFN_CREATE_SUB_WINDOW.get() {
         Some(tsfn) => tsfn,
@@ -91,9 +93,7 @@ pub fn create_os_window(params: WindowCreateParams) -> napi_ohos::Result<i64> {
             crate::error!(
                 "create_os_window: TSFN not initialized (register_create_sub_window_tsfn not called)"
             );
-            return Err(Error::from_reason(
-                "create_sub_window TSFN not initialized",
-            ));
+            return Err(Error::from_reason("create_sub_window TSFN not initialized"));
         }
     };
 
@@ -120,7 +120,7 @@ pub fn create_os_window(params: WindowCreateParams) -> napi_ohos::Result<i64> {
         )));
     }
 
-    crate::info!(
+    crate::debug!(
         "create_os_window: Dispatched ArkTS createSubWindow for ID: {}",
         id
     );
@@ -142,7 +142,7 @@ pub fn create_os_window(params: WindowCreateParams) -> napi_ohos::Result<i64> {
 type CreateSubWindowTsfn = ThreadsafeFunction<
     (String, i64, i32, i32, i32, i32, bool, bool, Option<u32>),
     (),
-    FnArgs<(Object<'static>, )>,
+    FnArgs<(Object<'static>,)>,
     Status,
     false,
 >;
@@ -157,7 +157,10 @@ static TSFN_CREATE_SUB_WINDOW: OnceLock<CreateSubWindowTsfn> = OnceLock::new();
 /// After registration, `create_os_window` can fire-and-forget sub-window creation
 /// from any thread (TSFN is threadsafe).
 #[napi(ts_args_type = "createFn: (config: ESObject) => Promise<number>")]
-pub fn register_create_sub_window_tsfn(_env: Env, create_fn: Function<'static, Object<'static>, ()>) -> Result<()> {
+pub fn register_create_sub_window_tsfn(
+    _env: Env,
+    create_fn: Function<'static, Object<'static>, ()>,
+) -> Result<()> {
     if TSFN_CREATE_SUB_WINDOW.get().is_some() {
         crate::info!("create_sub_window TSFN already registered");
         return Ok(());
@@ -177,8 +180,7 @@ pub fn register_create_sub_window_tsfn(_env: Env, create_fn: Function<'static, O
                 bool,
                 Option<u32>,
             )>| {
-                build_create_sub_window_args(ctx.env, ctx.value)
-                    .map(|args| FnArgs { data: args })
+                build_create_sub_window_args(ctx.env, ctx.value).map(|args| FnArgs { data: args })
             },
         )?;
     let _ = TSFN_CREATE_SUB_WINDOW.set(tsfn);
@@ -288,7 +290,10 @@ static CURSOR_LOCK_API: OnceLock<Option<CursorLockApi>> = OnceLock::new();
 
 extern "C" {
     fn dlopen(filename: *const std::ffi::c_char, flags: std::ffi::c_int) -> *mut std::ffi::c_void;
-    fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+    fn dlsym(
+        handle: *mut std::ffi::c_void,
+        symbol: *const std::ffi::c_char,
+    ) -> *mut std::ffi::c_void;
 }
 
 /// Resolves the cursor lock C API once per process; `None` when the system
@@ -360,7 +365,10 @@ impl std::fmt::Display for CursorGrabError {
 /// Pure FFI — safe from any thread (no NAPI env access). Returns a typed error
 /// (explicit `std::result::Result`) so tao can map `NotSupported` vs OS errors
 /// without string matching.
-pub fn set_cursor_grab(real_window_id: i32, grab: bool) -> std::result::Result<(), CursorGrabError> {
+pub fn set_cursor_grab(
+    real_window_id: i32,
+    grab: bool,
+) -> std::result::Result<(), CursorGrabError> {
     if real_window_id <= 0 {
         return Err(CursorGrabError::Bridge(format!(
             "invalid real window id {real_window_id}"

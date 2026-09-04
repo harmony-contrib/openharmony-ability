@@ -846,21 +846,15 @@ impl BridgeClient {
             Box::new(TypedBridgeResponse::<Response>(PhantomData));
         let (sender, receiver) = oneshot::channel::<BridgeWireResult>();
 
-        crate::info!(
-            "[bridge] call_raw: {}/{} req={} resp={} — before TSFN enqueue",
-            plugin_id,
-            action,
-            Request::TYPE_NAME,
-            Response::TYPE_NAME
-        );
-        // Owned copy for the TSFN callback log — the closure cannot borrow
-        // `plugin_id`/`action` (it must be self-contained).
-        let cb_tag = format!("[bridge] call_raw: {}/{} — TSFN callback", plugin_id, action);
+        // Single trace line per bridge call (issue #87 major-8: this path used to
+        // log 4 info lines per call — before enqueue, inside the TSFN callback,
+        // after enqueue, and after the receiver resolved — which flooded any
+        // Info-level logger such as tauri-plugin-log).
+        crate::debug!("[bridge] call_raw: {}/{}", plugin_id, action);
         let status = self.invoke.call_with_return_value(
             request,
             ThreadsafeFunctionCallMode::NonBlocking,
             move |result, _env| {
-                crate::info!("{} entered", cb_tag);
                 match result {
                     Ok(value) => {
                         attach_promise(value, response_decoder, sender);
@@ -878,21 +872,11 @@ impl BridgeClient {
                 "Bridge TSFN dispatch failed with status: {status:?}"
             )));
         }
-        crate::info!(
-            "[bridge] call_raw: {}/{} — TSFN enqueue Ok, before receiver.await",
-            plugin_id,
-            action
-        );
 
         let response = receiver
             .await
             .map_err(|_| Error::from_reason("Bridge response channel was cancelled"))?
             .map_err(Error::from_reason)?;
-        crate::info!(
-            "[bridge] call_raw: {}/{} — receiver.await returned, decoding",
-            plugin_id,
-            action
-        );
         response
             .downcast::<Response>()
             .map(|response| *response)
@@ -1801,7 +1785,10 @@ mod tests {
 
     #[test]
     fn context_requirement_window_stage_str() {
-        assert_eq!(BridgeContextRequirement::WindowStage.as_str(), "window-stage");
+        assert_eq!(
+            BridgeContextRequirement::WindowStage.as_str(),
+            "window-stage"
+        );
     }
 
     #[test]
