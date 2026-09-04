@@ -1,9 +1,9 @@
 ::Just run this script on Windows
 set SCRIPT_DIR=%~dp0
 
-:: Wipe stale package metadata + ArkTS source. The git-tracked
-:: `package/src/main/resources/` is preserved (not touched here) and
-:: re-tarred verbatim.
+:: Wipe stale package metadata + ArkTS source. The whole package/ tree is
+:: build output (gitignored since issue #87 minor-8) — everything under it
+:: is regenerated below from native_ability/.
 del /q "%SCRIPT_DIR%package\oh-package.json5" 2>nul
 del /q "%SCRIPT_DIR%package\index.ets" 2>nul
 del /q "%SCRIPT_DIR%package\build-profile.json5" 2>nul
@@ -28,6 +28,11 @@ copy /Y "%SCRIPT_DIR%native_ability\consumer-rules.txt" "%SCRIPT_DIR%package\con
 
 :: ETS source tree.
 xcopy "%SCRIPT_DIR%native_ability\src\main\ets\*" "%SCRIPT_DIR%package\src\main\ets\" /E /I /Y >nul
+
+:: Resources (color.json etc.). The package/ tree is fully generated now
+:: (issue #87 minor-8) — a fresh clone has no tracked resources to reuse,
+:: so mirror them from native_ability like every other package input.
+xcopy "%SCRIPT_DIR%native_ability\src\main\resources\*" "%SCRIPT_DIR%package\src\main\resources\" /E /I /Y >nul
 
 :: Aggregate the 13 bridge plugins into the package so the HAR is a
 :: self-contained `@ohos-rs/ability` (base + all plugins). Consumers depend on a

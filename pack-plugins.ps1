@@ -1,4 +1,4 @@
-# Aggregates the 16 bridge plugins into the single `@ohos-rs/ability` HAR.
+# Aggregates the 17 bridge plugins into the single `@ohos-rs/ability` HAR.
 #
 # Run by pack.bat AFTER the base native_ability metadata + ets tree have been
 # copied into package/. Produces a self-contained HAR (Strategy A):
@@ -7,7 +7,7 @@
 #   - an internal barrel `ability_exports.ets` is generated from the base index.ets
 #     (paths rewritten to be relative to package/src/main/ets/) so plugins resolve
 #     base symbols without importing their own module by name (no cycle)
-#   - the 16 plugin classes are appended as re-exports to package/index.ets so
+#   - the 17 plugin classes are appended as re-exports to package/index.ets so
 #     consumers import them from `@ohos-rs/ability` directly
 #
 # Plugins stay standalone-buildable: their source still uses
@@ -24,7 +24,7 @@ if (-not $ScriptDir) { $ScriptDir = $PSScriptRoot }
 # path, failing Test-Path with ItemExistsArgumentError).
 $ScriptDir = $ScriptDir.Trim('"\')
 
-# (plugin-dir, exported-class) — the 16 core bridge plugins.
+# (plugin-dir, exported-class) — the 17 core bridge plugins.
 $plugins = @(
   @{ name = 'accessibility';   cls = 'AccessibilityPlugin' },
   @{ name = 'app-control';     cls = 'AppControlPlugin' },
@@ -36,6 +36,7 @@ $plugins = @(
   @{ name = 'global-shortcut'; cls = 'GlobalShortcutPlugin' },
   @{ name = 'menu';            cls = 'MenuPlugin' },
   @{ name = 'permission';      cls = 'PermissionPlugin' },
+  @{ name = 'process';         cls = 'ProcessPlugin' },
   @{ name = 'resource';        cls = 'ResourcePlugin' },
   @{ name = 'statusbar';       cls = 'StatusbarPlugin' },
   @{ name = 'updater';         cls = 'UpdaterPlugin' },
@@ -104,6 +105,38 @@ $lines = @(
 foreach ($p in $plugins) {
   $lines += "export { $($p.cls) } from `"./src/main/ets/plugins/$($p.name)/$($p.cls)`";"
 }
+
+# 4. Generate `plugins/all.ets`: a ready-made factory array covering every
+#    bridge plugin in this package. Apps assign it to
+#    NativeAbility#bridgePlugins so newly added bridge plugins flow to apps
+#    on package update, without regenerating their EntryAbility. The
+#    LazyPlugin factories are stateless — sharing the array across Ability
+#    instances is safe (each host calls create() for its own plugin
+#    instances). Lives in its own module because `LazyPlugin` must be
+#    imported for the type annotation, and package/index.ets only re-exports
+#    it.
+$allEts = @(
+  "import { LazyPlugin } from '../ability/type';",
+  ''
+)
+foreach ($p in $plugins) {
+  $allEts += "import { $($p.cls) } from './$($p.name)/$($p.cls)';"
+}
+$allEts += @(
+  '',
+  '// Ready-made factory array for NativeAbility#bridgePlugins (see pack-plugins.ps1).',
+  'export const allBridgePlugins: LazyPlugin[] = ['
+)
+foreach ($p in $plugins) {
+  $allEts += "  new LazyPlugin(() => new $($p.cls)()),"
+}
+$allEts += ']'
+$allPath = Join-Path $pluginsDir 'all.ets'
+[System.IO.File]::WriteAllText($allPath, ($allEts -join "`r`n") + "`r`n", $utf8NoBom)
+Write-Host "  all:    $allPath"
+
+$lines += 'export { allBridgePlugins } from "./src/main/ets/plugins/all";'
+
 $append = ($lines -join "`r`n") + "`r`n"
 [System.IO.File]::AppendAllText($pkgIdx, $append, $utf8NoBom)
-Write-Host "  index:  appended $($plugins.Count) plugin re-exports to $pkgIdx"
+Write-Host "  index:  appended $($plugins.Count) plugin re-exports + allBridgePlugins to $pkgIdx"
