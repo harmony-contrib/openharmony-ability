@@ -1,16 +1,17 @@
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import {
   AsyncPluginBase,
+  BridgeAcknowledgement,
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  DOMAIN,
+  expectBridgeRequestType,
   getMenuDataCallback,
   getPredefinedActionExecutor,
   WindowManager,
   type PredefinedType,
 } from "@ohos-rs/ability";
-
-const DOMAIN: number = 0x1999;
 
 const SET_MENUBAR_REQUEST_TYPE = "ohos.menu.SetMenubarRequest";
 const POPUP_REQUEST_TYPE = "ohos.menu.PopupRequest";
@@ -40,25 +41,6 @@ interface PredefinedRequest {
   windowId?: string;
 }
 
-class MenuAcknowledgement {
-  readonly accepted: boolean;
-
-  constructor(accepted: boolean) {
-    this.accepted = accepted;
-  }
-}
-
-function expectRequestType(
-  payload: BridgeTypedValue,
-  action: string,
-  typeName: string,
-): ESObject {
-  if (payload.typeName !== typeName || payload.value === null || typeof payload.value !== "object") {
-    throw new Error(`ohos.menu.${action} requires bridge type ${typeName}`);
-  }
-  return payload.value as ESObject;
-}
-
 /**
  * Menu bridge plugin for ArkTS.
  *
@@ -84,7 +66,7 @@ export class MenuPlugin extends AsyncPluginBase {
     }
 
     if (action === "set-menubar") {
-      const request = expectRequestType(payload, action, SET_MENUBAR_REQUEST_TYPE) as SetMenubarRequest;
+      const request = expectBridgeRequestType(payload, "ohos.menu", action, SET_MENUBAR_REQUEST_TYPE) as SetMenubarRequest;
       if (typeof request.jsonData !== "string") {
         throw new Error("set-menubar.jsonData must be a string");
       }
@@ -92,16 +74,19 @@ export class MenuPlugin extends AsyncPluginBase {
         throw new Error("set-menubar.windowId must be a string");
       }
       const cb = getMenuDataCallback(request.windowId);
-      if (cb) {
-        cb.onMenubarJson?.(request.jsonData);
-      } else {
-        hilog.warn(DOMAIN, "MenuPlugin", "set-menubar: no callback for window '%{public}s'", request.windowId);
+      if (!cb) {
+        // No MenuBarComponent mounted for this window (e.g. a FloatPage
+        // sub-window) or the menubar has not attached yet. Rejecting lets the
+        // Rust MenuClient surface the failure instead of caching
+        // MENU_HAS_CONTENT as success.
+        throw new Error(`set-menubar: no menu callback registered for window '${request.windowId}'`);
       }
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new MenuAcknowledgement(true) };
+      cb.onMenubarJson?.(request.jsonData);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "popup") {
-      const request = expectRequestType(payload, action, POPUP_REQUEST_TYPE) as PopupRequest;
+      const request = expectBridgeRequestType(payload, "ohos.menu", action, POPUP_REQUEST_TYPE) as PopupRequest;
       hilog.info(DOMAIN, "MenuPlugin", "popup windowId=%{public}s x=%{public}d y=%{public}d jsonLen=%{public}d",
         request.windowId, request.x ?? 0, request.y ?? 0, request.jsonData.length);
       if (typeof request.jsonData !== "string") {
@@ -113,16 +98,15 @@ export class MenuPlugin extends AsyncPluginBase {
       const x = request.x ?? 0;
       const y = request.y ?? 0;
       const cb = getMenuDataCallback(request.windowId);
-      if (cb) {
-        cb.onMenuPopup?.(request.jsonData, x, y);
-      } else {
-        hilog.warn(DOMAIN, "MenuPlugin", "popup: no callback for window '%{public}s'", request.windowId);
+      if (!cb) {
+        throw new Error(`popup: no menu callback registered for window '${request.windowId}'`);
       }
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new MenuAcknowledgement(true) };
+      cb.onMenuPopup?.(request.jsonData, x, y);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-menubar-visible") {
-      const request = expectRequestType(payload, action, SET_VISIBLE_REQUEST_TYPE) as SetVisibleRequest;
+      const request = expectBridgeRequestType(payload, "ohos.menu", action, SET_VISIBLE_REQUEST_TYPE) as SetVisibleRequest;
       if (typeof request.visible !== "boolean") {
         throw new Error("set-menubar-visible.visible must be a boolean");
       }
@@ -130,16 +114,15 @@ export class MenuPlugin extends AsyncPluginBase {
         throw new Error("set-menubar-visible.windowId must be a string");
       }
       const cb = getMenuDataCallback(request.windowId);
-      if (cb) {
-        cb.onMenubarVisible?.(request.visible);
-      } else {
-        hilog.warn(DOMAIN, "MenuPlugin", "set-menubar-visible: no callback for window '%{public}s'", request.windowId);
+      if (!cb) {
+        throw new Error(`set-menubar-visible: no menu callback registered for window '${request.windowId}'`);
       }
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new MenuAcknowledgement(true) };
+      cb.onMenubarVisible?.(request.visible);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "execute-predefined") {
-      const request = expectRequestType(payload, action, PREDEFINED_REQUEST_TYPE) as PredefinedRequest;
+      const request = expectBridgeRequestType(payload, "ohos.menu", action, PREDEFINED_REQUEST_TYPE) as PredefinedRequest;
       if (typeof request.action !== "string" || !request.action) {
         throw new Error("execute-predefined.action must be a non-empty string");
       }
@@ -162,7 +145,7 @@ export class MenuPlugin extends AsyncPluginBase {
       } else {
         executor.execute(actionType);
       }
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new MenuAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     throw new Error(`Unsupported ohos.menu action '${action}'`);
