@@ -17,6 +17,9 @@ import {
   AsyncPluginBase,
   BridgeContextRequirement,
   BridgeLifecycleEvent,
+  BridgeAcknowledgement,
+  NATIVE_MODULE_STORAGE_KEY,
+  Module,
   WindowManager,
   notifyPrimaryWebviewController,
   notifyKeySynthesisController,
@@ -46,9 +49,6 @@ const PRINT_STATE_EVENT_TYPE = "ohos.webview.PrintStateEvent";
 
 const PRINT_LOG_DOMAIN = 0x9801;
 const PRINT_LOG_TAG = "WebviewPrint";
-// Mirrors native_ability helper/constants.ets NATIVE_MODULE_STORAGE_KEY; not re-exported
-// through the @ohos-rs/ability barrel, so defined locally for the close-window path.
-const NATIVE_MODULE_STORAGE_KEY = '__native_module__';
 const SNAPSHOT_REQUEST_TYPE = "ohos.webview.SnapshotRequest";
 const SNAPSHOT_RESPONSE_TYPE = "ohos.webview.SnapshotResponse";
 const CAPTURE_RESPONSE_TYPE = "ohos.webview.CaptureResponse";
@@ -455,10 +455,6 @@ class WebviewControllerEvent {
     this.id = id;
     this.nativeTag = nativeTag;
   }
-}
-
-interface WebviewEventAcknowledgement {
-  accepted: boolean;
 }
 
 class WebviewDragEventPayload {
@@ -981,7 +977,7 @@ function notifyNative(
     requestTypeName,
     EVENT_ACKNOWLEDGEMENT_TYPE,
     value,
-  ) as WebviewEventAcknowledgement;
+  ) as BridgeAcknowledgement;
   if (response === null || typeof response !== "object" || response.accepted !== true) {
     throw new Error("WebView native notification was not accepted");
   }
@@ -1296,22 +1292,10 @@ function BuildWebview(data: ManagedWebview) {
         .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
         // Vibrancy: backdropBlur for opaque sub-windows (see Direct mode comment)
         .backdropBlur(data.style.blurRadius ?? 0)
-        // Debounce resize JS dispatch to avoid flooding ArkWeb during drag-resize.
-        // Mirrors the proven legacy DefaultWebview.ets pattern (ASYNC_RENDER + dispatchEvent).
+        // Debounce resize JS dispatch to avoid flooding ArkWeb during drag-resize
+        // (handleWebviewAreaChange — shared with the direct branch, issue #87 major-6).
         .onAreaChange((oldArea: Area, newArea: Area) => {
-          hilog.info(0x1999, 'WebviewSurface',
-            'onAreaChange: oldW=%{public}s oldH=%{public}s newW=%{public}s newH=%{public}s',
-            String(oldArea.width), String(oldArea.height), String(newArea.width), String(newArea.height));
-          if (data.resizeDebounceTimer) {
-            clearTimeout(data.resizeDebounceTimer);
-          }
-          data.resizeDebounceTimer = setTimeout(() => {
-            data.resizeDebounceTimer = 0;
-            try {
-              data.controller.runJavaScript('window.dispatchEvent(new Event("resize"));')
-                .catch(() => { /* fire-and-forget */ });
-            } catch (_e) { /* synchronous throw guard */ }
-          }, 50);
+          handleWebviewAreaChange(data, oldArea, newArea);
         })
         .javaScriptAccess(data.javascriptEnabled ?? true)
         .domStorageAccess(true)
@@ -1324,58 +1308,18 @@ function BuildWebview(data: ManagedWebview) {
         })
         .onLoadIntercept((event) => handleLoadIntercept(data, event.data.getRequestUrl()))
         .onInterceptRequest((event) => {
-          const interceptUrl = (event as WebInterceptRequestEvent).request.getRequestUrl();
-          hilog.info(0x1999, 'WebviewSurface',
-            '[https-intercept] onInterceptRequest fired: id=%{public}s url=%{public}s protocols_size=%{public}d',
-            String(data.id), interceptUrl ?? 'null', data.httpsInterceptProtocols?.size ?? 0);
-          return handleHttpsIntercept(data, interceptUrl);
+          return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, '');
         })
         .onTitleReceive((event) => data.onTitleChange(event.title))
         .onPageBegin((e) => {
-          if (data.eventOptions.pageBegin === true) {
-            data.onPageBegin(e.url);
-          }
+          handleWebviewPageBegin(data, e.url);
         })
         .onPageEnd((e) => {
-          if (data.eventOptions.pageEnd === true) {
-            data.onPageEnd(e.url);
-          }
+          handleWebviewPageEnd(data, e.url);
         })
         .onWindowNew((e) => {
-          if (data.eventOptions.newWindow !== true) {
-            e.handler.setWebController(null);
-            return;
-          }
-          const allow = data.onNewWindow(
-            e.targetUrl ?? "",
-            e.isAlert ?? false,
-            e.isUserTrigger ?? false,
-          );
-          if (!allow) {
-            e.handler.setWebController(null);
-          } else {
-            // Allow: the embedding runtime permits the new window. `data.onNewWindow`
-            // above already ran the synchronous `invokeNativeSync("new-window-request")`
-            // round-trip and Rust emitted the `new-window-requested` event
-            // unconditionally (src-tauri/src/lib.rs, before the allow/deny branch),
-            // so the event is already queued for JS.
-            //
-            // We cancel ArkWeb's own popup via `setWebController(null)` (non-blocking;
-            // `setWebController` on an unhosted controller would permanently block the
-            // UI thread) and instead show an in-page NewWindowDialog whose `Web` loads
-            // the target URL directly — the OHOS equivalent of "open in a new in-page
-            // window" (Allow). The dialog's controller is independent of `e.handler`,
-            // so there is no deadlock. The auto suite uses Create mode (create=true →
-            // Rust returns Create → allow=false), so this branch only fires for the
-            // manual Allow button.
-            e.handler.setWebController(null);
-            try {
-              data.onShowNewWindow?.(new webview.WebviewController(), e.targetUrl ?? '');
-            } catch (err) {
-              hilog.warn(0x1999, 'WebviewSurface', 'Allow new-window dialog failed: %{public}s', String(err));
-            }
-          }
-        });
+          handleWebviewWindowNew(data, e);
+        })
 
       Stack()
         .width("100%")
@@ -1383,17 +1327,16 @@ function BuildWebview(data: ManagedWebview) {
         .backgroundColor(Color.Transparent)
         .hitTestBehavior(HitTestMode.Transparent)
         .onDragEnter((dragEvent: DragEvent) => {
-          data.onDragEnter(readDragX(dragEvent), readDragY(dragEvent));
+          dispatchWebviewDragEnter(data, dragEvent);
         })
         .onDragMove((dragEvent: DragEvent) => {
-          data.onDragMove(readDragX(dragEvent), readDragY(dragEvent));
+          dispatchWebviewDragMove(data, dragEvent);
         })
         .onDrop((dragEvent: DragEvent) => {
-          const paths = extractDragPaths(dragEvent);
-          data.onDrop(readDragX(dragEvent), readDragY(dragEvent), paths);
+          dispatchWebviewDragDrop(data, dragEvent);
         })
         .onDragLeave((dragEvent: DragEvent) => {
-          data.onDragLeave(readDragX(dragEvent), readDragY(dragEvent));
+          dispatchWebviewDragLeave(data, dragEvent);
         });
     }
     .width("100%")
@@ -1417,25 +1360,13 @@ function BuildWebview(data: ManagedWebview) {
       // Works on opaque containers (Float sub-windows where setWindowContainerColor returns 1300004).
       // The blur radius is read from WindowManager.getPendingBlur() at webview creation time.
       .backdropBlur(data.style.blurRadius ?? 0)
-      // Debounce resize JS dispatch to avoid flooding ArkWeb during drag-resize.
-      // Mirrors the proven legacy DefaultWebview.ets pattern (ASYNC_RENDER + dispatchEvent).
+      // Debounce resize JS dispatch (handleWebviewAreaChange — shared with the
+      // overlay branch, issue #87 major-6).
       .onAreaChange((oldArea: Area, newArea: Area) => {
-        hilog.info(0x1999, 'WebviewSurface',
-          'onAreaChange: oldW=%{public}s oldH=%{public}s newW=%{public}s newH=%{public}s',
-          String(oldArea.width), String(oldArea.height), String(newArea.width), String(newArea.height));
-        if (data.resizeDebounceTimer) {
-          clearTimeout(data.resizeDebounceTimer);
-        }
-        data.resizeDebounceTimer = setTimeout(() => {
-          data.resizeDebounceTimer = 0;
-          try {
-            data.controller.runJavaScript('window.dispatchEvent(new Event("resize"));')
-              .catch(() => { /* fire-and-forget */ });
-          } catch (_e) { /* synchronous throw guard */ }
-        }, 50);
+        handleWebviewAreaChange(data, oldArea, newArea);
       })
       .javaScriptAccess(data.javascriptEnabled ?? true)
-        .domStorageAccess(true)
+      .domStorageAccess(true)
       .mediaPlayGestureAccess(data.autoplay === true ? false : true)
       .javaScriptOnDocumentStart(keySynthesisScripts(data))
       .multiWindowAccess(data.eventOptions.newWindow === true)
@@ -1445,69 +1376,29 @@ function BuildWebview(data: ManagedWebview) {
       })
       .onLoadIntercept((event) => handleLoadIntercept(data, event.data.getRequestUrl()))
       .onInterceptRequest((event) => {
-        const interceptUrl = (event as { request: WebResourceRequest }).request.getRequestUrl();
-        hilog.info(0x1999, 'WebviewSurface',
-          '[https-intercept] onInterceptRequest(embedded) fired: id=%{public}s url=%{public}s protocols_size=%{public}d',
-          String(data.id), interceptUrl ?? 'null', data.httpsInterceptProtocols?.size ?? 0);
-        return handleHttpsIntercept(data, interceptUrl);
+        return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, '(embedded)');
       })
       .onTitleReceive((event) => data.onTitleChange(event.title))
       .onPageBegin((e) => {
-        if (data.eventOptions.pageBegin === true) {
-          data.onPageBegin(e.url);
-        }
+        handleWebviewPageBegin(data, e.url);
       })
       .onPageEnd((e) => {
-        if (data.eventOptions.pageEnd === true) {
-          data.onPageEnd(e.url);
-        }
+        handleWebviewPageEnd(data, e.url);
       })
       .onDragEnter((dragEvent: DragEvent) => {
-        if (data.eventOptions.dragDrop === true) {
-          data.onDragEnter(readDragX(dragEvent), readDragY(dragEvent));
-        }
+        dispatchWebviewDragEnter(data, dragEvent);
       })
       .onDragMove((dragEvent: DragEvent) => {
-        if (data.eventOptions.dragDrop === true) {
-          data.onDragMove(readDragX(dragEvent), readDragY(dragEvent));
-        }
+        dispatchWebviewDragMove(data, dragEvent);
       })
       .onDrop((dragEvent: DragEvent) => {
-        if (data.eventOptions.dragDrop === true) {
-          const paths = extractDragPaths(dragEvent);
-          data.onDrop(readDragX(dragEvent), readDragY(dragEvent), paths);
-        }
+        dispatchWebviewDragDrop(data, dragEvent);
       })
       .onDragLeave((dragEvent: DragEvent) => {
-        if (data.eventOptions.dragDrop === true) {
-          data.onDragLeave(readDragX(dragEvent), readDragY(dragEvent));
-        }
+        dispatchWebviewDragLeave(data, dragEvent);
       })
       .onWindowNew((e) => {
-        if (data.eventOptions.newWindow !== true) {
-          e.handler.setWebController(null);
-          return;
-        }
-        const allow = data.onNewWindow(
-          e.targetUrl ?? "",
-          e.isAlert ?? false,
-          e.isUserTrigger ?? false,
-        );
-        if (!allow) {
-          e.handler.setWebController(null);
-        } else {
-          // #85 / Allow: see overlay branch above. Cancel ArkWeb's popup
-          // (`setWebController(null)`, non-blocking) and show an in-page
-          // NewWindowDialog whose `Web` loads the target URL directly — the OHOS
-          // equivalent of "open in a new in-page window". Auto suite uses Create
-          // mode so this branch only fires for the manual Allow button.
-          e.handler.setWebController(null);
-          try {
-            data.onShowNewWindow?.(new webview.WebviewController(), e.targetUrl ?? '');
-          } catch (err) {
-            hilog.warn(0x1999, 'WebviewSurface', 'Allow new-window dialog failed: %{public}s', String(err));
-          }
-        }
+        handleWebviewWindowNew(data, e);
       });
   }
 }
@@ -1624,6 +1515,123 @@ function handleLoadIntercept(data: ManagedWebview, url: string): boolean {
   return data.onNavigationRequest(url);
 }
 
+// ─── Shared Web-callback handlers (issue #87 major-6) ─────────────────────────
+// BuildWebview's overlay and direct branches used to duplicate these closures
+// verbatim (with drifting comments/casts). Only the pure-JS logic is shared —
+// the Web(...) attribute chains stay duplicated per branch: ArkUI @Builder
+// attributes must complete at the call site (DSL limitation).
+
+/**
+ * Debounced resize dispatch: 50ms after the last onAreaChange, run a
+ * `resize` Event dispatch in the page so JS layout observers run once per
+ * settle instead of once per frame during drag-resize. Mirrors the proven
+ * legacy DefaultWebview.ets pattern (ASYNC_RENDER + dispatchEvent).
+ */
+function handleWebviewAreaChange(data: ManagedWebview, oldArea: Area, newArea: Area): void {
+  hilog.info(0x1999, 'WebviewSurface',
+    'onAreaChange: oldW=%{public}s oldH=%{public}s newW=%{public}s newH=%{public}s',
+    String(oldArea.width), String(oldArea.height), String(newArea.width), String(newArea.height));
+  if (data.resizeDebounceTimer) {
+    clearTimeout(data.resizeDebounceTimer);
+  }
+  data.resizeDebounceTimer = setTimeout(() => {
+    data.resizeDebounceTimer = 0;
+    try {
+      data.controller.runJavaScript('window.dispatchEvent(new Event("resize"));')
+        .catch(() => { /* fire-and-forget */ });
+    } catch (_e) { /* synchronous throw guard */ }
+  }, 50);
+}
+
+/** https-intercept dispatch with the diagnostic log. `modeTag` keeps the two
+ *  branches' log variants ('' vs '(embedded)') byte-identical to the former
+ *  inline copies. */
+function handleWebviewInterceptRequest(data: ManagedWebview, event: WebInterceptRequestEvent, modeTag: string): WebResourceResponse | null {
+  const interceptUrl = event.request.getRequestUrl();
+  hilog.info(0x1999, 'WebviewSurface',
+    '[https-intercept] onInterceptRequest%{public}s fired: id=%{public}s url=%{public}s protocols_size=%{public}d',
+    modeTag, String(data.id), interceptUrl ?? 'null', data.httpsInterceptProtocols?.size ?? 0);
+  return handleHttpsIntercept(data, interceptUrl);
+}
+
+/** pageBegin/pageEnd JS-callback dispatch, gated on the event options. */
+function handleWebviewPageBegin(data: ManagedWebview, url: string): void {
+  if (data.eventOptions.pageBegin === true) {
+    data.onPageBegin(url);
+  }
+}
+
+function handleWebviewPageEnd(data: ManagedWebview, url: string): void {
+  if (data.eventOptions.pageEnd === true) {
+    data.onPageEnd(url);
+  }
+}
+
+/**
+ * onWindowNew: ask the embedding runtime whether the new window is allowed.
+ * - Deny / Create mode (auto suite): cancel ArkWeb's popup via
+ *   `setWebController(null)` (non-blocking; `setWebController` on an unhosted
+ *   controller would permanently block the UI thread).
+ * - Allow (manual button only): still cancel ArkWeb's own popup, and instead
+ *   show an in-page NewWindowDialog whose `Web` loads the target URL directly
+ *   — the OHOS equivalent of "open in a new in-page window". The dialog's
+ *   controller is independent of `e.handler`, so there is no deadlock.
+ *   `data.onNewWindow` already ran the synchronous `invokeNativeSync(
+ *   "new-window-request")` round-trip and Rust emitted the
+ *   `new-window-requested` event unconditionally (src-tauri/src/lib.rs, before
+ *   the allow/deny branch), so the event is already queued for JS either way.
+ */
+function handleWebviewWindowNew(data: ManagedWebview, e: OnWindowNewEvent): void {
+  if (data.eventOptions.newWindow !== true) {
+    e.handler.setWebController(null);
+    return;
+  }
+  const allow = data.onNewWindow(
+    e.targetUrl ?? "",
+    e.isAlert ?? false,
+    e.isUserTrigger ?? false,
+  );
+  if (!allow) {
+    e.handler.setWebController(null);
+  } else {
+    e.handler.setWebController(null);
+    try {
+      data.onShowNewWindow?.(new webview.WebviewController(), e.targetUrl ?? '');
+    } catch (err) {
+      hilog.warn(0x1999, 'WebviewSurface', 'Allow new-window dialog failed: %{public}s', String(err));
+    }
+  }
+}
+
+// Drag dispatch with the dragDrop guard inside. In overlay mode the branch
+// condition guarantees dragDrop === true (guard always passes); in direct mode
+// the guard is load-bearing. Always going through these handlers keeps both
+// branches byte-identical in behavior.
+function dispatchWebviewDragEnter(data: ManagedWebview, dragEvent: DragEvent): void {
+  if (data.eventOptions.dragDrop === true) {
+    data.onDragEnter(readDragX(dragEvent), readDragY(dragEvent));
+  }
+}
+
+function dispatchWebviewDragMove(data: ManagedWebview, dragEvent: DragEvent): void {
+  if (data.eventOptions.dragDrop === true) {
+    data.onDragMove(readDragX(dragEvent), readDragY(dragEvent));
+  }
+}
+
+function dispatchWebviewDragDrop(data: ManagedWebview, dragEvent: DragEvent): void {
+  if (data.eventOptions.dragDrop === true) {
+    const paths = extractDragPaths(dragEvent);
+    data.onDrop(readDragX(dragEvent), readDragY(dragEvent), paths);
+  }
+}
+
+function dispatchWebviewDragLeave(data: ManagedWebview, dragEvent: DragEvent): void {
+  if (data.eventOptions.dragDrop === true) {
+    data.onDragLeave(readDragX(dragEvent), readDragY(dragEvent));
+  }
+}
+
 const webviewBuilder = wrapBuilder<[ManagedWebview]>(BuildWebview);
 
 /**
@@ -1647,7 +1655,7 @@ class WebviewSurface {
     this.remove(payload.id);
     const style = normalizeStyle(payload.style, payload.transparent);
     // Read pending blur radius from WindowManager (set by window set-blur command).
-    // This is the WebviewPlugin equivalent of RustWebviewNodeController's pendingBlurs injection.
+    // Injected at build time here; runtime refresh goes through blurRefreshCallbacks.
     const windowId = payload.windowId ?? 0;
     const pendingBlur = WindowManager.getInstance().getPendingBlur(windowId);
     hilog.info(0x1999, 'WebviewSurface',
@@ -1922,7 +1930,7 @@ class WebviewSurface {
       data.onCloseWindow = (): void => {
         hilog.info(0x1999, 'WebviewSurface', 'onCloseWindow: destroying windowId=%{public}d', windowId);
         try {
-          const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+          const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
           if (nativeModule && typeof nativeModule.notifyWindowClose === 'function') {
             nativeModule.notifyWindowClose(windowId);
           }

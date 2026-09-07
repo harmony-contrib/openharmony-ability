@@ -3,6 +3,7 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
 // ── Bridge type name contracts ────────────────────────────────────────────────
@@ -24,20 +25,6 @@ class DeepLinkGetUriResponse {
 
   constructor(uri: string | null) {
     this.uri = uri;
-  }
-}
-
-function expectRequestType(
-  payload: BridgeTypedValue,
-  action: string,
-  typeName: string,
-): void {
-  if (
-    payload.typeName !== typeName ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(`ohos.deep-link.${action} requires bridge type ${typeName}`);
   }
 }
 
@@ -67,7 +54,7 @@ export class DeepLinkPlugin extends AsyncPluginBase {
     }
 
     if (action === "get-initial-uri") {
-      expectRequestType(payload, action, GET_URI_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.deep-link", action, GET_URI_REQUEST_TYPE);
       return {
         typeName: GET_URI_RESPONSE_TYPE,
         value: new DeepLinkGetUriResponse(readUri(INITIAL_WANT_URI_KEY)),
@@ -75,7 +62,7 @@ export class DeepLinkPlugin extends AsyncPluginBase {
     }
 
     if (action === "get-latest-uri") {
-      expectRequestType(payload, action, GET_URI_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.deep-link", action, GET_URI_REQUEST_TYPE);
       return {
         typeName: GET_URI_RESPONSE_TYPE,
         value: new DeepLinkGetUriResponse(readUri(LATEST_WANT_URI_KEY)),

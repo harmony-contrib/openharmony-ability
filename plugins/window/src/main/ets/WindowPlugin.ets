@@ -7,15 +7,16 @@ import { hilog } from "@kit.PerformanceAnalysisKit";
 import { notificationManager } from "@kit.NotificationKit";
 import { inputMethod } from "@kit.IMEKit";
 import {
+  BridgeAcknowledgement,
   BridgeCallContext,
   BridgePluginHookContext,
   BridgeTypedValue,
   BridgeContextRequirement,
   AsyncPluginBase,
+  DOMAIN,
   WindowManager,
 } from "@ohos-rs/ability";
 
-const DOMAIN: number = 0x1999;
 const TAG: string = "WindowPlugin";
 
 const AVOID_AREA_REQUEST_TYPE = "ohos.window.AvoidAreaRequest";
@@ -206,14 +207,6 @@ class WindowCreateResponse {
 
   constructor(windowId: number) {
     this.windowId = windowId;
-  }
-}
-
-class WindowAcknowledgement {
-  readonly accepted: boolean;
-
-  constructor(accepted: boolean) {
-    this.accepted = accepted;
   }
 }
 
@@ -581,7 +574,7 @@ export class WindowPlugin extends AsyncPluginBase {
       const win = this.requireWindow(request.windowId, context);
       try {
         win.setWindowDecorVisible(request.decorations);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`set-decorations failed: ${String(error)}`);
       }
@@ -597,7 +590,7 @@ export class WindowPlugin extends AsyncPluginBase {
       // of the legacy NAPI path and only implemented the mobile path — a silent
       // visual no-op on desktop (ack OK, no window change).
       WindowManager.getInstance().setFullscreen(request.windowId, request.on);
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-background-color") {
@@ -605,7 +598,7 @@ export class WindowPlugin extends AsyncPluginBase {
       const win = this.requireWindow(request.windowId, context);
       try {
         win.setWindowBackgroundColor(this.colorString(request.color));
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`setWindowBackgroundColor failed: ${String(error)}`);
       }
@@ -620,7 +613,7 @@ export class WindowPlugin extends AsyncPluginBase {
       // instead of setWindowShadowRadius (window shadow — wrong API for vibrancy)
       WindowManager.getInstance().applyWindowBlur(request.windowId, request.radius);
       hilog.info(DOMAIN, TAG, 'set-blur: applyWindowBlur returned, ack=true');
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "focus") {
@@ -632,7 +625,7 @@ export class WindowPlugin extends AsyncPluginBase {
           throw new Error("raiseToAppTop is unavailable on this API level");
         }
         await (dynamic.raiseToAppTop() as Promise<void>);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`focus failed: ${String(error)}`);
       }
@@ -643,7 +636,7 @@ export class WindowPlugin extends AsyncPluginBase {
       const win = this.requireWindow(request.windowId, context);
       try {
         await win.setFocusable(request.focusable);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`setFocusable failed: ${String(error)}`);
       }
@@ -654,7 +647,7 @@ export class WindowPlugin extends AsyncPluginBase {
       const win = this.requireWindow(request.windowId, context);
       try {
         await win.setWindowTouchable(request.touchable);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`set-touchable failed: ${String(error)}`);
       }
@@ -665,7 +658,7 @@ export class WindowPlugin extends AsyncPluginBase {
       const win = this.requireWindow(request.windowId, context);
       try {
         await win.moveWindowTo(request.x, request.y);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`moveWindowTo failed: ${String(error)}`);
       }
@@ -676,7 +669,7 @@ export class WindowPlugin extends AsyncPluginBase {
       const win = this.requireWindow(request.windowId, context);
       try {
         await win.resize(request.width, request.height);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`resize failed: ${String(error)}`);
       }
@@ -712,14 +705,14 @@ export class WindowPlugin extends AsyncPluginBase {
       // permission handling live there, ported from upstream PR#45).
       const request = parseTopmostRequest(payload);
       WindowManager.getInstance().setWindowTopmost(request.windowId, request.topmost);
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-title") {
       // Delegates to WindowManager.setWindowTitle (API9+, main window + Float sub-windows).
       const request = parseTitleRequest(payload);
       WindowManager.getInstance().setWindowTitle(request.windowId, request.title);
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-limits") {
@@ -732,7 +725,7 @@ export class WindowPlugin extends AsyncPluginBase {
         request.maxWidth,
         request.maxHeight,
       );
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "request-user-attention") {
@@ -768,7 +761,7 @@ export class WindowPlugin extends AsyncPluginBase {
         });
       };
       doPublish();
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-ime-position") {
@@ -811,7 +804,7 @@ export class WindowPlugin extends AsyncPluginBase {
       }
       try {
         await win.enableDrag(request.enable);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`set-draggable failed: ${String(error)}`);
       }
@@ -837,7 +830,7 @@ export class WindowPlugin extends AsyncPluginBase {
       // setter).
       const request = parseCursorIconRequest(payload);
       WindowManager.getInstance().setPointerStyle(request.windowId, request.style);
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-cursor-visible") {
@@ -847,7 +840,7 @@ export class WindowPlugin extends AsyncPluginBase {
       // Fire-and-forget: failures are logged in WindowManager.
       const request = parseCursorVisibleRequest(payload);
       WindowManager.getInstance().setPointerVisible(request.visible);
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-decoration-flags") {
@@ -857,7 +850,7 @@ export class WindowPlugin extends AsyncPluginBase {
       // logs and returns, still acknowledged.
       const request = parseDecorationFlagsRequest(payload);
       WindowManager.getInstance().setDecorationFlags(request.windowId, request.flags);
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     throw new Error(`Unsupported ohos.window action '${action}'`);
@@ -888,7 +881,7 @@ export class WindowPlugin extends AsyncPluginBase {
         this.windows.delete(request.windowId);
       }
       // else: already destroyed — idempotent success
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     const win = this.requireWindow(request.windowId, context);
@@ -926,7 +919,7 @@ export class WindowPlugin extends AsyncPluginBase {
         // main window and showWindow() for sub-windows.
         WindowManager.getInstance().showWindowMethod(request.windowId);
       }
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WindowAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     } catch (error) {
       throw new Error(`${action} failed: ${String(error)}`);
     }

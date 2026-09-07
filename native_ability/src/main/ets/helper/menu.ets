@@ -6,6 +6,7 @@ import { Want } from '@kit.AbilityKit';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { WindowManager } from '../window/WindowManager';
+import { Module } from '../ability/type';
 import { getMenuDataCallback } from '../components/MenuBarComponent';
 import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from './constants';
 
@@ -146,9 +147,6 @@ export class PredefinedActionExecutor {
     // Sub-window path: raw controller registered by WebviewPlugin.handleControllerAttached.
     // Main window (id=0) and not-yet-attached sub-windows fall through to the one-shot
     // executor.controller (captured from the first main-window attach).
-    // NOTE: the old wm.getController(id) -> RustWebviewNodeController.getPrimaryWebviewController()
-    // chain is dead (registerController has zero callers → controllers Map always empty)
-    // and is intentionally not revived.
     const fromWm = wm.getWebviewController(windowId);
     const wmHit = fromWm !== undefined;
     hilog.info(DOMAIN, 'Menu',
@@ -194,7 +192,7 @@ export class PredefinedActionExecutor {
     if (isSubWindow) {
       // Sub-window: notify Rust + use WindowManager.closeWindow()
       try {
-        const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+        const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
         if (nativeModule && typeof nativeModule.notifyWindowClose === 'function') {
           nativeModule.notifyWindowClose(windowId);
         }

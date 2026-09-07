@@ -190,11 +190,26 @@ mod tests {
     #[test]
     fn input_source_type_from_i32_covers_all_values() {
         assert!(matches!(InputSourceType::from(1), InputSourceType::Mouse));
-        assert!(matches!(InputSourceType::from(2), InputSourceType::TouchScreen));
-        assert!(matches!(InputSourceType::from(3), InputSourceType::Touchpad));
-        assert!(matches!(InputSourceType::from(4), InputSourceType::Joystick));
-        assert!(matches!(InputSourceType::from(5), InputSourceType::Keyboard));
-        assert!(matches!(InputSourceType::from(99), InputSourceType::Unknown));
+        assert!(matches!(
+            InputSourceType::from(2),
+            InputSourceType::TouchScreen
+        ));
+        assert!(matches!(
+            InputSourceType::from(3),
+            InputSourceType::Touchpad
+        ));
+        assert!(matches!(
+            InputSourceType::from(4),
+            InputSourceType::Joystick
+        ));
+        assert!(matches!(
+            InputSourceType::from(5),
+            InputSourceType::Keyboard
+        ));
+        assert!(matches!(
+            InputSourceType::from(99),
+            InputSourceType::Unknown
+        ));
         assert!(matches!(InputSourceType::from(0), InputSourceType::Unknown));
     }
 
@@ -212,8 +227,14 @@ mod tests {
         use ohos_xcomponent_binding::MouseAction as BindingMouseAction;
         let conv = |v: BindingMouseAction| MouseAction::from(v);
         assert!(matches!(conv(BindingMouseAction::None), MouseAction::None));
-        assert!(matches!(conv(BindingMouseAction::Press), MouseAction::Press));
-        assert!(matches!(conv(BindingMouseAction::Release), MouseAction::Release));
+        assert!(matches!(
+            conv(BindingMouseAction::Press),
+            MouseAction::Press
+        ));
+        assert!(matches!(
+            conv(BindingMouseAction::Release),
+            MouseAction::Release
+        ));
         assert!(matches!(conv(BindingMouseAction::Move), MouseAction::Move));
     }
 

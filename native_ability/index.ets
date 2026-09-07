@@ -25,6 +25,7 @@ export type {
   BridgePluginFactory,
   BridgePluginHookContext,
   MainThreadSyncBridgePlugin,
+  Module,
 } from "./src/main/ets/ability/type";
 export { DefaultXComponent } from "./src/main/ets/components/DefaultXComponent";
 export { notifyPrimaryWebviewController } from "./src/main/ets/components/DefaultXComponent";
@@ -79,3 +80,12 @@ export {
   synthesizeDomKeyEvent,
   KEY_SYNTHESIS_SHIM,
 } from "./src/main/ets/helper/key_synthesis";
+
+// ─── Shared bridge-plugin utilities (issue #87 minor-6) ──────────────────────
+// DOMAIN used to be re-declared in every plugin that logs via hilog; the
+// request-type validator and the { accepted: boolean } acknowledgement shape
+// were duplicated per plugin with drifting signatures. Plugins import these
+// from "@ohos-rs/ability" instead (pack-plugins.ps1 rewrites that specifier
+// to the internal path when assembling the published HAR).
+export { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "./src/main/ets/helper/constants";
+export { expectBridgeRequestType, BridgeAcknowledgement } from "./src/main/ets/helper/bridge_plugin_utils";

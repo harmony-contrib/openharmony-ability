@@ -23,5 +23,6 @@
     "@ohos-rs/ability-plugin-autostart": "file:../../plugins/autostart",
     "@ohos-rs/ability-plugin-menu": "file:../../plugins/menu",
     "@ohos-rs/ability-plugin-statusbar": "file:../../plugins/statusbar",
+    "@ohos-rs/ability-plugin-process": "file:../../plugins/process",
   },
 }

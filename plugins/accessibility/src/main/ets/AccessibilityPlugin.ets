@@ -5,6 +5,7 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
 const GET_FONT_SCALE_REQUEST_TYPE = "ohos.accessibility.GetFontScaleRequest";
@@ -82,17 +83,6 @@ class AccessibilityStateChangedEvent {
   }
 }
 
-function expectRequestType(
-  payload: BridgeTypedValue,
-  action: string,
-  typeName: string,
-): ESObject {
-  if (payload.typeName !== typeName || payload.value === null || typeof payload.value !== "object") {
-    throw new Error(`ohos.accessibility.${action} requires bridge type ${typeName}`);
-  }
-  return payload.value as ESObject;
-}
-
 export class AccessibilityPlugin extends AsyncPluginBase {
   readonly id = "ohos.accessibility";
   readonly requires: BridgeContextRequirement[] = ["ability"];
@@ -109,7 +99,7 @@ export class AccessibilityPlugin extends AsyncPluginBase {
     }
 
     if (action === "get-font-scale") {
-      expectRequestType(payload, action, GET_FONT_SCALE_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.accessibility", action, GET_FONT_SCALE_REQUEST_TYPE);
       // fontScale requires no permission; config is always present on UIAbilityContext.
       // NOTE: the SDK Configuration property is fontSizeScale — fontScale does not exist.
       const config = context.abilityContext.config;
@@ -123,7 +113,7 @@ export class AccessibilityPlugin extends AsyncPluginBase {
     }
 
     if (action === "is-open-accessibility") {
-      expectRequestType(payload, action, IS_OPEN_ACCESSIBILITY_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.accessibility", action, IS_OPEN_ACCESSIBILITY_REQUEST_TYPE);
       // OHOS claims ohos.permission.ACCESSIBILITY (system_core) is required; whether a
       // third-party read-only call is actually rejected is unresolved — surface whatever
       // BusinessError the system throws instead of swallowing it.
@@ -141,7 +131,7 @@ export class AccessibilityPlugin extends AsyncPluginBase {
     }
 
     if (action === "is-touch-explore-enabled") {
-      expectRequestType(payload, action, IS_TOUCH_EXPLORE_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.accessibility", action, IS_TOUCH_EXPLORE_REQUEST_TYPE);
       let enabled = false;
       try {
         enabled = await accessibility.isOpenTouchGuide();
@@ -156,7 +146,7 @@ export class AccessibilityPlugin extends AsyncPluginBase {
     }
 
     if (action === "subscribe-state-change") {
-      expectRequestType(payload, action, SUBSCRIBE_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.accessibility", action, SUBSCRIBE_REQUEST_TYPE);
       // Idempotent: re-subscribing without unsubscribe just re-acks.
       if (this.screenReaderHandler === null) {
         const handler = (enabled: boolean): void => {
@@ -177,7 +167,7 @@ export class AccessibilityPlugin extends AsyncPluginBase {
     }
 
     if (action === "unsubscribe-state-change") {
-      expectRequestType(payload, action, UNSUBSCRIBE_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.accessibility", action, UNSUBSCRIBE_REQUEST_TYPE);
       this.removeScreenReaderHandler();
       return {
         typeName: UNSUBSCRIBE_RESPONSE_TYPE,

@@ -64,7 +64,8 @@ impl_bridge_napi_type!(UpdaterCheckRequest, "ohos.updater.CheckRequest");
 pub struct UpdaterCheckResponse {
     pub update_available: bool,
     pub current_version: String,
-    pub version: String,
+    /// `None` when the device API level is below 20 (`versionName` unavailable).
+    pub version: Option<String>,
     pub body: Option<String>,
     pub date: Option<String>,
 }
@@ -105,7 +106,8 @@ impl_bridge_napi_type!(
 #[serde(rename_all = "camelCase")]
 pub struct CheckResult {
     pub current_version: String,
-    pub version: String,
+    /// `None` when the device API level is below 20 (`versionName` unavailable).
+    pub version: Option<String>,
     pub body: Option<String>,
     pub date: Option<String>,
 }
@@ -151,10 +153,7 @@ impl Updater {
     /// Returns `Ok(Some(result))` if an update is available, `Ok(None)` otherwise.
     pub async fn check(&self) -> Result<Option<CheckResult>> {
         let response = self
-            .call::<UpdaterCheckRequest, UpdaterCheckResponse>(
-                "check",
-                UpdaterCheckRequest {},
-            )
+            .call::<UpdaterCheckRequest, UpdaterCheckResponse>("check", UpdaterCheckRequest {})
             .await?;
         if !response.update_available {
             return Ok(None);
@@ -178,15 +177,13 @@ impl Updater {
         if response.accepted {
             Ok(())
         } else {
-            Err(Error::from_reason("updater downloadAndInstall rejected by plugin"))
+            Err(Error::from_reason(
+                "updater downloadAndInstall rejected by plugin",
+            ))
         }
     }
 
-    async fn call<Request, Response>(
-        &self,
-        action: &str,
-        request: Request,
-    ) -> Result<Response>
+    async fn call<Request, Response>(&self, action: &str, request: Request) -> Result<Response>
     where
         Request: BridgeNapiType,
         Response: BridgeNapiType,
@@ -209,7 +206,7 @@ mod tests {
     fn check_result_serde_roundtrip() {
         let result = CheckResult {
             current_version: "1.0.0".into(),
-            version: "2.0.0".into(),
+            version: Some("2.0.0".into()),
             body: Some("Bug fixes".into()),
             date: Some("2025-01-15".into()),
         };
@@ -218,32 +215,32 @@ mod tests {
         assert!(json.contains("\"version\":\"2.0.0\""));
         let deserialized: CheckResult = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.current_version, "1.0.0");
-        assert_eq!(deserialized.version, "2.0.0");
+        assert_eq!(deserialized.version.as_deref(), Some("2.0.0"));
         assert_eq!(deserialized.body, Some("Bug fixes".into()));
         assert_eq!(deserialized.date, Some("2025-01-15".into()));
     }
 
     #[test]
     fn check_result_optional_nulls() {
-        let json = r#"{"currentVersion":"1.0.0","version":"unknown","body":null,"date":null}"#;
+        let json = r#"{"currentVersion":"1.0.0","version":null,"body":null,"date":null}"#;
         let result: CheckResult = serde_json::from_str(json).unwrap();
         assert_eq!(result.current_version, "1.0.0");
-        assert_eq!(result.version, "unknown");
+        assert_eq!(result.version, None);
         assert_eq!(result.body, None);
         assert_eq!(result.date, None);
     }
 
     #[test]
     fn check_result_unknown_version_fallback() {
-        // Simulates SDK 12 where versionName is not available
+        // Simulates SDK 12 where versionName is not available (ArkTS returns null)
         let result = CheckResult {
             current_version: "1.0.0".into(),
-            version: "unknown".into(),
+            version: None,
             body: None,
             date: None,
         };
         let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["version"], "unknown");
+        assert!(json["version"].is_null());
     }
 
     #[test]

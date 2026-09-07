@@ -20,9 +20,12 @@ use ohos_hilog_binding::hilog_info;
 use openharmony_ability::{Event, InputEvent, NodeExt, OpenHarmonyApp};
 use openharmony_ability_derive::ability;
 use openharmony_ability_plugin_app_control::AppControlBridgePlugin;
+use openharmony_ability_plugin_autostart::AutostartBridgePlugin;
+use openharmony_ability_plugin_deep_link::DeepLinkBridgePlugin;
 use openharmony_ability_plugin_files::{
     dialog_type, FileDialogFilter, FileDialogOptions, FilesExt,
 };
+use openharmony_ability_plugin_global_shortcut::GlobalShortcutBridgePlugin;
 use openharmony_ability_plugin_permission::{PermissionBridgePlugin, PermissionExt};
 use openharmony_ability_plugin_resource::{ResourceBridgePlugin, ResourceExt};
 use openharmony_ability_plugin_url::UrlExt;
@@ -32,9 +35,6 @@ use openharmony_ability_plugin_webview::{
     WebviewProtocolOptions, WebviewStyle,
 };
 use openharmony_ability_plugin_window::WindowBridgePlugin;
-use openharmony_ability_plugin_global_shortcut::GlobalShortcutBridgePlugin;
-use openharmony_ability_plugin_deep_link::DeepLinkBridgePlugin;
-use openharmony_ability_plugin_autostart::AutostartBridgePlugin;
 
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
 static PERMISSION_REQUESTED: AtomicBool = AtomicBool::new(false);

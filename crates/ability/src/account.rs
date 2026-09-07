@@ -193,8 +193,7 @@ impl HuaweiAccount {
             .call_with_options::<AccountLoginRequest, AccountLoginResponse>(
                 "login",
                 AccountLoginRequest {},
-                BridgeCallOptions::default()
-                    .with_timeout_ms(INTERACTIVE_LOGIN_TIMEOUT_MS),
+                BridgeCallOptions::default().with_timeout_ms(INTERACTIVE_LOGIN_TIMEOUT_MS),
             )
             .await?;
         Ok(response.into())
@@ -217,10 +216,7 @@ impl HuaweiAccount {
     /// (Account Kit's `createCancelAuthorizationRequest`, see design D8).
     pub async fn logout(&self) -> Result<()> {
         let response = self
-            .call::<AccountLogoutRequest, AccountLogoutResponse>(
-                "logout",
-                AccountLogoutRequest {},
-            )
+            .call::<AccountLogoutRequest, AccountLogoutResponse>("logout", AccountLogoutRequest {})
             .await?;
         if response.accepted {
             Ok(())
@@ -229,11 +225,7 @@ impl HuaweiAccount {
         }
     }
 
-    async fn call<Request, Response>(
-        &self,
-        action: &str,
-        request: Request,
-    ) -> Result<Response>
+    async fn call<Request, Response>(&self, action: &str, request: Request) -> Result<Response>
     where
         Request: BridgeNapiType,
         Response: BridgeNapiType,

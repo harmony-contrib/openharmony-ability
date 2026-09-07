@@ -176,6 +176,22 @@ pub(crate) fn clear_attached() -> Result<()> {
     Ok(())
 }
 
+/// Drops the queued proxy declarations for `webview_id`, if any.
+///
+/// Create-failure rollback path (see `callbacks::remove`): a failed create
+/// leaves no controller, so nothing was installed — only the queued
+/// declarations need removing. Returns how many declarations were dropped.
+pub fn remove_declarations(webview_id: &str) -> Result<usize> {
+    let dropped = PROXY_STATE
+        .lock()
+        .map_err(|_| Error::from_reason("Failed to lock WebView JavaScript proxy state"))?
+        .declarations
+        .remove(webview_id)
+        .map(|decls| decls.len())
+        .unwrap_or(0);
+    Ok(dropped)
+}
+
 fn install(
     declaration: ProxyDeclaration,
     native_tag: &str,

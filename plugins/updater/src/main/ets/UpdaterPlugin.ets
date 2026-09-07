@@ -7,9 +7,9 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  DOMAIN,
 } from "@ohos-rs/ability";
 
-const DOMAIN: number = 0x1999;
 const TAG = "UpdaterPlugin.ets";
 
 const CHECK_REQUEST_TYPE = "ohos.updater.CheckRequest";
@@ -22,8 +22,13 @@ class UpdaterCheckResponse {
   readonly updateAvailable: boolean;
   readonly currentVersion: string;
   readonly version: string;
-  readonly body: string | null;
-  readonly date: string | null;
+  // Optional properties: napi-ohos's derive codegen decodes an Option<T> field
+  // as T — a PRESENT-but-null value fails with `StringExpected on
+  // UpdaterCheckResponse.body`, while an ABSENT property maps to Rust None.
+  // Keep them unset when null (same pattern as AccountPlugin.accessToken,
+  // device-verified 2026-08-31).
+  readonly body?: string;
+  readonly date?: string;
 
   constructor(
     updateAvailable: boolean,
@@ -35,8 +40,12 @@ class UpdaterCheckResponse {
     this.updateAvailable = updateAvailable;
     this.currentVersion = currentVersion;
     this.version = version;
-    this.body = body;
-    this.date = date;
+    if (body !== null) {
+      this.body = body;
+    }
+    if (date !== null) {
+      this.date = date;
+    }
   }
 }
 

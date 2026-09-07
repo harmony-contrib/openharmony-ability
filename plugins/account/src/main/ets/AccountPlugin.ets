@@ -8,9 +8,9 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  DOMAIN,
 } from "@ohos-rs/ability";
 
-const DOMAIN: number = 0x1999;
 const TAG = "AccountPlugin.ets";
 
 const LOGIN_REQUEST_TYPE = "ohos.account.LoginRequest";

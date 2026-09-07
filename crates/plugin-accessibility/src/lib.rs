@@ -280,7 +280,10 @@ impl std::fmt::Display for AccessibilityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::PermissionDenied { code, message } => {
-                write!(f, "accessibility permission denied (code={code}): {message}")
+                write!(
+                    f,
+                    "accessibility permission denied (code={code}): {message}"
+                )
             }
             Self::Unavailable { code, message } => {
                 write!(f, "accessibility query failed (code={code}): {message}")
@@ -551,7 +554,10 @@ mod tests {
         let err = AccessibilityError::from_reason(
             "on(screenReaderStateChange) failed: code=9300001 msg=inner error",
         );
-        assert!(matches!(err, AccessibilityError::Unavailable { code: 9300001, .. }));
+        assert!(matches!(
+            err,
+            AccessibilityError::Unavailable { code: 9300001, .. }
+        ));
     }
 
     #[test]

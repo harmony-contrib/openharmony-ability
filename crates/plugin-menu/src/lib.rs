@@ -229,11 +229,7 @@ impl MenuClient {
         })
     }
 
-    async fn call<Request, Response>(
-        &self,
-        action: &str,
-        request: Request,
-    ) -> Result<Response>
+    async fn call<Request, Response>(&self, action: &str, request: Request) -> Result<Response>
     where
         Request: BridgeNapiType,
         Response: BridgeNapiType,

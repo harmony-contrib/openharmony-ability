@@ -631,7 +631,8 @@ impl WindowClient {
     /// ArkTS side: publish failures (including the 1600004 enable-notification
     /// retry path) are logged, not propagated — attention is best-effort.
     pub async fn request_user_attention(&self, window_id: i64) -> Result<()> {
-        self.window_command("request-user-attention", window_id).await
+        self.window_command("request-user-attention", window_id)
+            .await
     }
 
     /// Notifies the IME of the cursor rect (physical pixels). Requires a focused
@@ -647,11 +648,7 @@ impl WindowClient {
         validate_platform_integer("y coordinate", y)?;
         self.call::<ImePositionRequest, ImePositionResponse>(
             "set-ime-position",
-            ImePositionRequest {
-                window_id,
-                x,
-                y,
-            },
+            ImePositionRequest { window_id, x, y },
         )
         .await
     }

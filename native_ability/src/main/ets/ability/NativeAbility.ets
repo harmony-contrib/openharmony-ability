@@ -113,15 +113,15 @@ export class NativeAbility extends UIAbility {
         },
       };
       const initContext = ProcessInitializer.createInitContext(context, moduleName);
-      hilog.info(DOMAIN, 'NativeAbility', '[DBG] before module.init mod=%{public}s modules=%{public}d', moduleName, modules.length);
+      hilog.debug(DOMAIN, 'NativeAbility', 'before module.init mod=%{public}s modules=%{public}d', moduleName, modules.length);
       const lifecycle = module.init(bindings, bridgeOwner, initContext);
-      hilog.info(DOMAIN, 'NativeAbility', '[DBG] after module.init mod=%{public}s bridgePlugins=%{public}d', moduleName, lifecycle.bridgePlugins?.length ?? -1);
+      hilog.debug(DOMAIN, 'NativeAbility', 'after module.init mod=%{public}s bridgePlugins=%{public}d', moduleName, lifecycle.bridgePlugins?.length ?? -1);
 
       try {
       BridgeHostRegistry.configurePlugins(sessionId, moduleName, lifecycle.bridgePlugins);
-      hilog.info(DOMAIN, 'NativeAbility', '[DBG] after configurePlugins mod=%{public}s', moduleName);
+      hilog.debug(DOMAIN, 'NativeAbility', 'after configurePlugins mod=%{public}s', moduleName);
       BridgeHostRegistry.attachApplicationLifecycle(sessionId, moduleName, lifecycle);
-      hilog.info(DOMAIN, 'NativeAbility', '[DBG] after attachApplicationLifecycle mod=%{public}s', moduleName);
+      hilog.debug(DOMAIN, 'NativeAbility', 'after attachApplicationLifecycle mod=%{public}s', moduleName);
       BridgeHostRegistry.attachEventSink(
         sessionId,
         moduleName,
@@ -142,7 +142,7 @@ export class NativeAbility extends UIAbility {
       // stays false, and the subsequent DefaultXComponent attach fails with "cannot attach
       // without an active WindowStage" — freezing the app before setup runs.
       this.moduleRuntimes.push({ moduleName, module, lifecycle, bridgeOwner });
-      hilog.info(DOMAIN, 'NativeAbility', '[DBG] pushed runtime mod=%{public}s total=%{public}d', moduleName, this.moduleRuntimes.length);
+      hilog.debug(DOMAIN, 'NativeAbility', 'pushed runtime mod=%{public}s total=%{public}d', moduleName, this.moduleRuntimes.length);
 
       const restoredState = restoredStateMap[moduleName] ?? "";
       // Dispatch AbilityCreated into the Rust bridge registry. This NAPI callback is the ONLY
@@ -179,15 +179,43 @@ export class NativeAbility extends UIAbility {
       } catch (e) {
         hilog.error(DOMAIN, 'NativeAbility', 'onAbilityCreateWithWant failed: %{public}s', String(e));
       }
-      hilog.info(DOMAIN, 'NativeAbility', '[DBG] before activateAbility mod=%{public}s', moduleName);
+      hilog.debug(DOMAIN, 'NativeAbility', 'before activateAbility mod=%{public}s', moduleName);
       await BridgeHostRegistry.activateAbility(sessionId, moduleName, {
         kind: "ability-create",
         payload: new BridgeAbilityCreateLifecyclePayload(restoredState),
       });
-      hilog.info(DOMAIN, 'NativeAbility', '[DBG] after activateAbility mod=%{public}s', moduleName);
+      hilog.debug(DOMAIN, 'NativeAbility', 'after activateAbility mod=%{public}s', moduleName);
       } catch (e) {
-        hilog.error(DOMAIN, 'NativeAbility', '[DBG] module setup THREW mod=%{public}s: %{public}s', moduleName, String(e));
-        hilog.error(DOMAIN, 'NativeAbility', '[DBG] stack: %{public}s', (e as Error)?.stack ?? 'no-stack');
+        hilog.error(DOMAIN, 'NativeAbility', 'module setup THREW mod=%{public}s: %{public}s', moduleName, String(e));
+        hilog.error(DOMAIN, 'NativeAbility', 'stack: %{public}s', (e as Error)?.stack ?? 'no-stack');
+        // Fail-fast collapse (issue #87 minor-3): continuing with a half-initialized
+        // bridge leaves every later call failing with a confusing "not installed".
+        // Mirror onDestroy's teardown instead: close the session so pending bridge
+        // calls/hooks fail fast with "closing", then feed Event::Destroy to the
+        // modules that DID initialize (plus this failing module if its runtime was
+        // already pushed) so Rust's run_loop receives Event::Destroy and exits
+        // normally. terminate() itself cannot succeed at onCreate time — the
+        // main-thread Env is only populated later by render() — so the destroy
+        // dispatch, not a terminate call, drives the Rust exit chain.
+        if (this.bridgeSessionId) {
+          BridgeHostRegistry.beginClosing(this.bridgeSessionId);
+        }
+        const pushed = this.moduleRuntimes.some((r) => r.moduleName === moduleName);
+        if (!pushed) {
+          // The throw predates this module's runtime push — forEachLifecycle
+          // below would never reach it.
+          try {
+            lifecycle.windowStageEventCallback.onAbilityDestroy();
+          } catch (e2) {
+            hilog.error(DOMAIN, 'NativeAbility', 'onAbilityDestroy (failed module %{public}s) failed: %{public}s', moduleName, String(e2));
+          }
+        }
+        this.forEachLifecycle((l) => l.windowStageEventCallback.onAbilityDestroy());
+        // Prevent the real onDestroy from double-dispatching Event::Destroy to the
+        // same modules (onDestroy's dispatch is not gated by acceptingLifecycle).
+        // onDestroy still runs its own session teardown (dispose) normally.
+        this.moduleRuntimes = [];
+        return;
       }
     }
 
@@ -251,8 +279,13 @@ export class NativeAbility extends UIAbility {
 
   private setupMenuPopup(windowStage: window.WindowStage): void {
     const nativeModules = ProcessInitializer.getNativeModules();
-    const primaryModule: ESObject = nativeModules[0] as ESObject;
-    if (!primaryModule || typeof primaryModule.onMenuRequest !== 'function') {
+    const primaryModule: Module | undefined = nativeModules[0];
+    // Probe a live NAPI surface member as the "is this a real openharmony-ability
+    // module" guard. This used to probe the onMenuRequest stub — dead code whose
+    // registration body never executed (the Rust side discarded the callback);
+    // the stub has been deleted (issue #87 major-4), so probe isDesktopDevice
+    // instead, which setupMenuPopup itself needs at the line below.
+    if (!primaryModule || typeof primaryModule.isDesktopDevice !== 'function') {
       return;
     }
 
@@ -344,28 +377,11 @@ export class NativeAbility extends UIAbility {
       executor.setController(controller as webview.WebviewController);
     });
 
-    primaryModule.onMenuRequest((data: { jsonData: string; x?: number; y?: number; visible?: boolean; windowId?: string }) => {
-      const windowId = data.windowId ?? "main";
-
-      if (data.visible !== undefined && data.visible !== null) {
-        const cb = getMenuDataCallback(windowId);
-        cb?.onMenubarVisible?.(data.visible);
-        primaryModule.notifyMenubarVisibility(windowId, data.visible);
-        return;
-      }
-
-      if (data.x !== undefined && data.y !== undefined) {
-        try {
-          menuManager.popupFromJson(data.jsonData, data.x ?? 0, data.y ?? 0, windowId);
-        } catch (e) {
-          console.error(`[Menu] Popup failed: ${e}`);
-        }
-        return;
-      }
-
-      const cb = getMenuDataCallback(windowId);
-      cb?.onMenubarJson?.(data.jsonData);
-    });
+    // NOTE (issue #87 major-4): the legacy `primaryModule.onMenuRequest(...)`
+    // registration that used to live here never executed — the Rust-side
+    // on_menu_request stub discarded the callback (`let _ = callback`). All three
+    // of its branches (menubar visibility / popup / menubar json) are served by
+    // the MenuPlugin bridge actions set-menubar / popup / set-menubar-visible.
   }
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
@@ -388,7 +404,7 @@ export class NativeAbility extends UIAbility {
     // Inject the WindowStage into the bridge session so plugins requiring a
     // window-stage context (e.g. window/webview) can install before the page renders.
     if (this.bridgeSessionId) {
-      hilog.info(DOMAIN, 'NativeAbility', '[DBG] setWindowStage loop: runtimes=%{public}d sess=%{public}s', this.moduleRuntimes.length, this.bridgeSessionId);
+      hilog.debug(DOMAIN, 'NativeAbility', 'setWindowStage loop: runtimes=%{public}d sess=%{public}s', this.moduleRuntimes.length, this.bridgeSessionId);
       for (const runtime of this.moduleRuntimes) {
         try {
           await BridgeHostRegistry.setWindowStage(this.bridgeSessionId, runtime.moduleName, windowStage);
@@ -475,7 +491,7 @@ export class NativeAbility extends UIAbility {
         // API 11+;不支持则静默降级(不比现状差)。详见 doc/OHOS窗口遗留问题.md。
         try {
           win.on("windowStatusChange", (statusType: window.WindowStatusType) => {
-            const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+            const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
             if (nativeModule && typeof nativeModule.notifyWindowStatus === 'function') {
               // 本地单 UIAbility 架构:主窗口恒为 tao windowId=0(upstream 的
               // readWindowId() 首实例也返回 0);runtime-wry 按 tao window_id 路由。
@@ -484,7 +500,7 @@ export class NativeAbility extends UIAbility {
           });
           // seed 初始态(官方 updateWindowInfo 模式),避免漏掉注册前状态。
           const initialStatus = win.getWindowStatus();
-          const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+          const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
           if (nativeModule && typeof nativeModule.notifyWindowStatus === 'function') {
             nativeModule.notifyWindowStatus(0, initialStatus);
           }
@@ -655,9 +671,9 @@ export class NativeAbility extends UIAbility {
     let snapshot: string = "";
     try {
       const nativeModules = ProcessInitializer.getNativeModules();
-      const primaryModule: ESObject = nativeModules[0] as ESObject;
+      const primaryModule: Module | undefined = nativeModules[0];
       if (primaryModule && typeof primaryModule.readContinueSnapshot === "function") {
-        snapshot = primaryModule.readContinueSnapshot() as string;
+        snapshot = primaryModule.readContinueSnapshot();
       }
     } catch (e) {
       hilog.error(DOMAIN, 'NativeAbility', 'onContinue - snapshot read failed: %{public}s', String(e));

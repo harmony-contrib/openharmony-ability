@@ -5,6 +5,8 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  BridgeAcknowledgement,
+  expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
 // ── Bridge type name contracts ────────────────────────────────────────────────
@@ -16,14 +18,6 @@ const IS_ENABLED_REQUEST_TYPE = "ohos.autostart.IsEnabledRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.autostart.Acknowledgement";
 const IS_ENABLED_RESPONSE_TYPE = "ohos.autostart.IsEnabledResponse";
 
-class AutostartAcknowledgement {
-  readonly accepted: boolean;
-
-  constructor(accepted: boolean) {
-    this.accepted = accepted;
-  }
-}
-
 class AutostartIsEnabledResponse {
   readonly enabled: boolean;
 
@@ -32,24 +26,10 @@ class AutostartIsEnabledResponse {
   }
 }
 
-function expectRequestType(
-  payload: BridgeTypedValue,
-  action: string,
-  typeName: string,
-): void {
-  if (
-    payload.typeName !== typeName ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(`ohos.autostart.${action} requires bridge type ${typeName}`);
-  }
-}
-
 function ack(accepted: boolean): BridgeTypedValue {
   return {
     typeName: ACKNOWLEDGEMENT_TYPE,
-    value: new AutostartAcknowledgement(accepted),
+    value: new BridgeAcknowledgement(accepted),
   };
 }
 
@@ -67,17 +47,17 @@ export class AutostartPlugin extends AsyncPluginBase {
     }
 
     if (action === "enable") {
-      expectRequestType(payload, action, ENABLE_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.autostart", action, ENABLE_REQUEST_TYPE);
       return ack(await this.openAutostartSettings());
     }
 
     if (action === "disable") {
-      expectRequestType(payload, action, DISABLE_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.autostart", action, DISABLE_REQUEST_TYPE);
       return ack(await this.openAutostartSettings());
     }
 
     if (action === "is-enabled") {
-      expectRequestType(payload, action, IS_ENABLED_REQUEST_TYPE);
+      expectBridgeRequestType(payload, "ohos.autostart", action, IS_ENABLED_REQUEST_TYPE);
       const enabled = await this.queryAutostartStatus();
       return {
         typeName: IS_ENABLED_RESPONSE_TYPE,

@@ -2,8 +2,7 @@ import web_webview from '@ohos.web.webview';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ComponentContent } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
-
-const DOMAIN: number = 0x1999;
+import { DOMAIN } from "@ohos-rs/ability";
 
 // Module-level single-instance dialog references.
 // Limitation: only one new-window dialog can exist at a time. Opening a second

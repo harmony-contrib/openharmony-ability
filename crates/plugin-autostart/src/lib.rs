@@ -52,10 +52,7 @@ impl_bridge_napi_type!(AutostartDisableRequest, "ohos.autostart.DisableRequest")
 #[derive(Clone, Debug, Default)]
 pub struct AutostartIsEnabledRequest {}
 
-impl_bridge_napi_type!(
-    AutostartIsEnabledRequest,
-    "ohos.autostart.IsEnabledRequest"
-);
+impl_bridge_napi_type!(AutostartIsEnabledRequest, "ohos.autostart.IsEnabledRequest");
 
 // ── acknowledgement ───────────────────────────────────────────────────────────
 

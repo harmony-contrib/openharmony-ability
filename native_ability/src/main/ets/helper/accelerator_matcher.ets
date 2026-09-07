@@ -188,8 +188,8 @@ export class AcceleratorMatcher {
 }
 
 // Per-window clipboard flag: windowId -> clipboard enabled (default true = ArkWeb native).
-// Set by ArkHelper.createWebview from WebviewInitData.clipboard; read by onKeyPreIme
-// to decide whether to block clipboard shortcuts. See ohos-webview-flag-clipboard spec.
+// Set by WindowManager.setWebviewFlags (from WebviewPlugin.create's payload.clipboard); read by
+// onKeyPreIme to decide whether to block clipboard shortcuts. See ohos-webview-flag-clipboard spec.
 const clipboardEnabledMap: Map<number, boolean> = new Map();
 
 export function setClipboardEnabled(windowId: number, enabled: boolean): void {
@@ -206,8 +206,8 @@ export function clearClipboardEnabled(windowId: number): void {
 }
 
 // Per-window zoom-hotkeys flag: windowId -> enabled (default true = ArkWeb native zoom).
-// Set by ArkHelper.createWebview from WebviewInitData.zoomHotkeysEnabled; read by onKeyPreIme
-// to decide whether to block zoom hotkeys. See ohos-webview-flag-zoom-hotkeys spec.
+// Set by WindowManager.setWebviewFlags (from WebviewPlugin.create's payload.zoomHotkeys); read
+// by onKeyPreIme to decide whether to block zoom hotkeys. See ohos-webview-flag-zoom-hotkeys spec.
 const zoomHotkeysEnabledMap: Map<number, boolean> = new Map();
 
 export function setZoomHotkeysEnabled(windowId: number, enabled: boolean): void {

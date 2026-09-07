@@ -285,7 +285,10 @@ pub struct StatusBarUpdateIconRequest {
     pub icon_size: u32,
 }
 
-impl_bridge_napi_type!(StatusBarUpdateIconRequest, "ohos.statusbar.UpdateIconRequest");
+impl_bridge_napi_type!(
+    StatusBarUpdateIconRequest,
+    "ohos.statusbar.UpdateIconRequest"
+);
 
 impl From<StatusBarIcon> for StatusBarUpdateIconRequest {
     fn from(icon: StatusBarIcon) -> Self {
@@ -304,7 +307,10 @@ pub struct StatusBarUpdateMenuRequest {
     pub menu_json: String,
 }
 
-impl_bridge_napi_type!(StatusBarUpdateMenuRequest, "ohos.statusbar.UpdateMenuRequest");
+impl_bridge_napi_type!(
+    StatusBarUpdateMenuRequest,
+    "ohos.statusbar.UpdateMenuRequest"
+);
 
 impl From<&Vec<Vec<StatusBarMenuItem>>> for StatusBarUpdateMenuRequest {
     fn from(menus: &Vec<Vec<StatusBarMenuItem>>) -> Self {
@@ -320,15 +326,41 @@ pub struct StatusBarUpdateTipsRequest {
     pub tips: String,
 }
 
-impl_bridge_napi_type!(StatusBarUpdateTipsRequest, "ohos.statusbar.UpdateTipsRequest");
+impl_bridge_napi_type!(
+    StatusBarUpdateTipsRequest,
+    "ohos.statusbar.UpdateTipsRequest"
+);
+
+/// About-panel metadata carried on [`StatusBarPredefinedRequest`] for the
+/// `about` action — mirrors muda's `AboutMetadata` so the ArkTS
+/// PredefinedActionExecutor can show the real app info.
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct StatusBarAboutMetadata {
+    pub name: Option<String>,
+    pub version: Option<String>,
+    #[napi(js_name = "shortVersion")]
+    pub short_version: Option<String>,
+    pub authors: Option<Vec<String>>,
+    pub comments: Option<String>,
+    pub copyright: Option<String>,
+    pub license: Option<String>,
+    pub website: Option<String>,
+}
 
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct StatusBarPredefinedRequest {
     pub action: String,
+    /// Metadata for the `about` action; ignored by every other action.
+    #[napi(js_name = "aboutMetadata")]
+    pub about_metadata: Option<StatusBarAboutMetadata>,
 }
 
-impl_bridge_napi_type!(StatusBarPredefinedRequest, "ohos.statusbar.PredefinedRequest");
+impl_bridge_napi_type!(
+    StatusBarPredefinedRequest,
+    "ohos.statusbar.PredefinedRequest"
+);
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -390,11 +422,7 @@ impl StatusBarClient {
         })
     }
 
-    async fn call<Request, Response>(
-        &self,
-        action: &str,
-        request: Request,
-    ) -> Result<Response>
+    async fn call<Request, Response>(&self, action: &str, request: Request) -> Result<Response>
     where
         Request: BridgeNapiType,
         Response: BridgeNapiType,

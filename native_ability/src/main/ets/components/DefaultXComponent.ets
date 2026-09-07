@@ -110,7 +110,7 @@ export struct DefaultXComponent {
     // (the old aboutToAppear called it, but the new one didn't). Without this,
     // backgroundBlurStyle on transparent windows has no visible effect because
     // the container remains opaque.
-    hilog.info(0xA01999, 'DefaultXComponent', '[DBG] aboutToAppear: calling applyTransparentBackground(windowId=%{public}d)', this.windowId);
+    hilog.debug(0xA01999, 'DefaultXComponent', 'aboutToAppear: calling applyTransparentBackground(windowId=%{public}d)', this.windowId);
     WindowManager.getInstance().applyTransparentBackground(this.windowId);
 
     const sessionId = this.bridgeSessionId;

@@ -14,6 +14,5 @@ pub mod types;
 
 // Re-export public types
 pub use self::types::{
-    Key as ShortcutKey, Modifier as ShortcutModifier,
-    ShortcutEvent, ShortcutState,
+    Key as ShortcutKey, Modifier as ShortcutModifier, ShortcutEvent, ShortcutState,
 };

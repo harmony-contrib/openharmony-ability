@@ -24,7 +24,7 @@ import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from '../helper/constants';
  *
  * Subsequent UIAbility instances skip these initializations (initialized=true) to
  * avoid panicking from duplicate global-singleton initialization.
- * WebViews of subsequent instances are driven by DefaultXComponent.aboutToAppear → registerController.
+ * WebViews of subsequent instances are driven by the WebviewPlugin controller-attach path.
  */
 export class ProcessInitializer {
   private static initialized: boolean = false;
@@ -85,8 +85,8 @@ export class ProcessInitializer {
       this.nativeModules.push(module);
       this.loadedModuleNames.push(name);
 
-      if (typeof (module as ESObject).registerCustomProtocol === "function") {
-        (module as ESObject).registerCustomProtocol();
+      if (typeof module.registerCustomProtocol === "function") {
+        module.registerCustomProtocol();
         webEngineRequired = true;
       }
     }
@@ -101,8 +101,8 @@ export class ProcessInitializer {
     // (not the async bridge plugin path) to fire-and-forget sub-window creation on ArkTS.
     const wm = WindowManager.getInstance();
     for (const module of this.nativeModules) {
-      if (typeof (module as ESObject).registerCreateSubWindowTsfn === "function") {
-        (module as ESObject).registerCreateSubWindowTsfn(
+      if (typeof module.registerCreateSubWindowTsfn === "function") {
+        module.registerCreateSubWindowTsfn(
           (config: ESObject): Promise<number> => wm.createSubWindow(config)
         );
         hilog.info(DOMAIN, 'ProcessInitializer', 'Registered createSubWindow TSFN');
@@ -121,7 +121,7 @@ export class ProcessInitializer {
     // zombie entry → getByLabel returns a dead handle → same-label windows can't rebuild
     // (manual_tests §二十八 close lifecycle defect).
     if (this.nativeModules.length > 0) {
-      AppStorage.setOrCreate<ESObject>(NATIVE_MODULE_STORAGE_KEY, this.nativeModules[0] as ESObject);
+      AppStorage.setOrCreate<Module>(NATIVE_MODULE_STORAGE_KEY, this.nativeModules[0]);
     }
 
     this.initialized = true;

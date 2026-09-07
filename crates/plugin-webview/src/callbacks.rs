@@ -28,8 +28,7 @@ type DragEnterCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
 type DragOverCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
 type DragDropCallback = Arc<dyn Fn(WebviewDropEvent) + Send + Sync + 'static>;
 type DragLeaveCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
-type NewWindowCallback =
-    Arc<dyn Fn(WebviewNewWindowRequest) -> bool + Send + Sync + 'static>;
+type NewWindowCallback = Arc<dyn Fn(WebviewNewWindowRequest) -> bool + Send + Sync + 'static>;
 type PageBeginCallback = Arc<dyn Fn(WebviewPageEvent) + Send + Sync + 'static>;
 type PageEndCallback = Arc<dyn Fn(WebviewPageEvent) + Send + Sync + 'static>;
 type CloseWindowCallback = Arc<dyn Fn() + Send + Sync + 'static>;
@@ -260,6 +259,20 @@ impl WebviewCallbacksBuilder {
     }
 }
 
+/// Removes the callback bundle registered for `webview_id`, if any.
+///
+/// Create-failure rollback path: wry registers callbacks before spawning the
+/// bridge `create`; when that create fails, the entry would otherwise stay in
+/// the registry forever (wry ids are per-attempt, so nothing reuses it).
+/// Returns whether an entry was removed.
+pub fn remove(webview_id: &str) -> Result<bool> {
+    let removed = CALLBACKS
+        .write()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .remove(webview_id);
+    Ok(removed.is_some())
+}
+
 pub(crate) fn options_for(webview_id: &str) -> Result<WebviewCallbackOptions> {
     let callbacks = CALLBACKS
         .read()
@@ -337,7 +350,8 @@ pub(crate) fn https_intercept_decision(
     if !controller::is_current(&request.id, &request.native_tag)? {
         log::warn!(
             "[https-intercept] stale controller: id={} native_tag={}",
-            req_id, request.native_tag
+            req_id,
+            request.native_tag
         );
         return Ok(WebviewHttpsInterceptResponse::passthrough());
     }
@@ -558,7 +572,9 @@ mod tests {
         assert!(is_close_window_url("close-window.invalid/some/path"));
         assert!(is_close_window_url("http://close-window.invalid/foo"));
         assert!(!is_close_window_url("https://example.com"));
-        assert!(!is_close_window_url("http://example.com/close-window.invalid"));
+        assert!(!is_close_window_url(
+            "http://example.com/close-window.invalid"
+        ));
     }
 
     #[test]

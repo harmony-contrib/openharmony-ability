@@ -97,16 +97,23 @@ pub struct OpenHarmonyAppInner {
     /// must not re-enter any OpenHarmonyApp API (deadlock). Keep them lock-free:
     /// channel sends / atomics only. Expected to stay LOW-COUNT (one per tao
     /// window); every listener runs on every decor change under the lock.
-    pub(crate) decor_change_callbacks: Vec<(u64, std::sync::Arc<dyn Fn(i32) -> bool + Send + Sync>)>,
+    pub(crate) decor_change_callbacks:
+        Vec<(u64, std::sync::Arc<dyn Fn(i32) -> bool + Send + Sync>)>,
     next_decor_cb_id: u64,
-    /// Last inner size set via set_inner_size(). Packed as (w:u32)<<32 | (h:u32).
-    /// 0 = unset. Used to make inner_size()→set_inner_size() idempotent on OHOS
-    /// where windowSizeChange/windowRectChange may report content area, not outer area.
-    pub(crate) last_set_inner_size: u64,
     pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
     pub(crate) init_context: AbilityInitContext,
-    
-    
+    // ─── Session state (migrated from module-level statics, issue #87 major-9) ───
+    // These four carried session semantics while living at module scope, which is
+    // only correct under a single UIAbility instance. They now ride the app's
+    // inner RwLock, so they follow the app instance like every other field.
+    /// Latest `want.parameters` JSON from `onNewWant` (drained on take).
+    pub(crate) want_parameters: String,
+    /// Initial `want.uri` from cold-start `onCreate` (drained on take).
+    pub(crate) initial_want_uri: String,
+    /// Whether the current launch is an app-continuation restore (peek-only).
+    pub(crate) continuation_restore: bool,
+    /// Continuation payload JSON from a continuation-restore launch (drained on take).
+    pub(crate) continuation_data: String,
 }
 
 impl PartialEq for OpenHarmonyAppInner {
@@ -166,14 +173,20 @@ impl OpenHarmonyAppInner {
             decor_height: 0,
             decor_change_callbacks: Vec::new(),
             next_decor_cb_id: 0,
-            last_set_inner_size: 0,
             avoid_areas: HashMap::new(),
             init_context: AbilityInitContext::default(),
-            
+            want_parameters: String::new(),
+            initial_want_uri: String::new(),
+            continuation_restore: false,
+            continuation_data: String::new(),
         }
     }
 
     /// load current app state
+    ///
+    /// Returns `None` until `save()` has been called at least once in this
+    /// process (peek-only: repeated loads return the same bytes; nothing is
+    /// drained).
     pub fn load(&self) -> Option<Vec<u8>> {
         if self.save_state {
             Some(self.state.clone())
@@ -185,6 +198,11 @@ impl OpenHarmonyAppInner {
     /// save current app state
     pub fn save(&mut self, state: Vec<u8>) {
         self.state = state;
+        // Make save/load symmetric (issue #87 major-3): without this, load()
+        // gates on a save_state that is never set and always returns None —
+        // the write side (ArkTS onSaveState → Event::SaveState → app.save)
+        // was live while the read side silently produced nothing.
+        self.save_state = true;
     }
 
     pub fn create_waker(&self) -> OpenHarmonyWaker {
@@ -200,10 +218,11 @@ impl OpenHarmonyAppInner {
 
     pub fn set_frame_rate(&self, min: i32, max: i32, expected: i32) {
         if let Some(xcomponent) = self.xcomponent.as_ref() {
-            xcomponent
-                .native_xcomponent()
-                .set_frame_rate(min, max, expected)
-                .expect("Failed to set frame rate");
+            // Callable from embedding apps; a failure here must not abort the
+            // process (issue #87 minor-2 — this used to .expect).
+            if let Err(e) = xcomponent.native_xcomponent().set_frame_rate(min, max, expected) {
+                crate::warn!("set_frame_rate({min}, {max}, {expected}) failed: {e:?}");
+            }
         }
     }
 
@@ -330,15 +349,6 @@ impl OpenHarmonyAppInner {
         self.window_rects.insert(window_id, rect);
     }
 
-    /// Packed last-set inner size: (width:u32)<<32 | (height:u32). 0 = unset.
-    pub fn last_set_inner_size(&self) -> u64 {
-        self.last_set_inner_size
-    }
-
-    pub fn set_last_set_inner_size(&mut self, packed: u64) {
-        self.last_set_inner_size = packed;
-    }
-
     pub fn avoid_area(&self, area_type: AvoidAreaType) -> Option<AvoidArea> {
         self.avoid_areas.get(&area_type).copied()
     }
@@ -395,7 +405,44 @@ impl OpenHarmonyAppInner {
         self.init_context = context;
     }
 
+    // ─── Session-state accessors (issue #87 major-9; migrated from module statics) ───
 
+    pub(crate) fn store_want_parameters(&mut self, json: &str) {
+        self.want_parameters = json.to_string();
+    }
+
+    pub(crate) fn take_want_parameters(&mut self) -> String {
+        std::mem::take(&mut self.want_parameters)
+    }
+
+    pub(crate) fn store_initial_want_uri(&mut self, uri: &str) {
+        self.initial_want_uri = uri.to_string();
+    }
+
+    pub(crate) fn take_initial_want_uri(&mut self) -> String {
+        std::mem::take(&mut self.initial_want_uri)
+    }
+
+    /// `is_continuation == true` writes both the flag and the payload (passed
+    /// through verbatim — the wantParam schema is an application-level contract).
+    /// `is_continuation == false` clears both: a plain relaunch must not observe
+    /// the previous session's continuation payload.
+    pub(crate) fn store_continuation(&mut self, is_continuation: bool, parameters_json: &str) {
+        self.continuation_restore = is_continuation;
+        self.continuation_data = if is_continuation {
+            parameters_json.to_string()
+        } else {
+            String::new()
+        };
+    }
+
+    pub(crate) fn is_continuation_restore(&self) -> bool {
+        self.continuation_restore
+    }
+
+    pub(crate) fn take_continuation_data(&mut self) -> String {
+        std::mem::take(&mut self.continuation_data)
+    }
 }
 
 type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event)>>>>;
@@ -511,6 +558,73 @@ impl OpenHarmonyApp {
 
     pub fn preferred_locales(&self) -> Option<String> {
         self.init_context().preferred_locales
+    }
+
+    // ─── Session-state facades (issue #87 major-9) ───
+    // Mirror the old module-static free functions (lock-poisoning degrades to a
+    // default instead of unwinding; the NAPI/lifecycle writers call these from
+    // inside already-tolerant callback contexts).
+
+    /// Stores the latest `want.parameters` JSON from `onNewWant`.
+    pub fn store_want_parameters(&self, json: &str) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.store_want_parameters(json);
+        }
+    }
+
+    /// Takes the latest `want.parameters` JSON (draining the stored value).
+    /// Consumed by the `plugin-deep-link` facade (`DeepLinkClient`).
+    pub fn take_want_parameters(&self) -> String {
+        self.inner
+            .write()
+            .ok()
+            .map(|mut inner| inner.take_want_parameters())
+            .unwrap_or_default()
+    }
+
+    /// Stores the initial `want.uri` from `onCreate` (cold start).
+    pub fn store_initial_want_uri(&self, uri: &str) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.store_initial_want_uri(uri);
+        }
+    }
+
+    /// Takes the initial `want.uri` from `onCreate` (draining the stored value).
+    /// Consumed by the `plugin-deep-link` facade to surface the cold-start deep link.
+    pub fn take_initial_want_uri(&self) -> String {
+        self.inner
+            .write()
+            .ok()
+            .map(|mut inner| inner.take_initial_want_uri())
+            .unwrap_or_default()
+    }
+
+    /// Stores the continuation signal from a lifecycle callback
+    /// (see `OpenHarmonyAppInner::store_continuation` for the clear-on-false contract).
+    pub fn store_continuation(&self, is_continuation: bool, parameters_json: &str) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.store_continuation(is_continuation, parameters_json);
+        }
+    }
+
+    /// Returns whether the current launch is an app-continuation restore.
+    /// Peek-only. Consumed by the `plugin-continuation` facade (`ContinuationClient`).
+    pub fn is_continuation_restore(&self) -> bool {
+        self.inner
+            .read()
+            .ok()
+            .map(|inner| inner.is_continuation_restore())
+            .unwrap_or(false)
+    }
+
+    /// Takes the continuation payload JSON (draining the stored value).
+    /// Consumed by the `plugin-continuation` facade (`ContinuationClient`).
+    pub fn take_continuation_data(&self) -> String {
+        self.inner
+            .write()
+            .ok()
+            .map(|mut inner| inner.take_continuation_data())
+            .unwrap_or_default()
     }
 
     pub(crate) fn begin_render(&self, owner: &str, xcomponent: XComponent) -> Result<()> {
@@ -763,7 +877,10 @@ impl OpenHarmonyApp {
     /// tao's inner_size/set_inner_size/inner_position must read this instead of
     /// live-diffing window_rect − content_rect (async update race).
     pub fn decor_height(&self) -> i32 {
-        self.inner.read().map(|inner| inner.decor_height).unwrap_or(0)
+        self.inner
+            .read()
+            .map(|inner| inner.decor_height)
+            .unwrap_or(0)
     }
 
     /// Register a listener fired whenever the latched main-window decor height
@@ -789,7 +906,9 @@ impl OpenHarmonyApp {
     /// Remove a previously registered decor-change listener by id.
     pub fn remove_decor_change_callback(&self, id: u64) {
         if let Ok(mut inner) = self.inner.write() {
-            inner.decor_change_callbacks.retain(|(cb_id, _)| *cb_id != id);
+            inner
+                .decor_change_callbacks
+                .retain(|(cb_id, _)| *cb_id != id);
         }
     }
 
@@ -806,15 +925,71 @@ impl OpenHarmonyApp {
         self.inner.write().unwrap().set_window_rect(window_id, rect);
     }
 
-    /// Packed last-set inner size: (width:u32)<<32 | (height:u32). 0 = unset.
-    pub fn last_set_inner_size(&self) -> u64 {
-        self.inner.read().unwrap().last_set_inner_size()
+    /// Last known cursor position in physical px (vp stored by the ArkTS
+    /// `MainPage.onMouse` handler × current scale). Issue #87 major-10: the
+    /// f64-bit-packed `CURSOR_POSITION_X/Y` statics are an implementation
+    /// detail — consumers read them through this method instead of unpacking
+    /// the bits by hand.
+    pub fn cursor_position(&self) -> (f64, f64) {
+        let scale = self.scale() as f64;
+        (
+            f64::from_bits(CURSOR_POSITION_X.load(std::sync::atomic::Ordering::Relaxed)) * scale,
+            f64::from_bits(CURSOR_POSITION_Y.load(std::sync::atomic::Ordering::Relaxed)) * scale,
+        )
     }
 
-    pub fn set_last_set_inner_size(&self, packed: u64) {
-        self.inner.write().unwrap().set_last_set_inner_size(packed);
+    /// Decor (title-bar) height to compensate for the given window, in physical px.
+    ///
+    /// Invariant: window 0 is the one UIAbility main window; every id > 0 is a
+    /// Float sub-window (created via `create_os_window`, ids handed out from 1).
+    /// Float sub-windows ship their own title bar (FloatPage) and have no system
+    /// title bar, so their compensation is 0; the main window gets the cached
+    /// latched decor (see [`Self::decor_height`]).
+    pub fn decor_height_for(&self, window_id: i64) -> i32 {
+        if window_id == 0 {
+            self.decor_height().max(0)
+        } else {
+            0
+        }
     }
 
+    /// Inner (content-area) rect for the given window, in physical px, with the
+    /// decor compensation applied internally (issue #87 major-10 — consumers no
+    /// longer hand-roll it). The window rect comes from the WM
+    /// (`windowRectChange`), the content offset from the XComponent surface,
+    /// and the title-bar inset from the cached decor — all read under ONE lock
+    /// so the three can't tear.
+    ///
+    /// Semantics:
+    /// - `left/top` = window position + content offset (+ decor on the main window)
+    /// - `width` = window width (the title bar only affects height)
+    /// - `height` = window height − decor, saturating (≥ 0)
+    pub fn inner_rect_for(&self, window_id: i64) -> Rect {
+        self.inner
+            .read()
+            .map(|inner| {
+                let window = inner.window_rect_for(window_id);
+                let content = inner.content_rect();
+                let decor = if window_id == 0 {
+                    inner.decor_height
+                } else {
+                    0
+                };
+                Rect {
+                    left: window.left + content.left,
+                    top: window.top + content.top + decor,
+                    width: window.width,
+                    height: (window.height as u32).saturating_sub(decor.max(0) as u32) as i32,
+                }
+            })
+            .unwrap_or_default()
+    }
+
+    /// Outer (WM) rect for the given window, in physical px — the raw
+    /// `windowRectChange` payload; `(0,0,0,0)` before the first callback fires.
+    pub fn outer_rect_for(&self, window_id: i64) -> Rect {
+        self.window_rect_for(window_id)
+    }
 
     pub fn avoid_area(&self, area_type: AvoidAreaType) -> Option<AvoidArea> {
         self.inner.read().unwrap().avoid_area(area_type)
@@ -869,6 +1044,26 @@ impl OpenHarmonyApp {
         super::updater::Updater::new(self)
     }
 
+    /// Get a process handle for app-level process control via the bridge.
+    ///
+    /// Core-privileged OHOS capability (not Tauri-shaped).
+    ///
+    /// First-class OHOS ability exposed on par with `RuntimeInitArgs.app`.
+    /// Intentionally NOT facade-ized: the API has no Tauri shape (pure OHOS
+    /// platform capability). Precedent: `OpenHarmonyApp::updater()`.
+    ///
+    /// `Process::restart` dispatches `appRecovery.restartApp()` and returns
+    /// `Ok(0)` on success. The process is then hard-killed by the system
+    /// (`onDestroy` is NOT triggered) — callers should block afterwards and
+    /// let the runtime terminate them, same pattern as the non-OHOS restart
+    /// path. Requires the app's Ability to be recoverable (`recoverable: true`
+    /// in module.json5); recovery is enabled right before the restart call on
+    /// the ArkTS side.
+    #[cfg(feature = "process")]
+    pub fn process(&self) -> Result<super::process::Process> {
+        super::process::Process::new(self)
+    }
+
     // ── Fault injection facade (coverage testing only) ─────────────────────────
     //
     // Feature-gated: when `fault-injection` is off, these methods do not exist.
@@ -886,8 +1081,7 @@ impl OpenHarmonyApp {
             .await?;
         client
             .call_fault_injection::<crate::FaultRuleWire, crate::FaultInjectionAck>(
-                "set-rule",
-                rule,
+                "set-rule", rule,
             )
             .await?;
         Ok(())
@@ -904,7 +1098,6 @@ impl OpenHarmonyApp {
             .await?;
         Ok(())
     }
-
 
     pub fn run_loop<F: FnMut(Event) + 'static>(&self, event_handle: F) {
         if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
@@ -923,7 +1116,8 @@ impl OpenHarmonyApp {
 
     /// Register back press interceptor. Return `true` to intercept back action, `false` to pass through.
     pub fn on_back_press_intercept<F: FnMut() -> bool + 'static>(&self, interceptor: F) {
-        self.back_press_interceptor.replace(Some(Box::new(interceptor)));
+        self.back_press_interceptor
+            .replace(Some(Box::new(interceptor)));
     }
 
     /// Get back press interceptor result
@@ -969,17 +1163,25 @@ unsafe impl Send for OpenHarmonyApp {}
 unsafe impl Sync for OpenHarmonyApp {}
 
 #[napi]
-#[cfg(target_env = "ohos")]
 pub fn is_desktop_device() -> bool {
     cfg!(desktop)
 }
+
+// ─── Process-level globals (NAPI-entry-point state) ─────────────────────────────
+// PROCESS-LEVEL SINGLE-SESSION ASSUMPTION (issue #87 major-9): every static in
+// this section is written by a `#[napi]` free function — an entry point with no
+// receiver, so the state must live at module scope. The NAPI writer receives no
+// app handle from ArkTS, which is why these CANNOT migrate into
+// `OpenHarmonyAppInner` like the want/continuation session state did. They are
+// correct under a single UIAbility instance per process; under multiple
+// concurrent UIAbility instances the events interleave in one shared queue.
+// Do not add new statics here without an equivalent NAPI constraint.
 
 /// Global queue for pending window close requests from ArkTS.
 /// When ArkTS intercepts a close-window URL, it pushes the OHOS window ID here
 /// instead of directly destroying the window. The runtime event loop drains this
 /// queue and processes closes through the proper Rust lifecycle
 /// (close-requested → destroyed lifecycle, defined by the embedding runtime).
-#[cfg(target_env = "ohos")]
 static PENDING_WINDOW_CLOSES: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 
 /// NAPI function called from ArkTS to request a window close.
@@ -992,12 +1194,14 @@ static PENDING_WINDOW_CLOSES: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 /// The Rust side only uses the ID to look up the matching window —
 /// it never accesses the OHOS window object directly, so destroyed windows are safe.
 #[napi]
-#[cfg(target_env = "ohos")]
 pub fn notify_window_close(window_id: i32) {
     match PENDING_WINDOW_CLOSES.lock() {
         Ok(mut queue) => queue.push(window_id),
         Err(poisoned) => {
-            log::warn!("[OHOS] PENDING_WINDOW_CLOSES mutex poisoned, recovering. window_id={}", window_id);
+            log::warn!(
+                "[OHOS] PENDING_WINDOW_CLOSES mutex poisoned, recovering. window_id={}",
+                window_id
+            );
             poisoned.into_inner().push(window_id);
         }
     }
@@ -1020,7 +1224,6 @@ pub fn notify_window_close(window_id: i32) {
 /// because the event system does not propagate window identity through the
 /// normal event channel. The runtime drains this queue each iteration and
 /// matches the IDs to its internal window registry.
-#[cfg(target_env = "ohos")]
 pub fn drain_pending_window_closes() -> Vec<i32> {
     PENDING_WINDOW_CLOSES
         .lock()
@@ -1035,33 +1238,19 @@ pub fn drain_pending_window_closes() -> Vec<i32> {
 /// atomics. Dropped during the pluginize refactor (restored from 5941dfb).
 
 /// Last known cursor X position, in vp relative to the MainPage component
-/// (f64 stored as u64 bits).
-#[cfg(target_env = "ohos")]
-pub static CURSOR_POSITION_X: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// (f64 stored as u64 bits). Read through [`OpenHarmonyApp::cursor_position`].
+pub(crate) static CURSOR_POSITION_X: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Last known cursor Y position, in vp relative to the MainPage component
-/// (f64 stored as u64 bits).
-#[cfg(target_env = "ohos")]
-pub static CURSOR_POSITION_Y: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// (f64 stored as u64 bits). Read through [`OpenHarmonyApp::cursor_position`].
+pub(crate) static CURSOR_POSITION_Y: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// NAPI function called from the ArkTS `onMouse` handler (Move/Press) to
 /// update the tracked cursor position. Coordinates are MainPage-relative vp.
 #[napi]
-#[cfg(target_env = "ohos")]
 pub fn update_cursor_position(x: f64, y: f64) {
     CURSOR_POSITION_X.store(x.to_bits(), std::sync::atomic::Ordering::Relaxed);
     CURSOR_POSITION_Y.store(y.to_bits(), std::sync::atomic::Ordering::Relaxed);
-}
-
-/// NAPI function called from the ArkTS `onContinue` lifecycle callback to
-/// synchronously read the source-side continuation snapshot (pre-registered
-/// via `setContinuationData`). `onContinue` is a synchronous callback, so the
-/// read must be a plain NAPI call — no Promise, no bridge round-trip. Empty
-/// string means "nothing registered" (the caller refuses with MISMATCH).
-#[napi]
-#[cfg(target_env = "ohos")]
-pub fn read_continue_snapshot() -> String {
-    crate::app::peek_continue_snapshot()
 }
 
 /// Global queue for pending window status changes from ArkTS
@@ -1070,7 +1259,6 @@ pub fn read_continue_snapshot() -> String {
 /// into tao's `apply_window_status` mirror bits.
 /// Ported from upstream PR#45 (fc8c3cf/a052d3f): status sync via NAPI direct call
 /// (not the old ArkHelper channel), so the port is verbatim.
-#[cfg(target_env = "ohos")]
 static PENDING_WINDOW_STATUS: Mutex<Vec<(i32, i32)>> = Mutex::new(Vec::new());
 
 /// NAPI function called from ArkTS `windowStatusChange` callbacks to report a
@@ -1081,14 +1269,14 @@ static PENDING_WINDOW_STATUS: Mutex<Vec<(i32, i32)>> = Mutex::new(Vec::new());
 /// Semantic decoding happens on the tao side (`apply_window_status`); this layer
 /// only transports the integer.
 #[napi]
-#[cfg(target_env = "ohos")]
 pub fn notify_window_status(window_id: i32, status: i32) {
     match PENDING_WINDOW_STATUS.lock() {
         Ok(mut queue) => queue.push((window_id, status)),
         Err(poisoned) => {
             log::warn!(
                 "[OHOS] PENDING_WINDOW_STATUS mutex poisoned, recovering. window_id={} status={}",
-                window_id, status
+                window_id,
+                status
             );
             poisoned.into_inner().push((window_id, status));
         }
@@ -1098,7 +1286,6 @@ pub fn notify_window_status(window_id: i32, status: i32) {
 /// Drain all pending window status changes.
 /// Called by tauri-runtime-wry event loop (alongside `drain_pending_window_closes`)
 /// to回灌 system window status into tao mirror bits.
-#[cfg(target_env = "ohos")]
 pub fn drain_pending_window_status() -> Vec<(i32, i32)> {
     PENDING_WINDOW_STATUS
         .lock()
@@ -1128,128 +1315,21 @@ impl<'a> SaveLoader<'a> {
     }
 }
 
-// --- want.parameters storage for single-instance plugin ---
-
-/// Stores the latest `want.parameters` JSON from `onNewWant`.
-pub(crate) static WANT_PARAMETERS: Mutex<String> = Mutex::new(String::new());
-
-pub(crate) fn store_want_parameters(json: &str) {
-    match WANT_PARAMETERS.lock() {
-        Ok(mut params) => *params = json.to_string(),
-        Err(e) => crate::error!("WANT_PARAMETERS mutex poisoned in store: {}", e),
-    }
-}
-
-/// Takes the latest `want.parameters` JSON (draining the stored value).
-///
-/// Safe to call from any thread. The value is consumed (replaced with an empty
-/// `String`), so a second call returns `""` until the next `onNewWant` stores a
-/// fresh value. Consumed by the `plugin-deep-link` facade (`DeepLinkClient`).
-pub fn take_want_parameters() -> String {
-    WANT_PARAMETERS
-        .lock()
-        .map(|mut p| std::mem::take(&mut *p))
-        .unwrap_or_default()
-}
-
-// --- initial want.uri storage for deep-link plugin (cold start onCreate) ---
-
-/// Stores the initial `want.uri` from `onCreate` (cold start).
-pub(crate) static INITIAL_WANT_URI: Mutex<String> = Mutex::new(String::new());
-
-pub(crate) fn store_initial_want_uri(uri: &str) {
-    match INITIAL_WANT_URI.lock() {
-        Ok(mut u) => *u = uri.to_string(),
-        Err(e) => crate::error!("INITIAL_WANT_URI mutex poisoned in store: {}", e),
-    }
-}
-
-/// Takes the initial `want.uri` from `onCreate` (draining the stored value).
-///
-/// Safe to call from any thread. The value is consumed (replaced with an empty
-/// `String`), so a second call returns `""`. Consumed by the `plugin-deep-link`
-/// facade (`DeepLinkClient`) to surface the cold-start deep link.
-pub fn take_initial_want_uri() -> String {
-    INITIAL_WANT_URI
-        .lock()
-        .map(|mut u| std::mem::take(&mut *u))
-        .unwrap_or_default()
-}
-
-// --- app-continuation storage (launchReason === CONTINUATION restore) ---
-
-/// Marks whether the current launch is an app-continuation restore.
-///
-/// Peek-only (never drained): queries are idempotent and can be repeated
-/// without consuming the continuation payload.
-pub(crate) static CONTINUATION_RESTORE: Mutex<bool> = Mutex::new(false);
-
-/// Stores the continuation payload JSON (`want.parameters`) from a
-/// continuation-restore launch (cold start `onCreate` or warm `onNewWant`).
-pub(crate) static CONTINUATION_DATA: Mutex<String> = Mutex::new(String::new());
-
-/// Stores the continuation signal from a lifecycle callback.
-///
-/// `is_continuation == true` writes both the flag and the payload (passed
-/// through verbatim — the wantParam schema is an application-level contract).
-/// `is_continuation == false` clears both: the statics survive across Ability
-/// instances, so a plain relaunch must not observe the previous session's
-/// continuation payload.
-///
-/// Public (not `pub(crate)`) so the `plugin-continuation` crate's unit tests can
-/// drive the statics; production callers are the lifecycle closures.
-pub fn store_continuation(is_continuation: bool, parameters_json: &str) {
-    if let (Ok(mut flag), Ok(mut data)) = (CONTINUATION_RESTORE.lock(), CONTINUATION_DATA.lock()) {
-        *flag = is_continuation;
-        *data = if is_continuation {
-            parameters_json.to_string()
-        } else {
-            String::new()
-        };
-    } else {
-        crate::error!("continuation mutex poisoned in store");
-    }
-}
-
-/// Returns whether the current launch is an app-continuation restore.
-///
-/// Peek-only: does not consume [`take_continuation_data`], safe to call
-/// repeatedly. Consumed by the `plugin-continuation` facade
-/// (`ContinuationClient`).
-pub fn is_continuation_restore() -> bool {
-    CONTINUATION_RESTORE.lock().map(|f| *f).unwrap_or(false)
-}
-
-/// Takes the continuation payload JSON (draining the stored value).
-///
-/// Safe to call from any thread. The value is consumed (replaced with an empty
-/// `String`), so a second call returns `""` — empty also means the launch was
-/// not a continuation restore. Consumed by the `plugin-continuation` facade
-/// (`ContinuationClient`).
-pub fn take_continuation_data() -> String {
-    CONTINUATION_DATA
-        .lock()
-        .map(|mut d| std::mem::take(&mut *d))
-        .unwrap_or_default()
-}
-
 // --- app-continuation source-side snapshot (onContinue save) ---
 
 /// Source-side continuation snapshot, pre-registered by the application via
 /// `setContinuationData` and read synchronously by the ArkTS `onContinue`
 /// lifecycle callback when the system initiates a migration.
 ///
-/// Distinct from [`CONTINUATION_DATA`] (target-side restore payload, drained on
-/// take): the snapshot is **peek-only** — a cancelled migration must leave it
-/// intact so a retry reads the same value. A fresh `set` overwrites.
+/// Peek-only: a cancelled migration must leave it intact so a retry reads the
+/// same value. A fresh `set` overwrites.
 pub(crate) static CONTINUATION_SNAPSHOT: Mutex<String> = Mutex::new(String::new());
 
 /// Stores the source-side continuation snapshot (overwrite semantics).
 ///
 /// `""` clears the snapshot (an empty snapshot makes `onContinue` refuse the
-/// migration with MISMATCH). Public so the `plugin-continuation` crate's unit
-/// tests can drive the static; the production caller is the facade's
-/// `ContinuationClient::set_continuation_data`.
+/// migration with MISMATCH). The production caller is the `plugin-continuation`
+/// facade's `ContinuationClient::set_continuation_data`.
 pub fn store_continue_snapshot(snapshot: &str) {
     if let Ok(mut snap) = CONTINUATION_SNAPSHOT.lock() {
         *snap = snapshot.to_string();
@@ -1260,9 +1340,22 @@ pub fn store_continue_snapshot(snapshot: &str) {
 
 /// Returns the source-side continuation snapshot without consuming it
 /// (peek-only). Read by the ArkTS `onContinue` callback via the
-/// `read_continue_snapshot` NAPI export.
+/// `read_continue_snapshot` NAPI export below.
 pub fn peek_continue_snapshot() -> String {
-    CONTINUATION_SNAPSHOT.lock().map(|s| s.clone()).unwrap_or_default()
+    CONTINUATION_SNAPSHOT
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default()
+}
+
+/// NAPI function called from the ArkTS `onContinue` lifecycle callback to
+/// synchronously read the source-side continuation snapshot (pre-registered
+/// via `setContinuationData`). `onContinue` is a synchronous callback, so the
+/// read must be a plain NAPI call — no Promise, no bridge round-trip. Empty
+/// string means "nothing registered" (the caller refuses with MISMATCH).
+#[napi]
+pub fn read_continue_snapshot() -> String {
+    peek_continue_snapshot()
 }
 
 /// Tests for the app-continuation global statics.
@@ -1270,55 +1363,65 @@ pub fn peek_continue_snapshot() -> String {
 mod continuation_tests {
     use super::*;
 
-    /// Rust runs this module's tests in parallel while every test mutates the same
-    /// process-global statics — serialize them explicitly (the restore/data tests
-    /// share CONTINUATION_RESTORE/CONTINUATION_DATA, the snapshot tests share
-    /// CONTINUATION_SNAPSHOT).
+    #[test]
+    fn test_take_continuation_data_drains() {
+        let app = OpenHarmonyApp::new();
+        app.store_continuation(true, r#"{"scrollOffset":120,"route":"/article/42"}"#);
+        assert_eq!(
+            app.take_continuation_data(),
+            r#"{"scrollOffset":120,"route":"/article/42"}"#
+        );
+        // Second take is empty (draining semantics).
+        assert_eq!(app.take_continuation_data(), "");
+        // Flag survives the data take (peek does not drain).
+        assert!(app.is_continuation_restore());
+    }
+
+    #[test]
+    fn test_non_continuation_launch_clears_stale_payload() {
+        let app = OpenHarmonyApp::new();
+        app.store_continuation(true, r#"{"stale":true}"#);
+        // A plain relaunch stores isContinuation=false — must clear both.
+        app.store_continuation(false, r#"{}"#);
+        assert!(!app.is_continuation_restore());
+        assert_eq!(app.take_continuation_data(), "");
+    }
+
+    #[test]
+    fn test_is_continuation_restore_idempotent() {
+        let app = OpenHarmonyApp::new();
+        app.store_continuation(true, r#"{"a":1}"#);
+        assert!(app.is_continuation_restore());
+        assert!(app.is_continuation_restore());
+        assert!(app.is_continuation_restore());
+        // Data still intact after repeated peeks.
+        assert_eq!(app.take_continuation_data(), r#"{"a":1}"#);
+    }
+
+    #[test]
+    fn test_session_state_is_per_app_instance() {
+        // Issue #87 major-9: the migrated state rides the app instance, so two
+        // app handles no longer share one process-level slot.
+        let app_a = OpenHarmonyApp::new();
+        let app_b = OpenHarmonyApp::new();
+        app_a.store_continuation(true, r#"{"app":"a"}"#);
+        app_b.store_want_parameters(r#"{"app":"b"}"#);
+        assert!(app_a.is_continuation_restore());
+        assert!(!app_b.is_continuation_restore());
+        assert_eq!(app_a.take_continuation_data(), r#"{"app":"a"}"#);
+        assert_eq!(app_b.take_continuation_data(), "");
+        assert_eq!(app_b.take_want_parameters(), r#"{"app":"b"}"#);
+        assert_eq!(app_a.take_want_parameters(), "");
+    }
+
+    // ─── CONTINUATION_SNAPSHOT stays process-level (NAPI reader) ───
+    // These tests share the one static, so serialize them explicitly.
     static SERIALIZE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn lock() -> std::sync::MutexGuard<'static, ()> {
         SERIALIZE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    #[test]
-    fn test_take_continuation_data_drains() {
-        let _guard = lock();
-        store_continuation(true, r#"{"scrollOffset":120,"route":"/article/42"}"#);
-        assert_eq!(
-            take_continuation_data(),
-            r#"{"scrollOffset":120,"route":"/article/42"}"#
-        );
-        // Second take is empty (draining semantics).
-        assert_eq!(take_continuation_data(), "");
-        // Flag survives the data take (peek does not drain).
-        assert!(is_continuation_restore());
-        // Clean up for other tests sharing the static.
-        store_continuation(false, "");
-    }
-
-    #[test]
-    fn test_non_continuation_launch_clears_stale_payload() {
-        let _guard = lock();
-        store_continuation(true, r#"{"stale":true}"#);
-        // A plain relaunch stores isContinuation=false — must clear both.
-        store_continuation(false, r#"{}"#);
-        assert!(!is_continuation_restore());
-        assert_eq!(take_continuation_data(), "");
-    }
-
-    #[test]
-    fn test_is_continuation_restore_idempotent() {
-        let _guard = lock();
-        store_continuation(true, r#"{"a":1}"#);
-        assert!(is_continuation_restore());
-        assert!(is_continuation_restore());
-        assert!(is_continuation_restore());
-        // Data still intact after repeated peeks.
-        assert_eq!(take_continuation_data(), r#"{"a":1}"#);
-        // Clean up for other tests sharing the static.
-        store_continuation(false, "");
     }
 
     #[test]
@@ -1358,44 +1461,43 @@ mod continuation_tests {
     }
 }
 
-/// Tests for WANT_PARAMETERS and INITIAL_WANT_URI global statics.
+/// Tests for the want.parameters / initial want.uri session state
+/// (migrated from module statics, issue #87 major-9).
 #[cfg(test)]
 mod want_parameters_tests {
     use super::*;
 
-    fn take_want_parameters() -> String {
-        WANT_PARAMETERS
-            .lock()
-            .map(|mut p| std::mem::take(&mut *p))
-            .unwrap_or_default()
+    #[test]
+    fn test_want_parameters_store_take_overwrite() {
+        let app = OpenHarmonyApp::new();
+        app.store_want_parameters(r#"{"key":"value","num":42}"#);
+        assert_eq!(app.take_want_parameters(), r#"{"key":"value","num":42}"#);
+
+        app.store_want_parameters(r#"{"source":"widget"}"#);
+        assert_eq!(app.take_want_parameters(), r#"{"source":"widget"}"#);
+        assert_eq!(app.take_want_parameters(), "");
+
+        assert_eq!(app.take_want_parameters(), "");
+
+        app.store_want_parameters(r#"{"first":1}"#);
+        app.store_want_parameters(r#"{"second":2}"#);
+        assert_eq!(app.take_want_parameters(), r#"{"second":2}"#);
     }
 
     #[test]
-    fn test_want_parameters_store_take_overwrite() {
-        take_want_parameters(); // ensure clean state
-        store_want_parameters(r#"{"key":"value","num":42}"#);
-        assert_eq!(take_want_parameters(), r#"{"key":"value","num":42}"#);
-
-        store_want_parameters(r#"{"source":"widget"}"#);
-        assert_eq!(take_want_parameters(), r#"{"source":"widget"}"#);
-        assert_eq!(take_want_parameters(), "");
-
-        assert_eq!(take_want_parameters(), "");
-
-        store_want_parameters(r#"{"first":1}"#);
-        store_want_parameters(r#"{"second":2}"#);
-        assert_eq!(take_want_parameters(), r#"{"second":2}"#);
+    fn test_initial_want_uri_store_take() {
+        let app = OpenHarmonyApp::new();
+        app.store_initial_want_uri("myapp://cold-start");
+        assert_eq!(app.take_initial_want_uri(), "myapp://cold-start");
+        // Draining: second take is empty.
+        assert_eq!(app.take_initial_want_uri(), "");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::OpenHarmonyAppInner;
-    use crate::{AvoidArea, AvoidAreaType, Rect};
-    // Cursor-tracking items are cfg(target_env = "ohos")-gated; import them the
-    // same way so the test below compiles on the device target only.
-    #[cfg(target_env = "ohos")]
-    use crate::{update_cursor_position, CURSOR_POSITION_X, CURSOR_POSITION_Y};
+    use crate::{update_cursor_position, AvoidArea, AvoidAreaType, CURSOR_POSITION_X, CURSOR_POSITION_Y, Rect};
 
     #[test]
     fn render_owner_rejects_overlap_and_ignores_stale_surface_callbacks() {
@@ -1413,6 +1515,20 @@ mod tests {
         assert_eq!(inner.release_render_owner("owner-a"), None);
         assert!(inner.owns_render("owner-b"));
         assert!(inner.surface_active);
+    }
+
+    #[test]
+    fn save_then_load_round_trips() {
+        // Issue #87 major-3 regression: load() used to always return None because
+        // save_state was never set true by save().
+        let mut inner = OpenHarmonyAppInner::new();
+        assert_eq!(inner.load(), None);
+        inner.save(vec![1, 2, 3]);
+        assert_eq!(inner.load(), Some(vec![1, 2, 3]));
+        // load is peek-only: repeated loads return the same bytes.
+        assert_eq!(inner.load(), Some(vec![1, 2, 3]));
+        inner.save(vec![4]);
+        assert_eq!(inner.load(), Some(vec![4]));
     }
 
     #[test]
@@ -1530,7 +1646,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_env = "ohos")]
     fn update_cursor_position_stores_vp_coordinates() {
         use std::sync::atomic::Ordering;
         update_cursor_position(10.5, 20.25);
@@ -1552,7 +1667,12 @@ mod tests {
         inner.claim_render_owner("owner").unwrap();
         inner.window_rects.insert(
             0,
-            Rect { top: 0, left: 0, width: 2090, height: 1394 },
+            Rect {
+                top: 0,
+                left: 0,
+                width: 2090,
+                height: 1394,
+            },
         );
 
         let seen: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(vec![]));
@@ -1586,7 +1706,12 @@ mod tests {
         assert!(inner.activate_surface(
             "owner",
             None,
-            Rect { top: 0, left: 0, width: 2090, height: 1248 },
+            Rect {
+                top: 0,
+                left: 0,
+                width: 2090,
+                height: 1248
+            },
         ));
         assert_eq!(inner.decor_height, 146);
         assert_eq!(calls_a.load(Ordering::SeqCst), 1);
@@ -1596,7 +1721,12 @@ mod tests {
         // listener fires, one-shot B is already gone.
         assert!(inner.update_surface_rect(
             "owner",
-            Rect { top: 0, left: 0, width: 2090, height: 1248 },
+            Rect {
+                top: 0,
+                left: 0,
+                width: 2090,
+                height: 1248
+            },
         ));
         assert_eq!(calls_a.load(Ordering::SeqCst), 1);
         assert_eq!(calls_b.load(Ordering::SeqCst), 1);
@@ -1604,19 +1734,33 @@ mod tests {
         // Transient garbage (824px diff): rejected, no notification.
         assert!(inner.update_surface_rect(
             "owner",
-            Rect { top: 0, left: 0, width: 2090, height: 570 },
+            Rect {
+                top: 0,
+                left: 0,
+                width: 2090,
+                height: 570
+            },
         ));
         assert_eq!(calls_a.load(Ordering::SeqCst), 1);
 
         // Real change (decorations hidden → 0): only A remains and fires.
         assert!(inner.update_surface_rect(
             "owner",
-            Rect { top: 0, left: 0, width: 2090, height: 1394 },
+            Rect {
+                top: 0,
+                left: 0,
+                width: 2090,
+                height: 1394
+            },
         ));
         assert_eq!(inner.decor_height, 0);
         assert_eq!(calls_a.load(Ordering::SeqCst), 2);
         assert_eq!(calls_b.load(Ordering::SeqCst), 1);
         assert_eq!(*seen.lock().unwrap(), vec![146, 146, 0]);
-        assert_eq!(inner.decor_change_callbacks.len(), 1, "one-shot listener must be removed");
+        assert_eq!(
+            inner.decor_change_callbacks.len(),
+            1,
+            "one-shot listener must be removed"
+        );
     }
 }

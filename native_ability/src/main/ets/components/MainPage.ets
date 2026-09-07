@@ -1,4 +1,5 @@
 import { DefaultXComponent } from "./DefaultXComponent";
+import { Module } from "../ability/type";
 import { Loadable } from "../helper/loadable";
 import { AcceleratorMatcher, isClipboardEnabled, isZoomHotkeysEnabled } from "../helper/accelerator_matcher";
 import {
@@ -26,7 +27,7 @@ struct MainPage {
 
   private loadMode: "async" | "sync" = "async";
 
-  @State private nativeModule: ESObject | null = null;
+  @State private nativeModule: Module | null = null;
   @State private resolvedModuleName: string = "";
 
   private acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();

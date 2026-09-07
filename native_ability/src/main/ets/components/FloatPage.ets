@@ -1,4 +1,5 @@
 import { DefaultXComponent } from "./DefaultXComponent";
+import { Module } from "../ability/type";
 import {
   MenuBarComponent,
   getMenuClickHandler,
@@ -69,7 +70,7 @@ struct FloatPage {
     hilog.info(DOMAIN, 'FloatPage', 'aboutToDisappear: system close detected for window %{public}d', this.windowId);
     this.closeNotified = true;
     try {
-      const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+      const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
       if (nativeModule && typeof nativeModule.notifyWindowClose === 'function') {
         nativeModule.notifyWindowClose(this.windowId);
         hilog.info(DOMAIN, 'FloatPage', 'Window %{public}d close notified via NAPI (system close)', this.windowId);
@@ -118,7 +119,7 @@ struct FloatPage {
               // so it stays in sync when maximize/restore is triggered by the system or by
               // the tao mirror (apply_window_status), not only on button click.
               this.isMaximized = (statusType === arkWindow.WindowStatusType.MAXIMIZE);
-              const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+              const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
               if (nativeModule && typeof nativeModule.notifyWindowStatus === 'function') {
                 nativeModule.notifyWindowStatus(this.windowId, statusType);
               }
@@ -126,7 +127,7 @@ struct FloatPage {
             // seed 初始态(同时驱动按钮图标 + NAPI 镜像位)。
             const initialStatus = this.windowClass.getWindowStatus();
             this.isMaximized = (initialStatus === arkWindow.WindowStatusType.MAXIMIZE);
-            const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+            const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
             if (nativeModule && typeof nativeModule.notifyWindowStatus === 'function') {
               nativeModule.notifyWindowStatus(this.windowId, initialStatus);
             }
@@ -268,7 +269,7 @@ struct FloatPage {
                   try {
                     // Notify Rust event loop before destroying the OHOS window,
                     // so CloseRequested → Destroyed → WindowsStore cleanup can run.
-                    const nativeModule: ESObject = AppStorage.get<ESObject>(NATIVE_MODULE_STORAGE_KEY);
+                    const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
                     if (nativeModule && typeof nativeModule.notifyWindowClose === 'function') {
                       nativeModule.notifyWindowClose(this.windowId);
                       hilog.info(DOMAIN, 'FloatPage', 'Window %{public}d close notified via NAPI', this.windowId);
