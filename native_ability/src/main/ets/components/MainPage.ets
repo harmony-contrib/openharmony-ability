@@ -180,9 +180,15 @@ struct MainPage {
           // unchanged, per the key-synthesis spec). Same fall-through position
           // as the DOM synthesis — keys consumed by the interceptors above
           // are NOT forwarded (the shell already acted on them).
+          // Precise KeyType mapping (issue Eulogizethesun/tauri#138): the NDK
+          // action domain is DOWN=0/UP=1 (plus an UNKNOWN=-1 sentinel that is
+          // never a KeyType value), so only Down/Up are forwarded; any other
+          // KeyType value a future ArkUI adds (e.g. Cancel) has no NDK
+          // counterpart and must not be reported as a synthesized Up.
           if (
             isWebFocused(MAIN_WINDOW_ID) &&
-            typeof this.nativeModule?.notifyKeyEvent === "function"
+            typeof this.nativeModule?.notifyKeyEvent === "function" &&
+            (event.type === KeyType.Down || event.type === KeyType.Up)
           ) {
             this.nativeModule.notifyKeyEvent(
               event.keyCode,
