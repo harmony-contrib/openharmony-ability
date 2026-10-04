@@ -197,6 +197,15 @@ initial navigation. Use `custom_protocol_async`/`WebviewProtocolResponder` for a
 See the [plugin development standard](../../docs/plugin-development-standard.md) for type names,
 reverse events, threading, mounting and acceptance rules.
 
+## Document-start scripts
+
+Document-start scripts use `runJavaScriptOnDocumentStart` on API 15 and newer.
+Each array entry remains a separate script and runs in array order, so an exception
+in one entry does not prevent the following entries from running. On API 12–14,
+the existing `javaScriptOnDocumentStart` component API is retained; it does not
+guarantee execution order. Both direct and drag-overlay WebViews retain the
+scripts supplied by `keySynthesisScripts`, including the main-window keyboard shim.
+
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

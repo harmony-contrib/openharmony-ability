@@ -94,6 +94,24 @@ function enableWebDebuggingIfAvailable(): void {
   setWebDebuggingAccessIfAvailable(true);
 }
 
+/** Resolve the API-15 Web attribute dynamically to retain the API-12 baseline. */
+interface OrderedDocumentStartAttribute {
+  runJavaScriptOnDocumentStart?: (scripts: ScriptItem[]) => void;
+}
+
+class DocumentStartScriptsModifier implements AttributeModifier<WebAttribute> {
+  constructor(private scripts: ScriptItem[]) {}
+
+  applyNormalAttribute(instance: WebAttribute): void {
+    const ordered = instance as ESObject as OrderedDocumentStartAttribute;
+    if (typeof ordered.runJavaScriptOnDocumentStart === "function") {
+      ordered.runJavaScriptOnDocumentStart(this.scripts);
+    } else {
+      instance.javaScriptOnDocumentStart(this.scripts);
+    }
+  }
+}
+
 interface WebviewStyle {
   x?: number | string | null;
   y?: number | string | null;
@@ -1335,7 +1353,7 @@ function BuildWebview(data: ManagedWebview) {
         .javaScriptAccess(data.javascriptEnabled ?? true)
         .domStorageAccess(data.domStorageAccess ?? true)
         .mediaPlayGestureAccess(data.autoplay === true ? false : true)
-        .javaScriptOnDocumentStart(keySynthesisScripts(data))
+        .attributeModifier(new DocumentStartScriptsModifier(keySynthesisScripts(data)))
         .multiWindowAccess(data.eventOptions.newWindow === true)
         .allowWindowOpenMethod(data.eventOptions.newWindow === true)
         .onControllerAttached(() => {
@@ -1409,7 +1427,7 @@ function BuildWebview(data: ManagedWebview) {
       .javaScriptAccess(data.javascriptEnabled ?? true)
       .domStorageAccess(data.domStorageAccess ?? true)
       .mediaPlayGestureAccess(data.autoplay === true ? false : true)
-      .javaScriptOnDocumentStart(keySynthesisScripts(data))
+      .attributeModifier(new DocumentStartScriptsModifier(keySynthesisScripts(data)))
       .multiWindowAccess(data.eventOptions.newWindow === true)
       .allowWindowOpenMethod(data.eventOptions.newWindow === true)
       .onControllerAttached(() => {
