@@ -32,7 +32,7 @@ const NATIVE_MODULES = [MAIN_NATIVE_MODULE, SUB_WINDOW_NATIVE_MODULE];
 
 export default class EntryAbility extends NativeAbility {
   public moduleName: string[] = NATIVE_MODULES;
-  public defaultPage: boolean = false;
+  public defaultPage: boolean = true;
   public bridgePlugins = [
     new LazyPlugin(() => new PermissionPlugin()),
     new LazyPlugin(() => new AppControlPlugin()),
@@ -59,8 +59,9 @@ export default class EntryAbility extends NativeAbility {
     demoWindowStage = windowStage;
     try {
       const mainWindow = windowStage.getMainWindowSync();
-      // 全屏布局：内容延伸到状态栏下方（状态栏变透明），避免顶部出现系统绘制的黑色状态栏条。
-      await mainWindow.setWindowLayoutFullScreen(true);
+      // 全屏布局改成 best-effort:在 PC 自由窗口(mode 102)上 await 该调用会让
+      // 后续 loadContent 的内容挂载永不完成(SetUIContent timeout, uiContent 恒 null)。
+      mainWindow.setWindowLayoutFullScreen(true).catch(() => {});
       await windowStage.loadContent("pages/Index");
     } catch (error) {
       throw new Error(`Unable to load demo WindowStage content: ${String(error)}`);
