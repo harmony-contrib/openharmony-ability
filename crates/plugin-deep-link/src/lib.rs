@@ -39,7 +39,34 @@ pub struct DeepLinkGetUriResponse {
     pub uri: Option<String>,
 }
 
-impl_bridge_napi_type!(DeepLinkGetUriResponse, "ohos.deep-link.GetUriResponse");
+// Hand-rolled decode instead of `impl_bridge_napi_type!` — same reason as
+// UpdaterCheckResponse (crates/ability/src/updater.rs): the
+// napi-derive-backend-ohos 1.2.0 object getter infers the item type from the
+// assignment target, so a derived `let uri_: Option<String> = obj.get("uri")`
+// compiles as `obj.get::<String>` and explodes with `StringExpected` when
+// ArkTS sends an explicit `null` — which DeepLinkPlugin.readUri() does for
+// the no-deep-link launch, the most common case. A missing property happens
+// to work (the getter skips conversion); the explicit turbofish + `flatten()`
+// handles present-null, absent, and undefined alike.
+impl BridgeNapiType for DeepLinkGetUriResponse {
+    const TYPE_NAME: &'static str = "ohos.deep-link.GetUriResponse";
+
+    fn into_bridge_value<'env>(
+        self,
+        env: &'env napi_ohos::Env,
+    ) -> Result<napi_ohos::bindgen_prelude::Unknown<'env>> {
+        <Self as napi_ohos::bindgen_prelude::ToNapiValue>::into_unknown(self, env)
+    }
+
+    fn from_bridge_value(
+        value: napi_ohos::bindgen_prelude::Unknown<'_>,
+    ) -> Result<Self> {
+        use napi_ohos::bindgen_prelude::{FromNapiValue, Object};
+        let obj = Object::from_unknown(value)?;
+        let uri: Option<String> = obj.get::<Option<String>>("uri")?.flatten();
+        Ok(Self { uri })
+    }
+}
 
 // ── Client facade ─────────────────────────────────────────────────────────────
 

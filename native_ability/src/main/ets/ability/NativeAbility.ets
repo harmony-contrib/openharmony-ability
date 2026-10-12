@@ -1394,7 +1394,14 @@ export class NativeAbility extends UIAbility {
 
     for (const runtime of this.moduleRuntimes) {
       try {
-        stateMap[runtime.moduleName] = runtime.lifecycle.windowStageEventCallback.onAbilitySaveState(this.abilityWindowId) ?? "";
+        // Void-returning dispatcher: the Rust callback (lifecycle.rs
+        // on_ability_save_state: Function<'a, (), ()>) forwards SaveState to
+        // the app and returns nothing — the generated demo bindings agree
+        // (Index.d.ts: `onAbilitySaveState: () => void`). Module-level saved
+        // state is therefore always empty today; the explicit "" keeps
+        // `new String(...)` below from wrapping "undefined".
+        runtime.lifecycle.windowStageEventCallback.onAbilitySaveState(this.abilityWindowId);
+        stateMap[runtime.moduleName] = "";
       } catch (e) {
         hilog.error(DOMAIN, "NativeAbility", "onAbilitySaveState failed: %{public}s", String(e));
       }

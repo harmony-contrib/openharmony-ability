@@ -257,7 +257,8 @@ export class WindowManager {
   // Single source of truth for per-window state cleanup (issue #87 major-5): both
   // unregisterUIAbilityStage and removeWindow delegate here, so the two paths can
   // never drift apart again (they had diverged: one cleared transparentFlags/
-  // windowKinds, the other preMaximizeRects).
+  // windowKinds, the other preMaximizeRects; a later accelerator-flags duplicate
+  // in removeWindow was folded back into this sink — review finding F4).
   private clearWindowState(wid: number): void {
     this.uiAbilityContexts.delete(wid);
     this.windowKinds.delete(wid);
@@ -288,7 +289,14 @@ export class WindowManager {
       unregisterKeySynthesisController(wid);
       unregisterWebFocus(wid);
     }
-    // Per-window accelerator flags — same clearing removeWindow does for Float.
+    // Per-window accelerator flags (clipboard / zoom-hotkey intercepts) — set
+    // in WebviewPlugin.create and keyed by windowId, so they are cleared on
+    // window-lifetime teardown (both removeWindow and unregisterUIAbilityStage
+    // land here), not in removeWebview (per-webview), which would prematurely
+    // clear flags still in use by sibling webviews in the same window.
+    // removeWindow used to duplicate these two calls after its clearWindowState
+    // delegation — folded back in here so the single-sink invariant holds
+    // (review finding F4).
     clearClipboardEnabled(wid);
     clearZoomHotkeysEnabled(wid);
   }
@@ -2249,7 +2257,7 @@ export class WindowManager {
   // Remove window: clean up all per-window state to prevent memory leaks.
   // The shared cleanup list lives in clearWindowState (also used by
   // unregisterUIAbilityStage); this method additionally detaches the
-  // window-registry-specific pieces (rect listener, entry, accelerator flags).
+  // window-registry-specific pieces (rect listener, entry).
   removeWindow(windowId: number): void {
     hilog.info(DOMAIN, "WindowManager", `Removing window %{public}d from all maps`, windowId);
     // Phase 2 (design.md D3): detach this window's windowRectChange listener before
@@ -2275,14 +2283,9 @@ export class WindowManager {
       hilog.info(DOMAIN, "WindowManager", "Cleared lastUserInteractedWindowId (removed window)");
     }
     this.windows.delete(windowId);
-    // Shared per-window state (kinds/attachments/op-queues/pre-maximize/throttle).
+    // Shared per-window state (kinds/attachments/op-queues/pre-maximize/
+    // throttle/accelerator flags) — clearWindowState is the single cleanup
+    // sink; removeWindow adds nothing on top of it.
     this.clearWindowState(windowId);
-    // Clear per-window accelerator flags (clipboard / zoom-hotkey intercepts).
-    // These are keyed by windowId and set in WebviewPlugin.create; without
-    // clearing here they leak past window destruction. removeWindow is the
-    // window-lifetime sink — not removeWebview (per-webview), which would
-    // prematurely clear flags still in use by sibling webviews in the same window.
-    clearClipboardEnabled(windowId);
-    clearZoomHotkeysEnabled(windowId);
   }
 }
