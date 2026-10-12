@@ -238,6 +238,10 @@ export class NativeAbility extends UIAbility {
     const joinedSessionId = BridgeHostRegistry.activeSessionForModules(moduleNames);
     const sessionId = BridgeHostRegistry.prepare(moduleNames, context, this.bridgePlugins);
     this.bridgeSessionId = sessionId;
+    // AppStorage readers: the demo pages (Index/SubWindowPage load outside
+    // MainPage and feed DefaultXComponent's bridgeSessionId @Prop from here).
+    // MainPage itself consumes the per-instance LocalStorage write in
+    // onWindowStageCreate instead (design.md D6).
     this.updateAppStorage("bridgeSessionId", sessionId);
     this.joinedExistingSession = joinedSessionId !== undefined && joinedSessionId === sessionId;
     hilog.info(DOMAIN, 'NativeAbility', 'Bridge session created: %{public}s (joined=%{public}s)', sessionId, String(this.joinedExistingSession));

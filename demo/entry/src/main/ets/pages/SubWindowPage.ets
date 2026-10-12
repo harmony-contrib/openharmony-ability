@@ -11,6 +11,12 @@ struct SubWindowPage {
   @State status: string = "";
   @State busy: boolean = false;
 
+  // Same as Index: this page is loaded outside MainPage, so the session id
+  // comes from AppStorage (written by NativeAbility.onCreate before any page
+  // loads) instead of MainPage's LocalStorage feed. demo_sub_native shares
+  // the process's single bridge session with demo_native.
+  @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
+
   async handleCreateWebview() {
     this.busy = true;
     this.status = "";
@@ -79,7 +85,7 @@ struct SubWindowPage {
           .fontSize(12)
           .fontColor(this.status.startsWith("✗") ? "#aa3333" : "#227722")
           .textAlign(TextAlign.Center)
-        DefaultXComponent({ moduleName: SUB_WINDOW_NATIVE_MODULE })
+        DefaultXComponent({ moduleName: SUB_WINDOW_NATIVE_MODULE, bridgeSessionId: this.bridgeSessionId })
           .width("100%")
           .layoutWeight(1)
           .borderRadius(12)

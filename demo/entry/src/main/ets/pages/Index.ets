@@ -45,6 +45,16 @@ struct Index {
   @State fileDialogResult: string = "";
   @State resourceStatus: string = "";
 
+  // Demo pages bypass MainPage (EntryAbility overrides loadWindowStageContent
+  // and loads this page directly), so the per-instance LocalStorage feed that
+  // MainPage gives DefaultXComponent is absent. AppStorage carries the same
+  // session id — NativeAbility writes it during onCreate, before loadContent —
+  // so it is already populated when this page is constructed. This is the
+  // demo-only fallback DefaultXComponent deliberately does not provide itself
+  // (its @Prop keeps the value per-instance: a process-global default would
+  // let a spawned instance's session overwrite the primary's before attach).
+  @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
+
   private tabs: string[] = ["XComponent", "WebView", "Platform", "Resource"];
 
   // ---------- status helpers ----------
@@ -472,7 +482,7 @@ struct Index {
             ),
           ],
         })
-        DefaultXComponent({ moduleName: MODULE_NAME })
+        DefaultXComponent({ moduleName: MODULE_NAME, bridgeSessionId: this.bridgeSessionId })
           .width("100%")
           .height(280)
           .borderRadius(12)
@@ -524,7 +534,7 @@ struct Index {
         // component tree. The WebView plugin (and any other plugin) mounts its FrameNode into that
         // tree; there is no BridgeNodeHost or named slot anymore.
         this.WebviewUnderlay()
-        DefaultXComponent({ moduleName: MODULE_NAME })
+        DefaultXComponent({ moduleName: MODULE_NAME, bridgeSessionId: this.bridgeSessionId })
         this.WebviewOverlay()
       }
       .layoutWeight(1)
