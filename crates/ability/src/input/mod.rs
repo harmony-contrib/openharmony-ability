@@ -13,7 +13,10 @@ use ohos_xcomponent_binding::{KeyEventData, MouseEventData, TouchEventData};
 pub(crate) mod drag;
 mod ime;
 #[cfg(feature = "drag")]
-pub use drag::{DragInputData, DragPhase, DragResponse, NativeFileDrag};
+pub use drag::{
+    DragInputData, DragOperation, DragPhase, DragPreview, DragResponse, NativeDragResult,
+    NativeFileDrag,
+};
 mod keyboard;
 mod text_input;
 pub use ime::*;
@@ -105,6 +108,17 @@ pub struct PointerInputData {
     pub timestamp: i64,
     pub pointer_count: u32,
     pub pointer_id: Option<i32>,
+    /// Pen pose copied while the native input event is alive.
+    pub stylus: Option<StylusInputData>,
+}
+
+/// Native pen pose in degrees, with normalized pressure. Missing values stay unknown.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StylusInputData {
+    pub pressure: f32,
+    pub tilt_x: f32,
+    pub tilt_y: f32,
+    pub rotation: Option<f64>,
 }
 
 impl PointerInputData {
@@ -124,6 +138,17 @@ impl PointerInputData {
             timestamp: event.event_time(),
             pointer_count,
             pointer_id: (pointer_count > 0).then(|| event.pointer_id(0)),
+            stylus: (event.tool_type == UIInputToolType::Pen && pointer_count > 0).then(|| {
+                StylusInputData {
+                    pressure: event.pointer_pressure(0),
+                    tilt_x: event.pointer_tilt_x(0),
+                    tilt_y: event.pointer_tilt_y(0),
+                    #[cfg(feature = "stylus")]
+                    rotation: event.pointer_roll_angle().ok(),
+                    #[cfg(not(feature = "stylus"))]
+                    rotation: None,
+                }
+            }),
         }
     }
 }
@@ -144,6 +169,7 @@ impl From<GestureInputData> for PointerInputData {
             timestamp: event.timestamp,
             pointer_count: event.pointer_count,
             pointer_id: event.pointer_id,
+            stylus: None,
         }
     }
 }
@@ -307,6 +333,7 @@ mod tests {
             timestamp: 42,
             pointer_count: 1,
             pointer_id: Some(0),
+            stylus: None,
         }
     }
 

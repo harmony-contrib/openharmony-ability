@@ -1,4 +1,8 @@
 import window from "@ohos.window";
+import { image } from "@kit.ImageKit";
+import pointer from "@ohos.multimodalInput.pointer";
+import { setWindowIcon } from "./WindowIcon";
+import { parseCustomCursor } from "./CustomCursor";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 // Static imports are REQUIRED here: dynamic import('@kit.NotificationKit') /
@@ -1057,6 +1061,36 @@ export class WindowPlugin extends AsyncPluginBase {
         throw new Error(`get-real-window-id: window ${request.windowId} not found`);
       }
       return { typeName: REAL_WINDOW_ID_RESPONSE_TYPE, value: new RealWindowIdResponse(realId) };
+    }
+
+    if (action === "set-window-icon") {
+      await setWindowIcon(payload, context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+    if (action === "set-custom-cursor") {
+      const request = parseCustomCursor(payload);
+      const win = this.requireWindow(request.windowId, context);
+      const bytes = new Uint8Array(request.rgba);
+      const pixelMap = await image.createPixelMap(bytes.buffer, {
+        size: { width: request.width, height: request.height },
+        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
+        alphaType: image.AlphaType.UNPREMUL,
+        editable: false,
+      });
+      try {
+        this.assertCallActive(context);
+        await pointer.setCustomCursor(
+          win.getWindowProperties().id,
+          pixelMap,
+          request.hotspotX,
+          request.hotspotY,
+        );
+        this.assertCallActive(context);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      } finally {
+        await pixelMap.release();
+      }
     }
 
     if (action === "set-cursor-icon") {

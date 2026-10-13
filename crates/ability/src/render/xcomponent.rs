@@ -658,11 +658,17 @@ pub fn render_for_window(
         xcomponent_native.on_drag_enter(move |event| {
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Enter);
+                let response = snapshot.response.clone();
                 dispatch_input(
                     &drag_app,
                     &drag_owner,
                     InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
                 );
+                if let Some(operation) = response.operation() {
+                    if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
+                        crate::warn!("Failed to suggest drop operation: {error}");
+                    }
+                }
             }
         });
         let drag_app = app.clone();
@@ -670,11 +676,17 @@ pub fn render_for_window(
         xcomponent_native.on_drag_move(move |event| {
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Move);
+                let response = snapshot.response.clone();
                 dispatch_input(
                     &drag_app,
                     &drag_owner,
                     InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
                 );
+                if let Some(operation) = response.operation() {
+                    if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
+                        crate::warn!("Failed to suggest drop operation: {error}");
+                    }
+                }
             }
         });
         let drag_app = app.clone();
@@ -701,8 +713,13 @@ pub fn render_for_window(
                     InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
                 );
                 use ohos_arkui_binding::types::drag::DragResult;
-                let result = if response.accepted() {
-                    DragResult::Successful
+                let result = if let Some(operation) = response.operation() {
+                    if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
+                        crate::warn!("Failed to set drop operation: {error}");
+                        DragResult::Failed
+                    } else {
+                        DragResult::Successful
+                    }
                 } else {
                     DragResult::Failed
                 };

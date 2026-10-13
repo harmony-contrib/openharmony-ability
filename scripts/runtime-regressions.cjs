@@ -39,6 +39,7 @@ function loader(overrides = {}, globals = {}) {
     "@kit.AbilityKit": {},
     "@kit.NotificationKit": {},
     "@kit.IMEKit": {},
+    "@kit.ImageKit": {},
     "@kit.BasicServicesKit": { deviceInfo },
     "@kit.PerformanceAnalysisKit": { hilog: quietConsole },
     "@ohos.window": windowApi,
@@ -598,5 +599,78 @@ test("the aggregate plugin manifest includes every standalone plugin", () => {
   assert.deepEqual([...declared].sort(), actual.sort());
   for (const [, name, cls] of entries) {
     assert.ok(fs.existsSync(path.join(root, "plugins", name, "src/main/ets", cls + ".ets")));
+  }
+});
+
+test("custom cursors validate their named contract before allocating native pixels", async () => {
+  const { parseCustomCursor } = loader().load("plugins/window/src/main/ets/CustomCursor.ets");
+  const value = { windowId: 0, width: 1, height: 1, hotspotX: 0, hotspotY: 0, rgba: [255, 0, 0, 128] };
+  const payload = (v) => ({ typeName: "ohos.window.CustomCursorRequest", value: v });
+  assert.equal(parseCustomCursor(payload(value)), value);
+  for (const patch of [{ width: 0 }, { width: 257 }, { hotspotX: 1 }, { windowId: -1 }, { rgba: [0] }, { rgba: [0, 0, NaN, 0] }]) {
+    assert.throws(() => parseCustomCursor(payload({ ...value, ...patch })), /Invalid/);
+  }
+  assert.throws(() => parseCustomCursor({ typeName: "std.string", value }), /requires/);
+});
+
+test("custom cursors release PixelMaps after success, OS failure and canceled calls", async () => {
+  for (const outcome of ["success", "failure", "cancel"]) {
+    let released = 0, installed = 0, active = true;
+    const l = loader({
+      "@kit.ImageKit": { image: {
+        PixelMapFormat: { RGBA_8888: 3 }, AlphaType: { UNPREMUL: 3 },
+        async createPixelMap(bytes, options) {
+          assert.equal(bytes.byteLength, 4);
+          assert.equal(options.alphaType, 3);
+          assert.equal(options.srcPixelFormat, 3);
+          if (outcome === "cancel") active = false;
+          return { release() { released++; } };
+        },
+      } },
+      "@ohos.multimodalInput.pointer": { async setCustomCursor(id, _pixels, x, y) {
+        assert.equal(id, 42); assert.equal(x, 0); assert.equal(y, 0);
+        installed++;
+        if (outcome === "failure") throw new Error("OS rejected cursor");
+      } },
+    });
+    const { WindowPlugin } = l.load("plugins/window/src/main/ets/WindowPlugin.ets");
+    const result = new WindowPlugin().invokeAsync("set-custom-cursor", {
+      typeName: "ohos.window.CustomCursorRequest",
+      value: { windowId: 0, width: 1, height: 1, hotspotX: 0, hotspotY: 0, rgba: [255, 0, 0, 128] },
+    }, { isActive: () => active, getWindow: () => ({ getWindowProperties: () => ({ id: 42 }) }) });
+    if (outcome === "success") assert.equal((await result).value.accepted, true);
+    else await assert.rejects(result, outcome === "failure" ? /OS rejected/ : /no longer active/);
+    assert.equal(released, 1, outcome);
+    assert.equal(installed, outcome === "cancel" ? 0 : 1, outcome);
+  }
+});
+
+test("window icons restore packaged pixels and reject unsupported devices without allocating", async () => {
+  for (const device of ["phone", "2in1"]) {
+    let released = 0, sources = 0, installed = 0;
+    const pixels = { async release() { released++; } };
+    const l = loader({
+      "@kit.BasicServicesKit": { deviceInfo: { sdkApiVersion: 26, deviceType: device } },
+      "@kit.ImageKit": { image: {
+        PixelMapFormat: { RGBA_8888: 3 }, AlphaType: { UNPREMUL: 3 },
+        async createPixelMap() { return pixels; },
+        createImageSource() { return { async createPixelMap() { return pixels; }, async release() { sources++; } }; },
+      } },
+    });
+    const { setWindowIcon } = l.load("plugins/window/src/main/ets/WindowIcon.ets");
+    const context = { isActive: () => true, abilityContext: {
+      abilityInfo: { iconId: 42 }, applicationInfo: { iconId: 43 },
+      resourceManager: { async getMediaContent(id) { assert.equal(id, 42); return new Uint8Array([1]); } },
+      async setMissionWindowIcon(value) { assert.equal(value, pixels); installed++; },
+    } };
+    const payload = (size, rgba) => ({ typeName: "ohos.window.WindowIconRequest", value: { windowId: 0, size, rgba } });
+    for (const p of [payload(1, [0, 0, 255, 255]), payload(0, [])]) {
+      if (device === "phone") await assert.rejects(setWindowIcon(p, context), /PC\/2in1/);
+      else await setWindowIcon(p, context);
+    }
+    await assert.rejects(setWindowIcon(payload(2048, []), context), /Invalid/);
+    assert.equal(installed, device === "phone" ? 0 : 2);
+    assert.equal(released, installed);
+    assert.equal(sources, device === "phone" ? 0 : 1);
   }
 });

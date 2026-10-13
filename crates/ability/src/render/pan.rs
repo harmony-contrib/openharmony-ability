@@ -65,6 +65,7 @@ mod tests {
                 timestamp: 42,
                 pointer_count: 1,
                 pointer_id: Some(0),
+                stylus: None,
             },
             phase,
             delta_x: 0.0,

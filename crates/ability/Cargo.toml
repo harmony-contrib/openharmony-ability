@@ -11,6 +11,7 @@ log = ["dep:log"]
 window = ["dep:ohos-window-manager-binding"]
 # ArkUI keyboard snapshots and consumption are opt-in; raw XComponent keys remain available.
 keyboard = ["ohos-arkui-binding/api-14"]
+stylus = ["ohos-arkui-binding/api-17"]
 # Native file drag/drop is opt-in; ordinary keyboard/pointer input needs no UDMF or preview images.
 drag = ["dep:ohos-udmf-binding", "ohos-arkui-binding/udmf", "ohos-arkui-binding/image"]
 

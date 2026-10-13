@@ -10,6 +10,9 @@ use openharmony_ability::{
     BridgeContextRequirement, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp, Rect,
 };
 
+mod cursor;
+pub use cursor::{CustomCursorRequest, WindowIconRequest};
+
 mod stack;
 pub use stack::{WindowStackRequest, WindowStackResponse};
 

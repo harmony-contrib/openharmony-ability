@@ -2,7 +2,7 @@
 use crate::OpenHarmonyWaker;
 use napi_ohos::{Error, Result};
 use ohos_arkui_binding::{
-    api::drag::{DragAction, DragEvent},
+    api::drag::{DragAction, DragCompletion, DragEvent},
     component::attribute::ArkUIAttributeBasic,
     image_native_binding::{
         PixelFormat, PixelMap, PixelMapAlphaType, PixelMapInitializationOptions,
@@ -12,8 +12,8 @@ use ohos_arkui_binding::{
 };
 use ohos_udmf_binding::{UdmfData, UdmfRecord, UdsFileUri};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+    atomic::{AtomicU8, Ordering},
+    Arc, Mutex,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,13 +25,78 @@ pub enum DragPhase {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct DragResponse(Arc<AtomicBool>);
+pub struct DragResponse(Arc<AtomicU8>);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragOperation {
+    Copy,
+    Move,
+}
+impl DragOperation {
+    pub(crate) fn native(self) -> ohos_arkui_binding::types::drag::DropOperation {
+        match self {
+            Self::Copy => ohos_arkui_binding::types::drag::DropOperation::Copy,
+            Self::Move => ohos_arkui_binding::types::drag::DropOperation::Move,
+        }
+    }
+}
+/// Validated RGBA preview, in image pixels. The hotspot is relative to its top left.
+#[derive(Clone, Debug)]
+pub struct DragPreview {
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub hotspot_x: f32,
+    pub hotspot_y: f32,
+}
+impl DragPreview {
+    pub fn validate(&self) -> Result<()> {
+        if self.width == 0
+            || self.height == 0
+            || self.width > 1024
+            || self.height > 1024
+            || self.rgba.len() != (self.width * self.height * 4) as usize
+            || !self.hotspot_x.is_finite()
+            || !self.hotspot_y.is_finite()
+        {
+            return Err(Error::from_reason(
+                "Invalid drag preview dimensions, RGBA bytes or hotspot",
+            ));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeDragResult {
+    Dropped(DragOperation),
+    Cancelled,
+    Failed,
+}
+
 impl DragResponse {
     pub fn accept(&self) {
-        self.0.store(true, Ordering::Release);
+        self.accept_operation(DragOperation::Copy);
     }
     pub fn accepted(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.operation().is_some()
+    }
+    pub fn accept_operation(&self, operation: DragOperation) {
+        self.0.store(
+            match operation {
+                DragOperation::Copy => 1,
+                DragOperation::Move => 2,
+            },
+            Ordering::Release,
+        );
+    }
+    pub fn reject(&self) {
+        self.0.store(0, Ordering::Release);
+    }
+    pub fn operation(&self) -> Option<DragOperation> {
+        match self.0.load(Ordering::Acquire) {
+            1 => Some(DragOperation::Copy),
+            2 => Some(DragOperation::Move),
+            _ => None,
+        }
     }
 }
 impl PartialEq for DragResponse {
@@ -85,7 +150,7 @@ impl DragInputData {
 pub struct NativeFileDrag {
     // Native action disposal unregisters callbacks before releasing its data and preview.
     _action: DragAction,
-    ended: Arc<AtomicBool>,
+    completion: Arc<Mutex<Option<NativeDragResult>>>,
     _source: XComponent,
     _pixels: Vec<u8>,
     _records: Vec<UdmfRecord>,
@@ -105,6 +170,19 @@ impl NativeFileDrag {
         files: &[(String, bool)],
         waker: OpenHarmonyWaker,
     ) -> Result<Self> {
+        Self::start_with_preview(source, pointer_id, files, None, waker)
+    }
+
+    pub fn start_with_preview(
+        source: XComponent,
+        pointer_id: i32,
+        files: &[(String, bool)],
+        preview: Option<DragPreview>,
+        waker: OpenHarmonyWaker,
+    ) -> Result<Self> {
+        if let Some(preview) = &preview {
+            preview.validate()?;
+        }
         if files.is_empty() || files.len() > 512 {
             return Err(Error::from_reason("Native drag requires 1..512 files"));
         }
@@ -136,21 +214,23 @@ impl NativeFileDrag {
         let mut options =
             PixelMapInitializationOptions::new().map_err(|e| Error::from_reason(e.to_string()))?;
         options
-            .set_width(32)
+            .set_width(preview.as_ref().map_or(32, |p| p.width))
             .map_err(|e| Error::from_reason(e.to_string()))?;
         options
-            .set_height(32)
+            .set_height(preview.as_ref().map_or(32, |p| p.height))
             .map_err(|e| Error::from_reason(e.to_string()))?;
         options
-            .set_pixel_format(PixelFormat::Bgra8888)
+            .set_pixel_format(PixelFormat::Rgba8888)
             .map_err(|e| Error::from_reason(e.to_string()))?;
         options
-            .set_alpha_type(PixelMapAlphaType::Opaque)
+            .set_src_pixel_format(PixelFormat::Rgba8888)
             .map_err(|e| Error::from_reason(e.to_string()))?;
-        let mut pixels = vec![0u8; 32 * 32 * 4];
-        for pixel in pixels.as_chunks_mut::<4>().0 {
-            pixel.copy_from_slice(&[0x55, 0xc7, 0x3c, 0xff]);
-        }
+        options
+            .set_alpha_type(PixelMapAlphaType::Unpremultiplied)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+        let hotspot = preview.as_ref().map(|p| (p.hotspot_x, p.hotspot_y));
+        let mut pixels =
+            preview.map_or_else(|| [0x3c, 0xc7, 0x55, 0xff].repeat(32 * 32), |p| p.rgba);
         let preview = PixelMap::create(&mut pixels, &mut options)
             .map_err(|e| Error::from_reason(e.to_string()))?;
         let mut action = DragAction::new_with_node(source.raw())
@@ -164,12 +244,20 @@ impl NativeFileDrag {
         action
             .set_data(data)
             .map_err(|e| Error::from_reason(e.to_string()))?;
-        let ended = Arc::new(AtomicBool::new(false));
-        let completed = ended.clone();
+        if let Some((x, y)) = hotspot {
+            action
+                .set_touch_point_x(x)
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            action
+                .set_touch_point_y(y)
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+        }
+        let completion = Arc::new(Mutex::new(None));
+        let completed = completion.clone();
         action
-            .register_status_listener(move |status| {
-                if status == DragStatus::Ended {
-                    completed.store(true, Ordering::Release);
+            .register_completion_listener(move |event| {
+                if let Some(result) = native_drag_result(event) {
+                    *completed.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
                     waker.wake();
                 }
             })
@@ -179,7 +267,7 @@ impl NativeFileDrag {
             .map_err(|e| Error::from_reason(e.to_string()))?;
         Ok(Self {
             _action: action,
-            ended,
+            completion,
             _source: source,
             _pixels: pixels,
             _records: records,
@@ -188,6 +276,63 @@ impl NativeFileDrag {
     }
 
     pub fn ended(&self) -> bool {
-        self.ended.load(Ordering::Acquire)
+        self.result().is_some()
+    }
+}
+
+impl NativeFileDrag {
+    pub fn result(&self) -> Option<NativeDragResult> {
+        *self.completion.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+fn native_drag_result(event: DragCompletion) -> Option<NativeDragResult> {
+    use ohos_arkui_binding::types::drag::{DragResult, DropOperation};
+    if event.status != DragStatus::Ended {
+        return None;
+    }
+    Some(match (event.result, event.operation) {
+        (Some(DragResult::Successful), Some(DropOperation::Copy)) => {
+            NativeDragResult::Dropped(DragOperation::Copy)
+        }
+        (Some(DragResult::Successful), Some(DropOperation::Move)) => {
+            NativeDragResult::Dropped(DragOperation::Move)
+        }
+        (Some(DragResult::Canceled), _) => NativeDragResult::Cancelled,
+        _ => NativeDragResult::Failed,
+    })
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn completion_does_not_report_cancellation_as_success() {
+        use ohos_arkui_binding::types::drag::{DragResult, DropOperation};
+        for (result, operation, expected) in [
+            (
+                Some(DragResult::Successful),
+                Some(DropOperation::Move),
+                NativeDragResult::Dropped(DragOperation::Move),
+            ),
+            (
+                Some(DragResult::Canceled),
+                Some(DropOperation::Copy),
+                NativeDragResult::Cancelled,
+            ),
+            (None, None, NativeDragResult::Failed),
+        ] {
+            assert_eq!(
+                native_drag_result(DragCompletion {
+                    status: DragStatus::Ended,
+                    result,
+                    operation
+                }),
+                Some(expected)
+            );
+        }
+        let response = DragResponse::default();
+        response.accept_operation(DragOperation::Move);
+        assert_eq!(response.operation(), Some(DragOperation::Move));
+        response.reject();
+        assert!(!response.accepted());
     }
 }
