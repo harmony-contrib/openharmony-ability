@@ -82,10 +82,26 @@ interface RegisterRequestPayload {
   id: number;
   modifiers: string[];
   key: string;
+  // Operation sequence number taken by the Rust side at dispatch time.
+  // A register arriving with a generation older than the newest request
+  // served for this id (or older than the global unregister-all floor) is
+  // stale and rejected — see the ghost-hotkey race note on the class.
+  generation: number;
 }
 
 interface UnregisterRequestPayload {
   id: number;
+  // Raises the per-id generation watermark: an in-flight register for the
+  // same id dispatched before this call (smaller generation) is rejected
+  // when it arrives.
+  generation: number;
+}
+
+interface UnregisterAllRequestPayload {
+  // Raises the global generation floor: any in-flight register dispatched
+  // before this sweep (smaller generation) is rejected on arrival instead
+  // of resurrecting a hotkey the Rust side no longer tracks.
+  generation: number;
 }
 
 class ShortcutTriggeredEventPayload {
@@ -116,6 +132,30 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
 
   private registeredHotkeys: Map<number, RegisteredHotkey> = new Map();
 
+  // ── Registration generations (ghost-hotkey race) ──────────────────────────
+  // Registration on the Rust side is fire-and-forget: the local store is
+  // updated synchronously while the physical `inputConsumer.on()` happens
+  // here, asynchronously and possibly out of order. Without a guard, an
+  // in-flight register dispatched before a later unregister / unregister-all
+  // would arrive afterwards and resurrect a physical registration the Rust
+  // side no longer tracks: a "ghost hotkey" that still triggers, reports
+  // `isRegistered: false`, and can never be cleared through the plugin API.
+  //
+  // Every request carries a monotonic `generation` (the Rust side's global
+  // operation counter, sampled at dispatch time). We track the highest
+  // generation served — globally (`generationFloor`) and per id
+  // (`idGenerations`) — and reject any request carrying an older one. The
+  // rejection flows back as a normal registration error, whose Rust-side
+  // cleanup is a no-op against the already-updated store.
+
+  // Highest unregister-all generation served; registers carrying a smaller
+  // generation predate that sweep and are rejected on arrival.
+  private generationFloor: number = 0;
+
+  // Highest generation served per hotkey id; requests (register or
+  // unregister) carrying a smaller generation for the same id are stale.
+  private idGenerations: Map<number, number> = new Map();
+
   async invokeAsync(
     action: string,
     payload: BridgeTypedValue,
@@ -127,34 +167,53 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
 
     if (action === "register") {
       const request = expectBridgeRequestType(payload, "ohos.global-shortcut", action, REGISTER_REQUEST_TYPE) as RegisterRequestPayload;
-      hilog.info(DOMAIN, "GlobalShortcut", "register ENTER id=%{public}d key=%{public}s modifiers=[%{public}s]",
-        request.id, request.key, request.modifiers.join(','));
+      hilog.info(DOMAIN, "GlobalShortcut", "register ENTER id=%{public}d key=%{public}s modifiers=[%{public}s] generation=%{public}d",
+        request.id, request.key, request.modifiers.join(','), request.generation);
       return ack(this.registerHotkey(request));
     }
 
     if (action === "unregister") {
       const request = expectBridgeRequestType(payload, "ohos.global-shortcut", action, UNREGISTER_REQUEST_TYPE) as UnregisterRequestPayload;
-      hilog.info(DOMAIN, "GlobalShortcut", "unregister id=%{public}d", request.id);
-      return ack(this.unregisterHotkey(request.id));
+      hilog.info(DOMAIN, "GlobalShortcut", "unregister id=%{public}d generation=%{public}d", request.id, request.generation);
+      return ack(this.unregisterHotkey(request));
     }
 
     if (action === "unregister-all") {
-      hilog.info(DOMAIN, "GlobalShortcut", "unregister-all");
-      expectBridgeRequestType(payload, "ohos.global-shortcut", action, UNREGISTER_ALL_REQUEST_TYPE);
-      return ack(this.unregisterAllHotkeys());
+      const request = expectBridgeRequestType(payload, "ohos.global-shortcut", action, UNREGISTER_ALL_REQUEST_TYPE) as UnregisterAllRequestPayload;
+      hilog.info(DOMAIN, "GlobalShortcut", "unregister-all generation=%{public}d", request.generation);
+      return ack(this.unregisterAllHotkeys(request.generation));
     }
 
     throw new Error(`Unsupported ohos.global-shortcut action '${action}'`);
   }
 
   onDispose(): void {
-    this.unregisterAllHotkeys();
+    // MAX_SAFE_INTEGER raises the floor past every live generation: nothing
+    // may re-register after dispose.
+    this.unregisterAllHotkeys(Number.MAX_SAFE_INTEGER);
   }
 
   // ── Registration logic ──────────────────────────────────────────────────────
 
   private registerHotkey(request: RegisterRequestPayload): boolean {
     const id = request.id;
+
+    // Stale-generation guards (see the class comment): a register dispatched
+    // before a later unregister-all / unregister / re-register must not
+    // (re)create a physical registration the Rust side no longer tracks.
+    if (request.generation < this.generationFloor) {
+      hilog.info(DOMAIN, "GlobalShortcut",
+        "stale register id=%{public}d generation=%{public}d < floor=%{public}d (superseded by unregister-all), rejected",
+        id, request.generation, this.generationFloor);
+      return false;
+    }
+    const served = this.idGenerations.get(id);
+    if (served !== undefined && request.generation < served) {
+      hilog.info(DOMAIN, "GlobalShortcut",
+        "stale register id=%{public}d generation=%{public}d < served=%{public}d (superseded by a later request for this id), rejected",
+        id, request.generation, served);
+      return false;
+    }
 
     // Resolve modifier key codes
     const preKeys: number[] = [];
@@ -186,8 +245,10 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
     };
 
     // If re-registering the same ID, unregister the old one first
+    // (reached only after the stale-generation guards above, so this is a
+    // genuinely newer registration replacing an older one).
     if (this.registeredHotkeys.has(id)) {
-      this.unregisterHotkey(id);
+      this.unregisterHotkeyById(id);
     }
 
     // Create the callback that pushes Pressed + Released events back to Rust
@@ -221,6 +282,9 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
     try {
       inputConsumer.on("hotkeyChange", hotkeyOptions, callback);
       this.registeredHotkeys.set(id, { options: hotkeyOptions, callback });
+      // Raise the per-id watermark only after the physical registration
+      // succeeded, so the generation we served is the one that is live.
+      this.idGenerations.set(id, request.generation);
       hilog.info(DOMAIN, "GlobalShortcut", "Registered hotkey id=%{public}d key=%{public}s modifiers=%{public}s",
         id, request.key, request.modifiers.join('+'));
       return true;
@@ -242,7 +306,29 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
     }
   }
 
-  private unregisterHotkey(id: number): boolean {
+  private unregisterHotkey(request: UnregisterRequestPayload): boolean {
+    const id = request.id;
+
+    // Stale-generation guard, symmetric with register: an unregister
+    // dispatched before a later re-register of the same id must not remove
+    // the newer physical registration.
+    const served = this.idGenerations.get(id);
+    if (served !== undefined && request.generation < served) {
+      hilog.info(DOMAIN, "GlobalShortcut",
+        "stale unregister id=%{public}d generation=%{public}d < served=%{public}d, skipped",
+        id, request.generation, served);
+      return true;
+    }
+
+    // Raise the per-id watermark even when nothing is physically registered
+    // (idempotent unregister): an in-flight register for this id dispatched
+    // before this call carries a smaller generation and will be rejected on
+    // arrival.
+    this.idGenerations.set(id, request.generation);
+    return this.unregisterHotkeyById(id);
+  }
+
+  private unregisterHotkeyById(id: number): boolean {
     const entry = this.registeredHotkeys.get(id);
     if (!entry) {
       // Idempotent — unregistering an unknown ID is a no-op.
@@ -260,10 +346,19 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
     return true;
   }
 
-  private unregisterAllHotkeys(): boolean {
+  private unregisterAllHotkeys(generation: number): boolean {
+    // Raise the global generation floor: register requests carrying a
+    // smaller generation predate this sweep and are rejected on arrival —
+    // the ArkTS-side half of the ghost-hotkey race fix. Every recorded
+    // per-id watermark is smaller than this sweep's generation (the Rust
+    // counter is monotonic), so the floor subsumes them.
+    if (generation > this.generationFloor) {
+      this.generationFloor = generation;
+    }
+    this.idGenerations.clear();
     const ids = Array.from(this.registeredHotkeys.keys());
     for (const id of ids) {
-      this.unregisterHotkey(id);
+      this.unregisterHotkeyById(id);
     }
     return true;
   }
