@@ -24,9 +24,18 @@ do not need to derive gesture recognition from XComponent touch points.
 
 Gesture handles are owned by the active render and are detached and disposed with that render.
 
-## Keyboard and optional drag/drop
+## Optional mouse, keyboard, and drag/drop support
 
 Raw XComponent keyboard and pointer input are available with the default features.
+The `mouse` feature forwards `ohos-xcomponent-binding/api-18`, exposing
+`openharmony_ability::xcomponent::MouseAction::Cancel` for native mouse
+cancellation. It is opt-in and does not enable `keyboard`, `stylus`, or `drag`.
+Consumers can use the re-exported XComponent types without a direct binding dependency:
+
+```toml
+openharmony-ability = { git = "https://github.com/richerfu/openharmony-ability.git", branch = "feat/ohos-adaptation-runtime-fixes", features = ["mouse"] }
+```
+
 Enhanced ArkUI keyboard delivery is opt-in through the `keyboard` feature:
 
 ```toml

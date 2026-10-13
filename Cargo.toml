@@ -37,9 +37,9 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { version = "0.4.1", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "216d45870a0c0690b56280b39f0b82484b1c913b" }
-ohos-xcomponent-binding = { version = "0.5.1", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "216d45870a0c0690b56280b39f0b82484b1c913b", features = ["multi_mode", "accessibility", "api-15"] }
-ohos-udmf-binding = { version = "0.0.7", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "216d45870a0c0690b56280b39f0b82484b1c913b", features = ["api-13"] }
+ohos-arkui-binding = { version = "=0.4.2" }
+ohos-xcomponent-binding = { version = "=0.5.2", features = ["multi_mode", "accessibility", "api-15"] }
+ohos-udmf-binding = { version = "=0.0.7", features = ["api-13"] }
 ohos-ime-binding = { version = "0.3.1" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
