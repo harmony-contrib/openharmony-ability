@@ -1,7 +1,7 @@
 import common from "@ohos.app.ability.common";
 import { ConfigurationConstant } from "@kit.AbilityKit";
 import { BusinessError } from "@kit.BasicServicesKit";
-import { Want } from "@kit.AbilityKit";
+import { StartOptions, Want } from "@kit.AbilityKit";
 import {
   BridgeCallContext,
   BridgeTypedValue,
@@ -40,6 +40,12 @@ interface StartUiAbilityRequest {
   label: string;
   url: string;
   transparent: boolean;
+  // Creation-time geometry (tao#26 review follow-up F5): physical px,
+  // optional per axis — absent (undefined) keeps the OS default.
+  width?: number;
+  height?: number;
+  left?: number;
+  top?: number;
 }
 
 
@@ -141,6 +147,20 @@ function parseStartUiAbilityRequest(payload: BridgeTypedValue): StartUiAbilityRe
   }
   if (typeof request?.transparent !== "boolean") {
     throw new Error("start-ui-ability.transparent must be a boolean");
+  }
+  // Optional creation-time geometry (F5): physical px integers; width/height
+  // must be positive when present, left/top may be negative (multi-display).
+  if (request.width !== undefined && (!Number.isInteger(request.width) || request.width <= 0)) {
+    throw new Error("start-ui-ability.width must be a positive integer when present");
+  }
+  if (request.height !== undefined && (!Number.isInteger(request.height) || request.height <= 0)) {
+    throw new Error("start-ui-ability.height must be a positive integer when present");
+  }
+  if (request.left !== undefined && !Number.isInteger(request.left)) {
+    throw new Error("start-ui-ability.left must be an integer when present");
+  }
+  if (request.top !== undefined && !Number.isInteger(request.top)) {
+    throw new Error("start-ui-ability.top must be an integer when present");
   }
   return request;
 }
@@ -247,7 +267,26 @@ export class AppControlPlugin extends SyncPluginBase {
         abilityName: ctx.abilityInfo.name,
         parameters: params,
       };
-      console.info(`[AppControl] start-ui-ability: id=${request.windowId} label=${request.label} url='${request.url}' transparent=${request.transparent}`);
+      // Creation-time geometry (tao#26 review follow-up F5): forward the
+      // builder's size/position through startAbility StartOptions
+      // (windowWidth/windowHeight/windowLeft/windowTop, API 11+). Physical
+      // px, window rectangle (frame included) — same contract as the Float
+      // path's WindowCreateParams. Absent axes stay unset (OS default), so
+      // a start without builder geometry keeps today's sizing exactly.
+      const options: StartOptions = {};
+      if (request.width !== undefined) {
+        options.windowWidth = request.width;
+      }
+      if (request.height !== undefined) {
+        options.windowHeight = request.height;
+      }
+      if (request.left !== undefined) {
+        options.windowLeft = request.left;
+      }
+      if (request.top !== undefined) {
+        options.windowTop = request.top;
+      }
+      console.info(`[AppControl] start-ui-ability: id=${request.windowId} label=${request.label} url='${request.url}' transparent=${request.transparent} geometry=${request.width ?? "*"}x${request.height ?? "*"}@${request.left ?? "*"},${request.top ?? "*"}`);
       // Escape the NAPI re-entrancy context before calling AMS: startAbility
       // invoked synchronously inside a bridge (MainThreadSync) callback drops
       // want.parameters (multi-uiability-windows design D1). Fire-and-forget —
@@ -255,7 +294,7 @@ export class AppControlPlugin extends SyncPluginBase {
       // observes the handshake via register_ui_ability_stage, not this
       // response (accepted = "dispatched", not "instance created").
       setTimeout(() => {
-        ctx.startAbility(want).catch((e: BusinessError) => {
+        ctx.startAbility(want, options).catch((e: BusinessError) => {
           console.error(`[AppControl] start-ui-ability id=${request.windowId} failed: ${e.code} ${e.message}`);
           // accepted ≠ created: the Rust caller already returned Ok and tao
           // pre-registered the pending D7 handshake entry plus the label→id

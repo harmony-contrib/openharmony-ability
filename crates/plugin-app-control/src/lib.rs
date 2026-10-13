@@ -135,6 +135,19 @@ pub struct StartUiAbilityRequest {
     pub url: String,
     /// Window transparency flag (mirrors `WebviewWindowBuilder` semantics).
     pub transparent: bool,
+    /// Optional creation-time window width, physical px (tao#26 review
+    /// follow-up F5): applied via `StartOptions.windowWidth` on
+    /// `startAbility` (API 11+). `None` keeps the OS default. StartOptions
+    /// sizes the window rectangle (frame included) — same contract as the
+    /// Float path's `WindowCreateParams`.
+    pub width: Option<i32>,
+    /// Optional creation-time window height, physical px — see `width`.
+    pub height: Option<i32>,
+    /// Optional creation-time window left, physical px — applied via
+    /// `StartOptions.windowLeft`. `None` keeps the OS default placement.
+    pub left: Option<i32>,
+    /// Optional creation-time window top, physical px — see `left`.
+    pub top: Option<i32>,
 }
 
 impl_bridge_napi_type!(
@@ -166,6 +179,11 @@ impl_bridge_napi_type!(
 /// observable only through the D7 registry (`register_ui_ability_stage` /
 /// hilog), not through this response.
 ///
+/// `inner_size` / `position` (physical px tuples) carry the builder's
+/// creation-time geometry through to the `startAbility` StartOptions
+/// (tao#26 review follow-up F5); `None` leaves the OS default for that
+/// axis pair.
+///
 /// Must be awaited off the N-API main thread (e.g. from tao's
 /// `BridgeExecutor` worker) — `call_sync_from_worker` rejects main-thread
 /// callers outright to avoid the self-deadlock.
@@ -175,10 +193,20 @@ pub async fn start_ui_ability(
     label: String,
     url: String,
     transparent: bool,
+    inner_size: Option<(i32, i32)>,
+    position: Option<(i32, i32)>,
 ) -> Result<()> {
     // Record the label→id pairing so deep-link's per-window resolution can map a
     // calling Window's label back to its instance's want-URI storage (design D9).
     ::openharmony_ability::register_window_label(&label, window_id);
+    let (width, height) = match inner_size {
+        Some((w, h)) => (Some(w), Some(h)),
+        None => (None, None),
+    };
+    let (left, top) = match position {
+        Some((x, y)) => (Some(x), Some(y)),
+        None => (None, None),
+    };
     let result = match app.bridge() {
         Ok(bridge) => {
             bridge
@@ -189,6 +217,10 @@ pub async fn start_ui_ability(
                         label,
                         url,
                         transparent,
+                        width,
+                        height,
+                        left,
+                        top,
                     },
                 )
                 .await
@@ -419,17 +451,38 @@ mod tests {
         );
         // NAPI wire names are camelCase (window_id → windowId); the Rust-side
         // field stays snake_case. Round-trip the payload shape the ArkTS
-        // parser expects (integer id, string label/url, boolean transparent).
+        // parser expects (integer id, string label/url, boolean transparent,
+        // optional physical-px geometry — absent reads as undefined).
         let request = StartUiAbilityRequest {
             window_id: 1,
             label: "uiability-1".into(),
             url: String::new(),
             transparent: false,
+            width: Some(700),
+            height: Some(500),
+            left: Some(90),
+            top: Some(70),
         };
         assert_eq!(request.window_id, 1);
         assert_eq!(request.label, "uiability-1");
         assert!(request.url.is_empty());
         assert!(!request.transparent);
+        assert_eq!(request.width, Some(700));
+        assert_eq!(request.height, Some(500));
+        assert_eq!(request.left, Some(90));
+        assert_eq!(request.top, Some(70));
+        let unset = StartUiAbilityRequest {
+            window_id: 2,
+            label: "uiability-2".into(),
+            url: String::new(),
+            transparent: true,
+            width: None,
+            height: None,
+            left: None,
+            top: None,
+        };
+        assert!(unset.width.is_none() && unset.height.is_none());
+        assert!(unset.left.is_none() && unset.top.is_none());
         assert!(StartUiAbilityResponse { accepted: true }.accepted);
     }
 }
