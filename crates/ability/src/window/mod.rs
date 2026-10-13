@@ -36,6 +36,8 @@ pub struct WindowCreateParams {
     pub x: i32,
     /// Initial window Y position in px. Default: 100.
     pub y: i32,
+    /// Target display for a floating sub-window. None uses the current display.
+    pub display_id: Option<i64>,
     /// Whether to show window decorations (title bar, drag area, close button).
     /// Phase 2: controls FloatPage conditional rendering via LocalStorage.
     pub decorations: bool,
@@ -57,6 +59,7 @@ impl Default for WindowCreateParams {
             height: 600,
             x: 100,
             y: 100,
+            display_id: None,
             decorations: true,
             transparent: false,
             background_color: None,
@@ -109,6 +112,7 @@ pub fn create_os_window(params: WindowCreateParams) -> napi_ohos::Result<i64> {
             params.height,
             params.x,
             params.y,
+            params.display_id,
             params.decorations,
             params.transparent,
             params.background_color,
@@ -151,6 +155,7 @@ type CreateSubWindowParams = (
     i32,
     i32,
     i32,
+    Option<i64>,
     bool,
     bool,
     Option<u32>,
@@ -201,6 +206,7 @@ fn build_create_sub_window_args(
         height,
         x,
         y,
+        display_id,
         decorations,
         transparent,
         bg_color,
@@ -217,6 +223,9 @@ fn build_create_sub_window_args(
     config.set("height", height)?;
     config.set("x", x)?;
     config.set("y", y)?;
+    if let Some(display_id) = display_id {
+        config.set("displayId", display_id)?;
+    }
     config.set("decorations", decorations)?;
     config.set("transparent", transparent)?;
     if let Some(color) = bg_color {

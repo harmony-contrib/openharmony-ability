@@ -6,12 +6,23 @@ use ohos_arkui_binding::{
     },
     gesture::gesture_data::GestureInputData,
 };
-use ohos_ime_binding::KeyboardStatus;
+use ohos_ime_binding::{Action, Direction, KeyboardStatus};
 use ohos_xcomponent_binding::{KeyEventData, MouseEventData, TouchEventData};
 
+#[cfg(feature = "drag")]
+pub(crate) mod drag;
 mod ime;
+#[cfg(feature = "drag")]
+pub use drag::{
+    DragInputData, DragOperation, DragPhase, DragPreview, DragResponse, NativeDragResult,
+    NativeFileDrag,
+};
+mod keyboard;
 mod text_input;
 pub use ime::*;
+pub use keyboard::KeyboardInputDelivery;
+#[cfg(feature = "keyboard")]
+pub use keyboard::{KeyboardEventData, KeyboardEventResponse};
 pub use text_input::*;
 
 #[derive(Clone)]
@@ -41,15 +52,24 @@ pub enum XComponentInputEvent {
 }
 
 /// Owned ArkUI input and gesture semantics attached to the XComponent node.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ArkUiInputEvent {
+    /// Pointer identity only; the existing XComponent callback delivers the input itself.
+    Pointer(PointerInputData),
+    #[cfg(feature = "drag")]
+    Drag(DragInputData),
+    /// State-only snapshot before IME processing; do not dispatch another key press.
+    #[cfg(feature = "keyboard")]
+    KeyPreIme(KeyboardEventData),
+    #[cfg(feature = "keyboard")]
+    Key(KeyboardEventData),
     Axis(AxisEventData),
     Gesture(GestureEvent),
 }
 
 /// Controls which touch representation is delivered to the application.
 ///
-/// Mouse and key input remain XComponent events, while wheel and touchpad axis input remains an
+/// Mouse input remains XComponent events, while wheel and touchpad axis input remains an
 /// ArkUI event regardless of this setting. Configure delivery before the first render starts.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum TouchInputDelivery {
@@ -88,6 +108,17 @@ pub struct PointerInputData {
     pub timestamp: i64,
     pub pointer_count: u32,
     pub pointer_id: Option<i32>,
+    /// Pen pose copied while the native input event is alive.
+    pub stylus: Option<StylusInputData>,
+}
+
+/// Native pen pose in degrees, with normalized pressure. Missing values stay unknown.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StylusInputData {
+    pub pressure: f32,
+    pub tilt_x: f32,
+    pub tilt_y: f32,
+    pub rotation: Option<f64>,
 }
 
 impl PointerInputData {
@@ -107,6 +138,17 @@ impl PointerInputData {
             timestamp: event.event_time(),
             pointer_count,
             pointer_id: (pointer_count > 0).then(|| event.pointer_id(0)),
+            stylus: (event.tool_type == UIInputToolType::Pen && pointer_count > 0).then(|| {
+                StylusInputData {
+                    pressure: event.pointer_pressure(0),
+                    tilt_x: event.pointer_tilt_x(0),
+                    tilt_y: event.pointer_tilt_y(0),
+                    #[cfg(feature = "stylus")]
+                    rotation: event.pointer_roll_angle().ok(),
+                    #[cfg(not(feature = "stylus"))]
+                    rotation: None,
+                }
+            }),
         }
     }
 }
@@ -127,6 +169,7 @@ impl From<GestureInputData> for PointerInputData {
             timestamp: event.timestamp,
             pointer_count: event.pointer_count,
             pointer_id: event.pointer_id,
+            stylus: None,
         }
     }
 }
@@ -202,6 +245,10 @@ pub enum ImeEvent {
     PreviewTextEvent { text: String, start: i32, end: i32 },
     FinishPreviewEvent,
     BackspaceEvent(i32),
+    DeleteForwardEvent(i32),
+    MoveCursorEvent(Direction),
+    SelectionEvent { start: i32, end: i32 },
+    ExtendActionEvent(Action),
     ImeStatusEvent(KeyboardStatus),
     EnterEvent(i32),
 }
@@ -215,6 +262,10 @@ impl Debug for ImeEvent {
             }
             ImeEvent::FinishPreviewEvent => write!(f, "FinishPreviewEvent"),
             ImeEvent::BackspaceEvent(len) => write!(f, "BackspaceEvent: delete length is {}", len),
+            ImeEvent::DeleteForwardEvent(len) => write!(f, "DeleteForwardEvent: {len}"),
+            ImeEvent::MoveCursorEvent(direction) => write!(f, "MoveCursorEvent: {direction:?}"),
+            ImeEvent::SelectionEvent { start, end } => write!(f, "SelectionEvent: {start}..{end}"),
+            ImeEvent::ExtendActionEvent(action) => write!(f, "ExtendActionEvent: {action:?}"),
             ImeEvent::ImeStatusEvent(status) => write!(f, "ImeStatusEvent: {:?}", status),
             ImeEvent::EnterEvent(key) => write!(f, "EnterEvent: {:?}", key),
         }
@@ -282,6 +333,7 @@ mod tests {
             timestamp: 42,
             pointer_count: 1,
             pointer_id: Some(0),
+            stylus: None,
         }
     }
 

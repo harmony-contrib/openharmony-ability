@@ -2,6 +2,7 @@
   "private": true,
   "packageManager": "pnpm@10.22.0",
   "scripts": {
+    "test:runtime": "node --test scripts/runtime-regressions.cjs",
     "check": "pnpm run format:check && pnpm run lint",
     "format": "pnpm run format:rs && pnpm run format:oxk",
     "format:rs": "cargo fmt --all",

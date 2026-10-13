@@ -131,9 +131,7 @@ mod tests {
         assert!(sdk_v12 < 14);
     }
 
-    // Pure OnceLock logic — no NAPI dependency (the module used to be
-    // target_env-gated under a stale "NAPI-dependent" note; the gate and the
-    // note were wrong for the same reason: these tests hold no device state).
+    // Version initialization uses OnceLock and does not require initialized device state.
     // Run via ohos-rust-ut skill:
     //   PACKAGE=openharmony-ability bash .claude/skills/ohos-rust-ut/scripts/run-ut.sh version::
     mod ohos_device_tests {

@@ -81,6 +81,31 @@ ohrs build --arch arm64
 - Native demo module (Rust example): `rust_example/demo_native/src/lib.rs`
 - ArkTS package source: `native_ability`
 
+## Plugin configuration
+
+Plugin factories require business-owned protocol configuration:
+
+```ts
+new LazyPlugin(() => new ClipboardPlugin({ metadataMimeType: "application/x-my-app-metadata-v1" }));
+new LazyPlugin(() => new NotificationPlugin({ scheme: "my-app-notification" }));
+```
+
+The aggregate HAR exports `createAllBridgePlugins({ clipboard: { metadataMimeType }, notification: { scheme } })`
+to create its factory array with the same required configuration.
+
+## Runtime regression tests
+
+With Node 22+ and an OpenHarmony SDK installed:
+
+```bash
+OHOS_SDK_HOME=/path/to/sdk/openharmony pnpm run test:runtime
+```
+
+These host tests load the ArkTS implementation with the SDK parser and mock platform APIs.
+They cover clipboard order, window failure rollback and operation queues, prompt positioning,
+and subscription ownership across sessions. HAR compilation and device checks are still required
+to verify declarative UI layout and real platform behavior.
+
 ## License
 
 [MIT](./LICENSE)

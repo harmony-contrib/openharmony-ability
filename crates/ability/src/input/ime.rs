@@ -15,7 +15,17 @@ type ImeCallback = (
     ThreadsafeFunction<i32, (), i32, Status, false>,
     ThreadsafeFunction<PreviewTextEventData, (), PreviewTextEventData, Status, false>,
     ThreadsafeFunction<bool, (), bool, Status, false>,
+    ThreadsafeFunction<i32, (), i32, Status, false>,
+    ThreadsafeFunction<i32, (), i32, Status, false>,
+    ThreadsafeFunction<SelectionEventData, (), SelectionEventData, Status, false>,
+    ThreadsafeFunction<i32, (), i32, Status, false>,
 );
+
+#[napi(object)]
+pub struct SelectionEventData {
+    pub start: i32,
+    pub end: i32,
+}
 
 #[napi(object)]
 #[derive(Clone)]
@@ -35,7 +45,71 @@ fn dispatch_ime_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
     }
 }
 
+fn numeric_ime_callback(
+    env: &Env,
+    app: OpenHarmonyApp,
+    owner: String,
+    name: &str,
+    event: fn(i32) -> ImeEvent,
+) -> Result<ThreadsafeFunction<i32, (), i32, Status, false>> {
+    let callback: Function<i32, ()> = env.create_function_from_closure(name, move |ctx| {
+        if app.is_render_surface_active(&owner) {
+            if let Ok(value) = ctx.first_arg::<i32>() {
+                dispatch_ime_input(&app, &owner, InputEvent::Ime(event(value)));
+            }
+        }
+        Ok(())
+    })?;
+    callback
+        .build_threadsafe_function()
+        .callee_handled::<false>()
+        .build()
+}
+
 pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result<ImeCallback> {
+    let extend_action = numeric_ime_callback(
+        env,
+        app.clone(),
+        render_owner.clone(),
+        "ime_extend_action_callback",
+        |value| ImeEvent::ExtendActionEvent(ohos_ime_binding::Action::from(value as u32)),
+    )?;
+    let selection_app = app.clone();
+    let selection_owner = render_owner.clone();
+    let selection: Function<SelectionEventData, ()> =
+        env.create_function_from_closure("ime_selection_callback", move |ctx| {
+            if selection_app.is_render_surface_active(&selection_owner) {
+                if let Ok(value) = ctx.first_arg::<SelectionEventData>() {
+                    dispatch_ime_input(
+                        &selection_app,
+                        &selection_owner,
+                        InputEvent::Ime(ImeEvent::SelectionEvent {
+                            start: value.start,
+                            end: value.end,
+                        }),
+                    );
+                }
+            }
+            Ok(())
+        })?;
+    let selection = selection
+        .build_threadsafe_function()
+        .callee_handled::<false>()
+        .build()?;
+    let delete_forward = numeric_ime_callback(
+        env,
+        app.clone(),
+        render_owner.clone(),
+        "ime_delete_forward_callback",
+        ImeEvent::DeleteForwardEvent,
+    )?;
+    let move_cursor = numeric_ime_callback(
+        env,
+        app.clone(),
+        render_owner.clone(),
+        "ime_move_cursor_callback",
+        |value| ImeEvent::MoveCursorEvent(ohos_ime_binding::Direction::from(value as u32)),
+    )?;
     let on_preview_app = app.clone();
     let on_preview_owner = render_owner.clone();
     let preview_callback: Function<PreviewTextEventData, ()> =
@@ -196,5 +270,9 @@ pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result
         on_ime_enter_callback_tsfn,
         preview_callback_tsfn,
         finish_callback_tsfn,
+        delete_forward,
+        move_cursor,
+        selection,
+        extend_action,
     ))
 }

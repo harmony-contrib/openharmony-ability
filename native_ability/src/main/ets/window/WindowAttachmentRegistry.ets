@@ -34,6 +34,8 @@ export class WindowAttachmentRegistry {
   // applyWindowBlur is called AFTER a WebviewPlugin webview already exists, this fires
   // so the live Web component's backdropBlur is refreshed via node.update().
   private blurRefreshCallbacks: Map<number, (radius: number) => void> = new Map();
+  // The native XComponent is independent of WebView and needs its own listener.
+  private surfaceBlurCallbacks: Map<number, Set<(radius: number) => void>> = new Map();
   // Callback registry for plugins that need to react to componentRoot registration.
   // Used by WebviewPlugin to replay deferred webview creates (timing race: webview
   // bridge create arrives ~3ms after TSFN dispatch, but FloatPage.aboutToAppear
@@ -156,6 +158,45 @@ export class WindowAttachmentRegistry {
     this.blurRefreshCallbacks.delete(Number(windowId));
   }
 
+  registerSurfaceBlurCallback(windowId: number, cb: (radius: number) => void): () => void {
+    const wid = Number(windowId);
+    let callbacks = this.surfaceBlurCallbacks.get(wid);
+    if (!callbacks) {
+      callbacks = new Set();
+      this.surfaceBlurCallbacks.set(wid, callbacks);
+    }
+    const ownedCallbacks = callbacks;
+    ownedCallbacks.add(cb);
+    return (): void => {
+      ownedCallbacks.delete(cb);
+      if (ownedCallbacks.size === 0 && this.surfaceBlurCallbacks.get(wid) === ownedCallbacks) {
+        this.surfaceBlurCallbacks.delete(wid);
+      }
+    };
+  }
+
+  fireSurfaceBlurRefresh(windowId: number, radius: number): void {
+    const callbacks = this.surfaceBlurCallbacks.get(Number(windowId));
+    if (!callbacks) {
+      return;
+    }
+    for (const callback of Array.from(callbacks)) {
+      if (!callbacks.has(callback)) {
+        continue;
+      }
+      try {
+        callback(radius);
+      } catch (error) {
+        hilog.warn(
+          DOMAIN,
+          "WindowManager",
+          "Surface blur callback failed: %{public}s",
+          String(error),
+        );
+      }
+    }
+  }
+
   // Fire the registered refresh callback so a live webview's backdropBlur updates.
   fireBlurRefresh(windowId: number, radius: number): void {
     const refreshCb = this.blurRefreshCallbacks.get(Number(windowId));
@@ -207,6 +248,7 @@ export class WindowAttachmentRegistry {
     this.componentRoots.delete(wid);
     this.windowBlurRadii.delete(wid);
     this.blurRefreshCallbacks.delete(wid);
+    this.surfaceBlurCallbacks.delete(wid);
     WindowAttachmentRegistry.pendingComponentRootCallbacks.delete(wid);
   }
 

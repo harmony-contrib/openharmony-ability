@@ -5,15 +5,29 @@ import {
   BridgeContextRequirement,
 } from "@ohos-rs/ability";
 import Want from "@ohos.app.ability.Want";
-import { wantConstant } from "@kit.AbilityKit";
+import { bundleManager, wantConstant } from "@kit.AbilityKit";
 
 const OPEN_REQUEST_TYPE = "ohos.url.OpenRequest";
 const REVEAL_REQUEST_TYPE = "ohos.url.RevealRequest";
 const OPEN_FILE_REQUEST_TYPE = "ohos.url.OpenFileRequest";
 const OPEN_RESPONSE_TYPE = "ohos.url.OpenResponse";
+const SCHEME_REQUEST_TYPE = "ohos.url.SchemeRequest";
+const SCHEME_RESPONSE_TYPE = "ohos.url.SchemeResponse";
 
 interface UrlOpenRequest {
   url: string;
+}
+
+interface UrlSchemeRequest {
+  scheme: string;
+}
+
+class UrlSchemeResponse {
+  readonly declared: boolean;
+
+  constructor(declared: boolean) {
+    this.declared = declared;
+  }
 }
 
 interface UrlRevealRequest {
@@ -86,7 +100,7 @@ function parseOpenRequest(payload: BridgeTypedValue): UrlOpenRequest {
     throw new Error(`ohos.url.open-url requires bridge type ${OPEN_REQUEST_TYPE}`);
   }
   const request = payload.value as UrlOpenRequest;
-  if (typeof request.url !== "string" || !request.url.trim() || request.url.indexOf("://") < 0) {
+  if (typeof request.url !== "string" || !/^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(request.url)) {
     throw new Error("open-url.url must be an absolute URL with a scheme");
   }
   return request;
@@ -181,6 +195,38 @@ export class UrlPlugin extends AsyncPluginBase {
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
+    if (action === "check-scheme") {
+      if (payload.typeName !== SCHEME_REQUEST_TYPE || typeof payload.value !== "object") {
+        throw new Error(`ohos.url.check-scheme requires bridge type ${SCHEME_REQUEST_TYPE}`);
+      }
+      const request = payload.value as UrlSchemeRequest;
+      if (typeof request.scheme !== "string" || !/^[A-Za-z][A-Za-z0-9+.-]*$/.test(request.scheme)) {
+        throw new Error("check-scheme.scheme must be a URL scheme name");
+      }
+      const flags =
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_HAP_MODULE |
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_ABILITY |
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_SKILL;
+      const bundle = await bundleManager.getBundleInfoForSelf(flags);
+      if (!context.isActive()) {
+        throw new Error("Ability was destroyed while checking its URL schemes");
+      }
+      const abilityName = context.abilityContext.abilityInfo.name;
+      const scheme = request.scheme.toLowerCase();
+      const declared = (bundle.hapModulesInfo ?? []).some((module) =>
+        (module.abilitiesInfo ?? []).some(
+          (ability) =>
+            ability.name === abilityName &&
+            (ability.skills ?? []).some(
+              (skill) =>
+                (skill.actions ?? []).includes("ohos.want.action.viewData") &&
+                (skill.uris ?? []).some((uri) => (uri.scheme ?? "").toLowerCase() === scheme),
+            ),
+        ),
+      );
+      return { typeName: SCHEME_RESPONSE_TYPE, value: new UrlSchemeResponse(declared) };
+    }
+
     if (action === "open-file") {
       if (payload.typeName !== OPEN_FILE_REQUEST_TYPE || typeof payload.value !== "object") {
         throw new Error(`ohos.url.open-file requires bridge type ${OPEN_FILE_REQUEST_TYPE}`);

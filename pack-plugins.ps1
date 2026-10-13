@@ -1,4 +1,4 @@
-# Aggregates the 18 bridge plugins into the single `@ohos-rs/ability` HAR.
+# Aggregates the 20 bridge plugins into the single `@ohos-rs/ability` HAR.
 #
 # Run by pack.bat AFTER the base native_ability metadata + ets tree have been
 # copied into package/. Produces a self-contained HAR (Strategy A):
@@ -12,7 +12,7 @@
 #   - an internal barrel `ability_exports.ets` is generated from the base index.ets
 #     (paths rewritten to be relative to package/src/main/ets/) so plugins resolve
 #     base symbols without importing their own module by name (no cycle)
-#   - the 18 plugin classes are appended as re-exports to package/index.ets so
+#   - the 20 plugin classes are appended as re-exports to package/index.ets so
 #     consumers import them from `@ohos-rs/ability` directly
 #
 # Plugins stay standalone-buildable: their source still uses
@@ -32,22 +32,24 @@ if (-not $ScriptDir) { $ScriptDir = $PSScriptRoot }
 # path, failing Test-Path with ItemExistsArgumentError).
 $ScriptDir = $ScriptDir.Trim('"\')
 
-# (plugin-dir, exported-class) — the 18 core bridge plugins.
+# (plugin-dir, exported-class) — the 20 core bridge plugins.
 $plugins = @(
   @{ name = 'accessibility';   cls = 'AccessibilityPlugin' },
   @{ name = 'app-control';     cls = 'AppControlPlugin' },
   @{ name = 'account';         cls = 'AccountPlugin' },
   @{ name = 'autostart';       cls = 'AutostartPlugin' },
-  @{ name = 'clipboard';       cls = 'ClipboardPlugin' },
+  @{ name = 'clipboard';       cls = 'ClipboardPlugin'; exports = 'ClipboardPlugin, ClipboardPluginOptions' },
   @{ name = 'deep-link';       cls = 'DeepLinkPlugin' },
   @{ name = 'faultinjection';  cls = 'FaultInjectionPlugin' },
   @{ name = 'files';           cls = 'FilesPlugin' },
   @{ name = 'global-shortcut'; cls = 'GlobalShortcutPlugin' },
   @{ name = 'menu';            cls = 'MenuPlugin' },
+  @{ name = 'notification';    cls = 'NotificationPlugin'; exports = 'NotificationPlugin, NotificationPluginOptions' },
   @{ name = 'permission';      cls = 'PermissionPlugin' },
   @{ name = 'process';         cls = 'ProcessPlugin' },
   @{ name = 'resource';        cls = 'ResourcePlugin' },
   @{ name = 'statusbar';       cls = 'StatusbarPlugin' },
+  @{ name = 'system-state';    cls = 'SystemStatePlugin' },
   @{ name = 'updater';         cls = 'UpdaterPlugin' },
   @{ name = 'url';             cls = 'UrlPlugin' },
   @{ name = 'webview';         cls = 'WebviewPlugin' },
@@ -156,43 +158,50 @@ $lines = @(
   '// === Bridge plugins (aggregated from plugins/ - see pack-plugins.ps1) ==='
 )
 foreach ($p in $plugins) {
-  $lines += "export { $($p.cls) } from `"./src/main/ets/plugins/$($p.name)/$($p.cls)`";"
+  $exports = if ($p.exports) { $p.exports } else { $p.cls }
+  $lines += "export { $exports } from `"./src/main/ets/plugins/$($p.name)/$($p.cls)`";"
 }
 
-# 4. Generate `plugins/all.ets`: a ready-made factory array covering every
-#    bridge plugin in this package. Apps assign it to
-#    NativeAbility#bridgePlugins so newly added bridge plugins flow to apps
-#    on package update, without regenerating their EntryAbility. The
-#    LazyPlugin factories are stateless — sharing the array across Ability
-#    instances is safe (each host calls create() for its own plugin
-#    instances). Lives in its own module because `LazyPlugin` must be
-#    imported for the type annotation, and package/index.ets only re-exports
-#    it.
+# 4. Generate `plugins/all.ets`: an explicitly configured factory for every
+#    bridge plugin. Business code must provide its clipboard MIME and notification
+#    scheme. Each host still creates independent plugin instances through LazyPlugin.
 $allEts = @(
   "import { LazyPlugin } from '../ability/type';",
   ''
 )
 foreach ($p in $plugins) {
-  $allEts += "import { $($p.cls) } from './$($p.name)/$($p.cls)';"
+  $exports = if ($p.exports) { $p.exports } else { $p.cls }
+  $allEts += "import { $exports } from './$($p.name)/$($p.cls)';"
 }
 $allEts += @(
   '',
-  '// Ready-made factory array for NativeAbility#bridgePlugins (see pack-plugins.ps1).',
-  'export const allBridgePlugins: LazyPlugin[] = ['
+  'export interface AllBridgePluginOptions {',
+  '  clipboard: ClipboardPluginOptions;',
+  '  notification: NotificationPluginOptions;',
+  '}',
+  '',
+  'export function createAllBridgePlugins(options: AllBridgePluginOptions): LazyPlugin[] {',
+  '  if (!options?.clipboard || !options?.notification) {',
+  '    throw new Error("createAllBridgePlugins requires clipboard and notification options");',
+  '  }',
+  '  const clipboard: ClipboardPluginOptions = { metadataMimeType: options.clipboard.metadataMimeType };',
+  '  const notification: NotificationPluginOptions = { scheme: options.notification.scheme };',
+  '  return ['
 )
 foreach ($p in $plugins) {
-  $allEts += "  new LazyPlugin(() => new $($p.cls)()),"
+  $argument = if ($p.name -eq 'clipboard') { 'clipboard' } elseif ($p.name -eq 'notification') { 'notification' } else { '' }
+  $allEts += "    new LazyPlugin(() => new $($p.cls)($argument)),"
 }
-$allEts += ']'
+$allEts += @('  ];', '}')
 $allPath = Join-Path $pluginsDir 'all.ets'
 [System.IO.File]::WriteAllText($allPath, ($allEts -join "`r`n") + "`r`n", $utf8NoBom)
 Write-Host "  all:    $allPath"
 
-$lines += 'export { allBridgePlugins } from "./src/main/ets/plugins/all";'
+$lines += 'export { createAllBridgePlugins, AllBridgePluginOptions } from "./src/main/ets/plugins/all";'
 
 $append = ($lines -join "`r`n") + "`r`n"
 [System.IO.File]::AppendAllText($pkgIdx, $append, $utf8NoBom)
-Write-Host "  index:  appended $($plugins.Count) plugin re-exports + allBridgePlugins to $pkgIdx"
+Write-Host "  index:  appended $($plugins.Count) plugin re-exports + createAllBridgePlugins to $pkgIdx"
 
 # 5. Guard: the aggregate HAR must be self-contained. After all rewrites, no
 #    `@ohos-rs/*` package specifier may remain anywhere under package/ — a

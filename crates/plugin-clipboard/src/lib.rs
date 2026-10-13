@@ -3,14 +3,26 @@
 //! Provides `read-text`, `write-text`, and `write-image` actions through the bridge plugin model.
 //! The ArkTS side uses `pasteboard.getSystemPasteboard()` to interact with the system clipboard.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use napi_derive_ohos::napi;
-use napi_ohos::{Error, Result};
+use napi_ohos::{bindgen_prelude::Unknown, Error, Result};
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
-    BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
+    BridgeMainThreadEvent, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
+    PluginLifecycleEvent,
 };
 
-pub struct ClipboardBridgePlugin;
+#[derive(Default)]
+pub struct ClipboardBridgePlugin {
+    revision: AtomicU64,
+}
+
+impl ClipboardBridgePlugin {
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+}
 
 impl BridgePlugin for ClipboardBridgePlugin {
     type Mode = AsyncBridge;
@@ -18,6 +30,85 @@ impl BridgePlugin for ClipboardBridgePlugin {
     const ID: &'static str = "ohos.clipboard";
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
+
+    fn on_main_thread_event<'env>(
+        &self,
+        event: BridgeMainThreadEvent<'env>,
+    ) -> Result<Unknown<'env>> {
+        if event.name() != "changed" {
+            return Err(Error::from_reason("Unsupported clipboard event"));
+        }
+        let _: ClipboardChangedEvent = event.decode()?;
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        event.respond(true)
+    }
+
+    fn on_lifecycle(&self, _event: &PluginLifecycleEvent) -> Result<()> {
+        // Any new session invalidates cached clipboard data from the previous session.
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        Ok(())
+    }
+}
+
+/// One native pasteboard record. Exactly one of text, encoded_image, or uri is set.
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct ClipboardRecord {
+    pub text: Option<String>,
+    pub metadata: Option<String>,
+    pub encoded_image: Option<Vec<u8>>,
+    pub uri: Option<String>,
+}
+impl_bridge_napi_type!(ClipboardRecord, "ohos.clipboard.Record");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ClipboardWriteRecordsRequest {
+    pub records: Vec<ClipboardRecord>,
+}
+impl_bridge_napi_type!(
+    ClipboardWriteRecordsRequest,
+    "ohos.clipboard.WriteRecordsRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ClipboardReadRecordsResponse {
+    pub records: Vec<ClipboardRecord>,
+}
+impl_bridge_napi_type!(
+    ClipboardReadRecordsResponse,
+    "ohos.clipboard.ReadRecordsResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct ClipboardChangedEvent {}
+impl_bridge_napi_type!(ClipboardChangedEvent, "ohos.clipboard.ChangedEvent");
+
+fn validate_records(records: &[ClipboardRecord]) -> Result<()> {
+    if records.is_empty() || records.len() > 512 {
+        return Err(Error::from_reason("clipboard requires 1..512 records"));
+    }
+    for record in records {
+        let count = usize::from(record.text.is_some())
+            + usize::from(record.encoded_image.is_some())
+            + usize::from(record.uri.is_some());
+        if count != 1 || record.metadata.is_some() && record.text.is_none() {
+            return Err(Error::from_reason(
+                "clipboard record must contain one supported value; metadata requires text",
+            ));
+        }
+        if record.encoded_image.as_ref().is_some_and(Vec::is_empty)
+            || record
+                .uri
+                .as_ref()
+                .is_some_and(|uri| !uri.starts_with("file://") || uri.contains('\0'))
+        {
+            return Err(Error::from_reason("invalid clipboard image or file URI"));
+        }
+    }
+    Ok(())
 }
 
 // ── read-text ───────────────────────────────────────────────────────────────────
@@ -177,6 +268,30 @@ impl ClipboardClient {
                 BridgeCallOptions::default(),
             )
             .await
+    }
+
+    pub async fn read_records(&self) -> Result<Vec<ClipboardRecord>> {
+        Ok(self
+            .call::<ClipboardReadTextRequest, ClipboardReadRecordsResponse>(
+                "read-records",
+                ClipboardReadTextRequest {},
+            )
+            .await?
+            .records)
+    }
+
+    pub async fn write_records(&self, records: Vec<ClipboardRecord>) -> Result<()> {
+        validate_records(&records)?;
+        let response = self
+            .call::<ClipboardWriteRecordsRequest, ClipboardWriteTextResponse>(
+                "write-records",
+                ClipboardWriteRecordsRequest { records },
+            )
+            .await?;
+        if !response.accepted {
+            return Err(Error::from_reason("Clipboard plugin rejected records"));
+        }
+        Ok(())
     }
 
     /// Reads the current text content from the system clipboard.
@@ -339,6 +454,45 @@ fn validate_image_dimensions(rgba: &[u8], width: u32, height: u32) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_contract_and_validation() {
+        assert_eq!(ClipboardRecord::TYPE_NAME, "ohos.clipboard.Record");
+        assert_eq!(
+            ClipboardWriteRecordsRequest::TYPE_NAME,
+            "ohos.clipboard.WriteRecordsRequest"
+        );
+        assert_eq!(
+            ClipboardReadRecordsResponse::TYPE_NAME,
+            "ohos.clipboard.ReadRecordsResponse"
+        );
+        assert_eq!(
+            ClipboardChangedEvent::TYPE_NAME,
+            "ohos.clipboard.ChangedEvent"
+        );
+        let text = ClipboardRecord {
+            text: Some(String::new()),
+            metadata: Some("metadata".into()),
+            ..Default::default()
+        };
+        let image = ClipboardRecord {
+            encoded_image: Some(vec![1]),
+            ..Default::default()
+        };
+        assert!(validate_records(&[text.clone(), image.clone()]).is_ok());
+        assert!(validate_records(&[]).is_err());
+        assert!(validate_records(&[ClipboardRecord::default()]).is_err());
+        assert!(validate_records(&[ClipboardRecord {
+            uri: Some("file:///a".into()),
+            ..text
+        }])
+        .is_err());
+        assert!(validate_records(&[ClipboardRecord {
+            encoded_image: Some(vec![]),
+            ..image
+        }])
+        .is_err());
+    }
 
     #[test]
     fn clipboard_plugin_targets_ability_context() {

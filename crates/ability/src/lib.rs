@@ -33,7 +33,12 @@ macro_rules! error {
 #[cfg(not(feature = "log"))]
 #[macro_export]
 macro_rules! error {
-    ($($arg:tt)*) => {};
+    (target: $target:expr, $($arg:tt)*) => {{
+        if false { let _ = $target; let _ = format_args!($($arg)*); }
+    }};
+    ($($arg:tt)*) => {{
+        if false { let _ = format_args!($($arg)*); }
+    }};
 }
 
 #[cfg(feature = "log")]
@@ -44,7 +49,12 @@ macro_rules! info {
 #[cfg(not(feature = "log"))]
 #[macro_export]
 macro_rules! info {
-    ($($arg:tt)*) => {};
+    (target: $target:expr, $($arg:tt)*) => {{
+        if false { let _ = $target; let _ = format_args!($($arg)*); }
+    }};
+    ($($arg:tt)*) => {{
+        if false { let _ = format_args!($($arg)*); }
+    }};
 }
 
 #[cfg(feature = "log")]
@@ -55,7 +65,12 @@ macro_rules! warn {
 #[cfg(not(feature = "log"))]
 #[macro_export]
 macro_rules! warn {
-    ($($arg:tt)*) => {};
+    (target: $target:expr, $($arg:tt)*) => {{
+        if false { let _ = $target; let _ = format_args!($($arg)*); }
+    }};
+    ($($arg:tt)*) => {{
+        if false { let _ = format_args!($($arg)*); }
+    }};
 }
 
 #[cfg(feature = "log")]
@@ -66,7 +81,12 @@ macro_rules! debug {
 #[cfg(not(feature = "log"))]
 #[macro_export]
 macro_rules! debug {
-    ($($arg:tt)*) => {};
+    (target: $target:expr, $($arg:tt)*) => {{
+        if false { let _ = $target; let _ = format_args!($($arg)*); }
+    }};
+    ($($arg:tt)*) => {{
+        if false { let _ = format_args!($($arg)*); }
+    }};
 }
 
 // ─── Re-exports ───

@@ -1,4 +1,8 @@
 import window from "@ohos.window";
+import { image } from "@kit.ImageKit";
+import pointer from "@ohos.multimodalInput.pointer";
+import { setWindowIcon } from "./WindowIcon";
+import { parseCustomCursor } from "./CustomCursor";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 // Static imports are REQUIRED here: dynamic import('@kit.NotificationKit') /
@@ -16,6 +20,8 @@ import {
   DOMAIN,
   WindowManager,
 } from "@ohos-rs/ability";
+
+import { PromptDialogs, WindowPromptRequest } from "./PromptDialogs";
 
 const TAG: string = "WindowPlugin";
 
@@ -58,6 +64,11 @@ function isSafeInteger(value: number): boolean {
 
 function isWindowId(value: number): boolean {
   return isSafeInteger(value) && value >= 0;
+}
+
+interface WindowStackRequest {
+  displayId: number;
+  windowIds: number[];
 }
 
 interface AvoidAreaRequest {
@@ -533,6 +544,7 @@ function parseDecorationFlagsRequest(payload: BridgeTypedValue): DecorationFlags
 export class WindowPlugin extends AsyncPluginBase {
   readonly id = "ohos.window";
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
+  private readonly prompts: PromptDialogs = new PromptDialogs();
   private readonly windows: Map<number, window.Window> = new Map();
 
   async invokeAsync(
@@ -540,6 +552,66 @@ export class WindowPlugin extends AsyncPluginBase {
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
+    this.assertCallActive(context);
+    if (action === "get-window-stack") {
+      if (payload.typeName !== "ohos.window.StackRequest" || typeof payload.value !== "object") {
+        throw new Error("get-window-stack requires ohos.window.StackRequest");
+      }
+      const request = payload.value as WindowStackRequest;
+      if (
+        !isWindowId(request.displayId) ||
+        !Array.isArray(request.windowIds) ||
+        request.windowIds.some((id: number) => !isWindowId(id))
+      ) {
+        throw new Error("Invalid window stack request");
+      }
+      const aliases: Map<number, number> = new Map();
+      for (const id of request.windowIds) {
+        try {
+          aliases.set(this.requireWindow(id, context).getWindowProperties().id, id);
+        } catch (error) {
+          hilog.warn(
+            DOMAIN,
+            TAG,
+            "get-window-stack skipped window %{public}d: %{public}s",
+            id,
+            String(error),
+          );
+        }
+      }
+      if (deviceInfo.sdkApiVersion < 14) {
+        throw new Error("get-window-stack requires API 14 or later");
+      }
+      // Negative/omitted coordinates query all visible windows belonging to this app.
+      const ordered = await window.getWindowsByCoordinate(request.displayId);
+      this.assertCallActive(context);
+      const ids: number[] = [];
+      for (const win of ordered) {
+        const id = aliases.get(win.getWindowProperties().id);
+        if (id !== undefined && !ids.includes(id)) {
+          ids.push(id);
+        }
+      }
+      return { typeName: "ohos.window.StackResponse", value: { windowIds: ids } };
+    }
+
+    if (action === "show-prompt") {
+      if (payload.typeName !== "ohos.window.PromptRequest" || typeof payload.value !== "object") {
+        throw new Error("show-prompt requires ohos.window.PromptRequest");
+      }
+      const request = payload.value as WindowPromptRequest;
+      if (!isWindowId(request?.windowId)) {
+        throw new Error("Invalid prompt window");
+      }
+      const index = await this.prompts.show(
+        this.requireWindow(request.windowId, context),
+        request,
+        context,
+      );
+      this.assertCallActive(context);
+      return { typeName: "ohos.window.PromptResponse", value: { index } };
+    }
+
     if (action === "get-avoid-area") {
       const request = parseAvoidAreaRequest(payload);
       try {
@@ -553,12 +625,26 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "create-os-window") {
       const request = parseCreateRequest(payload);
+      hilog.info(
+        DOMAIN,
+        TAG,
+        "create-os-window bounds x=%{public}d y=%{public}d w=%{public}d h=%{public}d",
+        request.x,
+        request.y,
+        request.width,
+        request.height,
+      );
       let created: window.Window | undefined;
       try {
         created = await context.getWindowStage().createSubWindow(request.name.trim());
         this.assertCallActive(context);
-        await created.moveWindowTo(request.x, request.y);
         await created.resize(request.width, request.height);
+        const position = await WindowManager.getInstance().resolveWindowPosition(
+          created,
+          request.x,
+          request.y,
+        );
+        await created.moveWindowTo(position.x, position.y);
         created.setWindowDecorVisible(request.decorations);
         const backgroundColor = request.transparent
           ? "#00000000"
@@ -570,7 +656,10 @@ export class WindowPlugin extends AsyncPluginBase {
         // the transparent window (vibrancy/frosted glass effect invisible).
         if (request.transparent && deviceInfo.sdkApiVersion >= 20) {
           try {
-            created.setWindowContainerColor("#00000000", "#00000000");
+            created.setWindowContainerColor(
+              "#00000000",
+              WindowManager.getInstance().inactiveContainerColor(created, 0),
+            );
           } catch (containerErr) {
             const error = containerErr as BusinessError;
             if (error.code !== 801) {
@@ -580,6 +669,18 @@ export class WindowPlugin extends AsyncPluginBase {
         }
         await created.showWindow();
         this.assertCallActive(context);
+        // showWindow() can reset a newly created float window to the origin.
+        // Apply the requested GPUI bounds after the window is visible.
+        await created.moveWindowTo(position.x, position.y);
+        this.assertCallActive(context);
+        const actualRect = created.getWindowProperties().windowRect;
+        hilog.info(
+          DOMAIN,
+          TAG,
+          "create-os-window shown at x=%{public}d y=%{public}d",
+          actualRect.left,
+          actualRect.top,
+        );
         const windowId = created.getWindowProperties().id;
         if (!isWindowId(windowId)) {
           throw new Error(`createSubWindow returned invalid window id '${windowId}'`);
@@ -628,15 +729,39 @@ export class WindowPlugin extends AsyncPluginBase {
       const request = parseColorRequest(payload);
       const win = this.requireWindow(request.windowId, context);
       try {
-        win.setWindowBackgroundColor(this.colorString(request.color));
+        const color = this.colorString(request.color);
+        win.setWindowBackgroundColor(color);
+        if (
+          WindowManager.getInstance().isUIAbilityMainWindow(request.windowId) &&
+          deviceInfo.sdkApiVersion >= 20
+        ) {
+          // The main window has a separate container layer. A transparent content
+          // background alone leaves that layer opaque and hides the blur beneath.
+          try {
+            win.setWindowContainerColor(
+              color,
+              WindowManager.getInstance().inactiveContainerColor(win, request.color),
+            );
+          } catch (containerError) {
+            if ((containerError as BusinessError).code !== 801) {
+              throw containerError as Error;
+            }
+            hilog.debug(
+              DOMAIN,
+              TAG,
+              "setWindowContainerColor unavailable; window background applied",
+            );
+          }
+        }
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
-        throw new Error(`setWindowBackgroundColor failed: ${String(error)}`);
+        throw new Error(`set window background failed: ${String(error)}`);
       }
     }
 
     if (action === "set-blur") {
       const request = parseBlurRequest(payload);
+      this.requireWindow(request.windowId, context);
       hilog.info(
         DOMAIN,
         TAG,
@@ -644,8 +769,7 @@ export class WindowPlugin extends AsyncPluginBase {
         Number(request.windowId),
         request.radius,
       );
-      // Use WindowManager.applyWindowBlur (backdropBlur on WebView container)
-      // instead of setWindowShadowRadius (window shadow — wrong API for vibrancy)
+      // Refresh both WebView and the native XComponent background layer.
       WindowManager.getInstance().applyWindowBlur(request.windowId, request.radius);
       hilog.info(DOMAIN, TAG, "set-blur: applyWindowBlur returned, ack=true");
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -654,12 +778,26 @@ export class WindowPlugin extends AsyncPluginBase {
     if (action === "focus") {
       const request = parseWindowIdRequest(payload);
       const win = this.requireWindow(request.windowId, context);
+      const manager = WindowManager.getInstance();
       try {
-        const dynamic: ESObject = this.dynamic(win);
-        if (typeof dynamic.raiseToAppTop !== "function") {
-          throw new Error("raiseToAppTop is unavailable on this API level");
+        if (manager.isUIAbilityMainWindow(request.windowId)) {
+          await manager.restoreWindow(request.windowId, {
+            window: win,
+            onlyIfMinimized: true,
+            focus: true,
+            beforeRun: (): void => this.assertCallActive(context),
+          });
+        } else {
+          await manager.serializeOp(request.windowId, async (): Promise<void> => {
+            this.assertCallActive(context);
+            const dynamic: ESObject = this.dynamic(win);
+            if (typeof dynamic.raiseToAppTop !== "function") {
+              throw new Error("raiseToAppTop is unavailable on this API level");
+            }
+            await (dynamic.raiseToAppTop() as Promise<void>);
+          });
         }
-        await (dynamic.raiseToAppTop() as Promise<void>);
+        this.assertCallActive(context);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`focus failed: ${String(error)}`);
@@ -771,11 +909,25 @@ export class WindowPlugin extends AsyncPluginBase {
       // context, so hilog is safe everywhere here.
       const request = parseWindowIdRequest(payload);
       const notifId = ++attentionNotifId;
+      const abilityInfo = context.abilityContext.abilityInfo;
+      let appLabel = abilityInfo.label || abilityInfo.bundleName;
+      if (abilityInfo.labelId > 0) {
+        try {
+          appLabel = context.abilityContext.resourceManager.getStringSync(abilityInfo.labelId);
+        } catch (error) {
+          hilog.warn(
+            DOMAIN,
+            TAG,
+            "request-user-attention: app label lookup failed: %{public}s",
+            String(error),
+          );
+        }
+      }
       const notification: notificationManager.NotificationRequest = {
         id: notifId,
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-          normal: { title: "Tauri App", text: "请查看应用窗口" },
+          normal: { title: appLabel, text: "请查看应用窗口" },
         },
       };
       const doPublish = async (retry: boolean): Promise<void> => {
@@ -911,6 +1063,36 @@ export class WindowPlugin extends AsyncPluginBase {
       return { typeName: REAL_WINDOW_ID_RESPONSE_TYPE, value: new RealWindowIdResponse(realId) };
     }
 
+    if (action === "set-window-icon") {
+      await setWindowIcon(payload, context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+    if (action === "set-custom-cursor") {
+      const request = parseCustomCursor(payload);
+      const win = this.requireWindow(request.windowId, context);
+      const bytes = new Uint8Array(request.rgba);
+      const pixelMap = await image.createPixelMap(bytes.buffer, {
+        size: { width: request.width, height: request.height },
+        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
+        alphaType: image.AlphaType.UNPREMUL,
+        editable: false,
+      });
+      try {
+        this.assertCallActive(context);
+        await pointer.setCustomCursor(
+          win.getWindowProperties().id,
+          pixelMap,
+          request.hotspotX,
+          request.hotspotY,
+        );
+        this.assertCallActive(context);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      } finally {
+        await pixelMap.release();
+      }
+    }
+
     if (action === "set-cursor-icon") {
       // Delegates to WindowManager.setPointerStyle, which resolves the real OHOS
       // window id internally (pointer.setPointerStyleSync). Fire-and-forget on
@@ -976,39 +1158,51 @@ export class WindowPlugin extends AsyncPluginBase {
 
     const win = this.requireWindow(request.windowId, context);
     try {
-      const dynamic: ESObject = this.dynamic(win);
-      if (action === "minimize") {
-        await (dynamic.minimize() as Promise<void>);
-      } else if (action === "maximize") {
-        // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
-        // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
-        // layout gap (white bar at bottom) after recover().
-        // Snapshot the floating rect first: WMS recover() re-anchors the floating
-        // position to the pointer (GetFullScreenToFloatingRect), so the paired
-        // recover below must moveTo() back — see WindowManager.preMaximizeRects.
-        // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
-        // losing this bridge's await-completion semantics (callers immediately
-        // query is-maximized afterwards).
-        WindowManager.getInstance().snapshotPreMaximizeRect(request.windowId, win);
-        await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
-      } else if (action === "restore") {
-        await (dynamic.restore() as Promise<void>);
-      } else if (action === "recover") {
-        await (dynamic.recover() as Promise<void>);
-        // Restore the pre-maximize position snapshotted above (WMS recover()
-        // pointer-anchors the floating rect). Best-effort — recover already
-        // succeeded.
-        await WindowManager.getInstance().restorePreMaximizeRect(request.windowId, win);
-        // NOTE: Do NOT call showWindow() after recover() — recover() already makes
-        // the window visible, and showWindow() resets the window position to centered
-        // state, causing the window to jump to the center of the screen.
-      } else if (action === "show") {
-        // A minimized UIAbility main window cannot be brought back by
-        // showWindow() — only restore() can (upstream PR#45). Delegate to
-        // WindowManager.showWindowMethod, which picks restore() for a minimized
-        // main window and showWindow() for sub-windows.
-        WindowManager.getInstance().showWindowMethod(request.windowId);
+      const manager = WindowManager.getInstance();
+      if (
+        action === "restore" ||
+        (action === "show" && manager.isUIAbilityMainWindow(request.windowId))
+      ) {
+        await manager.restoreWindow(request.windowId, {
+          window: win,
+          onlyIfMinimized: action === "show",
+          beforeRun: (): void => this.assertCallActive(context),
+        });
+      } else {
+        await manager.serializeOp(request.windowId, async (): Promise<void> => {
+          this.assertCallActive(context);
+          const dynamic: ESObject = this.dynamic(win);
+          if (action === "minimize") {
+            await (dynamic.minimize() as Promise<void>);
+          } else if (action === "maximize") {
+            // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
+            // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
+            // layout gap (white bar at bottom) after recover().
+            // Snapshot the floating rect first: WMS recover() re-anchors the floating
+            // position to the pointer (GetFullScreenToFloatingRect), so the paired
+            // recover below must moveTo() back — see WindowManager.preMaximizeRects.
+            // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
+            // losing this bridge's await-completion semantics (callers immediately
+            // query is-maximized afterwards).
+            manager.snapshotPreMaximizeRect(request.windowId, win);
+            await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
+          } else if (action === "recover") {
+            await (dynamic.recover() as Promise<void>);
+            // Restore the pre-maximize position snapshotted above (WMS recover()
+            // pointer-anchors the floating rect). Best-effort — recover already
+            // succeeded.
+            await manager.restorePreMaximizeRect(request.windowId, win);
+            // NOTE: Do NOT call showWindow() after recover() — recover() already makes
+            // the window visible, and showWindow() resets the window position to centered
+            // state, causing the window to jump to the center of the screen.
+          } else if (action === "show") {
+            const previousRect = win.getWindowProperties().windowRect;
+            await win.showWindow();
+            await win.moveWindowTo(previousRect.left, previousRect.top);
+          }
+        });
       }
+      this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     } catch (error) {
       throw new Error(`${action} failed: ${String(error)}`);
@@ -1075,6 +1269,7 @@ export class WindowPlugin extends AsyncPluginBase {
   }
 
   override async onDispose(_context: BridgePluginHookContext): Promise<void> {
+    await this.prompts.dispose();
     const windows = Array.from(this.windows.values());
     this.windows.clear();
     await Promise.all(

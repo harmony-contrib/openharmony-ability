@@ -73,9 +73,11 @@ export struct DefaultXComponent {
   private nodeController = new BridgeRootNodeController();
   @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
+  @State private blurRadius: number = 0;
   private appearanceGeneration: number = 0;
   private attachment?: ComponentAttachment;
   private releasePromise: Promise<void> = Promise.resolve();
+  private releaseSurfaceBlur?: () => void;
 
   async aboutToAppear(): Promise<void> {
     const generation = ++this.appearanceGeneration;
@@ -128,6 +130,7 @@ export struct DefaultXComponent {
         nativeModule,
         nativeSubWindow: true,
       };
+      this.attachSurfaceBlur(generation);
       return;
     }
 
@@ -143,7 +146,7 @@ export struct DefaultXComponent {
     // Apply transparent background + container color for main windows that were
     // created with transparent=true. This was dead code after the pluginize refactor
     // (the old aboutToAppear called it, but the new one didn't). Without this,
-    // backgroundBlurStyle on transparent windows has no visible effect because
+    // backdrop blur on transparent windows has no visible effect because
     // the container remains opaque.
     hilog.debug(
       0xa01999,
@@ -191,7 +194,9 @@ export struct DefaultXComponent {
       );
       if (generation !== this.appearanceGeneration) {
         await this.releasePromise;
+        return;
       }
+      this.attachSurfaceBlur(generation);
     } catch (error) {
       if (generation !== this.appearanceGeneration) {
         await this.releasePromise;
@@ -205,13 +210,15 @@ export struct DefaultXComponent {
   }
 
   aboutToDisappear(): void {
+    this.appearanceGeneration += 1;
+    this.releaseSurfaceBlur?.();
+    this.releaseSurfaceBlur = undefined;
     // Sub-window mode cleanup: unregister component root and dispose FrameNode
     if (!this.moduleName.trim() && this.windowId > 0) {
       WindowManager.getInstance().unregisterComponentRoot(this.windowId);
       this.nodeController.disposeRoot();
       return;
     }
-    this.appearanceGeneration += 1;
     this.releasePromise = this.releaseAttachment(this.attachment);
   }
 
@@ -219,6 +226,8 @@ export struct DefaultXComponent {
     if (expected !== undefined && this.attachment !== expected) {
       return this.releasePromise;
     }
+    this.releaseSurfaceBlur?.();
+    this.releaseSurfaceBlur = undefined;
     const attachment = expected ?? this.attachment;
     this.attachment = undefined;
     if (attachment === undefined) {
@@ -243,8 +252,32 @@ export struct DefaultXComponent {
       });
   }
 
+  private attachSurfaceBlur(generation: number): void {
+    if (generation !== this.appearanceGeneration) {
+      return;
+    }
+    const manager = WindowManager.getInstance();
+    this.blurRadius = manager.getPendingBlur(this.windowId);
+    this.releaseSurfaceBlur?.();
+    this.releaseSurfaceBlur = manager.registerSurfaceBlurCallback(
+      this.windowId,
+      (radius: number): void => {
+        if (generation === this.appearanceGeneration) {
+          this.blurRadius = radius;
+        }
+      },
+    );
+  }
+
   build() {
     Stack() {
+      // Blur the pixels behind this window before the transparent GPUI surface is composed.
+      Row()
+        .width("100%")
+        .height("100%")
+        .hitTestBehavior(HitTestMode.None)
+        .backgroundColor(Color.Transparent)
+        .backdropBlur(this.blurRadius)
       // ContentSlot is the GPUI input surface. These full-window layout nodes must not take
       // touches from it. Interactive plugin content blocks the lower layer at its own bounds.
       ContentSlot(this.rootSlot)

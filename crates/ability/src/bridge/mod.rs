@@ -1192,6 +1192,10 @@ pub fn attach_bridge_session(
 }
 
 impl BridgeRuntime {
+    pub(crate) fn is_main_thread(&self) -> bool {
+        std::thread::current().id() == self.client.main_thread_id
+    }
+
     pub(crate) fn from_bindings(
         env: &Env,
         bindings: &napi_ohos::bindgen_prelude::ObjectRef,

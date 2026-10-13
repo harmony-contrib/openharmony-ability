@@ -50,7 +50,7 @@ Rust 侧还需注册 `FilesBridgePlugin`，并通过 `FilesExt::show_file_dialog
 ## 行为
 
 - `dialogType` 必须是合法的 open / save / folder 枚举值；请求 typeName 或字段不合法直接抛错。
-- folder 选择依赖设备能力：非 2-in-1 设备上调用 folder 对话框会以明确错误结束。
+- folder 选择由系统 `DocumentViewPicker.select(FOLDER)` 判断是否支持，不按设备名称拦截，支持具备能力的 tablet / 2in1。系统拒绝时保留错误码、设备类型和 API 版本。
 - 系统对话框关闭后检查 `context.isActive()`；Ability 已销毁时 Promise 以错误结束。
 - request/response 是具名 N-API object，禁止 JSON transport。
 

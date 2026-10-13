@@ -1,9 +1,11 @@
 import pasteboard from "@ohos.pasteboard";
 import { image } from "@kit.ImageKit";
+import { util } from "@kit.ArkTS";
 import { BusinessError } from "@kit.BasicServicesKit";
 import {
   AsyncPluginBase,
   BridgeCallContext,
+  BridgePluginHookContext,
   BridgeTypedValue,
   BridgeContextRequirement,
   expectBridgeRequestType,
@@ -20,6 +22,34 @@ const WRITE_IMAGE_REQUEST_TYPE = "ohos.clipboard.WriteImageRequest";
 const WRITE_IMAGE_RESPONSE_TYPE = "ohos.clipboard.WriteImageResponse";
 const WRITE_HTML_REQUEST_TYPE = "ohos.clipboard.WriteHtmlRequest";
 const WRITE_HTML_RESPONSE_TYPE = "ohos.clipboard.WriteHtmlResponse";
+const WRITE_RECORDS_REQUEST_TYPE = "ohos.clipboard.WriteRecordsRequest";
+const READ_RECORDS_RESPONSE_TYPE = "ohos.clipboard.ReadRecordsResponse";
+const CHANGED_EVENT_TYPE = "ohos.clipboard.ChangedEvent";
+// Retain reads of existing clipboard entries during consumer-specific MIME migration.
+const LEGACY_METADATA_MIME = "application/x-gpui-ohos-text-metadata";
+const LEGACY_METADATA_MIME_V1 = "application/x-gpui-ohos-text-metadata-v1";
+
+export interface ClipboardPluginOptions {
+  /** Custom MIME for versioned UTF-8 text metadata; keep writers and readers consistent. */
+  metadataMimeType: string;
+}
+
+interface ClipboardRecord {
+  text?: string;
+  metadata?: string;
+  encodedImage?: Uint8Array | number[];
+  uri?: string;
+}
+interface WriteRecordsRequest {
+  records: ClipboardRecord[];
+}
+class ReadRecordsResponse {
+  readonly records: ClipboardRecord[];
+  constructor(records: ClipboardRecord[]) {
+    this.records = records;
+  }
+}
+
 const CLEAR_REQUEST_TYPE = "ohos.clipboard.ClearRequest";
 const CLEAR_RESPONSE_TYPE = "ohos.clipboard.ClearResponse";
 
@@ -102,6 +132,54 @@ class ClearResponse {
 export class ClipboardPlugin extends AsyncPluginBase {
   readonly id = "ohos.clipboard";
   readonly requires: BridgeContextRequirement[] = ["ability"];
+  private readonly metadataMimeType: string;
+
+  private updateListener?: () => void;
+
+  constructor(options: ClipboardPluginOptions) {
+    super();
+    const mime = options?.metadataMimeType;
+    const reserved = [
+      pasteboard.MIMETYPE_TEXT_PLAIN,
+      pasteboard.MIMETYPE_TEXT_HTML,
+      pasteboard.MIMETYPE_TEXT_URI,
+      pasteboard.MIMETYPE_TEXT_WANT,
+      pasteboard.MIMETYPE_PIXELMAP,
+      LEGACY_METADATA_MIME,
+    ];
+    if (
+      typeof mime !== "string" ||
+      mime.length > 1024 ||
+      !/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(mime) ||
+      reserved.includes(mime.toLowerCase())
+    ) {
+      throw new Error(
+        "ClipboardPlugin options.metadataMimeType must be a non-reserved type/subtype MIME",
+      );
+    }
+    this.metadataMimeType = mime.toLowerCase();
+  }
+
+  override onInstall(context: BridgePluginHookContext): void {
+    this.updateListener = (): void => {
+      if (!context.isActive()) {
+        return;
+      }
+      try {
+        context.invokeNativeSync("changed", CHANGED_EVENT_TYPE, "std.bool", {});
+      } catch (error) {
+        console.warn(`[Clipboard] update notification failed: ${String(error)}`);
+      }
+    };
+    pasteboard.getSystemPasteboard().on("update", this.updateListener);
+  }
+
+  override onDispose(): void {
+    if (this.updateListener) {
+      pasteboard.getSystemPasteboard().off("update", this.updateListener);
+      this.updateListener = undefined;
+    }
+  }
 
   async invokeAsync(
     action: string,
@@ -110,6 +188,156 @@ export class ClipboardPlugin extends AsyncPluginBase {
   ): Promise<BridgeTypedValue> {
     if (!context.isActive()) {
       throw new Error("Bridge session is no longer active");
+    }
+
+    if (action === "write-records") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        WRITE_RECORDS_REQUEST_TYPE,
+      ) as WriteRecordsRequest;
+      if (
+        !Array.isArray(request.records) ||
+        request.records.length === 0 ||
+        request.records.length > 512
+      ) {
+        throw new Error("write-records requires 1..512 records");
+      }
+      const maps: image.PixelMap[] = [];
+      let data: pasteboard.PasteData | undefined;
+      try {
+        // addRecord inserts at the front; reverse construction preserves caller record order.
+        for (let index = request.records.length - 1; index >= 0; index--) {
+          const entry = request.records[index];
+          const hasText = typeof entry.text === "string";
+          const hasImage = entry.encodedImage !== undefined && entry.encodedImage !== null;
+          const hasUri = typeof entry.uri === "string";
+          if (
+            Number(hasText) + Number(hasImage) + Number(hasUri) !== 1 ||
+            (entry.metadata !== undefined && !hasText)
+          ) {
+            throw new Error("Each clipboard record must contain one supported value");
+          }
+          let record: pasteboard.PasteDataRecord;
+          if (hasText) {
+            record = pasteboard.createRecord(pasteboard.MIMETYPE_TEXT_PLAIN, entry.text!);
+            if (entry.metadata !== undefined) {
+              // A version byte keeps empty metadata readable: the SDK rejects empty custom data.
+              const encoded = new util.TextEncoder().encodeInto(`1${entry.metadata}`);
+              record.addEntry(
+                this.metadataMimeType,
+                encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength),
+              );
+            }
+          } else if (hasUri) {
+            if (!entry.uri!.startsWith("file://") || entry.uri!.includes("\0")) {
+              throw new Error("clipboard URI must be a file:// URI");
+            }
+            record = pasteboard.createRecord(pasteboard.MIMETYPE_TEXT_URI, entry.uri!);
+          } else {
+            const bytes = new Uint8Array(entry.encodedImage!);
+            if (bytes.length === 0) {
+              throw new Error("clipboard image must not be empty");
+            }
+            const source = image.createImageSource(bytes.buffer);
+            try {
+              const pixelMap = await source.createPixelMap();
+              maps.push(pixelMap);
+              record = pasteboard.createRecord(pasteboard.MIMETYPE_PIXELMAP, pixelMap);
+            } finally {
+              source.release();
+            }
+          }
+          if (!context.isActive()) {
+            throw new Error("Clipboard write was cancelled");
+          }
+          if (data === undefined) {
+            // createData requires a typed value; start with the last record, then replace it.
+            data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, "");
+            data.replaceRecord(0, record);
+          } else {
+            data.addRecord(record);
+          }
+        }
+        await pasteboard.getSystemPasteboard().setData(data!);
+        if (!context.isActive()) {
+          throw new Error("Clipboard write was cancelled");
+        }
+        return { typeName: WRITE_TEXT_RESPONSE_TYPE, value: new WriteTextResponse(true) };
+      } finally {
+        for (const pixelMap of maps) {
+          pixelMap.release();
+        }
+      }
+    }
+
+    if (action === "read-records") {
+      expectBridgeRequestType(payload, this.id, action, READ_TEXT_REQUEST_TYPE);
+      const systemPasteboard = pasteboard.getSystemPasteboard();
+      const data = await systemPasteboard.getData().catch((error: Error): never => {
+        throw new Error(`Clipboard getData failed: ${String(error)}`);
+      });
+      if (data.getRecordCount() === 0 && (await systemPasteboard.hasData())) {
+        throw new Error("Clipboard data is unreadable; check READ_PASTEBOARD signing profile ACL");
+      }
+      const entries: ClipboardRecord[] = [];
+      for (let index = 0; index < data.getRecordCount(); index++) {
+        const record = data.getRecordAt(index);
+        if (
+          record.mimeType === pasteboard.MIMETYPE_TEXT_PLAIN &&
+          typeof record.plainText === "string"
+        ) {
+          let metadata: string | undefined;
+          let metadataMime: string | undefined;
+          for (const mime of [
+            this.metadataMimeType,
+            LEGACY_METADATA_MIME_V1,
+            LEGACY_METADATA_MIME,
+          ]) {
+            if (record.getValidTypes([mime]).length > 0) {
+              metadataMime = mime;
+              break;
+            }
+          }
+          if (metadataMime !== undefined) {
+            const versioned = metadataMime !== LEGACY_METADATA_MIME;
+            const value = await record.getData(metadataMime).catch((error: Error): never => {
+              throw new Error(`Clipboard metadata record ${index} failed: ${String(error)}`);
+            });
+            if (value instanceof ArrayBuffer) {
+              const decoded = new util.TextDecoder("utf-8").decodeToString(new Uint8Array(value));
+              if (versioned && !decoded.startsWith("1")) {
+                throw new Error("Unsupported clipboard metadata version");
+              }
+              metadata = versioned ? decoded.slice(1) : decoded;
+            }
+          }
+          entries.push({ text: record.plainText, metadata });
+        } else if (
+          record.mimeType === pasteboard.MIMETYPE_TEXT_URI &&
+          typeof record.uri === "string" &&
+          record.uri.startsWith("file://")
+        ) {
+          entries.push({ uri: record.uri });
+        } else if (record.pixelMap) {
+          const packer = image.createImagePacker();
+          try {
+            const encoded = await packer
+              .packToData(record.pixelMap, { format: "image/png", quality: 100 })
+              .catch((error: Error): never => {
+                throw new Error(`Clipboard image record ${index} failed: ${String(error)}`);
+              });
+            entries.push({ encodedImage: Array.from(new Uint8Array(encoded)) });
+          } finally {
+            packer.release();
+          }
+        }
+      }
+      if (!context.isActive()) {
+        throw new Error("Clipboard read was cancelled");
+      }
+      return { typeName: READ_RECORDS_RESPONSE_TYPE, value: new ReadRecordsResponse(entries) };
     }
 
     if (action === "read-content") {
@@ -202,8 +430,12 @@ export class ClipboardPlugin extends AsyncPluginBase {
       ) {
         throw new Error("write-uris.uris must contain file:// URIs");
       }
-      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_URI, request.uris[0]);
-      for (let index = 1; index < request.uris.length; index++) {
+      // Both addRecord overloads prepend; construct from the end to preserve URI order.
+      const data = pasteboard.createData(
+        pasteboard.MIMETYPE_TEXT_URI,
+        request.uris[request.uris.length - 1],
+      );
+      for (let index = request.uris.length - 2; index >= 0; index--) {
         data.addRecord(pasteboard.MIMETYPE_TEXT_URI, request.uris[index]);
       }
       await pasteboard.getSystemPasteboard().setData(data);

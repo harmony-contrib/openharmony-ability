@@ -117,7 +117,8 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             });
             SUB_ROOT_NODES.with(|nodes| {
-                for (_, (owner, root)) in nodes.borrow_mut().drain() {
+                let roots: Vec<_> = nodes.borrow_mut().drain().collect();
+                for (_, (owner, root)) in roots {
                     // Release before root drop — see dispose_render for the UAF rationale.
                     (*APP).release_render(&owner);
                     drop(root);

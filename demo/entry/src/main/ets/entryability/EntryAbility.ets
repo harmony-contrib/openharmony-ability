@@ -44,7 +44,9 @@ export default class EntryAbility extends NativeAbility {
     new LazyPlugin(() => new WindowPlugin()),
     new LazyPlugin(() => new WebviewPlugin()),
     new LazyPlugin(() => new UrlPlugin()),
-    new LazyPlugin(() => new ClipboardPlugin()),
+    new LazyPlugin(
+      () => new ClipboardPlugin({ metadataMimeType: "application/x-demo-text-metadata-v1" }),
+    ),
     new LazyPlugin(() => new GlobalShortcutPlugin()),
     new LazyPlugin(() => new DeepLinkPlugin()),
     new LazyPlugin(() => new FaultInjectionPlugin()),

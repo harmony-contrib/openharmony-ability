@@ -10,6 +10,15 @@ use openharmony_ability::{
     BridgeContextRequirement, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp, Rect,
 };
 
+mod cursor;
+pub use cursor::{CustomCursorRequest, WindowIconRequest};
+
+mod stack;
+pub use stack::{WindowStackRequest, WindowStackResponse};
+
+mod prompt;
+pub use prompt::{WindowPromptAnchor, WindowPromptRequest, WindowPromptResponse};
+
 pub struct WindowBridgePlugin;
 
 impl BridgePlugin for WindowBridgePlugin {
@@ -455,12 +464,12 @@ impl WindowClient {
         .ensure()
     }
 
-    /// Sets the platform sub-window shadow radius. The ArkTS side rejects unsupported API levels.
+    /// Sets the background blur radius for a window's WebView and native render surface.
     pub async fn set_window_blur(&self, window_id: i64, radius: f64) -> Result<()> {
         validate_window_id(window_id)?;
         if !radius.is_finite() || radius < 0.0 {
             return Err(Error::from_reason(
-                "window shadow radius must be a non-negative finite number",
+                "window backdrop blur radius must be a non-negative finite number",
             ));
         }
         self.call::<WindowBlurRequest, WindowAcknowledgement>(

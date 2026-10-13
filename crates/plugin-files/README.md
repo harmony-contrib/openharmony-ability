@@ -64,7 +64,7 @@ let response = app.show_file_dialog(options).await?;
 ```
 
 `dialog_type` 支持 `OPEN_FILE`、`SAVE_FILE` 与 `FOLDER`；`SAVE_FILE` 可带 `default_location`
-（如 `file://docs`）。folder 选择依赖设备能力，非 2-in-1 设备会返回明确错误。
+（如 `file://docs`）。folder 选择由系统 `DocumentViewPicker.select(FOLDER)` 判断是否支持，不按设备名称拦截；系统拒绝时错误信息包含错误码、设备类型和 API 版本。
 
 ## 线程与生命周期限制
 

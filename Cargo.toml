@@ -17,6 +17,7 @@ openharmony-ability-plugin-webview = { version = "1.0.0-beta.2", path = "crates/
 openharmony-ability-plugin-window = { version = "1.0.0-beta.1", path = "crates/plugin-window" }
 openharmony-ability-plugin-statusbar = { version = "1.0.0-beta.0", path = "crates/plugin-statusbar" }
 openharmony-ability-plugin-menu = { version = "1.0.0-beta.0", path = "crates/plugin-menu" }
+openharmony-ability-plugin-notification = { version = "1.0.0-beta.0", path = "crates/plugin-notification" }
 openharmony-ability-plugin-global-shortcut = { version = "1.0.0-beta.0", path = "crates/plugin-global-shortcut" }
 openharmony-ability-plugin-deep-link = { version = "1.0.0-beta.0", path = "crates/plugin-deep-link" }
 openharmony-ability-plugin-autostart = { version = "1.0.0-beta.0", path = "crates/plugin-autostart" }
@@ -24,6 +25,7 @@ openharmony-ability-plugin-continuation = { version = "1.0.0-beta.0", path = "cr
 openharmony-ability-plugin-fault-injection = { version = "1.0.0-beta.0", path = "crates/plugin-fault-injection" }
 openharmony-ability-plugin-account = { version = "1.0.0-beta.0", path = "crates/plugin-account" }
 openharmony-ability-plugin-process = { version = "1.0.0-beta.0", path = "crates/plugin-process" }
+openharmony-ability-plugin-system-state = { version = "1.0.0-beta.0", path = "crates/plugin-system-state" }
 openharmony-ability-plugin-updater = { version = "1.0.0-beta.0", path = "crates/plugin-updater" }
 
 napi-sys-ohos = { version = "1.2", features = ["napi8"] }
@@ -35,17 +37,17 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { version = "0.3" }
-ohos-xcomponent-binding = { version = "0.4", features = ["multi_mode", "accessibility", "api-15"] }
-ohos-xcomponent-sys = { version = "0.1" }
-ohos-arkui-sys = { version = "0.1" }
-ohos-ime-binding = { version = "0.3" }
+ohos-arkui-binding = { version = "=0.4.2" }
+ohos-xcomponent-binding = { version = "=0.5.2", features = ["multi_mode", "accessibility", "api-15"] }
+ohos-udmf-binding = { version = "=0.0.7", features = ["api-13"] }
+ohos-ime-binding = { version = "0.3.1" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
 ohos-resource-manager-binding = { version = "0.3" }
 ohos-resource-manager-sys = { version = "0.3" }
 ohos-hilog-binding = { version = "0.2" }
-ohos-window-manager-binding = { version = "0.1" }
+# Share image-native 0.0.7 with the published ArkUI wrappers.
+ohos-window-manager-binding = { version = "0.1.1" }
 
 # Bridge runtime and examples use these without pinning versions in member manifests.
 futures-channel = { version = "0.3" }
@@ -59,9 +61,3 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "time"] }
 png = "0.17"
-
-[patch.crates-io]
-ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
-ohos-xcomponent-sys = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
-ohos-arkui-input-sys = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }
-ohos-arkui-input-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "c05f75ebc489ad2a8c7f7b314aac38a27fb24836" }

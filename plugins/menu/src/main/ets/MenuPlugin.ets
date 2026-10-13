@@ -29,6 +29,7 @@ import {
   getMenuBarRecoverFn,
   isMenubarVisible,
   setMenuClickHandler,
+  setMenuWillOpenHandler,
   setMenuBarRecoverFn,
   windowKeyForId,
 } from "./MenuBarComponent";
@@ -168,6 +169,10 @@ export class MenuPlugin extends AsyncPluginBase {
     setMenuBarPort(new CoreMenuBarPort());
   }
 
+  onDispose(): void {
+    setMenuWillOpenHandler(null);
+  }
+
   onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
     if (event.kind !== "window-stage-create") {
       return;
@@ -185,6 +190,18 @@ export class MenuPlugin extends AsyncPluginBase {
    * in NativeAbility (they probe the native module, not the menu domain).
    */
   private setupMenuWiring(context: BridgePluginContext): void {
+    setMenuWillOpenHandler((windowId: number): void => {
+      if (!context.isActive()) {
+        return;
+      }
+      try {
+        context.invokeNativeSyncProcessWide("menu-open", "ohos.menu.MenuOpenEvent", "std.bool", {
+          windowId: windowId === 0 ? "main" : String(windowId),
+        });
+      } catch (error) {
+        hilog.warn(DOMAIN, "MenuPlugin", "menu-open forward failed: %{public}s", String(error));
+      }
+    });
     // Forward menubar item clicks / accelerator key presses to the Rust-side
     // plugin-menu bridge `menu-click` main-thread event (process-wide broadcast).
     // plugin-menu decodes MenuClickEvent (typeName "ohos.menu.MenuClickEvent"),

@@ -7,6 +7,11 @@ import { hilog } from "@kit.PerformanceAnalysisKit";
 
 // --- Per-window click handler registry (MW-1) ---
 const windowMenuClickHandlers: Map<number, (item: MenuItemData) => void> = new Map();
+let menuWillOpenHandler: ((windowId: number) => void) | null = null;
+
+export function setMenuWillOpenHandler(handler: ((windowId: number) => void) | null): void {
+  menuWillOpenHandler = handler;
+}
 
 export function setMenuClickHandler(windowId: number, handler: (item: MenuItemData) => void): void {
   hilog.info(0x1999, "MenuBar", "setMenuClickHandler registered for windowId=%{public}d", windowId);
@@ -412,6 +417,7 @@ export struct MenuBarComponent {
               this.activeDropdownShown,
               this.activeDropdownId,
             );
+            menuWillOpenHandler?.(this.windowId);
             this.activeDropdownId = item.id;
             this.activeDropdownShown = true;
           })

@@ -1,29 +1,33 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
+use super::pan::PanTracker;
+
 use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
 use napi_ohos::{Env, Error, Result};
-use ohos_arkui_binding::component::attribute::{ArkUICommonAttribute, ArkUIGesture};
+use ohos_arkui_binding::component::attribute::{
+    ArkUIAttributeBasic, ArkUICommonAttribute, ArkUIEvent, ArkUIGesture,
+};
 use ohos_arkui_binding::gesture::{gesture_data::GestureData, inner_gesture::Gesture};
 use ohos_arkui_binding::types::{
     gesture_direction::GestureDirection, gesture_event::GestureEventAction,
+};
+use ohos_arkui_binding::{
+    api::node_custom_event::IntOffset, common::node::ArkUINode, types::advanced::LengthMetricUnit,
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
 use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
 
+#[cfg(feature = "keyboard")]
+use crate::KeyboardEventData;
 use crate::{
     input, set_main_thread_env, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase,
-    InputEvent, IntervalInfo, OpenHarmonyApp, PanGestureEvent, PointerInputData, Rect, Size,
-    SwipeGestureEvent, TapGestureEvent, XComponentInputEvent,
+    InputEvent, KeyboardInputDelivery, OpenHarmonyApp, PanGestureEvent, PointerInputData, Rect,
+    Size, SwipeGestureEvent, TapGestureEvent, XComponentInputEvent,
 };
 
 const PAN_GESTURE_DISTANCE: f64 = 8.0;
 const SWIPE_GESTURE_MIN_SPEED: f64 = 100.0;
-
-#[derive(Default)]
-struct PanDeltaTracker {
-    previous_offset: Option<(f32, f32)>,
-}
 
 struct RenderOwnerGuard {
     app: OpenHarmonyApp,
@@ -53,24 +57,6 @@ impl Drop for RenderOwnerGuard {
     }
 }
 
-impl PanDeltaTracker {
-    fn next(&mut self, phase: GesturePhase, offset_x: f32, offset_y: f32) -> (f32, f32) {
-        if phase == GesturePhase::Cancel {
-            self.previous_offset = None;
-            return (0.0, 0.0);
-        }
-
-        let (previous_x, previous_y) = self.previous_offset.unwrap_or_default();
-        let delta = (offset_x - previous_x, offset_y - previous_y);
-        self.previous_offset = if phase == GesturePhase::End {
-            None
-        } else {
-            Some((offset_x, offset_y))
-        };
-        delta
-    }
-}
-
 fn gesture_phase(action: &GestureEventAction) -> Option<GesturePhase> {
     if action.contains(GestureEventAction::Accept) {
         Some(GesturePhase::Start)
@@ -96,6 +82,28 @@ fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
             None => {}
         }
     }
+    app.drain_after_input();
+}
+
+fn pointer_snapshot(
+    input: &ohos_arkui_binding::arkui_input_binding::ArkUIInputEvent,
+    node: *mut std::ffi::c_void,
+) -> PointerInputData {
+    let mut pointer = PointerInputData::from_arkui_event(input);
+    // This borrowed node view exists only while its native callback is active.
+    if let Some(node) = ArkUINode::from_raw_handle(node.cast()) {
+        if let Ok(origin) = node.layout_position_in_screen() {
+            pointer.display_x = origin.x as f32 + pointer.x;
+            pointer.display_y = origin.y as f32 + pointer.y;
+        }
+    }
+    pointer
+}
+
+fn content_offset_in_window(node: *mut std::ffi::c_void) -> Option<IntOffset> {
+    ArkUINode::from_raw_handle(node.cast())?
+        .layout_position_in_window()
+        .ok()
 }
 
 fn release_gestures(xcomponent: &XComponent, gestures: &mut Vec<Gesture>) {
@@ -109,6 +117,7 @@ fn register_gestures(
     xcomponent: &XComponent,
     render_owner: &str,
     app: &OpenHarmonyApp,
+    pan_tracker: Rc<RefCell<PanTracker>>,
 ) -> Result<Vec<Gesture>> {
     let mut gestures = Vec::with_capacity(3);
 
@@ -145,42 +154,45 @@ fn register_gestures(
 
     let pan_app = app.clone();
     let pan_owner = render_owner.to_owned();
-    let pan_tracker = Rc::new(RefCell::new(PanDeltaTracker::default()));
     let pan = match xcomponent.on_pan_gesture(
         1,
         GestureDirection::All,
         PAN_GESTURE_DISTANCE,
         move |event| {
+            if !pan_app.is_render_surface_active(&pan_owner) {
+                pan_tracker.borrow_mut().reset();
+                return;
+            }
             let Some(phase) = gesture_phase(&event.event_action_type) else {
                 return;
             };
-            let Some(pointer) = event.input.map(PointerInputData::from) else {
-                return;
+            let pointer = event.input.map(PointerInputData::from);
+            let pan_event = if phase == GesturePhase::Cancel {
+                pan_tracker.borrow_mut().cancel(pointer)
+            } else {
+                let Some(pointer) = pointer else { return };
+                let GestureData::Pan(data) = event.event_action_data else {
+                    return;
+                };
+                pan_tracker.borrow_mut().update(PanGestureEvent {
+                    pointer,
+                    phase,
+                    delta_x: 0.0,
+                    delta_y: 0.0,
+                    offset_x: data.offset_x,
+                    offset_y: data.offset_y,
+                    velocity: data.velocity,
+                    velocity_x: data.velocity_x,
+                    velocity_y: data.velocity_y,
+                })
             };
-            let GestureData::Pan(data) = event.event_action_data else {
-                return;
-            };
-            let (delta_x, delta_y) =
-                pan_tracker
-                    .borrow_mut()
-                    .next(phase, data.offset_x, data.offset_y);
-            dispatch_input(
-                &pan_app,
-                &pan_owner,
-                InputEvent::ArkUi(ArkUiInputEvent::Gesture(GestureEvent::Pan(
-                    PanGestureEvent {
-                        pointer,
-                        phase,
-                        delta_x,
-                        delta_y,
-                        offset_x: data.offset_x,
-                        offset_y: data.offset_y,
-                        velocity: data.velocity,
-                        velocity_x: data.velocity_x,
-                        velocity_y: data.velocity_y,
-                    },
-                ))),
-            );
+            if let Some(event) = pan_event {
+                dispatch_input(
+                    &pan_app,
+                    &pan_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Gesture(GestureEvent::Pan(event))),
+                );
+            }
         },
     ) {
         Ok(pan) => pan,
@@ -264,8 +276,14 @@ pub fn render_for_window(
     // TSFN inits here — new capability goes through bridge plugins.
 
     let mut root = RootNode::new(slot);
-    let xcomponent_native =
+    let mut xcomponent_native =
         XComponent::new().map_err(|e| Error::from_reason(e.reason.to_string()))?;
+    // GPUI and the native surface use physical pixels. ArkUI node callbacks otherwise
+    // inherit VP units, even though UIInputEvent getters are documented as pixels.
+    xcomponent_native
+        .raw()
+        .set_length_metric_unit(LengthMetricUnit::Px)
+        .map_err(|e| Error::from_reason(e.to_string()))?;
     xcomponent_native
         .background_color(0x0000_0000)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
@@ -276,6 +294,7 @@ pub fn render_for_window(
         .set_focus_on_touch(true)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
 
+    let content_node = xcomponent_native.raw().raw_handle();
     let xcomponent = xcomponent_native.native_xcomponent();
 
     let touch_input_delivery =
@@ -283,10 +302,11 @@ pub fn render_for_window(
     let mut render_guard = RenderOwnerGuard::new(app.clone(), render_owner.clone());
 
     let xc = xcomponent.clone();
+    let pan_tracker = Rc::new(RefCell::new(PanTracker::default()));
+    let created_pan_tracker = pan_tracker.clone();
 
     let on_surface_created_app = app.clone();
     let on_surface_created_owner = render_owner.clone();
-    let redraw_app = app.clone();
 
     let (
         insert_text_callback_tsfn,
@@ -295,6 +315,10 @@ pub fn render_for_window(
         on_ime_enter_callback_tsfn,
         preview_callback_tsfn,
         finish_callback_tsfn,
+        delete_forward_callback_tsfn,
+        move_cursor_callback_tsfn,
+        selection_callback_tsfn,
+        extend_action_callback_tsfn,
     ) = input::ime_ts_fn(env, app.clone(), render_owner.clone())?;
     let insert_text_callback_tsfn = Arc::new(insert_text_callback_tsfn);
     let on_ime_hide_callback_tsfn = Arc::new(on_ime_hide_callback_tsfn);
@@ -302,6 +326,10 @@ pub fn render_for_window(
     let on_ime_enter_callback_tsfn = Arc::new(on_ime_enter_callback_tsfn);
     let preview_callback_tsfn = Arc::new(preview_callback_tsfn);
     let finish_callback_tsfn = Arc::new(finish_callback_tsfn);
+    let delete_forward_callback_tsfn = Arc::new(delete_forward_callback_tsfn);
+    let move_cursor_callback_tsfn = Arc::new(move_cursor_callback_tsfn);
+    let selection_callback_tsfn = Arc::new(selection_callback_tsfn);
+    let extend_action_callback_tsfn = Arc::new(extend_action_callback_tsfn);
 
     xcomponent.on_surface_created(move |xc_raw, win| {
         // NDK callback boundary: a panic here aborts the process (no unwinding
@@ -318,9 +346,10 @@ pub fn render_for_window(
             crate::warn!("on_surface_created: offset() failed: {e:?}, degrading to 0,0");
             XComponentOffset { x: 0.0, y: 0.0 }
         });
+        let origin = content_offset_in_window(content_node.cast());
         let rect = Rect {
-            top: offset.y as _,
-            left: offset.x as _,
+            top: origin.map_or(offset.y as i32, |origin| origin.y),
+            left: origin.map_or(offset.x as i32, |origin| origin.x),
             width: size.width as _,
             height: size.height as _,
         };
@@ -332,6 +361,8 @@ pub fn render_for_window(
             return Ok(());
         }
 
+        created_pan_tracker.borrow_mut().reset();
+
         // We need to create IME instance when app is focused.
         let ime = IME::new(Default::default());
 
@@ -342,6 +373,10 @@ pub fn render_for_window(
             let on_ime_enter_callback_tsfn = on_ime_enter_callback_tsfn.clone();
             let preview_callback_tsfn = preview_callback_tsfn.clone();
             let finish_callback_tsfn = finish_callback_tsfn.clone();
+            let delete_forward_callback_tsfn = delete_forward_callback_tsfn.clone();
+            let move_cursor_callback_tsfn = move_cursor_callback_tsfn.clone();
+            let selection_callback_tsfn = selection_callback_tsfn.clone();
+            let extend_action_callback_tsfn = extend_action_callback_tsfn.clone();
 
             // // run in other thread
             ime.insert_text(move |s| {
@@ -353,8 +388,26 @@ pub fn render_for_window(
             ime.on_backspace(move |len| {
                 on_backspace_callback_tsfn.call(len, NonBlocking);
             });
+            ime.on_delete_forward(move |len| {
+                delete_forward_callback_tsfn.call(len, NonBlocking);
+            });
+            ime.on_move_cursor(move |direction| {
+                move_cursor_callback_tsfn.call(u32::from(direction) as i32, NonBlocking);
+            });
+            ime.on_set_selection(move |selection| {
+                selection_callback_tsfn.call(
+                    input::SelectionEventData {
+                        start: selection.start,
+                        end: selection.end,
+                    },
+                    NonBlocking,
+                );
+            });
+            ime.on_extend_action(move |action| {
+                extend_action_callback_tsfn.call(u32::from(action) as i32, NonBlocking);
+            });
             ime.on_enter(move |key| {
-                on_ime_enter_callback_tsfn.call(key as i32, NonBlocking);
+                on_ime_enter_callback_tsfn.call(u32::from(key) as i32, NonBlocking);
             });
             ime.on_preview(move |text, start, end| {
                 preview_callback_tsfn.call(
@@ -386,34 +439,24 @@ pub fn render_for_window(
             }
         }
 
-        let inner_redraw_app = redraw_app.clone();
-        let inner_redraw_owner = on_surface_created_owner.clone();
-        xc.on_frame_callback(move |_xcomponent, _time, _time_stamp| {
-            if !inner_redraw_app.is_render_surface_active(&inner_redraw_owner) {
-                return Ok(());
-            }
-            if let Some(ref mut h) = *inner_redraw_app.event_loop.borrow_mut() {
-                let interval = IntervalInfo {
-                    time_stamp: _time_stamp as _,
-                    target_time_stamp: _time as _,
-                };
-                if window_id == 0 {
-                    h(Event::WindowRedraw(interval))
-                } else {
-                    h(Event::SubWindowRedraw {
-                        window_id,
-                        interval,
-                    })
-                }
-            }
-            Ok(())
-        })?;
+        // Surface lifetime is valid independently of frame callback registration.
+        // The handler may already have selected on-demand scheduling. Reconcile
+        // afterwards; failure remains retryable and must never swallow SurfaceCreate.
+        if let Err(error) = on_surface_created_app.set_frame_input_delivery_for(
+            window_id,
+            on_surface_created_app.frame_input_delivery_for(window_id),
+        ) {
+            crate::warn!("Cannot configure native surface frames: {error}");
+        }
+
         Ok(())
     });
 
     let on_surface_destroyed_app = app.clone();
     let on_surface_destroyed_owner = render_owner.clone();
+    let destroyed_pan_tracker = pan_tracker.clone();
     xcomponent.on_surface_destroyed(move |_, _| {
+        destroyed_pan_tracker.borrow_mut().reset();
         if on_surface_destroyed_app.deactivate_render_surface(&on_surface_destroyed_owner) {
             if window_id == 0 {
                 on_surface_destroyed_app.dispatch_surface_destroy();
@@ -446,11 +489,12 @@ pub fn render_for_window(
                 return Ok(());
             }
         };
+        let origin = content_offset_in_window(content_node.cast());
         if on_surface_changed_app.update_render_surface_rect(
             &on_surface_changed_owner,
             Rect {
-                top: offset.y as _,
-                left: offset.x as _,
+                top: origin.map_or(offset.y as i32, |origin| origin.y),
+                left: origin.map_or(offset.x as i32, |origin| origin.x),
                 width: size.width as _,
                 height: size.height as _,
             },
@@ -486,15 +530,53 @@ pub fn render_for_window(
 
     let on_key_event_app = app.clone();
     let on_key_event_owner = render_owner.clone();
-    if let Err(error) = xcomponent.on_key_event(move |_, _, data| {
-        dispatch_input(
-            &on_key_event_app,
-            &on_key_event_owner,
-            InputEvent::XComponent(XComponentInputEvent::Key(data)),
-        );
-        Ok(())
-    }) {
-        crate::warn!("Failed to register XComponent key events: {error:?}");
+    match app.keyboard_input_delivery() {
+        #[cfg(feature = "keyboard")]
+        KeyboardInputDelivery::ArkUi => {
+            let pre_ime_app = app.clone();
+            let pre_ime_owner = render_owner.clone();
+            xcomponent_native.on_key_pre_ime(move |event| {
+                if let Some(input) = event.key_event() {
+                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
+                        dispatch_input(
+                            &pre_ime_app,
+                            &pre_ime_owner,
+                            InputEvent::ArkUi(ArkUiInputEvent::KeyPreIme(data)),
+                        );
+                    }
+                }
+                // Keep system shortcuts and IME processing intact.
+                None
+            });
+            xcomponent_native.on_key_event(move |event| {
+                if let Some(input) = event.key_event() {
+                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
+                        let response = data.response.clone();
+                        dispatch_input(
+                            &on_key_event_app,
+                            &on_key_event_owner,
+                            InputEvent::ArkUi(ArkUiInputEvent::Key(data)),
+                        );
+                        if response.is_consumed() {
+                            input.set_consumed(true);
+                            input.stop_propagation(true);
+                        }
+                    }
+                }
+            });
+        }
+        KeyboardInputDelivery::RawXComponent => {
+            if let Err(error) = xcomponent.on_key_event(move |_, _, data| {
+                dispatch_input(
+                    &on_key_event_app,
+                    &on_key_event_owner,
+                    InputEvent::XComponent(XComponentInputEvent::Key(data)),
+                );
+                Ok(())
+            }) {
+                crate::warn!("Failed to register XComponent key events: {error:?}");
+            }
+        }
     }
 
     let on_mouse_event_app = app.clone();
@@ -535,8 +617,121 @@ pub fn render_for_window(
         Ok(())
     })?;
 
+    // Capture native pointer identity without duplicating the existing mouse/touch stream.
+    let pointer_node = xcomponent_native
+        .raw()
+        .raw_handle()
+        .cast::<std::ffi::c_void>();
+    let pointer_app = app.clone();
+    let pointer_owner = render_owner.clone();
+    xcomponent_native.on_mouse(move |event| {
+        if let Some(input) = event.input_event() {
+            dispatch_input(
+                &pointer_app,
+                &pointer_owner,
+                InputEvent::ArkUi(ArkUiInputEvent::Pointer(pointer_snapshot(
+                    &input,
+                    pointer_node,
+                ))),
+            );
+        }
+    });
+    let pointer_app = app.clone();
+    let pointer_owner = render_owner.clone();
+    xcomponent_native.on_touch_event(move |event| {
+        if let Some(input) = event.input_event() {
+            dispatch_input(
+                &pointer_app,
+                &pointer_owner,
+                InputEvent::ArkUi(ArkUiInputEvent::Pointer(pointer_snapshot(
+                    &input,
+                    pointer_node,
+                ))),
+            );
+        }
+    });
+
+    #[cfg(feature = "drag")]
+    {
+        let drag_app = app.clone();
+        let drag_owner = render_owner.clone();
+        xcomponent_native.on_drag_enter(move |event| {
+            if let Some(drag) = event.drag_event() {
+                let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Enter);
+                let response = snapshot.response.clone();
+                dispatch_input(
+                    &drag_app,
+                    &drag_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
+                );
+                if let Some(operation) = response.operation() {
+                    if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
+                        crate::warn!("Failed to suggest drop operation: {error}");
+                    }
+                }
+            }
+        });
+        let drag_app = app.clone();
+        let drag_owner = render_owner.clone();
+        xcomponent_native.on_drag_move(move |event| {
+            if let Some(drag) = event.drag_event() {
+                let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Move);
+                let response = snapshot.response.clone();
+                dispatch_input(
+                    &drag_app,
+                    &drag_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
+                );
+                if let Some(operation) = response.operation() {
+                    if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
+                        crate::warn!("Failed to suggest drop operation: {error}");
+                    }
+                }
+            }
+        });
+        let drag_app = app.clone();
+        let drag_owner = render_owner.clone();
+        xcomponent_native.on_drag_leave(move |event| {
+            if let Some(drag) = event.drag_event() {
+                let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Leave);
+                dispatch_input(
+                    &drag_app,
+                    &drag_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
+                );
+            }
+        });
+        let drag_app = app.clone();
+        let drag_owner = render_owner.clone();
+        xcomponent_native.on_drop(move |event| {
+            if let Some(drag) = event.drag_event() {
+                let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Drop);
+                let response = snapshot.response.clone();
+                dispatch_input(
+                    &drag_app,
+                    &drag_owner,
+                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
+                );
+                use ohos_arkui_binding::types::drag::DragResult;
+                let result = if let Some(operation) = response.operation() {
+                    if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
+                        crate::warn!("Failed to set drop operation: {error}");
+                        DragResult::Failed
+                    } else {
+                        DragResult::Successful
+                    }
+                } else {
+                    DragResult::Failed
+                };
+                if let Err(error) = drag.set_drag_result(result) {
+                    crate::warn!("Failed to set drag result: {error}");
+                }
+            }
+        });
+    }
+
     if touch_input_delivery.delivers_arkui_gestures() {
-        let gestures = register_gestures(&xcomponent_native, &render_owner, &app)?;
+        let gestures = register_gestures(&xcomponent_native, &render_owner, &app, pan_tracker)?;
         app.set_render_gestures(&render_owner, gestures)?;
     }
 
@@ -549,26 +744,57 @@ pub fn render_for_window(
     Ok(root)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Continuous callbacks remain the default for existing consumers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FrameInputDelivery {
+    #[default]
+    Continuous,
+    OnDemand,
+}
 
-    #[test]
-    fn pan_delta_tracker_converts_cumulative_offsets() {
-        let mut tracker = PanDeltaTracker::default();
-
-        assert_eq!(tracker.next(GesturePhase::Start, 3.0, 5.0), (3.0, 5.0));
-        assert_eq!(tracker.next(GesturePhase::Update, 7.0, 4.0), (4.0, -1.0));
-        assert_eq!(tracker.next(GesturePhase::End, 9.0, 10.0), (2.0, 6.0));
-        assert_eq!(tracker.next(GesturePhase::Start, 1.0, 2.0), (1.0, 2.0));
-    }
-
-    #[test]
-    fn cancelled_pan_resets_delta_state() {
-        let mut tracker = PanDeltaTracker::default();
-        tracker.next(GesturePhase::Start, 4.0, 8.0);
-
-        assert_eq!(tracker.next(GesturePhase::Cancel, 6.0, 9.0), (0.0, 0.0));
-        assert_eq!(tracker.next(GesturePhase::Start, 2.0, 3.0), (2.0, 3.0));
+impl OpenHarmonyApp {
+    pub(crate) fn configure_frame_callback(
+        &self,
+        native: &ohos_xcomponent_binding::NativeXComponent,
+        window_id: i64,
+        owner: &str,
+        delivery: FrameInputDelivery,
+    ) -> Result<()> {
+        if delivery == FrameInputDelivery::OnDemand {
+            return native.unregister_frame_callback();
+        }
+        let inner = Arc::downgrade(&self.inner);
+        let event_loop = Arc::downgrade(&self.event_loop);
+        let owner = owner.to_owned();
+        native.on_frame_callback(move |_, time, time_stamp| {
+            let Some(inner) = inner.upgrade() else {
+                return Ok(());
+            };
+            if !inner
+                .read()
+                .map(|inner| inner.frame_owner_is_active(&owner))
+                .unwrap_or(false)
+            {
+                return Ok(());
+            }
+            let Some(event_loop) = event_loop.upgrade() else {
+                return Ok(());
+            };
+            if let Some(handler) = event_loop.borrow_mut().as_mut() {
+                let interval = crate::IntervalInfo {
+                    time_stamp: time_stamp as _,
+                    target_time_stamp: time as _,
+                };
+                if window_id == 0 {
+                    handler(Event::WindowRedraw(interval));
+                } else {
+                    handler(Event::SubWindowRedraw {
+                        window_id,
+                        interval,
+                    });
+                }
+            }
+            Ok(())
+        })
     }
 }
