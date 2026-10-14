@@ -240,6 +240,15 @@ pub fn render(
     xcomponent_native
         .background_color(0x0000_0000)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
+    // ArkUI delivers key events to the focused node only, and an XComponent is
+    // not focusable until it is made so; without it a physical keyboard types
+    // nothing into the application.
+    xcomponent_native
+        .set_focusable(true)
+        .map_err(|e| Error::from_reason(e.reason.to_string()))?;
+    xcomponent_native
+        .set_focus_on_touch(true)
+        .map_err(|e| Error::from_reason(e.reason.to_string()))?;
 
     let xcomponent = xcomponent_native.native_xcomponent();
 
