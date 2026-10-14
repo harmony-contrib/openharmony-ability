@@ -666,6 +666,14 @@ impl OpenHarmonyApp {
             ime.show_keyboard();
         }
     }
+    /// Sets the kind of text the keyboard is for (digits, a phone number), for
+    /// the keyboard shown next and the one on screen.
+    pub fn set_input_type(&self, input_type: ohos_ime_binding::InputType) {
+        if let Some(ime) = self.ime.borrow().as_ref() {
+            let _ =
+                ime.try_update_configuration(ohos_ime_binding::EnterKey::Unspecified, input_type);
+        }
+    }
     pub fn hide_keyboard(&self) {
         let _guard = self
             .is_keyboard_show
