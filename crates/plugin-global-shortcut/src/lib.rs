@@ -7,7 +7,19 @@
 //! channel for consumer consumption.
 //!
 //! Version guard: `inputConsumer` hotkey registration requires API 14+. On lower API levels,
-//! `register` silently returns `Ok(())`.
+//! the client methods return an error naming the required API level.
+//!
+//! ## Registration generations (ghost-hotkey race)
+//!
+//! Every register / unregister / unregister-all request carries a `generation`:
+//! a monotonic sequence number the embedding plugin takes from its global
+//! counter at dispatch time. The ArkTS side tracks the highest generation
+//! served (a global floor plus a per-id watermark) and rejects any request
+//! carrying an older one, so an in-flight `register` that arrives after a
+//! later `unregister` / `unregister-all` cannot resurrect a physical
+//! registration the Rust side no longer tracks. The rejection surfaces as a
+//! normal registration error on the worker, whose cleanup path is a no-op
+//! against the already-updated store.
 
 use std::sync::OnceLock;
 
@@ -15,8 +27,9 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use napi_derive_ohos::napi;
 use napi_ohos::bindgen_prelude::Unknown;
 use napi_ohos::{Error, Result};
+pub use openharmony_ability::version;
 use openharmony_ability::{
-    impl_bridge_napi_type, version, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
+    impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeMainThreadEvent, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
 };
 
@@ -25,6 +38,15 @@ const MAX_MODIFIERS: usize = 2;
 
 /// Minimum API level for `inputConsumer.on('hotkeyChange')`.
 const MIN_HOTKEY_API_VERSION: i32 = 14;
+
+/// Unified version error for all hotkey operations: names the operation, the
+/// required API level, and the current one.
+fn hotkey_api_version_error(op: &str) -> Error {
+    Error::from_reason(format!(
+        "{op} requires API level {MIN_HOTKEY_API_VERSION}+ on OpenHarmony (current: {})",
+        version::sdk_api_version()
+    ))
+}
 
 // ── Bridge plugin declaration ─────────────────────────────────────────────────
 
@@ -81,6 +103,11 @@ pub struct ShortcutRegisterRequest {
     pub modifiers: Vec<String>,
     /// Key name: `"A"`, `"F5"`, `"Space"`, etc.
     pub key: String,
+    /// Registration generation: a monotonic sequence number taken from the
+    /// embedding plugin's global counter at dispatch time. The ArkTS side
+    /// rejects requests carrying a generation older than the newest one it
+    /// has served (see the module docs: ghost-hotkey race).
+    pub generation: u32,
 }
 
 impl_bridge_napi_type!(
@@ -94,6 +121,11 @@ impl_bridge_napi_type!(
 #[derive(Clone, Debug)]
 pub struct ShortcutUnregisterRequest {
     pub id: u32,
+    /// Operation generation (see [`ShortcutRegisterRequest::generation`]):
+    /// the per-id watermark on the ArkTS side is raised to this value, so
+    /// any in-flight register for the same id dispatched earlier (smaller
+    /// generation) is rejected on arrival.
+    pub generation: u32,
 }
 
 impl_bridge_napi_type!(
@@ -105,7 +137,14 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
-pub struct ShortcutUnregisterAllRequest {}
+pub struct ShortcutUnregisterAllRequest {
+    /// Sweep generation (see [`ShortcutRegisterRequest::generation`]): the
+    /// ArkTS side raises its global generation floor to this value, so any
+    /// in-flight register dispatched earlier (smaller generation) is
+    /// rejected on arrival instead of resurrecting a hotkey after the
+    /// sweep.
+    pub generation: u32,
+}
 
 impl_bridge_napi_type!(
     ShortcutUnregisterAllRequest,
@@ -204,13 +243,26 @@ impl GlobalShortcutClient {
             .await
     }
 
-    /// Registers a global shortcut. On API levels below 14, silently returns `Ok(())`.
+    /// Registers a global shortcut. On API levels below 14, returns an error
+    /// naming the required API level.
     ///
     /// The `modifiers` slice uses the cross-platform modifier names:
     /// `"Control"`, `"Shift"`, `"Alt"`, `"Super"`.
-    pub async fn register(&self, id: u32, modifiers: &[String], key: &str) -> Result<()> {
+    ///
+    /// `generation` is the operation sequence number taken by the caller at
+    /// dispatch time; the ArkTS side rejects it when a newer-generation
+    /// unregister / unregister-all has already been served (see the module
+    /// docs: ghost-hotkey race), which surfaces here as
+    /// [`Error::from_reason`] just like any other rejection.
+    pub async fn register(
+        &self,
+        id: u32,
+        modifiers: &[String],
+        key: &str,
+        generation: u32,
+    ) -> Result<()> {
         if version::sdk_api_version() < MIN_HOTKEY_API_VERSION {
-            return Ok(());
+            return Err(hotkey_api_version_error("register"));
         }
         let deduped = validate_and_dedup_modifiers(modifiers)?;
         let response = self
@@ -220,6 +272,7 @@ impl GlobalShortcutClient {
                     id,
                     modifiers: deduped,
                     key: key.to_owned(),
+                    generation,
                 },
             )
             .await?;
@@ -227,29 +280,40 @@ impl GlobalShortcutClient {
     }
 
     /// Unregisters a previously registered shortcut by ID. Idempotent — unregistering an
-    /// unknown ID succeeds silently.
-    pub async fn unregister(&self, id: u32) -> Result<()> {
+    /// unknown ID succeeds silently. On API levels below 14, returns an error naming
+    /// the required API level.
+    ///
+    /// `generation` raises the per-id watermark on the ArkTS side: an
+    /// in-flight register for the same id dispatched before this call
+    /// (smaller generation) is rejected when it arrives.
+    pub async fn unregister(&self, id: u32, generation: u32) -> Result<()> {
         if version::sdk_api_version() < MIN_HOTKEY_API_VERSION {
-            return Ok(());
+            return Err(hotkey_api_version_error("unregister"));
         }
         let response = self
             .call::<ShortcutUnregisterRequest, ShortcutAcknowledgement>(
                 "unregister",
-                ShortcutUnregisterRequest { id },
+                ShortcutUnregisterRequest { id, generation },
             )
             .await?;
         response.ensure()
     }
 
-    /// Unregisters all previously registered shortcuts.
-    pub async fn unregister_all(&self) -> Result<()> {
+    /// Unregisters all previously registered shortcuts. On API levels below 14,
+    /// returns an error naming the required API level.
+    ///
+    /// `generation` raises the ArkTS-side global generation floor: any
+    /// in-flight register dispatched before this sweep (smaller generation)
+    /// is rejected on arrival, so a late register cannot resurrect a hotkey
+    /// the Rust side no longer tracks.
+    pub async fn unregister_all(&self, generation: u32) -> Result<()> {
         if version::sdk_api_version() < MIN_HOTKEY_API_VERSION {
-            return Ok(());
+            return Err(hotkey_api_version_error("unregisterAll"));
         }
         let response = self
             .call::<ShortcutUnregisterAllRequest, ShortcutAcknowledgement>(
                 "unregister-all",
-                ShortcutUnregisterAllRequest {},
+                ShortcutUnregisterAllRequest { generation },
             )
             .await?;
         response.ensure()

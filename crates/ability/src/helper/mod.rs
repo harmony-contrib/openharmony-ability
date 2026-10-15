@@ -85,3 +85,24 @@ pub fn is_main_thread() -> bool {
 pub fn get_main_thread_env() -> Rc<RefCell<Option<Env>>> {
     MAIN_THREAD_ENV.with(Rc::clone)
 }
+
+/// Whether this build targets the OHOS desktop (PC/2in1) form factor
+/// (`OHOS_DEVICE_TYPE=desktop` at build time).
+///
+/// Compiled from this crate's build-script cfg — `cargo:rustc-cfg` only
+/// applies to the crate whose build script emits it, so dependents (tao,
+/// wry) cannot see `cfg(desktop)`/`cfg(mobile)` themselves; this query is
+/// how they gate desktop-only behavior (e.g. tao's multi-UIAbility spawn)
+/// without duplicating the env-var logic in their own build scripts. The
+/// semantics match `tauri_utils::platform::is_mobile_target` (which drives
+/// the tauri lib's `cfg(desktop)`/`cfg(mobile)` aliases): both read the
+/// same `OHOS_DEVICE_TYPE`, so the form answer is consistent across
+/// layers.
+///
+/// On non-OHOS targets neither cfg is set (the build script only emits
+/// them for `target_env = "ohos"`), so this returns false — call sites in
+/// tao/wry are `cfg(target_env = "ohos")`-gated and never observe that
+/// value.
+pub fn is_desktop_form() -> bool {
+    cfg!(desktop)
+}

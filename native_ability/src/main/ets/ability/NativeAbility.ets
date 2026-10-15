@@ -10,6 +10,7 @@ import {
   setMenuClickHandler,
   setMenuBarRecoverFn,
   getMenuDataCallback,
+  windowKeyForId,
 } from "../components/MenuBarComponent";
 import {
   ApplicationLifecycle,
@@ -62,6 +63,41 @@ export class NativeAbility extends UIAbility {
   private bridgeSessionId: string = "";
   private moduleRuntimes: NativeModuleRuntime[] = [];
   private windowStageActive: boolean = false;
+  // D12 join model (openspec multi-uiability-windows): true when this instance's
+  // modules were already owned by a live bridge session and prepare() returned
+  // that shared session instead of creating a new one. A joined instance skips
+  // every session-mutating operation — module.init, configurePlugins,
+  // attachEventSink, activateAbility, setWindowStage, beginClosing, dispose —
+  // and only fires the shared lifecycle NAPI callbacks with its own windowId.
+  private joinedExistingSession: boolean = false;
+  // Window identity of this UIAbility instance (design.md D3, openspec
+  // multi-uiability-windows): 0 for the process's first instance, or the
+  // tauri_window_id pre-allocated by tao and delivered via want.parameters
+  // for instances spawned through start-ui-ability. Read in onCreate, used
+  // by every Rust-facing registration (stage/menu/window-status/rect events)
+  // so they target this instance's window instead of overwriting id 0.
+  private abilityWindowId: number = 0;
+  // D4b plain-relaunch duplicate flag (design.md D4b, openspec
+  // multi-uiability-windows): set in onCreate when this instance resolved to
+  // window id 0 while a live primary already owns stage 0 (relaunch via icon /
+  // taskbar / a second deep-link click under launchType "standard"). The
+  // duplicate forwards its want URI, raises the primary, and terminates in
+  // onCreate; terminateSelf is async, so every later system callback
+  // (onWindowStageCreate/Destroy, onDestroy, onNewWant) is gated on this flag
+  // — the duplicate must never register a stage nor fire the primary's
+  // lifecycle callbacks with id 0 (onAbilityDestroy(0) would run the primary
+  // exit chain, Event::Destroy → process teardown).
+  private isDuplicatePrimary: boolean = false;
+  // Transparency delivered alongside tauri_window_id (start-ui-ability sends
+  // tauri_transparent as a string); feeds registerUIAbilityStage so
+  // applyTransparentBackground in DefaultXComponent works for spawned windows.
+  private abilityTransparent: boolean = false;
+  // This instance's want URIs (design.md D9): delivered per-instance through
+  // the loadWindowStageContent LocalStorage instead of the process-global
+  // AppStorage keys, so a spawned instance's deep link never overwrites the
+  // primary's (and vice versa).
+  private initialWantUri: string = "";
+  private latestWantUri: string = "";
   private readonly lifecycleQueue = new SerialTaskQueue((label: string, error: Error): void => {
     hilog.error(
       DOMAIN,
@@ -73,9 +109,24 @@ export class NativeAbility extends UIAbility {
   });
 
   protected forEachLifecycle(handler: (lifecycle: ApplicationLifecycle) => void): void {
-    for (const runtime of this.moduleRuntimes) {
+    // A joined instance (D12) never runs module.init, so its moduleRuntimes
+    // stays empty; its lifecycle callbacks come from the process-level store
+    // the creator instance filled via ProcessInitializer.rememberLifecycle.
+    // The bundles are plain NAPI-callback records — every invocation carries
+    // this instance's windowId, so sharing them cannot cross-deliver events.
+    if (this.moduleRuntimes.length > 0) {
+      for (const runtime of this.moduleRuntimes) {
+        try {
+          handler(runtime.lifecycle);
+        } catch (e) {
+          hilog.error(DOMAIN, 'NativeAbility', 'Lifecycle callback error: %{public}s', String(e));
+        }
+      }
+      return;
+    }
+    for (const lifecycle of ProcessInitializer.getLifecycles().values()) {
       try {
-        handler(runtime.lifecycle);
+        handler(lifecycle);
       } catch (e) {
         hilog.error(DOMAIN, "NativeAbility", "Lifecycle callback error: %{public}s", String(e));
       }
@@ -84,11 +135,74 @@ export class NativeAbility extends UIAbility {
 
   async onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): Promise<void> {
     setCurrentAbilityName(want.abilityName ?? "");
-    // Populate AppStorage keys consumed by DeepLinkPlugin.ets (get-initial-uri /
-    // get-latest-uri bridge actions, keys INITIAL_WANT_URI_KEY/LATEST_WANT_URI_KEY).
-    // Contract documented in DeepLinkPlugin.ets. Was never written before.
-    AppStorage.setOrCreate("initialWantUri", want.uri ?? "");
-    AppStorage.setOrCreate("wantUri", want.uri ?? "");
+    // Window identity (design.md D3): tao pre-allocates the id and delivers it
+    // as an all-string want parameter; the first (process-launched) instance
+    // has no parameter and stays 0. Number("") is 0 and Number(undefined) is
+    // NaN, so `|| 0` keeps both degenerate shapes at the primary id.
+    this.abilityWindowId = Number(want.parameters?.["tauri_window_id"] ?? 0) || 0;
+    this.abilityTransparent = want.parameters?.["tauri_transparent"] === "true";
+    hilog.info(DOMAIN, 'NativeAbility', 'onCreate - windowId=%{public}d transparent=%{public}s (from want.parameters)', this.abilityWindowId, String(this.abilityTransparent));
+
+    // D4b plain-relaunch guard (design.md D4b): for a bypassed/missing
+    // onAcceptWant route, a relaunch while the app is running — desktop
+    // icon / taskbar / a second deep-link click — spawns a duplicate
+    // EntryAbility whose want carries no tauri_window_id, so it resolves to
+    // the primary id 0. Letting it proceed would overwrite the primary's
+    // uiAbilityStages[0] entry (R4: registerUIAbilityStage blind set,
+    // device-proven corrosion) and its AppStorage want keys below, and its
+    // eventual onDestroy would fire the primary exit chain. Single-instance
+    // semantics instead (macOS-native / Windows + single-instance-plugin
+    // production behavior): forward this want.uri into the primary's
+    // per-window deep-link slot, bring the primary window to front, terminate
+    // this instance before it registers a stage or mounts a window.
+    // (2026-09-15 specified amendment: bare wants are normally routed to the
+    // primary by AbilityStage.onAcceptWant before ever reaching onCreate —
+    // this guard is defense-in-depth for a bypassed/missing AbilityStage
+    // route. It cannot cover a hideAbility()-hidden primary; that state is
+    // foregrounded by the startAbility(self) call sites instead.)
+    if (this.abilityWindowId === 0 && WindowManager.isStageRegistered(0)) {
+      this.isDuplicatePrimary = true;
+      hilog.warn(DOMAIN, 'NativeAbility', 'D4b duplicate-primary guard: relaunch (no tauri_window_id) while primary lives — uri=%{public}s, forwarding + raising + terminating', want.uri ?? '');
+      // Forward: seed the primary's INITIAL_WANT_URI[0] slot through the shared
+      // lifecycle callback. The Rust side of onAbilityCreateWithWant only
+      // writes the per-window URI store (store_initial_want_uri) — no session
+      // partition is opened — so the primary's next deep-link getCurrent
+      // (get_current_for_window, lazy-take) drains this relaunch URI.
+      // Continuation faithfulness: pass the real launchReason so a
+      // continuation relaunch at least preserves its payload (NG5 defers
+      // multi-instance continuation handling).
+      const relaunchIsContinuation = launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION;
+      if (want.uri && want.uri.length > 0) {
+        this.forEachLifecycle((lifecycle) =>
+          lifecycle.windowStageEventCallback.onAbilityCreateWithWant({
+            uri: want.uri ?? '',
+            isContinuation: relaunchIsContinuation,
+            parametersJson: JSON.stringify(want.parameters ?? {}),
+          }, 0),
+        );
+      }
+      // Raise the primary window (restore from minimize, or raise to top —
+      // WindowManager.showWindowMethod handles both for main windows).
+      WindowManager.getInstance().showWindowMethod(0);
+      // Terminate this duplicate. Async — later callbacks are gated on
+      // isDuplicatePrimary in case the system still delivers them.
+      (this.context as common.UIAbilityContext).terminateSelf().catch((e: ESObject) => {
+        hilog.error(DOMAIN, 'NativeAbility', 'D4b terminateSelf failed: %{public}s', String(e));
+      });
+      return;
+    }
+    // This instance's want URIs (design.md D9): delivered per-instance via the
+    // loadWindowStageContent LocalStorage. The AppStorage keys below remain a
+    // primary-instance-only back-compat channel for the legacy DeepLinkPlugin
+    // bridge path ("initialWantUri"/"wantUri"); a spawned instance must NOT
+    // overwrite them, or the primary's deep-link reads would see the spawned
+    // instance's launch URI.
+    this.initialWantUri = want.uri ?? '';
+    this.latestWantUri = want.uri ?? '';
+    if (this.abilityWindowId === 0) {
+      AppStorage.setOrCreate("initialWantUri", this.initialWantUri);
+      AppStorage.setOrCreate("wantUri", this.latestWantUri);
+    }
 
     hilog.info(
       DOMAIN,
@@ -106,7 +220,12 @@ export class NativeAbility extends UIAbility {
     //    No longer calls module.init — session creation is this Ability's responsibility.
     await ProcessInitializer.initialize(context, this.moduleName, this.loadMode, want);
 
-    // 2. Create the bridge session for this Ability instance.
+    // 2. Create the bridge session for this Ability instance. Join model (D12):
+    //    when every loaded module already belongs to one live session — i.e. this
+    //    is a spawned instance reusing the process's modules — prepare() returns
+    //    that shared session instead of creating a new one. The joined instance
+    //    keeps the session id for its page's LocalStorage (D6) and for teardown
+    //    gating, but performs none of the session-mutating setup below.
     const moduleNames = ProcessInitializer.getLoadedModuleNames();
     if (moduleNames.length === 0) {
       hilog.error(
@@ -116,10 +235,41 @@ export class NativeAbility extends UIAbility {
       );
       return;
     }
+    const joinedSessionId = BridgeHostRegistry.activeSessionForModules(moduleNames);
     const sessionId = BridgeHostRegistry.prepare(moduleNames, context, this.bridgePlugins);
     this.bridgeSessionId = sessionId;
+    // AppStorage readers: the demo pages (Index/SubWindowPage load outside
+    // MainPage and feed DefaultXComponent's bridgeSessionId @Prop from here).
+    // MainPage itself consumes the per-instance LocalStorage write in
+    // onWindowStageCreate instead (design.md D6).
     this.updateAppStorage("bridgeSessionId", sessionId);
-    hilog.info(DOMAIN, "NativeAbility", "Bridge session created: %{public}s", sessionId);
+    this.joinedExistingSession = joinedSessionId !== undefined && joinedSessionId === sessionId;
+    hilog.info(DOMAIN, 'NativeAbility', 'Bridge session created: %{public}s (joined=%{public}s)', sessionId, String(this.joinedExistingSession));
+
+    if (this.joinedExistingSession) {
+      // D12 joined instance: the shared session already has every module
+      // configured by the primary instance — re-running init /
+      // configurePlugins / attachEventSink / activateAbility would
+      // double-register plugins and re-deliver ability-create to the ArkTS
+      // hosts. Only the NAPI lifecycle callbacks fire, carrying THIS
+      // instance's windowId so the Rust-side registry opens the session
+      // partition for this window (bridge/mod.rs dispatch_lifecycle →
+      // AbilityCreated{window_id}) and deep-link's per-window want-URI map
+      // is seeded (onAbilityCreateWithWant → store_initial_want_uri).
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onAbilityCreate("", this.abilityWindowId),
+      );
+      const isContinuation = launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION;
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.windowStageEventCallback.onAbilityCreateWithWant({
+          uri: want.uri ?? '',
+          isContinuation,
+          parametersJson: JSON.stringify(want.parameters ?? {}),
+        }, this.abilityWindowId),
+      );
+      this.acceptingLifecycle = true;
+      return;
+    }
 
     // 3. Decode per-module restored state (ability recovery scenario).
     const isRestore =
@@ -191,6 +341,10 @@ export class NativeAbility extends UIAbility {
         moduleName,
         lifecycle.bridgePlugins?.length ?? -1,
       );
+      // Publish the lifecycle bundle to the process-level store (D12) so a
+      // later joined instance can fire the shared callbacks with its own
+      // windowId once this module is owned by the live session.
+      ProcessInitializer.rememberLifecycle(moduleName, lifecycle);
 
       try {
         BridgeHostRegistry.configurePlugins(sessionId, moduleName, lifecycle.bridgePlugins);
@@ -215,8 +369,12 @@ export class NativeAbility extends UIAbility {
               ): ESObject =>
                 module.onBridgeSyncEvent!(pluginId, event, requestTypeName, responseTypeName, value)
             : undefined,
+          // windowId threading (design.md D8): only this session-owning instance
+          // registers the sink, and its ui-context events describe its own
+          // DefaultXComponent attachment — so from_arkts receives the owner
+          // instance's window id, never the joined instance's.
           module.onBridgeLifecycle
-            ? (kind: string): void => module.onBridgeLifecycle!(kind)
+            ? (kind: string): void => module.onBridgeLifecycle!(kind, this.abilityWindowId)
             : undefined,
         );
 
@@ -248,7 +406,7 @@ export class NativeAbility extends UIAbility {
         // uses the same lifecycle.windowStageEventCallback callback pattern; this onAbilityCreate
         // was simply dropped during the NativeAbility refactor (it survived in onWindowStageCreate).
         try {
-          lifecycle.windowStageEventCallback.onAbilityCreate(restoredState);
+          lifecycle.windowStageEventCallback.onAbilityCreate(restoredState, this.abilityWindowId);
         } catch (e) {
           hilog.error(DOMAIN, "NativeAbility", "onAbilityCreate failed: %{public}s", String(e));
         }
@@ -268,7 +426,7 @@ export class NativeAbility extends UIAbility {
             uri: want.uri ?? "",
             isContinuation,
             parametersJson: JSON.stringify(want.parameters ?? {}),
-          });
+          }, this.abilityWindowId);
         } catch (e) {
           hilog.error(
             DOMAIN,
@@ -314,7 +472,7 @@ export class NativeAbility extends UIAbility {
           // The throw predates this module's runtime push — forEachLifecycle
           // below would never reach it.
           try {
-            lifecycle.windowStageEventCallback.onAbilityDestroy();
+            lifecycle.windowStageEventCallback.onAbilityDestroy(this.abilityWindowId);
           } catch (e2) {
             hilog.error(
               DOMAIN,
@@ -325,7 +483,7 @@ export class NativeAbility extends UIAbility {
             );
           }
         }
-        this.forEachLifecycle((l) => l.windowStageEventCallback.onAbilityDestroy());
+        this.forEachLifecycle((l) => l.windowStageEventCallback.onAbilityDestroy(this.abilityWindowId));
         // Prevent the real onDestroy from double-dispatching Event::Destroy to the
         // same modules (onDestroy's dispatch is not gated by acceptingLifecycle).
         // onDestroy still runs its own session teardown (dispose) normally.
@@ -401,7 +559,18 @@ export class NativeAbility extends UIAbility {
   }
 
   protected async loadWindowStageContent(windowStage: window.WindowStage): Promise<void> {
-    await windowStage.loadContentByName(Entry.RouteName);
+    // Per-instance LocalStorage (design.md D3/D6/D9): MainPage and
+    // DefaultXComponent read these via @LocalStorageProp — a spawned instance
+    // receives its own window id, the shared bridge session id (D12 join) and
+    // its own want URIs, never the process-global AppStorage values the
+    // primary instance published. Same pattern as WindowManager.createSubWindow
+    // for Float sub-windows.
+    const storage = new LocalStorage();
+    storage.setOrCreate('windowId', this.abilityWindowId);
+    storage.setOrCreate('bridgeSessionId', this.bridgeSessionId);
+    storage.setOrCreate('initialWantUri', this.initialWantUri);
+    storage.setOrCreate('wantUri', this.latestWantUri);
+    await windowStage.loadContentByName(Entry.RouteName, storage);
   }
 
   private setupMenuPopup(windowStage: window.WindowStage): void {
@@ -498,23 +667,17 @@ export class NativeAbility extends UIAbility {
 
     const menuManager = new MenuManager(executor, emitMenuEventFn);
 
-    setMenuClickHandler(0, (item) => {
-      hilog.info(
-        DOMAIN,
-        "NativeAbility",
-        "menuClickHandler invoked id=%{public}s type=%{public}s",
-        item.id,
-        item.type,
-      );
+    setMenuClickHandler(this.abilityWindowId, (item) => {
+      hilog.info(DOMAIN, 'NativeAbility', 'menuClickHandler invoked id=%{public}s type=%{public}s', item.id, item.type);
       menuManager.handleItemClick(item);
     });
 
-    setMenuBarRecoverFn(0, () => {
+    setMenuBarRecoverFn(this.abilityWindowId, () => {
       // Esc exit from predefined fullscreen: dual-path exit so the title bar /
       // Dock hover hidden on entry (WindowManager.setFullscreen desktop path)
       // are restored too. The internal recover() triggers
       // windowRectChange(RECOVER) → menubar restore (see on("windowRectChange")).
-      WindowManager.getInstance().setFullscreen(0, false);
+      WindowManager.getInstance().setFullscreen(this.abilityWindowId, false);
     });
 
     setPrimaryWebviewControllerCallback((controller: ESObject) => {
@@ -529,12 +692,20 @@ export class NativeAbility extends UIAbility {
   }
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
-    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageCreate());
+    // D4b: a plain-relaunch duplicate (terminated in onCreate) must not
+    // register a stage — registerUIAbilityStage(0) would overwrite the live
+    // primary's entry — nor mount a window. terminateSelf is async, so the
+    // system may still deliver this callback before teardown lands.
+    if (this.isDuplicatePrimary) {
+      hilog.warn(DOMAIN, 'NativeAbility', 'onWindowStageCreate skipped: duplicate primary (D4b)');
+      return;
+    }
+    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageCreate(this.abilityWindowId));
 
-    WindowManager.getInstance().registerUIAbilityStage(0, windowStage, this.context, false);
-    hilog.info(DOMAIN, "NativeAbility", "onWindowStageCreate: windowId=0 transparent=false");
+    WindowManager.getInstance().registerUIAbilityStage(this.abilityWindowId, windowStage, this.context, this.abilityTransparent);
+    hilog.info(DOMAIN, 'NativeAbility', 'onWindowStageCreate: windowId=%{public}d transparent=%{public}s', this.abilityWindowId, String(this.abilityTransparent));
 
-    // Phase 2 (design.md D3 注入小节): WindowManager doesn't hold a lifecycle reference,
+    // Phase 2 (design.md D3 injection section): WindowManager doesn't hold a lifecycle reference,
     // so it exposes a single rectChangeCallback that createSubWindow's per-window
     // windowRectChange handler invokes. Here we wire it to fan out to every lifecycle
     // (same forEachLifecycle pattern as the main-window registrations above). The
@@ -547,14 +718,13 @@ export class NativeAbility extends UIAbility {
 
     // Inject the WindowStage into the bridge session so plugins requiring a
     // window-stage context (e.g. window/webview) can install before the page renders.
-    if (this.bridgeSessionId) {
-      hilog.debug(
-        DOMAIN,
-        "NativeAbility",
-        "setWindowStage loop: runtimes=%{public}d sess=%{public}s",
-        this.moduleRuntimes.length,
-        this.bridgeSessionId,
-      );
+    // Skipped for a joined instance (D12): the shared session's window-stage
+    // context belongs to the primary instance's stage — injecting this
+    // instance's stage would re-target every shared plugin at the wrong window
+    // (R11 cross-talk). The joined window's webview mounts through the
+    // WindowManager multi-root path (OQ3) instead.
+    if (this.bridgeSessionId && !this.joinedExistingSession) {
+      hilog.debug(DOMAIN, 'NativeAbility', 'setWindowStage loop: runtimes=%{public}d sess=%{public}s', this.moduleRuntimes.length, this.bridgeSessionId);
       for (const runtime of this.moduleRuntimes) {
         try {
           await BridgeHostRegistry.setWindowStage(
@@ -602,7 +772,7 @@ export class NativeAbility extends UIAbility {
           clearAllTrackedModifiers();
         }
         this.forEachLifecycle((lifecycle) =>
-          lifecycle.windowStageEventCallback.onWindowStageEvent(event),
+          lifecycle.windowStageEventCallback.onWindowStageEvent(event, this.abilityWindowId),
         );
       });
     } catch (e) {
@@ -625,39 +795,36 @@ export class NativeAbility extends UIAbility {
       try {
         win.on("windowSizeChange", (size: window.Size) => {
           // Phase 3 (design.md D2/D3): wrap with typed interface and route through
-          // per-window(0) throttle (leading+trailing 16ms). windowId=0 = main window.
-          // Double-registration dedup: BridgeHost also registers onSizeChange for the
-          // same windowId=0 — the throttle merges both sources automatically.
-          const wrapped: WindowSizeEventWrap = {
-            windowId: 0,
-            width: size.width,
-            height: size.height,
-          };
-          WindowManager.getInstance().throttledRectDispatch(
-            0,
-            wrapped,
-            (w: object) => {
-              this.forEachLifecycle((lifecycle) =>
-                lifecycle.windowStageEventCallback.onWindowSizeChange(w),
-              );
-            },
-            "size",
-          );
+          // this instance's per-window throttle (leading+trailing 16ms). The id is
+          // abilityWindowId so a second UIAbility instance's resize is keyed (and
+          // routed) to its own window, not the primary's.
+          // Double-registration dedup: BridgeHost also registers onSizeChange for
+          // the same windowId=0 — the throttle merges both sources automatically.
+          const wrapped: WindowSizeEventWrap = { windowId: this.abilityWindowId, width: size.width, height: size.height };
+          WindowManager.getInstance().throttledRectDispatch(this.abilityWindowId, wrapped, (w: object) => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.windowStageEventCallback.onWindowSizeChange(w),
+            );
+          }, 'size');
         });
         mainWindow.on("windowRectChange", (options: window.RectChangeOptions) => {
           // Phase 3 (design.md D3): RECOVER→menubar logic stays synchronous (UI logic,
           // not throttled — must respond immediately on fullscreen exit).
           if (options.reason === window.RectChangeReason.RECOVER) {
-            const cb = getMenuDataCallback("main");
+            // Per-window menubar key (windowKeyForId(0) === "main"), so a
+            // spawned instance's RECOVER notifies its own menubar instead of
+            // the primary's.
+            const cb = getMenuDataCallback(windowKeyForId(this.abilityWindowId));
             cb?.onMenubarVisible?.(true);
           }
-          // Phase 3 (design.md D2/D5): rect dispatch through per-window(0) throttle.
-          // Deep-copy rect fields (not system object ref) per design.md D5.
+          // Phase 3 (design.md D2/D5): rect dispatch through this instance's
+          // per-window throttle. Deep-copy rect fields (not system object ref)
+          // per design.md D5.
           // Issue Eulogizethesun/tauri#97: attach the same moment's drawableRect
           // (sync getWindowProperties snapshot) so the Rust inner-rect cache
           // tracks the system-defined inner value — omitted when unreadable.
           const wrapped: WindowRectEventWrap = {
-            windowId: 0,
+            windowId: this.abilityWindowId,
             reason: options.reason,
             rect: {
               left: options.rect.left,
@@ -667,47 +834,47 @@ export class NativeAbility extends UIAbility {
             },
             drawable: WindowManager.readDrawableRect(mainWindow),
           };
-          WindowManager.getInstance().throttledRectDispatch(
-            0,
-            wrapped,
-            (w: object) => {
-              this.forEachLifecycle((lifecycle) =>
-                lifecycle.windowStageEventCallback.onWindowRectChange(w),
-              );
-            },
-            "rect",
-          );
+          WindowManager.getInstance().throttledRectDispatch(this.abilityWindowId, wrapped, (w: object) => {
+            this.forEachLifecycle((lifecycle) =>
+              lifecycle.windowStageEventCallback.onWindowRectChange(w),
+            );
+          }, 'rect');
         });
         win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
           this.forEachLifecycle((lifecycle) =>
-            lifecycle.windowStageEventCallback.onAvoidAreaChange(options),
+            lifecycle.windowStageEventCallback.onAvoidAreaChange(options, this.abilityWindowId),
           );
         });
         win.on("keyboardHeightChange", (height) => {
           this.forEachLifecycle((lifecycle) =>
-            lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
+            lifecycle.keyboardEventCallback.onKeyboardHeightChange(height, this.abilityWindowId),
           );
         });
-        // 回灌系统窗口状态到 tao 镜像位(问题五 5.3):
-        // 最大化/最小化/全屏/悬浮等系统状态变化经 notifyWindowStatus NAPI 入队,
-        // runtime-wry drain 后用真实 windowId 路由到对应 tao Window 更新镜像位。
-        // API 11+;不支持则静默降级(不比现状差)。详见 doc/OHOS窗口遗留问题.md。
+        // Back-propagate system window state into the tao mirror flags
+        // (legacy issue 5.3): maximize/minimize/fullscreen/float state changes
+        // are queued through the notifyWindowStatus NAPI entry, and after the
+        // runtime-wry drain they are routed to the matching tao Window by its
+        // real windowId to update the mirror flags. API 11+; silently degrades
+        // when unsupported (no worse than before). See the tauri repository's
+        // doc/OHOS窗口遗留问题.md (legacy window issues) for details.
         try {
           win.on("windowStatusChange", (statusType: window.WindowStatusType) => {
-            const nativeModule: Module | undefined =
-              AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-            if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
-              // 本地单 UIAbility 架构:主窗口恒为 tao windowId=0(upstream 的
-              // readWindowId() 首实例也返回 0);runtime-wry 按 tao window_id 路由。
-              nativeModule.notifyWindowStatus(0, statusType);
+            const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+            if (nativeModule && typeof nativeModule.notifyWindowStatus === 'function') {
+              // Carries abilityWindowId (design.md D3): with multiple
+              // UIAbilities the event routes by the instance's real windowId;
+              // the first instance is 0, matching the legacy single-instance
+              // behavior. runtime-wry routes to the matching tao Window by
+              // tao window_id to update its mirror flags.
+              nativeModule.notifyWindowStatus(this.abilityWindowId, statusType);
             }
           });
-          // seed 初始态(官方 updateWindowInfo 模式),避免漏掉注册前状态。
+          // Seed the initial state (official updateWindowInfo pattern) so
+          // state that predates the subscription is not missed.
           const initialStatus = win.getWindowStatus();
-          const nativeModule: Module | undefined =
-            AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-          if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
-            nativeModule.notifyWindowStatus(0, initialStatus);
+          const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+          if (nativeModule && typeof nativeModule.notifyWindowStatus === 'function') {
+            nativeModule.notifyWindowStatus(this.abilityWindowId, initialStatus);
           }
         } catch (e) {
           hilog.warn(
@@ -784,13 +951,13 @@ export class NativeAbility extends UIAbility {
       const snapshot = WindowManager.readWindowRectSnapshot(seedWindow);
       if (snapshot) {
         const wrapped: WindowRectEventWrap = {
-          windowId: 0,
+          windowId: this.abilityWindowId,
           reason: window.RectChangeReason.UNDEFINED,
           rect: snapshot.rect,
           drawable: snapshot.drawable,
         };
         WindowManager.getInstance().throttledRectDispatch(
-          0,
+          this.abilityWindowId,
           wrapped,
           (w: object) => {
             this.forEachLifecycle((lifecycle) =>
@@ -799,7 +966,9 @@ export class NativeAbility extends UIAbility {
           },
           "rect",
         );
-        hilog.info(DOMAIN, "NativeAbility", "rect cache seeded post-load (windowId=0)");
+        // Seed THIS instance's window id (spawned instances seed their own
+        // rect, not the primary's window 0).
+        hilog.info(DOMAIN, "NativeAbility", "rect cache seeded post-load (windowId=%{public}d)", this.abilityWindowId);
       }
     } catch (e) {
       hilog.warn(DOMAIN, "NativeAbility", "rect cache seed failed: %{public}s", String(e));
@@ -810,10 +979,20 @@ export class NativeAbility extends UIAbility {
     // flag is stored in WindowManager.registerUIAbilityStage and applied via
     // WindowManager.applyTransparentBackground(windowId) in aboutToAppear.
 
-    try {
-      this.setupMenuPopup(windowStage);
-    } catch (menuErr) {
-      console.error(`[Menu] setupMenuPopup threw: ${menuErr}`);
+    // Menu/tray wiring is skipped for a joined instance (D12): several of the
+    // registrations inside are process-global single slots
+    // (setPredefinedActionExecutor, primaryModule.onMenuRequest) — a spawned
+    // instance taking them would strip the primary's webview controller from
+    // tray Copy/Cut/Paste actions and retarget its menubar popups. Per-window
+    // menu support for spawned windows lands with the tray/menu phase
+    // (design.md Phase 5); the primary's menu behavior must stay intact while
+    // a spawned window exists.
+    if (!this.joinedExistingSession) {
+      try {
+        this.setupMenuPopup(windowStage);
+      } catch (menuErr) {
+        console.error(`[Menu] setupMenuPopup threw: ${menuErr}`);
+      }
     }
   }
 
@@ -902,7 +1081,13 @@ export class NativeAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void | Promise<void> {
-    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy());
+    // D4b: a duplicate primary never registered a stage — its destroy must not
+    // unregister the primary's id-0 entry nor fire its lifecycle callbacks.
+    if (this.isDuplicatePrimary) {
+      hilog.warn(DOMAIN, 'NativeAbility', 'onWindowStageDestroy skipped: duplicate primary (D4b)');
+      return;
+    }
+    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onWindowStageDestroy(this.abilityWindowId));
     if (this.displayAddListener) {
       try {
         display.off("add", this.displayAddListener);
@@ -928,7 +1113,10 @@ export class NativeAbility extends UIAbility {
       this.displayChangeListener = undefined;
     }
     try {
-      WindowManager.getInstance().unregisterUIAbilityStage(0);
+      // Mirror of registerUIAbilityStage (HC-10): must unregister THIS
+      // instance's id — a hardcoded 0 would wipe the primary instance's
+      // stage entry when a spawned instance is destroyed.
+      WindowManager.getInstance().unregisterUIAbilityStage(this.abilityWindowId);
     } catch (e) {
       hilog.error(
         DOMAIN,
@@ -937,7 +1125,9 @@ export class NativeAbility extends UIAbility {
         String(e),
       );
     }
-    if (this.bridgeSessionId) {
+    // Joined instance (D12): the shared session's window-stage context stays
+    // with the primary — nothing to clear or notify here.
+    if (this.bridgeSessionId && !this.joinedExistingSession) {
       return this.enqueueLifecycleOperation("window-stage-destroy", async (): Promise<void> => {
         await this.destroyWindowStageIfActive();
         await this.notifyBridgeLifecycle({
@@ -953,7 +1143,7 @@ export class NativeAbility extends UIAbility {
       return;
     }
     void this.enqueueLifecycleOperation("memory-level", async (): Promise<void> => {
-      this.forEachLifecycle((lifecycle) => lifecycle.environmentCallback.onMemoryLevel(level));
+      this.forEachLifecycle((lifecycle) => lifecycle.environmentCallback.onMemoryLevel(level, this.abilityWindowId));
       await this.notifyBridgeLifecycle({
         kind: "memory-level",
         payload: new BridgeMemoryLevelLifecyclePayload(level),
@@ -986,6 +1176,24 @@ export class NativeAbility extends UIAbility {
    *          follows).
    */
   async onPrepareToTerminateAsync(): Promise<boolean> {
+    // Only the primary instance's termination ends the app — ask Rust for the
+    // app-level ExitRequested/confirm flow here. A spawned instance's close
+    // only destroys that window (the app keeps running), so it must NOT reach
+    // the app-level probe: tauri-runtime-wry's probe arm marks its process-wide
+    // exit_state dedup flag when a probe is allowed through, and a spawned
+    // instance's probe would burn that flag and silently neuter every later
+    // prevent_exit() (observed 2026-10-08: suite-closed spawned windows
+    // consumed the flag, then the primary's ✕ went straight through with
+    // Exit Confirm ON).
+    if (this.abilityWindowId !== 0) {
+      hilog.info(
+        DOMAIN,
+        "NativeAbility",
+        "onPrepareToTerminateAsync: spawned instance (id=%{public}d) — allow, app keeps running",
+        this.abilityWindowId,
+      );
+      return false;
+    }
     hilog.info(DOMAIN, "NativeAbility", "onPrepareToTerminateAsync: asking Rust lifecycles");
     let prevent = false;
     this.forEachLifecycle((lifecycle) => {
@@ -1018,7 +1226,7 @@ export class NativeAbility extends UIAbility {
     this.abilityGeneration += 1;
     this.windowStageGeneration += 1;
     this.detachWindowListeners();
-    if (this.bridgeSessionId) {
+    if (this.bridgeSessionId && !this.joinedExistingSession) {
       // Reject new calls and cancel an active plugin hook immediately; the queued teardown below
       // still preserves lifecycle ordering for state mutation and platform callbacks.
       BridgeHostRegistry.beginClosing(this.bridgeSessionId);
@@ -1031,7 +1239,22 @@ export class NativeAbility extends UIAbility {
     // never fired. This call is fully synchronous (no await / bridge recv) and completes
     // in microseconds; prevent_exit() is ineffective on this path by design
     // (tauri-runtime-wry discards it on LoopDestroyed).
-    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onAbilityDestroy());
+    // For a joined instance (D12) the windowId-bearing dispatch is the whole
+    // teardown on the ArkTS side: Rust removes only this instance's session
+    // partition (bridge/mod.rs AbilityDestroyed{window_id}) while the shared
+    // session, its module bridges and the primary's exit chain stay intact —
+    // a spawned window closing must NOT terminate the process (OQ4).
+    // D4b: a plain-relaunch duplicate resolving to id 0 must not dispatch at
+    // all — onAbilityDestroy(0) runs the primary exit chain (Event::Destroy →
+    // process teardown) and would kill the live app it was meant to restore.
+    if (this.isDuplicatePrimary) {
+      hilog.warn(DOMAIN, 'NativeAbility', 'onDestroy: duplicate primary (D4b) — skipping onAbilityDestroy dispatch (id 0 would fire the primary exit chain)');
+      return Promise.resolve();
+    }
+    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onAbilityDestroy(this.abilityWindowId));
+    if (this.joinedExistingSession) {
+      return Promise.resolve();
+    }
     return this.enqueueLifecycleOperation("ability-destroy", async (): Promise<void> => {
       const sessionId = this.bridgeSessionId;
       if (!sessionId) {
@@ -1057,7 +1280,14 @@ export class NativeAbility extends UIAbility {
   }
 
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
-    const uri = want.uri ?? "";
+    // D4b: a plain-relaunch duplicate terminated in onCreate; its want was
+    // already forwarded there. Under "standard" onNewWant should not fire for
+    // it at all — this guard covers a racing delivery before teardown lands.
+    if (this.isDuplicatePrimary) {
+      hilog.warn(DOMAIN, 'NativeAbility', 'onNewWant skipped: duplicate primary (D4b)');
+      return;
+    }
+    const uri = want.uri ?? '';
     const parametersJson = JSON.stringify(want.parameters ?? {});
     hilog.info(
       DOMAIN,
@@ -1069,9 +1299,14 @@ export class NativeAbility extends UIAbility {
 
     // Update the latest want.uri for deep-link get-latest-uri (warm-start
     // relaunch). initialWantUri is intentionally NOT updated — it stays the
-    // cold-start value. (Previously onNewWant only forwarded to lifecycle
-    // callbacks, never wrote AppStorage, so get_latest_uri was stale.)
-    AppStorage.setOrCreate("wantUri", uri);
+    // cold-start value. The per-instance field feeds this instance's
+    // LocalStorage (D9); the AppStorage key stays a primary-instance-only
+    // back-compat channel so a spawned instance's relaunch cannot overwrite
+    // the primary's latest URI.
+    this.latestWantUri = uri;
+    if (this.abilityWindowId === 0) {
+      AppStorage.setOrCreate("wantUri", uri);
+    }
 
     // Cancel cleanup timer when system triggers onNewWant
     // This indicates the system's foreground transition has started,
@@ -1093,9 +1328,7 @@ export class NativeAbility extends UIAbility {
     // isContinuation marks a warm-start app-continuation restore; consumed by the
     // Rust-side continuation storage (lifecycle.rs → store_continuation).
     const isContinuation = launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION;
-    this.forEachLifecycle((lifecycle) =>
-      lifecycle.windowStageEventCallback.onNewWant({ uri, parametersJson, isContinuation }),
-    );
+    this.forEachLifecycle((lifecycle) => lifecycle.windowStageEventCallback.onNewWant({ uri, parametersJson, isContinuation }, this.abilityWindowId));
   }
 
   // Source-side app-continuation save. The snapshot is PRE-REGISTERED by the JS
@@ -1148,7 +1381,7 @@ export class NativeAbility extends UIAbility {
     }
     void this.enqueueLifecycleOperation("configuration-updated", async (): Promise<void> => {
       this.forEachLifecycle((lifecycle) =>
-        lifecycle.environmentCallback.onConfigurationUpdated(newConfig),
+        lifecycle.environmentCallback.onConfigurationUpdated(newConfig, this.abilityWindowId),
       );
       await this.notifyBridgeLifecycle({
         kind: "configuration-updated",
@@ -1165,8 +1398,14 @@ export class NativeAbility extends UIAbility {
 
     for (const runtime of this.moduleRuntimes) {
       try {
-        stateMap[runtime.moduleName] =
-          runtime.lifecycle.windowStageEventCallback.onAbilitySaveState() ?? "";
+        // Void-returning dispatcher: the Rust callback (lifecycle.rs
+        // on_ability_save_state: Function<'a, (), ()>) forwards SaveState to
+        // the app and returns nothing — the generated demo bindings agree
+        // (Index.d.ts: `onAbilitySaveState: () => void`). Module-level saved
+        // state is therefore always empty today; the explicit "" keeps
+        // `new String(...)` below from wrapping "undefined".
+        runtime.lifecycle.windowStageEventCallback.onAbilitySaveState(this.abilityWindowId);
+        stateMap[runtime.moduleName] = "";
       } catch (e) {
         hilog.error(DOMAIN, "NativeAbility", "onAbilitySaveState failed: %{public}s", String(e));
       }

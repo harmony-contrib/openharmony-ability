@@ -61,6 +61,14 @@ export class PredefinedActionExecutor {
    * Restore the Ability (app) from background.
    * Called when user clicks the tray icon to bring the app back to foreground.
    * Uses startAbility() to bring the hidden Ability back to front.
+   * D4 specified amendment (openspec multi-uiability-windows): under
+   * launchType "specified" + AbilityStage.onAcceptWant, a bare self-targeting
+   * startAbility routes to the live primary instance — AMS pulls it back to
+   * the top of the stack (official foreground primitive, covers visible/
+   * minimized/hidden states). This is the only mechanism that can undo a
+   * context.hideAbility()-backgrounded ability; window-level restore()/
+   * showWindow() cannot (device-proven regression under the interim
+   * "standard" + showWindowMethod variant, 2026-09-15).
    */
   async showAbility(): Promise<void> {
     if (!this.context) {

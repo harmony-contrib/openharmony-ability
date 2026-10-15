@@ -30,8 +30,15 @@ const iconClickHandler = (event: emitter.EventData): void => {
   // menuClickHandler never does, the rightMenuClick path specifically is broken.
   hilog.info(DOMAIN, 'StatusBar', 'iconClickHandler fired');
 
-  // Auto-restore app from background when tray icon is clicked
-  // Uses startAbility() to bring the hidden Ability back to front
+  // Auto-restore app from background when tray icon is clicked.
+  // Uses startAbility() to bring the hidden Ability back to front.
+  // D4 specified amendment (openspec multi-uiability-windows): under
+  // launchType "specified" + AbilityStage.onAcceptWant, a bare self-targeting
+  // startAbility routes to the live primary instance — AMS pulls it back to
+  // the top of the stack. This is the only mechanism that also covers the
+  // context.hideAbility()-hidden state (window-level showWindow cannot —
+  // device-proven regression under the interim "standard" +
+  // showWindowMethod variant, 2026-09-15).
   if (abilityContext) {
     try {
       const bundleName = abilityContext.abilityInfo.bundleName;

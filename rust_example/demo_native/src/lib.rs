@@ -439,7 +439,7 @@ fn openharmony_app(app: OpenHarmonyApp) {
                 });
             }
         }
-        Event::Input(input) => match input {
+        Event::Input { input, .. } => match input {
             InputEvent::ImeEvent(text) => {
                 hilog_info!(format!("ohos-rs input_text: {text:?}").as_str());
             }
@@ -450,7 +450,7 @@ fn openharmony_app(app: OpenHarmonyApp) {
                 hilog_info!("ohos-rs input");
             }
         },
-        Event::WindowRedraw(_) => {
+        Event::WindowRedraw { .. } => {
             hilog_info!("ohos-rs window_redraw");
         }
         event => {

@@ -1,5 +1,6 @@
 import { autoStartupManager, Want } from "@kit.AbilityKit";
 import { BusinessError } from "@kit.BasicServicesKit";
+import deviceInfo from "@ohos.deviceInfo";
 import {
   AsyncPluginBase,
   BridgeCallContext,
@@ -81,6 +82,21 @@ export class AutostartPlugin extends AsyncPluginBase {
    * switch to `application_startup_settings` + `pushParams`.
    */
   private async openAutostartSettings(): Promise<boolean> {
+    // Phone guard (2026-10-08 Mate 70 forensics): startAbility() LAUNCHES the
+    // Settings app even on phones — the pc_app_setup_settings URI is 2in1-only,
+    // so nothing useful opens — and the launch itself minimizes this UIAbility
+    // (AMS MinimizeUIAbilityBySCB), backgrounding the whole app. The phone
+    // resource scheduler then Doze-freezes the process ~30s later
+    // (LifecycleDetectTimeoutProc → FreezeFreezeUnit), which killed the mobile
+    // test suite mid-run. Refuse before launching: the caller receives the
+    // clean "rejected the requested operation" instead of a backgrounded app.
+    // PC/2in1 keep the settings-page navigation (verified behavior, no freeze).
+    if (deviceInfo.deviceType === "phone") {
+      // console.warn (not info): console.info does not reach hilog on this
+      // build — the gate must stay observable for device forensics.
+      console.warn("[Autostart] settings page is PC/2in1-only; refusing startAbility on phone to avoid backgrounding the app");
+      return false;
+    }
     const want: Want = {
       bundleName: "com.huawei.hmos.settings",
       abilityName: "com.huawei.hmos.settings.MainAbility",

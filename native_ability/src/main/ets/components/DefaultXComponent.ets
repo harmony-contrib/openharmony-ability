@@ -71,7 +71,12 @@ export struct DefaultXComponent {
 
   private rootSlot = new NodeContent();
   private nodeController = new BridgeRootNodeController();
-  @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
+  // Bridge session id, passed down from MainPage's per-instance LocalStorage
+  // (design.md D6). Was @StorageProp — a process-global AppStorage single value
+  // that a spawned instance would overwrite before the primary's component
+  // finished attaching. @Prop keeps it per-instance; the primary passes its own
+  // session, a joined instance passes the shared session id (D12).
+  @Prop bridgeSessionId: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
   private appearanceGeneration: number = 0;
   private attachment?: ComponentAttachment;
@@ -93,6 +98,24 @@ export struct DefaultXComponent {
       const root = this.nodeController.makeNode(this.getUIContext());
       WindowManager.getInstance().registerComponentRoot(this.windowId, root);
       hilog.info(0xA01999, 'DefaultXComponent', 'sub-window mode: root registered for windowId=%{public}d', this.windowId);
+      return;
+    }
+
+    // Spawned UIAbility-instance window (design.md OQ3 multi-root): moduleName
+    // is set (same process modules) AND windowId > 0 (pre-allocated by tao).
+    // The window's webview content mounts through the same WindowManager
+    // multi-root path as Float sub-windows — register the component root and
+    // UIContext keyed by this window id so WebviewSurface.create can build its
+    // BuilderNode against them. The native render tree, render-owner claim and
+    // bridge component attachment stay with the primary instance
+    // (render_owner is single-occupancy, app.rs claim_render_owner) — calling
+    // them here would evict the primary's render.
+    if (moduleName && this.windowId > 0) {
+      WindowManager.getInstance().applyTransparentBackground(this.windowId);
+      const root = this.nodeController.makeNode(this.getUIContext());
+      WindowManager.getInstance().registerComponentRoot(this.windowId, root);
+      WindowManager.getInstance().registerUIContext(this.windowId, this.getUIContext());
+      hilog.info(0xA01999, 'DefaultXComponent', 'spawned-UIAbility mode: root + uiContext registered for windowId=%{public}d', this.windowId);
       return;
     }
 
@@ -120,7 +143,10 @@ export struct DefaultXComponent {
       );
     }
     const renderOwner = `${sessionId}:${moduleName}:${nextRenderOwnerId++}`;
-    nativeModule.render(this.rootSlot, renderOwner);
+    // windowId threads the per-instance UIAbility id (design.md D5, Phase 4)
+    // into render() so the Rust event closures stamp input/redraw/resize
+    // events with the originating window; 0 for the primary instance.
+    nativeModule.render(this.rootSlot, renderOwner, this.windowId);
 
     if (generation !== this.appearanceGeneration) {
       nativeModule.disposeRender(renderOwner);
@@ -162,6 +188,16 @@ export struct DefaultXComponent {
     // Sub-window mode cleanup: unregister component root and dispose FrameNode
     if (!this.moduleName.trim() && this.windowId > 0) {
       WindowManager.getInstance().registerComponentRoot(this.windowId, undefined as any);
+      this.nodeController.disposeRoot();
+      return;
+    }
+    // Spawned UIAbility-instance mode cleanup (OQ3 multi-root): mirror the
+    // registration pair. removeControllerAndUIContext drops the componentRoot
+    // and UIContext entries (plus the webview-controller caches keyed by this
+    // id); unregisterUIAbilityStage covers the stage-side keys when the
+    // instance's window is torn down.
+    if (this.moduleName.trim() && this.windowId > 0) {
+      WindowManager.getInstance().removeControllerAndUIContext(this.windowId);
       this.nodeController.disposeRoot();
       return;
     }

@@ -62,10 +62,16 @@ import { DefaultXComponent } from "@ohos-rs/ability";
 @Entry
 @Component
 struct Index {
+  // Bridge session id — required. NativeAbility publishes it to AppStorage
+  // when it creates the session, so pages loading outside the MainPage route
+  // read it via @StorageProp (the demo pages do exactly this); MainPage's own
+  // route receives it through the per-instance LocalStorage instead.
+  @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
+
   build() {
     Row() {
       Column() {
-        DefaultXComponent({ moduleName: "demo_native" })
+        DefaultXComponent({ moduleName: "demo_native", bridgeSessionId: this.bridgeSessionId })
       }
       .width("100%")
     }
@@ -99,6 +105,10 @@ export default class EntryAbility extends NativeAbility {
 @Entry
 @Component
 struct Page {
+  // Same session-id contract as the single-component example above: pages
+  // outside the MainPage route read the AppStorage-published value.
+  @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
+
   @Builder BusinessOverlay() {
     Text("business overlay")
   }
@@ -106,8 +116,8 @@ struct Page {
   build() {
     Stack() {
       // Each component uses a distinct module and owns an independent tree.
-      DefaultXComponent({ moduleName: "demo_native" })
-      DefaultXComponent({ moduleName: "demo_sub_native" })
+      DefaultXComponent({ moduleName: "demo_native", bridgeSessionId: this.bridgeSessionId })
+      DefaultXComponent({ moduleName: "demo_sub_native", bridgeSessionId: this.bridgeSessionId })
       this.BusinessOverlay()
     }
   }

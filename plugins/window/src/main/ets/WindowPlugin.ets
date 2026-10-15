@@ -592,6 +592,11 @@ export class WindowPlugin extends AsyncPluginBase {
               // 801 = API not supported; other errors logged but non-fatal
             }
           }
+        } else if (request.transparent) {
+          // setWindowContainerColor is API 20+; below that the opaque container
+          // layer stays, so a transparent window background / blur (vibrancy)
+          // has no visible effect. Non-fatal: the window is still created.
+          hilog.warn(DOMAIN, TAG, "create-os-window: transparent container requires API 20+, current %{public}d; container stays opaque (no visible blur)", deviceInfo.sdkApiVersion);
         }
         await created.showWindow();
         this.assertCallActive(context);
@@ -617,13 +622,27 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-decorations") {
       const request = parseDecorationsRequest(payload);
-      const win = this.requireWindow(request.windowId, context);
-      try {
-        win.setWindowDecorVisible(request.decorations);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
-      } catch (error) {
-        throw new Error(`set-decorations failed: ${String(error)}`);
+      // Validate the window id resolves (same throw semantics as before);
+      // the effect itself is delegated below.
+      this.requireWindow(request.windowId, context);
+      // Delegate to WindowManager.setDecorations: dual-path by window kind —
+      // UIAbility main windows call setWindowDecorVisible (system title bar),
+      // Float sub-windows write LocalStorage('decorations') so FloatPage's
+      // @LocalStorageProp reactively shows/hides its self-drawn title bar.
+      // The inline win.setWindowDecorVisible call below was the pluginize-era
+      // migration of the legacy NAPI path and only implemented the UIAbility
+      // half: Float sub-windows are created with decorEnabled:false (system
+      // decoration permanently off), so the direct call was a silent no-op and
+      // the FloatPage title bar never reacted to setDecorations().
+      // setDecorations returns whether the window kind was handled (Float
+      // LocalStorage write / UIAbility setWindowDecorVisible); false means the
+      // window is unknown or the system call threw — surface it to the Rust
+      // caller instead of acking success (the pre-pluginize handler threw on
+      // the setWindowDecorVisible error).
+      if (!WindowManager.getInstance().setDecorations(request.windowId, request.decorations)) {
+        throw new Error(`set-decorations failed: window ${request.windowId}`);
       }
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-fullscreen") {
@@ -1119,7 +1138,7 @@ export class WindowPlugin extends AsyncPluginBase {
       // error instead of the old ArkHelper no-op.
       const request = parseDraggableRequest(payload);
       if (deviceInfo.sdkApiVersion < 20) {
-        throw new Error(`set-draggable requires API20+, current ${deviceInfo.sdkApiVersion}`);
+        throw new Error(`setDraggable requires API level 20+ on OpenHarmony (current: ${deviceInfo.sdkApiVersion})`);
       }
       const win = WindowManager.getInstance().getWindow(request.windowId);
       if (!win) {

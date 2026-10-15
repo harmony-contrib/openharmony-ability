@@ -55,9 +55,17 @@ pub enum Event<'a> {
     /// window stage destroy event
     /// alias onWindowStageDestroy
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-abilitylifecyclecallback-V5#abilitylifecyclecallbackonwindowstagedestroy
-    WindowDestroy,
+    ///
+    /// `window_id` is the UIAbility instance whose stage is being torn down
+    /// (0 = primary). Phase 4 (design.md D5): every instance's destroy
+    /// dispatches with its own id so tao routes CloseRequested/Destroyed to
+    /// that window instead of the primary.
+    WindowDestroy { window_id: i64 },
 
-    WindowRedraw(IntervalInfo),
+    /// Per-frame redraw tick from the XComponent frame callback.
+    /// `window_id` is the window owning that render surface (0 = primary —
+    /// spawned UIAbility windows mount no XComponent, Phase 4 design.md D5).
+    WindowRedraw { window_id: i64, info: IntervalInfo },
     /// window resize event
     /// alias window.on("windowSizeChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowsizechange7
@@ -96,10 +104,16 @@ pub enum Event<'a> {
     Start,
     /// window stage focus event
     /// alias WindowStageEventType.ACTIVE
-    GainedFocus,
+    ///
+    /// `window_id` is the UIAbility instance that gained focus (0 = primary).
+    /// Phase 4 (design.md D5): focus dispatches per-window — when a spawned
+    /// instance gains focus the primary receives the matching `LostFocus`
+    /// half of the pair.
+    GainedFocus { window_id: i64 },
     /// window stage unfocus event
     /// alias WindowStageEventType.INAVTIVE
-    LostFocus,
+    /// `window_id` semantics mirror `GainedFocus`.
+    LostFocus { window_id: i64 },
     /// window resume
     /// alias WindowStageEventType.RESUMED
     Resume(SaveLoader<'a>),
@@ -132,7 +146,10 @@ pub enum Event<'a> {
     SurfaceDestroy,
     /// surface input event
     /// IME
-    Input(InputEvent),
+    /// `window_id` is the window whose render surface produced the input
+    /// (0 = primary; populated from `render()`'s `window_id` param — Phase 4
+    /// design.md D5).
+    Input { window_id: i64, input: InputEvent },
 
     /// keyboard event
     /// alias onKeyboardHeightChange
@@ -170,16 +187,16 @@ impl<'a> Event<'a> {
     pub fn as_str(&self) -> &'static str {
         match self {
             Event::WindowCreate => "WindowCreate",
-            Event::WindowDestroy => "WindowDestroy",
-            Event::WindowRedraw(_) => "WindowRedraw",
+            Event::WindowDestroy { .. } => "WindowDestroy",
+            Event::WindowRedraw { .. } => "WindowRedraw",
             Event::WindowResize { .. } => "WindowResize",
             Event::ContentRectChange(_) => "ContentRectChange",
             Event::AvoidAreaChange(_) => "AvoidAreaChange",
             Event::ConfigChanged(_) => "ConfigChanged",
             Event::LowMemory => "LowMemory",
             Event::Start => "Start",
-            Event::GainedFocus => "GainedFocus",
-            Event::LostFocus => "LostFocus",
+            Event::GainedFocus { .. } => "GainedFocus",
+            Event::LostFocus { .. } => "LostFocus",
             Event::Resume(_) => "Resume",
             Event::Pause => "Pause",
             Event::Stop => "Stop",
@@ -188,7 +205,7 @@ impl<'a> Event<'a> {
             Event::Destroy => "Destroy",
             Event::SurfaceCreate => "SurfaceCreate",
             Event::SurfaceDestroy => "SurfaceDestroy",
-            Event::Input(_) => "Input",
+            Event::Input { .. } => "Input",
             Event::UserEvent => "UserEvent",
             Event::KeyboardEvent(_) => "KeyboardEvent",
             Event::NewWant { .. } => "NewWant",

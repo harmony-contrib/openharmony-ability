@@ -337,18 +337,28 @@ class WebviewAcceptedResponse {
 }
 
 class WebviewScriptResponse {
-  readonly result: string | null;
+  // Optional: absent when the script produced no return value. The NAPI
+  // bridge cannot decode a JS `null` into Rust `Option<String>` (treated
+  // as `String` → conversion error), so the field must be left unset
+  // rather than set to null.
+  readonly result?: string;
 
   constructor(result: string | null) {
-    this.result = result;
+    if (result !== null && result !== undefined) {
+      this.result = result;
+    }
   }
 }
 
 class WebviewStringResponse {
-  readonly value: string | null;
+  // Optional: absent when there is nothing to report (same NAPI `null`
+  // constraint as `WebviewScriptResponse.result`).
+  readonly value?: string;
 
   constructor(value: string | null) {
-    this.value = value;
+    if (value !== null && value !== undefined) {
+      this.value = value;
+    }
   }
 }
 
@@ -372,26 +382,38 @@ class WebviewDownloadStartRequest {
   readonly id: string;
   readonly nativeTag: string;
   readonly url: string;
-  readonly tempPath: string | null;
+  // Optional: absent when ArkWeb reported no destination. Same NAPI `null`
+  // constraint as `WebviewPrintStateEvent.error` — the field must be left
+  // unset rather than set to null.
+  readonly tempPath?: string;
 
   constructor(id: string, nativeTag: string, url: string, tempPath: string | null) {
     this.id = id;
     this.nativeTag = nativeTag;
     this.url = url;
-    this.tempPath = tempPath;
+    if (tempPath !== null && tempPath !== undefined) {
+      this.tempPath = tempPath;
+    }
   }
 }
 
 interface WebviewDownloadStartResponse {
   allow: boolean;
-  tempPath: string | null;
+  // Optional: the Rust side's `Option<String>` encodes `None` as an absent
+  // property (the NAPI bridge cannot round-trip an explicit JS `null`), so
+  // the field arrives as `undefined` when no replacement destination is
+  // set.
+  tempPath?: string;
 }
 
 class WebviewDownloadEndEvent {
   readonly id: string;
   readonly nativeTag: string;
   readonly url: string;
-  readonly tempPath: string | null;
+  // Optional: absent when the download failed before a destination was
+  // settled (same NAPI `null` constraint as
+  // `WebviewPrintStateEvent.error`).
+  readonly tempPath?: string;
   readonly success: boolean;
 
   constructor(
@@ -404,7 +426,9 @@ class WebviewDownloadEndEvent {
     this.id = id;
     this.nativeTag = nativeTag;
     this.url = url;
-    this.tempPath = tempPath;
+    if (tempPath !== null && tempPath !== undefined) {
+      this.tempPath = tempPath;
+    }
     this.success = success;
   }
 }
@@ -954,7 +978,9 @@ function downloadStartDecision(
       response === null ||
       typeof response !== "object" ||
       typeof response.allow !== "boolean" ||
-      (response.tempPath !== null && typeof response.tempPath !== "string")
+      // `undefined` is the wire form of the Rust side's `Option::None`
+      // (an omitted property), so it is a valid "no override" answer.
+      (response.tempPath !== undefined && typeof response.tempPath !== "string")
     ) {
       throw new Error("Invalid WebView download-start response");
     }
@@ -963,7 +989,7 @@ function downloadStartDecision(
     console.error("WebView download decision failed: " + String(error));
     // A download callback explicitly requested a synchronous admission decision. Failing closed
     // avoids writing to an unintended path when native state is no longer available.
-    return { allow: false, tempPath: null };
+    return { allow: false };
   }
 }
 
@@ -1314,9 +1340,12 @@ function BuildWebview(data: ManagedWebview) {
         .width("100%")
         .height("100%")
         .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
-        .backgroundColor(
-          data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined),
-        )
+        // Explicit background color (create-time style or runtime set-background-color)
+        // takes precedence; transparent webviews fall back to Color.Transparent so
+        // vibrancy/blur stays visible. The old form (transparent ? Color.Transparent
+        // : style.backgroundColor) short-circuited runtime set_background_color into
+        // a visual no-op on transparent windows (tao skips the window layer for them).
+        .backgroundColor(data.style.backgroundColor ?? (data.transparent === true ? Color.Transparent : undefined))
         .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
         // Vibrancy: backdropBlur for opaque sub-windows (see Direct mode comment)
         .backdropBlur(data.style.blurRadius ?? 0)
@@ -1437,12 +1466,11 @@ function BuildWebview(data: ManagedWebview) {
         .width("100%")
         .height("100%")
         .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
-        // Transparent windows: force Web background to transparent so vibrancy/blur
-        // effects are visible through the Web component. Without this, the Web renders
-        // with its default opaque background, hiding any blur effect.
-        .backgroundColor(
-          data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined),
-        )
+        // Explicit background color takes precedence over the transparent fallback —
+        // same precedence flip as the overlay branch above (runtime set_background_color
+        // must stay visible on transparent windows). Unset + transparent →
+        // Color.Transparent so vibrancy/blur remains visible through the Web component.
+        .backgroundColor(data.style.backgroundColor ?? (data.transparent === true ? Color.Transparent : undefined))
         .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
         // Vibrancy/frosted glass: backdropBlur blurs in-surface pixels of the Web component.
         // Works on opaque containers (Float sub-windows where setWindowContainerColor returns 1300004).

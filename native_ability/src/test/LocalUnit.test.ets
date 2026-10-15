@@ -514,28 +514,52 @@ export default function localUnitTest() {
       BridgeHostRegistry.beginClosing(sessionId);
       await BridgeHostRegistry.dispose(sessionId);
     });
-    it("oneNativeModuleCannotBelongToTwoActiveAbilities", 0, async () => {
+    it("secondAbilityJoinsTheLiveSessionOfItsModules", 0, async () => {
       const firstSession = BridgeHostRegistry.prepare(
         ["module_owner_test"],
         {} as common.UIAbilityContext,
         [],
       );
       BridgeHostRegistry.configurePlugins(firstSession, "module_owner_test", []);
-      let duplicateError = "";
-      try {
-        BridgeHostRegistry.prepare(["module_owner_test"], {} as common.UIAbilityContext, []);
-      } catch (error) {
-        duplicateError = String(error);
-      }
-      expect(duplicateError.indexOf("already belongs to active Ability") >= 0).assertTrue();
 
+      // D12 join model (openspec multi-uiability-windows): a spawned instance
+      // requesting the same modules joins the live session instead of failing
+      // with "already belongs to active Ability session" (the pre-D12
+      // behavior this test used to assert).
+      const joinedSession = BridgeHostRegistry.prepare(
+        ["module_owner_test"],
+        {} as common.UIAbilityContext,
+        [],
+      );
+      expect(joinedSession).assertEqual(firstSession);
+      expect(BridgeHostRegistry.activeSessionForModules(["module_owner_test"])).assertEqual(firstSession);
+
+      // Mixed ownership is still rejected: one owned module plus one free
+      // module would leave teardown ownership ambiguous, so prepare must not
+      // create a half-joined session.
+      let mixedError = "";
+      try {
+        BridgeHostRegistry.prepare(
+          ["module_owner_test", "module_owner_free"],
+          {} as common.UIAbilityContext,
+          [],
+        );
+      } catch (error) {
+        mixedError = String(error);
+      }
+      expect(mixedError.indexOf("already belongs to active Ability") >= 0).assertTrue();
+
+      // After dispose the modules are free again and a fresh prepare creates
+      // a NEW session — a join never outlives the session that owns it.
       BridgeHostRegistry.beginClosing(firstSession);
       await BridgeHostRegistry.dispose(firstSession);
+      expect(BridgeHostRegistry.activeSessionForModules(["module_owner_test"])).assertUndefined();
       const replacementSession = BridgeHostRegistry.prepare(
         ["module_owner_test"],
         {} as common.UIAbilityContext,
         [],
       );
+      expect(replacementSession !== firstSession).assertTrue();
       BridgeHostRegistry.configurePlugins(replacementSession, "module_owner_test", []);
       BridgeHostRegistry.beginClosing(replacementSession);
       await BridgeHostRegistry.dispose(replacementSession);

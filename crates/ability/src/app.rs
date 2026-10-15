@@ -1,10 +1,10 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     fmt::Debug,
     sync::{
-        atomic::{AtomicBool, AtomicI64},
-        Arc, Mutex, RwLock,
+        atomic::AtomicI64,
+        Arc, LazyLock, Mutex, RwLock,
     },
 };
 
@@ -21,13 +21,11 @@ use ohos_xcomponent_binding::{KeyEventData, RawWindow};
 use crate::{
     bridge::MainThreadBridgeEndpoint, AvoidArea, AvoidAreaType, BridgeMainThread,
     BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration, BridgePluginRegistry,
-    BridgeRuntime, Configuration, Event, InputEvent, MainThreadScheduler, OpenHarmonyWaker,
+    BridgeRuntime, Configuration, Event, InputEvent, MainThreadScheduler, OpenHarmonyWaker, WakerSlot,
     PluginLifecycleEvent, Rect,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
-
-pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
@@ -189,13 +187,6 @@ impl OpenHarmonyAppInner {
         // the write side (ArkTS onSaveState → Event::SaveState → app.save)
         // was live while the read side silently produced nothing.
         self.save_state = true;
-    }
-
-    pub fn create_waker(&self) -> OpenHarmonyWaker {
-        // Read `WAKER` live at `wake()` time, not here. See `waker.rs` for the
-        // snapshot-timing rationale: `WAKER` is populated by `create_lifecycle_handle`,
-        // which runs after the embedding runtime's entry that constructs the event-loop proxy.
-        OpenHarmonyWaker::new()
     }
 
     pub fn config(&self) -> Configuration {
@@ -456,6 +447,15 @@ struct ActiveBridgeSession {
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: EventLoop,
+    /// Per-app latch replacing the old process-global `HAS_EVENT` (design.md
+    /// D10, openspec multi-uiability-windows): `run_loop` installs the event
+    /// handler at most once per app. Shared through `Arc` so every clone of
+    /// the app observes the same latch.
+    pub(crate) event_loop_installed: Arc<Cell<bool>>,
+    /// Per-app event-loop waker slot (design.md D10): populated by
+    /// `create_lifecycle_handle`, read live by every `OpenHarmonyWaker` clone
+    /// (see `waker.rs` for the live-read rationale).
+    pub(crate) waker: WakerSlot,
     pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
     bridge_session: Arc<RwLock<Option<ActiveBridgeSession>>>,
@@ -506,6 +506,8 @@ impl OpenHarmonyApp {
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
             #[allow(clippy::arc_with_non_send_sync)]
             event_loop: Arc::new(RefCell::new(None)),
+            event_loop_installed: Arc::new(Cell::new(false)),
+            waker: Arc::new(RwLock::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
             back_press_interceptor: Arc::new(RefCell::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
@@ -562,6 +564,9 @@ impl OpenHarmonyApp {
     // inside already-tolerant callback contexts).
 
     /// Stores the latest `want.parameters` JSON from `onNewWant`.
+    /// Test-only facade: production code goes through the module-level
+    /// window-id-keyed free functions (same names, taking a leading
+    /// `window_id`); kept for unit tests.
     pub fn store_want_parameters(&self, json: &str) {
         if let Ok(mut inner) = self.inner.write() {
             inner.store_want_parameters(json);
@@ -569,7 +574,9 @@ impl OpenHarmonyApp {
     }
 
     /// Takes the latest `want.parameters` JSON (draining the stored value).
-    /// Consumed by the `plugin-deep-link` facade (`DeepLinkClient`).
+    /// Test-only facade: production code goes through the window-id-keyed free
+    /// functions (`take_want_parameters_for_window` and siblings); kept for
+    /// unit tests.
     pub fn take_want_parameters(&self) -> String {
         self.inner
             .write()
@@ -579,6 +586,9 @@ impl OpenHarmonyApp {
     }
 
     /// Stores the initial `want.uri` from `onCreate` (cold start).
+    /// Test-only facade: production code goes through the module-level
+    /// window-id-keyed free functions (same names, taking a leading
+    /// `window_id`); kept for unit tests.
     pub fn store_initial_want_uri(&self, uri: &str) {
         if let Ok(mut inner) = self.inner.write() {
             inner.store_initial_want_uri(uri);
@@ -586,7 +596,9 @@ impl OpenHarmonyApp {
     }
 
     /// Takes the initial `want.uri` from `onCreate` (draining the stored value).
-    /// Consumed by the `plugin-deep-link` facade to surface the cold-start deep link.
+    /// Test-only facade: production code goes through the window-id-keyed free
+    /// functions (`take_initial_want_uri_for_window` and siblings); kept for
+    /// unit tests.
     pub fn take_initial_want_uri(&self) -> String {
         self.inner
             .write()
@@ -597,6 +609,10 @@ impl OpenHarmonyApp {
 
     /// Stores the continuation signal from a lifecycle callback
     /// (see `OpenHarmonyAppInner::store_continuation` for the clear-on-false contract).
+    /// Test-only facade: production code goes through the module-level free
+    /// function `store_continuation` (its doc is the public entry point, and
+    /// external tests — e.g. plugin-continuation — must call it instead of
+    /// this app-instance store); kept for unit tests.
     pub fn store_continuation(&self, is_continuation: bool, parameters_json: &str) {
         if let Ok(mut inner) = self.inner.write() {
             inner.store_continuation(is_continuation, parameters_json);
@@ -604,7 +620,9 @@ impl OpenHarmonyApp {
     }
 
     /// Returns whether the current launch is an app-continuation restore.
-    /// Peek-only. Consumed by the `plugin-continuation` facade (`ContinuationClient`).
+    /// Peek-only. Test-only facade: production code goes through the
+    /// module-level free functions (`is_continuation_restore` and siblings);
+    /// kept for unit tests.
     pub fn is_continuation_restore(&self) -> bool {
         self.inner
             .read()
@@ -614,7 +632,8 @@ impl OpenHarmonyApp {
     }
 
     /// Takes the continuation payload JSON (draining the stored value).
-    /// Consumed by the `plugin-continuation` facade (`ContinuationClient`).
+    /// Test-only facade: production code goes through the module-level free
+    /// functions (`take_continuation_data` and siblings); kept for unit tests.
     pub fn take_continuation_data(&self) -> String {
         self.inner
             .write()
@@ -797,6 +816,40 @@ impl OpenHarmonyApp {
         self.bridge_plugins.dispatch_lifecycle(event)
     }
 
+    /// Tears down every per-window registry entry for a destroyed UIAbility
+    /// instance (design.md D13): the D7 handshake entry, the D9 want-URI
+    /// storage, the label → id registry and the cached window rects. Called
+    /// from the `on_ability_destroy` lifecycle callback after
+    /// `AbilityDestroyed` has been dispatched to bridge plugins (which drop
+    /// the session partition themselves).
+    ///
+    /// Float sub-windows never reach this path — they are torn down through
+    /// `notify_window_close` → tao `Destroyed` — and window ids are monotonic
+    /// (never reused), so removing by id cannot touch a live window. The
+    /// primary (id 0) also passes through on process exit: harmless, its
+    /// handshake entry never existed and `release_render_owner` already
+    /// cleared its rect.
+    pub fn unregister_ui_ability_state(&self, window_id: i64) {
+        let pending_len = crate::window::unregister_pending_ui_ability(window_id);
+        remove_want_uri_storage(window_id);
+        unregister_window_label(window_id);
+        if let Ok(mut inner) = self.inner.write() {
+            inner.window_rects.remove(&window_id);
+        }
+        // Registry-size observability for the teardown path: log AFTER the
+        // mutations and outside any lock (lock discipline — see
+        // set_ui_ability_waker). Debug level: per-window teardown is routine.
+        let want_params_len = WANT_PARAMETERS.lock().map(|m| m.len()).unwrap_or(0);
+        let want_uris_len = INITIAL_WANT_URI.lock().map(|m| m.len()).unwrap_or(0);
+        crate::debug!(
+            "unregister_ui_ability_state id={} — pending={} want_params={} want_uris={}",
+            window_id,
+            pending_len,
+            want_params_len,
+            want_uris_len
+        );
+    }
+
     pub(crate) fn begin_bridge_session(
         &self,
         owner: &str,
@@ -859,7 +912,9 @@ impl OpenHarmonyApp {
         }
     }
     pub fn create_waker(&self) -> OpenHarmonyWaker {
-        self.inner.read().unwrap().create_waker()
+        // The waker slot lives on the app (wrapper), not the inner state —
+        // see `waker.rs` for the live-read rationale.
+        OpenHarmonyWaker::new(self.waker.clone())
     }
     pub fn config(&self) -> Configuration {
         self.inner.read().unwrap().config()
@@ -1028,18 +1083,28 @@ impl OpenHarmonyApp {
     }
 
     pub fn run_loop<F: FnMut(Event) + 'static>(&self, event_handle: F) {
-        if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
+        // Per-app latch (design.md D10, openspec multi-uiability-windows —
+        // replaces the old process-global HAS_EVENT silent no-op). All
+        // UIAbility instances of one app share ONE event loop by design
+        // (NG4): a second run_loop call means a caller mis-assumed one loop
+        // per instance. Keep the first handler (the shared loop stays
+        // coherent) but make the anomaly visible instead of silent.
+        if self.event_loop_installed.get() {
+            crate::error!(
+                "run_loop called twice on the same OpenHarmonyApp — keeping the first \
+                 handler (multi-UIAbility instances share one app/event loop, NG4)"
+            );
             return;
         }
 
         // The handler is required to be `'static` (no borrows of `self` or other
         // non-'static data), so it can be stored in the `Box<dyn FnMut(Event)>`
-        // slot without any lifetime erasure. The `HAS_EVENT` guard ensures
-        // `run_loop` is called exactly once and the app outlives all event
+        // slot without any lifetime erasure. The latch ensures `run_loop`
+        // installs exactly one handler and the app outlives all event
         // dispatch.
         let static_handler: Box<dyn FnMut(Event) + 'static> = Box::new(event_handle);
         self.event_loop.replace(Some(static_handler));
-        HAS_EVENT.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.event_loop_installed.set(true);
     }
 
     /// Dispatch a key event into the tao event loop from the ArkTS pre-IME
@@ -1056,7 +1121,14 @@ impl OpenHarmonyApp {
     /// tracking and keycode mapping all apply unchanged.
     pub fn dispatch_key_event(&self, data: KeyEventData) {
         if let Some(ref mut h) = *self.event_loop.borrow_mut() {
-            h(Event::Input(InputEvent::KeyEvent(data)));
+            // window_id = 0 (primary): MainPage.onKeyPreIme forwards pre-IME
+            // keys only for the main window — sub-UIAbility instances are
+            // gated out upstream (no suppression shim → double dispatch), so
+            // this dispatch is always the primary's render surface.
+            h(Event::Input {
+                window_id: 0,
+                input: InputEvent::KeyEvent(data),
+            });
         }
     }
 
@@ -1156,11 +1228,13 @@ pub fn notify_window_close(window_id: i32) {
     // iteration, so the queued close (and the downstream `CloseRequested` →
     // `Destroyed` events) would sit undrained indefinitely. The main-window
     // path wakes via `tao::EventLoopProxy::send_event` → `waker.wake()`; this
-    // mirrors that for the NAPI-driven sub-window path. `OpenHarmonyWaker::new()`
-    // reads the global `WAKER` live at `wake()` time (see `waker.rs`), so it is
-    // safe even though `create_lifecycle_handle` may not have run yet — a no-op
-    // wake leaves the close queued for a later iteration.
-    OpenHarmonyWaker::new().wake();
+    // mirrors that for the NAPI-driven sub-window path. This free fn has no
+    // `OpenHarmonyApp` handle (ArkTS callers only hold the native module), so
+    // it goes through the process-level alias of the app's waker slot — exact
+    // under the NG4 one-app-per-process invariant (see waker.rs). A no-op
+    // wake (lifecycle setup not yet run) leaves the close queued for a later
+    // iteration.
+    crate::waker::wake_installed_app();
 }
 
 /// Drain all pending window close requests.
@@ -1261,6 +1335,190 @@ impl<'a> SaveLoader<'a> {
     pub fn load(&self) -> Option<Vec<u8>> {
         self.app.load()
     }
+}
+
+// --- want.parameters storage (per UIAbility instance, design.md D9) ---
+
+/// Latest `want.parameters` JSON per UIAbility instance, keyed by tauri window id
+/// (0 = the process's first instance). `onNewWant` stores with the originating
+/// instance's id so a spawned instance's deep link never overwrites the primary's.
+pub(crate) static WANT_PARAMETERS: LazyLock<Mutex<HashMap<i64, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub(crate) fn store_want_parameters(window_id: i64, json: &str) {
+    match WANT_PARAMETERS.lock() {
+        Ok(mut params) => {
+            params.insert(window_id, json.to_string());
+        }
+        Err(e) => crate::error!("WANT_PARAMETERS mutex poisoned in store: {}", e),
+    }
+}
+
+/// Takes the `want.parameters` JSON stored for `window_id` (draining that entry).
+///
+/// Safe to call from any thread. The value is consumed (entry removed), so a
+/// second call for the same instance returns `""` until the next `onNewWant`
+/// stores a fresh value. Consumed by the `plugin-deep-link` facade
+/// (`DeepLinkClient`).
+pub fn take_want_parameters_for_window(window_id: i64) -> String {
+    WANT_PARAMETERS
+        .lock()
+        .map(|mut p| p.remove(&window_id).unwrap_or_default())
+        .unwrap_or_default()
+}
+
+/// Primary-instance (window id 0) variant of [`take_want_parameters_for_window`].
+pub fn take_want_parameters() -> String {
+    take_want_parameters_for_window(0)
+}
+
+// --- initial want.uri storage (per UIAbility instance, design.md D9) ---
+
+/// Initial `want.uri` from cold-start `onCreate`, keyed by tauri window id.
+pub(crate) static INITIAL_WANT_URI: LazyLock<Mutex<HashMap<i64, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub(crate) fn store_initial_want_uri(window_id: i64, uri: &str) {
+    match INITIAL_WANT_URI.lock() {
+        Ok(mut uris) => {
+            uris.insert(window_id, uri.to_string());
+        }
+        Err(e) => crate::error!("INITIAL_WANT_URI mutex poisoned in store: {}", e),
+    }
+}
+
+/// Takes the initial `want.uri` stored for `window_id` (draining that entry).
+///
+/// Safe to call from any thread. The value is consumed (entry removed), so a
+/// second call for the same instance returns `""`. Consumed by the
+/// `plugin-deep-link` facade (`DeepLinkClient`) to surface the cold-start deep
+/// link of the calling window.
+pub fn take_initial_want_uri_for_window(window_id: i64) -> String {
+    INITIAL_WANT_URI
+        .lock()
+        .map(|mut u| u.remove(&window_id).unwrap_or_default())
+        .unwrap_or_default()
+}
+
+/// Primary-instance (window id 0) variant of [`take_initial_want_uri_for_window`].
+pub fn take_initial_want_uri() -> String {
+    take_initial_want_uri_for_window(0)
+}
+
+/// Drops the want storage (both maps) for a destroyed UIAbility instance
+/// (design.md D13). The lazy-take accessors above only drain on read, so an
+/// instance that never queried its deep link would otherwise leak its entries.
+/// Ids are never reused, so this cannot race a live instance.
+fn remove_want_uri_storage(window_id: i64) {
+    if let Ok(mut params) = WANT_PARAMETERS.lock() {
+        params.remove(&window_id);
+    }
+    if let Ok(mut uris) = INITIAL_WANT_URI.lock() {
+        uris.remove(&window_id);
+    }
+}
+
+// --- window label → id registry (deep-link per-instance resolution, D9) ---
+
+/// Maps tauri window labels to their pre-allocated UIAbility window ids.
+///
+/// `start_ui_ability` records every label it spawns so the deep-link facade can
+/// resolve a calling `Window`'s label back to its instance's want-URI storage.
+/// The primary window is never inserted at runtime: `window_id_for_label`
+/// resolves unknown labels to id 0 (`unwrap_or(0)`), which doubles as the
+/// fallback for the un-spawned "main" label — matching single-instance
+/// behavior.
+static WINDOW_ID_BY_LABEL: LazyLock<Mutex<HashMap<String, i64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Records (or overwrites) the window id owned by `label`.
+pub fn register_window_label(label: &str, window_id: i64) {
+    match WINDOW_ID_BY_LABEL.lock() {
+        Ok(mut labels) => {
+            labels.insert(label.to_owned(), window_id);
+        }
+        Err(e) => crate::error!("WINDOW_ID_BY_LABEL mutex poisoned in store: {}", e),
+    }
+}
+
+/// Resolves the window id previously registered for `label` (primary = 0 when
+/// the label was never registered, matching single-instance behavior).
+pub fn window_id_for_label(label: &str) -> i64 {
+    WINDOW_ID_BY_LABEL
+        .lock()
+        .map(|labels| labels.get(label).copied().unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Removes the label → id entry for a destroyed UIAbility instance (design.md
+/// D13). The map is keyed by label, so scan for our id — the registry holds at
+/// most one entry per live spawned window.
+///
+/// Direction note (audit of the E4 plan): after removal, a late
+/// `window_id_for_label` for the dead label resolves to 0 and would read the
+/// primary's memo. A call arriving from a destroyed window's webview is
+/// unreachable in practice, and keeping stale entries breaks the leak check.
+pub fn unregister_window_label(window_id: i64) {
+    if let Ok(mut labels) = WINDOW_ID_BY_LABEL.lock() {
+        labels.retain(|_, id| *id != window_id);
+    }
+}
+
+// --- app-continuation storage (launchReason === CONTINUATION restore) ---
+
+/// Marks whether the current launch is an app-continuation restore.
+///
+/// Peek-only (never drained): queries are idempotent and can be repeated
+/// without consuming the continuation payload.
+pub(crate) static CONTINUATION_RESTORE: Mutex<bool> = Mutex::new(false);
+
+/// Stores the continuation payload JSON (`want.parameters`) from a
+/// continuation-restore launch (cold start `onCreate` or warm `onNewWant`).
+pub(crate) static CONTINUATION_DATA: Mutex<String> = Mutex::new(String::new());
+
+/// Stores the continuation signal from a lifecycle callback.
+///
+/// `is_continuation == true` writes both the flag and the payload (passed
+/// through verbatim — the wantParam schema is an application-level contract).
+/// `is_continuation == false` clears both: the statics survive across Ability
+/// instances, so a plain relaunch must not observe the previous session's
+/// continuation payload.
+///
+/// Public (not `pub(crate)`) so the `plugin-continuation` crate's unit tests can
+/// drive the statics; production callers are the lifecycle closures.
+pub fn store_continuation(is_continuation: bool, parameters_json: &str) {
+    if let (Ok(mut flag), Ok(mut data)) = (CONTINUATION_RESTORE.lock(), CONTINUATION_DATA.lock()) {
+        *flag = is_continuation;
+        *data = if is_continuation {
+            parameters_json.to_string()
+        } else {
+            String::new()
+        };
+    } else {
+        crate::error!("continuation mutex poisoned in store");
+    }
+}
+
+/// Returns whether the current launch is an app-continuation restore.
+///
+/// Peek-only: does not consume [`take_continuation_data`], safe to call
+/// repeatedly. Consumed by the `plugin-continuation` facade
+/// (`ContinuationClient`).
+pub fn is_continuation_restore() -> bool {
+    CONTINUATION_RESTORE.lock().map(|f| *f).unwrap_or(false)
+}
+
+/// Takes the continuation payload JSON (draining the stored value).
+///
+/// Safe to call from any thread. The value is consumed (replaced with an empty
+/// `String`), so a second call returns `""` — empty also means the launch was
+/// not a continuation restore. Consumed by the `plugin-continuation` facade
+/// (`ContinuationClient`).
+pub fn take_continuation_data() -> String {
+    CONTINUATION_DATA
+        .lock()
+        .map(|mut d| std::mem::take(&mut *d))
+        .unwrap_or_default()
 }
 
 // --- app-continuation source-side snapshot (onContinue save) ---
@@ -1409,36 +1667,60 @@ mod continuation_tests {
     }
 }
 
-/// Tests for the want.parameters / initial want.uri session state
-/// (migrated from module statics, issue #87 major-9).
+/// Tests for the per-instance WANT_PARAMETERS / INITIAL_WANT_URI maps and the
+/// window label registry (design.md D9). Each test uses disjoint window ids so
+/// the process-wide statics never race under the default parallel test runner.
 #[cfg(test)]
 mod want_parameters_tests {
     use super::*;
 
     #[test]
     fn test_want_parameters_store_take_overwrite() {
-        let app = OpenHarmonyApp::new();
-        app.store_want_parameters(r#"{"key":"value","num":42}"#);
-        assert_eq!(app.take_want_parameters(), r#"{"key":"value","num":42}"#);
+        store_want_parameters(0, r#"{"key":"value","num":42}"#);
+        assert_eq!(
+            take_want_parameters_for_window(0),
+            r#"{"key":"value","num":42}"#
+        );
 
-        app.store_want_parameters(r#"{"source":"widget"}"#);
-        assert_eq!(app.take_want_parameters(), r#"{"source":"widget"}"#);
-        assert_eq!(app.take_want_parameters(), "");
+        store_want_parameters(0, r#"{"source":"widget"}"#);
+        assert_eq!(take_want_parameters_for_window(0), r#"{"source":"widget"}"#);
+        assert_eq!(take_want_parameters_for_window(0), "");
 
-        assert_eq!(app.take_want_parameters(), "");
+        // The key-0 wrapper drains the same entry the wrapper-level callers use.
+        assert_eq!(take_want_parameters(), "");
 
-        app.store_want_parameters(r#"{"first":1}"#);
-        app.store_want_parameters(r#"{"second":2}"#);
-        assert_eq!(app.take_want_parameters(), r#"{"second":2}"#);
+        store_want_parameters(0, r#"{"first":1}"#);
+        store_want_parameters(0, r#"{"second":2}"#);
+        assert_eq!(take_want_parameters_for_window(0), r#"{"second":2}"#);
     }
 
     #[test]
-    fn test_initial_want_uri_store_take() {
-        let app = OpenHarmonyApp::new();
-        app.store_initial_want_uri("myapp://cold-start");
-        assert_eq!(app.take_initial_want_uri(), "myapp://cold-start");
-        // Draining: second take is empty.
-        assert_eq!(app.take_initial_want_uri(), "");
+    fn want_parameters_are_isolated_per_window() {
+        store_want_parameters(3, r#"{"window":3}"#);
+        store_want_parameters(4, r#"{"window":4}"#);
+        assert_eq!(take_want_parameters_for_window(4), r#"{"window":4}"#);
+        // Window 3's entry survives window 4's drain.
+        assert_eq!(take_want_parameters_for_window(3), r#"{"window":3}"#);
+        assert_eq!(take_want_parameters_for_window(4), "");
+    }
+
+    #[test]
+    fn initial_want_uri_is_isolated_per_window() {
+        store_initial_want_uri(0, "app://primary");
+        store_initial_want_uri(2, "app://second");
+        assert_eq!(take_initial_want_uri_for_window(2), "app://second");
+        assert_eq!(take_initial_want_uri_for_window(0), "app://primary");
+        assert_eq!(take_initial_want_uri_for_window(0), "");
+    }
+
+    #[test]
+    fn label_registry_resolves_registered_labels() {
+        register_window_label("main", 0);
+        register_window_label("secondary", 1);
+        assert_eq!(window_id_for_label("secondary"), 1);
+        assert_eq!(window_id_for_label("main"), 0);
+        // Unknown labels fall back to the primary instance (single-instance behavior).
+        assert_eq!(window_id_for_label("never-registered"), 0);
     }
 }
 
@@ -1449,6 +1731,41 @@ mod tests {
         update_cursor_position, AvoidArea, AvoidAreaType, Rect, CURSOR_POSITION_X,
         CURSOR_POSITION_Y,
     };
+
+    #[test]
+    fn d13_teardown_drops_per_window_registry_entries() {
+        use crate::window::{
+            is_ui_ability_stage_ready, register_pending_ui_ability, unregister_pending_ui_ability,
+        };
+        use crate::{register_window_label, window_id_for_label};
+
+        // Pending-ability handshake: once torn down the id reads as unknown, and
+        // unknown ids read as "ready" (see is_ui_ability_stage_ready) — a future
+        // spawn opens a fresh entry via register_pending_ui_ability.
+        register_pending_ui_ability(11);
+        assert!(!is_ui_ability_stage_ready(11));
+        assert_eq!(unregister_pending_ui_ability(11), 0);
+        assert!(is_ui_ability_stage_ready(11));
+        // Tearing down an id that never existed is a no-op.
+        assert_eq!(unregister_pending_ui_ability(404), 0);
+
+        // Want storage: the D13 teardown drains entries the instance never read
+        // (the lazy-take accessors only clear on read).
+        super::store_want_parameters(11, "{}");
+        super::store_initial_want_uri(11, "tauri://never-read");
+        super::remove_want_uri_storage(11);
+        assert_eq!(crate::take_want_parameters_for_window(11), "");
+        assert_eq!(crate::take_initial_want_uri_for_window(11), "");
+
+        // Label registry: removing our id leaves other labels untouched, and the
+        // dead label resolves back to 0 (primary) — see the direction note on
+        // unregister_window_label.
+        register_window_label("d13-spawned", 11);
+        register_window_label("d13-other", 12);
+        super::unregister_window_label(11);
+        assert_eq!(window_id_for_label("d13-spawned"), 0);
+        assert_eq!(window_id_for_label("d13-other"), 12);
+    }
 
     #[test]
     fn render_owner_rejects_overlap_and_ignores_stale_surface_callbacks() {

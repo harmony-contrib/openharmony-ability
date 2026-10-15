@@ -25,13 +25,17 @@ export interface ApplicationLifecycle {
   keyboardEventCallback: KeyboardCallback;
 }
 
+// Trailing windowId parameters (multi-UIAbility, design.md D3/D8): 0 = the
+// process's first instance, or a spawned instance's pre-allocated tauri window
+// id. Payload-object callbacks whose object already wraps windowId
+// (onWindowSizeChange / onWindowRectChange) keep their single-arg shape.
 export interface EnvironmentCallback {
-  onConfigurationUpdated: (arg: object) => void;
-  onMemoryLevel: (arg: number) => void;
+  onConfigurationUpdated: (arg: object, windowId: number) => void;
+  onMemoryLevel: (arg: number, windowId: number) => void;
 }
 
 export interface KeyboardCallback {
-  onKeyboardHeightChange: (height: number) => void;
+  onKeyboardHeightChange: (height: number, windowId: number) => void;
 }
 
 // NewWantData payload for onNewWant. Optional continuation fields are read with
@@ -51,17 +55,17 @@ export interface CreateWithWantData {
 }
 
 export interface WindowStageEventCallback {
-  onWindowStageCreate: () => void;
-  onWindowStageDestroy: () => void;
-  onAbilityCreate: (arg: string) => void;
-  onAbilityCreateWithWant: (data: CreateWithWantData) => void;
-  onAbilityDestroy: () => void;
-  onAbilitySaveState: () => string;
-  onWindowStageEvent: (arg: number) => void;
+  onWindowStageCreate: (windowId: number) => void;
+  onWindowStageDestroy: (windowId: number) => void;
+  onAbilityCreate: (arg: string, windowId: number) => void;
+  onAbilityCreateWithWant: (data: CreateWithWantData, windowId: number) => void;
+  onAbilityDestroy: (windowId: number) => void;
+  onAbilitySaveState: (windowId: number) => void;
+  onWindowStageEvent: (arg: number, windowId: number) => void;
   onWindowSizeChange: (arg: object) => void;
   onWindowRectChange: (arg: object) => void;
-  onAvoidAreaChange: (arg: object) => void;
-  onNewWant: (data: NewWantData) => void;
+  onAvoidAreaChange: (arg: object, windowId: number) => void;
+  onNewWant: (data: NewWantData, windowId: number) => void;
   // PC/2in1 pre-close probe (onPrepareToTerminateAsync). Return true to CANCEL
   // this termination, false to allow it (normal destroy chain follows).
   onPrepareToTerminate: () => boolean;
@@ -178,9 +182,11 @@ export interface Module {
   /**
    * Mounts this native module's one Rust render tree into `slot`. `renderOwner` is unique per
    * appearance and protects a later render from stale cleanup; another concurrently active
-   * DefaultXComponent must use a different native module.
+   * DefaultXComponent must use a different native module. `windowId` is the calling
+   * UIAbility instance's id (0 = primary) — it keys the input/redraw/resize events the
+   * Rust closures dispatch (multi-uiability-windows design.md D5).
    */
-  render: (slot: NodeContent, renderOwner: string) => void;
+  render: (slot: NodeContent, renderOwner: string, windowId: number) => void;
   /** Releases only the render tree owned by `renderOwner`. */
   disposeRender: (renderOwner: string) => void;
   /** Releases the remaining render tree when the WindowStage is torn down. */
@@ -211,7 +217,27 @@ export interface Module {
    *  action: 0 = Down, 1 = Up. */
   notifyKeyEvent?: (keyCode: number, action: number, deviceId: number) => void;
   /** `register_create_sub_window_tsfn` — legacy create_os_window path hookup. */
-  registerCreateSubWindowTsfn?: (createSubWindow: (config: ESObject) => Promise<number>) => void;
+  registerCreateSubWindowTsfn?: (
+    createSubWindow: (config: ESObject) => Promise<number>,
+  ) => void;
+  /** `notify_float_window_registered` — Float creation-chain settle signal (success or
+   *  failure); drains the Rust-side ops queued against the pre-registration race window
+   *  (doc/OHOS窗口遗留问题.md issue-7 addendum). */
+  notifyFloatWindowRegistered?: (windowId: number, registered: boolean) => void;
+  /** `enable_float_pending_tracking` — Float pending-registry capability handshake
+   *  (review V1); arms the Rust-side gate only when present, so a stale HAR keeps the
+   *  pre-fix fire-and-forget semantics. */
+  enableFloatPendingTracking?: () => void;
+  /** `notify_ui_ability_start_failed` — start-ui-ability deferred-catch rollback
+   *  (AppControlPlugin): AMS rejected the spawn after the bridge response already
+   *  returned accepted; drops the pending D7 handshake entry and the label→id
+   *  pairing so a rejected spawn cannot strand them (review G15). */
+  notifyUiAbilityStartFailed?: (windowId: number) => void;
+  /** `enable_ui_ability_pending_tracking` — UIAbility spawn pending-registry
+   *  capability handshake (mirrors enableFloatPendingTracking); arms the Rust-side
+   *  gate only when present, so a stale HAR keeps the pre-registry fire-and-forget
+   *  semantics instead of wedging ops against entries no ArkTS code would settle. */
+  enableUiAbilityPendingTracking?: () => void;
   /**
    * Synchronous ArkTS platform callback -> Rust plugin decision. The value is a named N-API
    * object and must be returned before the platform callback resumes.
@@ -223,7 +249,7 @@ export interface Module {
     responseTypeName: string,
     value: ESObject,
   ) => ESObject;
-  onBridgeLifecycle?: (kind: string) => void;
+  onBridgeLifecycle?: (kind: string, windowId: number) => void;
   /**
    * Legacy opt-in for native modules that register a custom `webview` URL scheme. Retained so
    * ProcessInitializer can probe for web-engine requirements on pre-pluginize modules. New

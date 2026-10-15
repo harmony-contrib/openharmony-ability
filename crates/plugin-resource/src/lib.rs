@@ -113,9 +113,18 @@ impl BridgePlugin for ResourceBridgePlugin {
     }
 
     fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
+        // The stored manager belongs to the primary window's registry (the
+        // Ability-scoped wrapper pushes once via resource-manager-ready). A
+        // spawned UIAbility instance's create/destroy must not clear it —
+        // under the D12 join model a joined instance skips
+        // configurePlugins/onInstall, so resource-manager-ready is never
+        // re-pushed and the primary would lose resource access permanently.
+        // Single-instance events all carry window_id 0, so this gate never
+        // changes existing behavior (multi-uiability-windows R11 / AF2).
         if matches!(
             event,
-            PluginLifecycleEvent::AbilityCreated { .. } | PluginLifecycleEvent::AbilityDestroyed
+            PluginLifecycleEvent::AbilityCreated { window_id: 0, .. }
+                | PluginLifecycleEvent::AbilityDestroyed { window_id: 0 }
         ) {
             self.replace_resource_manager(None)?;
         }

@@ -184,9 +184,14 @@ impl BridgePlugin for WebviewBridgePlugin {
     }
 
     fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
+        // The attached controller/protocol/js-proxy state belongs to the primary window's
+        // XComponent webview. A spawned UIAbility instance teardown must not clear it
+        // (multi-uiability-windows R11); single-instance events all carry window_id 0,
+        // so this gate never changes existing behavior.
         if matches!(
             event,
-            PluginLifecycleEvent::UiContextDestroyed | PluginLifecycleEvent::AbilityDestroyed
+            PluginLifecycleEvent::UiContextDestroyed { window_id: 0, .. }
+                | PluginLifecycleEvent::AbilityDestroyed { window_id: 0 }
         ) {
             clear_attached_webview_state()?;
         }

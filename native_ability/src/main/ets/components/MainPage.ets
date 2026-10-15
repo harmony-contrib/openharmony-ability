@@ -27,7 +27,14 @@ export const RouteName = "NativeAbility";
 struct MainPage {
   @StorageProp("moduleName") moduleNames: string | string[] = "";
   // Subsequent UIAbility instances receive their windowId via LocalStorage
-  @LocalStorageProp("windowId") windowId: number = MAIN_WINDOW_ID;
+  @LocalStorageProp('windowId') windowId: number = MAIN_WINDOW_ID;
+  // Bridge session id (design.md D6/D12): the primary instance's own session,
+  // or the shared session id for a joined spawned instance. Delivered through
+  // the per-instance LocalStorage built in NativeAbility.loadWindowStageContent
+  // — NOT AppStorage, which is a process-global single value a spawned
+  // instance would overwrite mid-attachment. Passed down to
+  // DefaultXComponent as a plain @Prop.
+  @LocalStorageProp('bridgeSessionId') bridgeSessionId: string = "";
 
   private loadMode: "async" | "sync" = "async";
 
@@ -79,7 +86,11 @@ struct MainPage {
         Row() {
           Column() {
             if (this.resolvedModuleName !== "") {
-              DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: this.windowId });
+              DefaultXComponent({
+                moduleName: this.resolvedModuleName,
+                windowId: this.windowId,
+                bridgeSessionId: this.bridgeSessionId,
+              })
             } else {
               Text("Loading Main Window...").fontSize(20).fontColor(Color.Gray);
             }
@@ -106,7 +117,7 @@ struct MainPage {
         if (
           event.type === KeyType.Down &&
           this.acceleratorMatcher.matchesClipboardShortcut(event) &&
-          !isClipboardEnabled(MAIN_WINDOW_ID)
+          !isClipboardEnabled(this.windowId)
         ) {
           return true;
         }
@@ -114,7 +125,7 @@ struct MainPage {
         if (
           event.type === KeyType.Down &&
           this.acceleratorMatcher.matchesZoomShortcut(event) &&
-          !isZoomHotkeysEnabled(MAIN_WINDOW_ID)
+          !isZoomHotkeysEnabled(this.windowId)
         ) {
           return true;
         }
@@ -122,7 +133,7 @@ struct MainPage {
         if (event.type === KeyType.Down && this.acceleratorMatcher.matches(event)) {
           const matchedItem = this.acceleratorMatcher.getMatchedItem();
           if (matchedItem) {
-            const handler = getMenuClickHandler(MAIN_WINDOW_ID);
+            const handler = getMenuClickHandler(this.windowId);
             if (handler) {
               handler(matchedItem);
             }
@@ -136,9 +147,9 @@ struct MainPage {
         if (
           event.type === KeyType.Down &&
           event.keyCode === KeyCode.KEYCODE_ESCAPE &&
-          !isMenubarVisible(MAIN_WINDOW_ID)
+          !isMenubarVisible(this.windowId)
         ) {
-          const recoverFn = getMenuBarRecoverFn(MAIN_WINDOW_ID);
+          const recoverFn = getMenuBarRecoverFn(this.windowId);
           if (recoverFn) {
             recoverFn();
           }

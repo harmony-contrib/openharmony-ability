@@ -58,12 +58,15 @@ WebView 的 `FrameNode` 默认以 host 内部唯一 key 挂进当前 module 的�
 全屏显示。Rust 需要组合时，先用内置 `ohos.node` 插件创建容器，把容器句柄作为 `parentHandle` 传入
 create request，WebView 节点就会挂到该容器下；容器最终由 Rust `mount-into-root` 整体挂载。
 
-业务层级 = 页面 `Stack` 声明顺序，业务内容放在 `DefaultXComponent` 前后即可得到下/上层级：
+业务层级 = 页面 `Stack` 声明顺序，业务内容放在 `DefaultXComponent` 前后即可得到下/上层级。
+`DefaultXComponent` 必须传入 `bridgeSessionId`（缺失时组件拒绝挂载）：MainPage 路由内用
+`@LocalStorageProp('bridgeSessionId')`，独立页面用 `@StorageProp("bridgeSessionId")`
+（NativeAbility 创建会话后发布到 AppStorage，demo 页面即此写法）：
 
 ```ts
 Stack() {
   this.BusinessUnderlay()                        // 插件树之下
-  DefaultXComponent({ moduleName: "demo_native" })
+  DefaultXComponent({ moduleName: "demo_native", bridgeSessionId: this.bridgeSessionId })
   this.BusinessForeground()                      // 插件树之上
 }
 ```

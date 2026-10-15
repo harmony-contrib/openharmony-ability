@@ -5,13 +5,15 @@
 //! queries and `context.startAbility(want)` to navigate to the system "App Startup Management"
 //! settings page for enable/disable.
 //!
-//! Version guard: `is_enabled` requires API 21+; on lower API levels it returns `Ok(false)`.
+//! Version guard: `is_enabled` requires API 21+; on lower API levels it returns an
+//! error naming the required API level.
 //! `enable` / `disable` have no version guard — `startAbility` is available from API 12+.
 
 use napi_derive_ohos::napi;
 use napi_ohos::{Error, Result};
+pub use openharmony_ability::version;
 use openharmony_ability::{
-    impl_bridge_napi_type, version, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
+    impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
     BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
 };
 
@@ -151,11 +153,14 @@ impl AutostartClient {
     /// Queries whether autostart is enabled for this application.
     ///
     /// Requires API 21+ (`autoStartupManager.getAutoStartupStatusForSelf()`).
-    /// On lower API levels, returns `Ok(false)` as a forced fallback.
-    /// On devices that do not support `autoStartupManager` (error 801), also returns `Ok(false)`.
+    /// On lower API levels, returns an error naming the required API level.
+    /// On devices that do not support `autoStartupManager` (error 801), returns `Ok(false)`.
     pub async fn is_enabled(&self) -> Result<bool> {
         if version::sdk_api_version() < MIN_AUTOSTART_API_VERSION {
-            return Ok(false);
+            return Err(Error::from_reason(format!(
+                "isEnabled requires API level {MIN_AUTOSTART_API_VERSION}+ on OpenHarmony (current: {})",
+                version::sdk_api_version()
+            )));
         }
         let response = self
             .call::<AutostartIsEnabledRequest, AutostartIsEnabledResponse>(

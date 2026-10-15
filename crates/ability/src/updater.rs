@@ -23,7 +23,7 @@
 //! up per Ability session.
 
 use napi_derive_ohos::napi;
-use napi_ohos::{Error, Result};
+use napi_ohos::{Error, Result, Status};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -70,7 +70,54 @@ pub struct UpdaterCheckResponse {
     pub date: Option<String>,
 }
 
-impl_bridge_napi_type!(UpdaterCheckResponse, "ohos.updater.CheckResponse");
+// Hand-rolled decode instead of `impl_bridge_napi_type!`: the
+// napi-derive-backend-ohos 1.2.0 object getter infers the item type from the
+// assignment target, so a derived `let body_: Option<String> = obj.get("body")`
+// compiles as `obj.get::<String>` and explodes with `StringExpected` when ArkTS
+// sends an explicit `null` (the "No update available" response does exactly
+// that — `new UpdaterCheckResponse(false, "unknown", "unknown", null, null)`).
+// A missing property happens to work (the getter skips conversion), which is
+// why no other Option-field bridge type has hit this yet. The explicit
+// turbofish + `flatten()` handles present-null, absent, and undefined alike.
+impl BridgeNapiType for UpdaterCheckResponse {
+    const TYPE_NAME: &'static str = "ohos.updater.CheckResponse";
+
+    fn into_bridge_value<'env>(
+        self,
+        env: &'env napi_ohos::Env,
+    ) -> Result<napi_ohos::bindgen_prelude::Unknown<'env>> {
+        <Self as napi_ohos::bindgen_prelude::ToNapiValue>::into_unknown(self, env)
+    }
+
+    fn from_bridge_value(
+        value: napi_ohos::bindgen_prelude::Unknown<'_>,
+    ) -> Result<Self> {
+        use napi_ohos::bindgen_prelude::{FromNapiValue, Object};
+        let obj = Object::from_unknown(value)?;
+        let missing = |name: &'static str| {
+            Error::new(Status::InvalidArg, format!("Missing field `{name}`"))
+        };
+        let update_available: bool = obj
+            .get("updateAvailable")?
+            .ok_or_else(|| missing("updateAvailable"))?;
+        let current_version: String = obj
+            .get("currentVersion")?
+            .ok_or_else(|| missing("currentVersion"))?;
+        // `version` is nullable: `None` when the device API level is below 20
+        // (AppGallery `versionName` unavailable) — same explicit-null handling
+        // as `body`/`date` above.
+        let version: Option<String> = obj.get::<Option<String>>("version")?.flatten();
+        let body: Option<String> = obj.get::<Option<String>>("body")?.flatten();
+        let date: Option<String> = obj.get::<Option<String>>("date")?.flatten();
+        Ok(Self {
+            update_available,
+            current_version,
+            version,
+            body,
+            date,
+        })
+    }
+}
 
 /// Empty request marker for the `downloadAndInstall` action.
 #[napi(object)]

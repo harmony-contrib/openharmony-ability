@@ -659,7 +659,10 @@ class BridgeHost {
         return;
       }
       try {
-        this.applicationLifecycle?.windowStageEventCallback.onAvoidAreaChange(options);
+        // windowId 0 like the size/rect handlers above: attachComponentWindow
+        // binds to the session-owning (primary) instance's component window —
+        // a joined instance never attaches a component (design.md D12/OQ3).
+        this.applicationLifecycle?.windowStageEventCallback.onAvoidAreaChange(options, 0);
       } catch {}
     };
     const onKeyboardHeightChange = (height: number): void => {
@@ -667,7 +670,7 @@ class BridgeHost {
         return;
       }
       try {
-        this.applicationLifecycle?.keyboardEventCallback.onKeyboardHeightChange(height);
+        this.applicationLifecycle?.keyboardEventCallback.onKeyboardHeightChange(height, 0);
       } catch {}
     };
     state.windowBinding = {
@@ -1894,13 +1897,35 @@ export class BridgeHostRegistry {
   private static readonly moduleOwners: Map<string, string> = new Map();
   private static nextSession: number = 1;
 
+  /**
+   * Returns the single live session that currently owns every listed module, or
+   * undefined when at least one module is unowned or the owners diverge
+   * (design.md D12 join model). NativeAbility uses this to detect that
+   * prepare() will join an existing session instead of creating a new one.
+   */
+  static activeSessionForModules(moduleNames: string[]): string | undefined {
+    let owner: string | undefined = undefined;
+    for (const moduleName of moduleNames) {
+      const moduleOwner = BridgeHostRegistry.moduleOwners.get(moduleName);
+      // Unowned, or owned by a session that no longer exists (stale entry) —
+      // either way this is not a clean join.
+      if (moduleOwner === undefined || !BridgeHostRegistry.sessions.has(moduleOwner)) {
+        return undefined;
+      }
+      if (owner === undefined) {
+        owner = moduleOwner;
+      } else if (owner !== moduleOwner) {
+        return undefined;
+      }
+    }
+    return owner;
+  }
+
   static prepare(
     moduleNames: string[],
     abilityContext: common.UIAbilityContext,
     factories: BridgePluginFactory[],
   ): string {
-    const sessionId = `bridge-${Date.now()}-${BridgeHostRegistry.nextSession++}`;
-    const hosts: Map<string, BridgeHost> = new Map();
     if (moduleNames.length === 0) {
       throw new Error("NativeAbility must declare at least one native module");
     }
@@ -1913,13 +1938,33 @@ export class BridgeHostRegistry {
         throw new Error(`Native module '${moduleName}' is declared more than once for one Ability`);
       }
       requestedModules.set(moduleName, true);
+    }
+
+    // Join model (design.md D12, openspec multi-uiability-windows): a spawned
+    // UIAbility instance reuses the same native modules as the primary instance
+    // — module.init cannot run twice and the per-module bridge state is
+    // process-level. When every requested module already belongs to one
+    // still-live session, prepare returns that session's id instead of throwing,
+    // so the spawned instance shares the primary's transport while its own
+    // window identity stays per-instance (windowId, LocalStorage, Rust session
+    // partition). Mixed ownership — some modules owned and some free, or owned
+    // by different live sessions — remains an error: a half-joined session would
+    // leave teardown ownership ambiguous.
+    const existingSession = BridgeHostRegistry.activeSessionForModules(moduleNames);
+    if (existingSession !== undefined) {
+      return existingSession;
+    }
+    for (const moduleName of moduleNames) {
       const owner = BridgeHostRegistry.moduleOwners.get(moduleName);
-      if (owner !== undefined) {
+      if (owner !== undefined && BridgeHostRegistry.sessions.has(owner)) {
         throw new Error(
           `Native module '${moduleName}' already belongs to active Ability session '${owner}'; use a distinct native module for another Ability`,
         );
       }
     }
+
+    const sessionId = `bridge-${Date.now()}-${BridgeHostRegistry.nextSession++}`;
+    const hosts: Map<string, BridgeHost> = new Map();
     try {
       for (const moduleName of moduleNames) {
         const host = new BridgeHost(sessionId, moduleName, abilityContext, factories);

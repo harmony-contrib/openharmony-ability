@@ -67,6 +67,13 @@ export function isWebFocused(windowId: number): boolean {
   return webFocused.get(windowId) ?? false;
 }
 
+/** Web focus state teardown (design.md D13) — mirrors
+ * unregisterKeySynthesisController's window-lifetime sinks so the map does
+ * not grow one entry per destroyed window. */
+export function unregisterWebFocus(windowId: number): void {
+  webFocused.delete(windowId);
+}
+
 /** Keys currently held — repeat = Down for an already-held key (mirrors tao's PRESSED_KEYS). */
 const pressedKeys: Set<number> = new Set();
 
@@ -305,4 +312,12 @@ export function notifyKeySynthesisController(
   controller: web_webview.WebviewController,
 ): void {
   controllers.set(windowId, controller);
+}
+
+/** Controller registry teardown (design.md D13). Called from WindowManager's
+ * window-lifetime sinks — unregisterUIAbilityStage (spawned UIAbility close,
+ * skipping the primary's id 0) and removeWindow (Float sub-window close).
+ * Without this the map grew one WebviewController entry per destroyed window. */
+export function unregisterKeySynthesisController(windowId: number): void {
+  controllers.delete(windowId);
 }

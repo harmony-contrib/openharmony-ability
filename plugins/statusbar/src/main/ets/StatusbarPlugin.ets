@@ -1,5 +1,5 @@
 import { statusBarManager } from "@kit.DeskTopExtensionKit";
-import { BusinessError } from "@kit.BasicServicesKit";
+import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import {
   type AboutMetadataData,
@@ -93,6 +93,13 @@ export class StatusbarPlugin extends AsyncPluginBase {
     }
 
     if (action === "add") {
+      // addToStatusBar's AsyncCallback overload (awaited further below) is
+      // API 14+; on lower API levels the callback never fires and the awaited
+      // Promise never settles — the bridge call hangs forever. Fail fast with
+      // the unified version error instead of risking the hang.
+      if (deviceInfo.sdkApiVersion < 14) {
+        throw new Error(`add requires API level 14+ on OpenHarmony (current: ${deviceInfo.sdkApiVersion})`);
+      }
       const request = expectBridgeRequestType(payload, "ohos.statusbar", action, ADD_REQUEST_TYPE) as AddRequest;
       if (!Number.isInteger(request.iconSize) || request.iconSize <= 0) {
         throw new Error("add.iconSize must be a positive integer");
@@ -212,6 +219,11 @@ export class StatusbarPlugin extends AsyncPluginBase {
     }
 
     if (action === "remove") {
+      // Same API 14+ guard as "add": the awaited AsyncCallback overload never
+      // settles below API 14, hanging the bridge call forever.
+      if (deviceInfo.sdkApiVersion < 14) {
+        throw new Error(`remove requires API level 14+ on OpenHarmony (current: ${deviceInfo.sdkApiVersion})`);
+      }
       const abilityContext = context.abilityContext;
       try {
         // Await the AsyncCallback overload (API 14+): the tray backend issues

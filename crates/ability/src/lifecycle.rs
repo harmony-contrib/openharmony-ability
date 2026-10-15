@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use napi_derive_ohos::napi;
 use napi_ohos::{
-    bindgen_prelude::{Function, JsObjectValue, Object},
+    bindgen_prelude::{Function, FunctionCallContext, JsObjectValue, Object},
     Env, Result,
 };
 
 use crate::{
     AvoidArea, AvoidAreaInfo, AvoidAreaType, BridgePluginDeclaration, ContentRect, Event,
-    OpenHarmonyApp, PluginLifecycleEvent, Rect, SaveLoader, SaveSaver, Size, StageEventType, WAKER,
+    OpenHarmonyApp, PluginLifecycleEvent, Rect, SaveLoader, SaveSaver, Size, StageEventType,
 };
 
 #[napi(object)]
@@ -63,6 +63,17 @@ fn parse_rect(rect: Object<'_>) -> Result<Rect> {
     })
 }
 
+/// Reads the UIAbility window id that ArkTS appends to lifecycle callbacks
+/// (design.md D3/D8, openspec multi-uiability-windows).
+///
+/// The id arrives as the trailing numeric argument of each callback: index 0 for
+/// callbacks without a payload, index 1 when the first argument is the payload
+/// object. A missing, null, or non-number argument degrades to the primary
+/// window (0) so an outdated HAR caller keeps the single-instance behavior.
+fn window_id_arg(ctx: &FunctionCallContext<'_>, index: usize) -> i64 {
+    ctx.get::<Option<i64>>(index).ok().flatten().unwrap_or(0)
+}
+
 /// create lifecycle object and return to arkts
 pub fn create_lifecycle_handle<'a>(
     env: &'a Env,
@@ -87,21 +98,35 @@ pub fn create_lifecycle_handle<'a>(
         .build()?;
 
     {
-        let mut guard = (*WAKER)
-            .write()
-            .map_err(|_| napi_ohos::Error::from_reason("Failed to write WAKER"))?;
-
-        guard.replace(Arc::new(tsfn));
+        // Install the TSFN into the app's per-app waker slot (design.md D10,
+        // openspec multi-uiability-windows — replaces the old process-global
+        // WAKER). Every OpenHarmonyWaker handle created via `create_waker`
+        // reads this slot live at wake() time.
+        let tsfn = Arc::new(tsfn);
+        {
+            let mut guard = waker_app
+                .waker
+                .write()
+                .map_err(|_| napi_ohos::Error::from_reason("Failed to write app waker slot"))?;
+            guard.replace(tsfn.clone());
+        }
+        // Process-level alias for NAPI free fns without an app handle
+        // (notify_window_close → wake_installed_app). Exact under the NG4
+        // one-app-per-process invariant; see waker.rs.
+        crate::waker::install_app_waker_alias(tsfn);
     }
 
     let on_memory_level_app = app.clone();
     let on_memory_level: Function<'_, i32, ()> =
         env.create_function_from_closure("memory_level", move |ctx| {
             let level = ctx.first_arg::<i32>()?;
+            let window_id = window_id_arg(&ctx, 1);
             let _ = on_memory_level_app
-                .dispatch_plugin_lifecycle(PluginLifecycleEvent::MemoryLevel { level });
-            if let Some(ref mut h) = *on_memory_level_app.event_loop.borrow_mut() {
-                h(Event::LowMemory)
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::MemoryLevel { window_id, level });
+            if window_id == 0 {
+                if let Some(ref mut h) = *on_memory_level_app.event_loop.borrow_mut() {
+                    h(Event::LowMemory)
+                }
             }
             Ok(())
         })?;
@@ -110,6 +135,7 @@ pub fn create_lifecycle_handle<'a>(
     let on_configuration_updated =
         env.create_function_from_closure("configuration_updated", move |ctx| {
             let configuration = ctx.first_arg::<Object>()?;
+            let window_id = window_id_arg(&ctx, 1);
             let language = configuration.get_named_property::<String>("language")?;
             let color_mode = configuration.get_named_property::<i32>("colorMode")?;
             let direction = configuration.get_named_property::<i32>("direction")?;
@@ -134,17 +160,21 @@ pub fn create_lifecycle_handle<'a>(
                 mcc,
                 mnc,
             };
-            configuration_updated_app
-                .inner
-                .write()
-                .unwrap()
-                .configuration = configuration.clone();
-            let _ = configuration_updated_app
-                .dispatch_plugin_lifecycle(PluginLifecycleEvent::ConfigurationUpdated);
-            let conf = configuration.clone();
-            if let Some(ref mut h) = *configuration_updated_app.event_loop.borrow_mut() {
-                h(Event::ConfigChanged(conf))
+            // The cached configuration and the app-level Event::ConfigChanged stay
+            // primary-instance-driven (R10: app-level dispatch keeps WindowId(0));
+            // OHOS notifies every live instance, so the primary's copy suffices.
+            if window_id == 0 {
+                configuration_updated_app
+                    .inner
+                    .write()
+                    .unwrap()
+                    .configuration = configuration.clone();
+                if let Some(ref mut h) = *configuration_updated_app.event_loop.borrow_mut() {
+                    h(Event::ConfigChanged(configuration))
+                }
             }
+            let _ = configuration_updated_app
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::ConfigurationUpdated { window_id });
             Ok(())
         })?;
 
@@ -152,21 +182,29 @@ pub fn create_lifecycle_handle<'a>(
     let window_stage_event =
         env.create_function_from_closure("window_stage_event", move |ctx| {
             let event_type = ctx.first_arg::<i32>()?;
+            let window_id = window_id_arg(&ctx, 1);
             let _ = window_stage_event_app
-                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageEvent { event_type });
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageEvent { window_id, event_type });
 
+            // Phase 4 (design.md D5): focus dispatches per-window — a spawned
+            // instance's ACTIVE/INACTIVE reaches its own tao window (and when it
+            // gains focus, the primary receives the matching LostFocus half of
+            // the pair). The remaining stage events map to tao app-level events
+            // (Resumed/Pause/…) with no window routing, so they stay
+            // primary-only (window_id == 0).
+            let state_event = StageEventType::from(event_type);
+            let e = match state_event {
+                StageEventType::Active => Event::GainedFocus { window_id },
+                StageEventType::Inactive => Event::LostFocus { window_id },
+                StageEventType::Shown if window_id == 0 => Event::Start,
+                StageEventType::Hidden if window_id == 0 => Event::Stop,
+                StageEventType::Resumed if window_id == 0 => Event::Resume(SaveLoader {
+                    app: &window_stage_event_app,
+                }),
+                StageEventType::Paused if window_id == 0 => Event::Pause,
+                _ => return Ok(()),
+            };
             if let Some(ref mut h) = *window_stage_event_app.event_loop.borrow_mut() {
-                let state_event = StageEventType::from(event_type);
-                let e = match state_event {
-                    StageEventType::Shown => Event::Start,
-                    StageEventType::Active => Event::GainedFocus,
-                    StageEventType::Inactive => Event::LostFocus,
-                    StageEventType::Hidden => Event::Stop,
-                    StageEventType::Resumed => Event::Resume(SaveLoader {
-                        app: &window_stage_event_app,
-                    }),
-                    StageEventType::Paused => Event::Pause,
-                };
                 h(e)
             }
             Ok(())
@@ -240,6 +278,7 @@ pub fn create_lifecycle_handle<'a>(
     let avoid_area_change_app = app.clone();
     let avoid_area_change = env.create_function_from_closure("avoid_area_change", move |ctx| {
         let options = ctx.first_arg::<Object>()?;
+        let window_id = window_id_arg(&ctx, 1);
         let area_type = AvoidAreaType::from(options.get_named_property::<i32>("type")?);
         let area = options.get_named_property::<Object>("area")?;
         let visible = area.get_named_property::<bool>("visible")?;
@@ -251,38 +290,53 @@ pub fn create_lifecycle_handle<'a>(
             bottom_rect: parse_rect(area.get_named_property::<Object>("bottomRect")?)?,
         };
 
-        {
-            let mut inner = avoid_area_change_app.inner.write().unwrap();
-            inner.avoid_areas.insert(area_type, avoid_area);
-        }
+        // The avoid-area cache and Event::AvoidAreaChange remain primary-window scoped
+        // until per-window avoid areas land (same known-limitation family as NG7).
+        // Sub-window registrations from the existing Float path call back without the
+        // trailing id, degrade to 0, and keep their current behavior.
+        if window_id == 0 {
+            {
+                let mut inner = avoid_area_change_app.inner.write().unwrap();
+                inner.avoid_areas.insert(area_type, avoid_area);
+            }
 
-        if let Some(ref mut h) = *avoid_area_change_app.event_loop.borrow_mut() {
-            h(Event::AvoidAreaChange(AvoidAreaInfo {
-                area_type,
-                area: avoid_area,
-            }))
+            if let Some(ref mut h) = *avoid_area_change_app.event_loop.borrow_mut() {
+                h(Event::AvoidAreaChange(AvoidAreaInfo {
+                    area_type,
+                    area: avoid_area,
+                }))
+            }
         }
         Ok(())
     })?;
 
     let on_window_stage_create_app = app.clone();
     let on_window_stage_create =
-        env.create_function_from_closure("on_ability_create", move |_ctx| {
+        env.create_function_from_closure("on_ability_create", move |ctx| {
+            let window_id = window_id_arg(&ctx, 0);
             let _ = on_window_stage_create_app
-                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageCreated);
-            if let Some(ref mut h) = *on_window_stage_create_app.event_loop.borrow_mut() {
-                h(Event::WindowCreate)
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageCreated { window_id });
+            if window_id == 0 {
+                if let Some(ref mut h) = *on_window_stage_create_app.event_loop.borrow_mut() {
+                    h(Event::WindowCreate)
+                }
             }
             Ok(())
         })?;
 
     let on_window_stage_destroy_app = app.clone();
     let on_window_stage_destroy =
-        env.create_function_from_closure("on_window_stage_destroy", move |_ctx| {
+        env.create_function_from_closure("on_window_stage_destroy", move |ctx| {
+            let window_id = window_id_arg(&ctx, 0);
             let _ = on_window_stage_destroy_app
-                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageDestroyed);
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::WindowStageDestroyed { window_id });
+            // Phase 4 (design.md D5): dispatch per-window — a spawned instance's
+            // stage teardown reaches its own tao window (CloseRequested +
+            // Destroyed for that id) so tauri-runtime-wry cleans the window
+            // store entry; the primary (0) keeps its historical exit-chain
+            // semantics unchanged.
             if let Some(ref mut h) = *on_window_stage_destroy_app.event_loop.borrow_mut() {
-                h(Event::WindowDestroy)
+                h(Event::WindowDestroy { window_id })
             }
             Ok(())
         })?;
@@ -291,21 +345,35 @@ pub fn create_lifecycle_handle<'a>(
     let on_ability_create: Function<'_, String, ()> =
         env.create_function_from_closure("on_ability_create", move |ctx| {
             let restored_state = ctx.first_arg::<String>().unwrap_or_default();
+            let window_id = window_id_arg(&ctx, 1);
             let _ = on_ability_create_app
-                .dispatch_plugin_lifecycle(PluginLifecycleEvent::AbilityCreated { restored_state });
-            if let Some(ref mut h) = *on_ability_create_app.event_loop.borrow_mut() {
-                h(Event::Create)
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::AbilityCreated { window_id, restored_state });
+            if window_id == 0 {
+                if let Some(ref mut h) = *on_ability_create_app.event_loop.borrow_mut() {
+                    h(Event::Create)
+                }
             }
             Ok(())
         })?;
 
     let on_ability_destroy_app = app.clone();
     let on_ability_destroy =
-        env.create_function_from_closure("on_ability_destroy", move |_ctx| {
+        env.create_function_from_closure("on_ability_destroy", move |ctx| {
+            let window_id = window_id_arg(&ctx, 0);
             let _ = on_ability_destroy_app
-                .dispatch_plugin_lifecycle(PluginLifecycleEvent::AbilityDestroyed);
-            if let Some(ref mut h) = *on_ability_destroy_app.event_loop.borrow_mut() {
-                h(Event::Destroy)
+                .dispatch_plugin_lifecycle(PluginLifecycleEvent::AbilityDestroyed { window_id });
+            // D13 teardown: drop every remaining per-window registry entry for
+            // this destroyed instance (handshake, want storage, label map,
+            // rects). Runs after the plugin dispatch so bridge plugins observe
+            // the event before their per-window state disappears.
+            on_ability_destroy_app.unregister_ui_ability_state(window_id);
+            // The critical Phase-3 gate (design.md D8 / OQ4): a spawned instance
+            // closing must NOT run the process exit chain — only the primary
+            // instance's destroy ends the app.
+            if window_id == 0 {
+                if let Some(ref mut h) = *on_ability_destroy_app.event_loop.borrow_mut() {
+                    h(Event::Destroy)
+                }
             }
             Ok(())
         })?;
@@ -330,26 +398,32 @@ pub fn create_lifecycle_handle<'a>(
     let on_ability_restore_state_app = app.clone();
 
     let on_ability_restore_state =
-        env.create_function_from_closure("on_ability_restore_state", move |_ctx| {
-            let save_loader = SaveLoader {
-                app: &on_ability_restore_state_app,
-            };
+        env.create_function_from_closure("on_ability_restore_state", move |ctx| {
+            let window_id = window_id_arg(&ctx, 0);
+            if window_id == 0 {
+                let save_loader = SaveLoader {
+                    app: &on_ability_restore_state_app,
+                };
 
-            if let Some(ref mut h) = *on_ability_restore_state_app.event_loop.borrow_mut() {
-                h(Event::Resume(save_loader))
+                if let Some(ref mut h) = *on_ability_restore_state_app.event_loop.borrow_mut() {
+                    h(Event::Resume(save_loader))
+                }
             }
             Ok(())
         })?;
 
     let on_ability_save_state_app = app.clone();
     let on_ability_save_state =
-        env.create_function_from_closure("on_ability_save_state", move |_ctx| {
-            let save_saver = SaveSaver {
-                app: &on_ability_save_state_app,
-            };
+        env.create_function_from_closure("on_ability_save_state", move |ctx| {
+            let window_id = window_id_arg(&ctx, 0);
+            if window_id == 0 {
+                let save_saver = SaveSaver {
+                    app: &on_ability_save_state_app,
+                };
 
-            if let Some(ref mut h) = *on_ability_save_state_app.event_loop.borrow_mut() {
-                h(Event::SaveState(save_saver))
+                if let Some(ref mut h) = *on_ability_save_state_app.event_loop.borrow_mut() {
+                    h(Event::SaveState(save_saver))
+                }
             }
             Ok(())
         })?;
@@ -358,8 +432,11 @@ pub fn create_lifecycle_handle<'a>(
     let keyboard_event_callback =
         env.create_function_from_closure("keyboard_event_callback", move |ctx| {
             let event_type = ctx.first_arg::<i32>()?;
-            if let Some(ref mut h) = *keyboard_event_callback_app.event_loop.borrow_mut() {
-                h(Event::KeyboardEvent(event_type))
+            let window_id = window_id_arg(&ctx, 1);
+            if window_id == 0 {
+                if let Some(ref mut h) = *keyboard_event_callback_app.event_loop.borrow_mut() {
+                    h(Event::KeyboardEvent(event_type))
+                }
             }
             Ok(())
         })?;
@@ -367,38 +444,49 @@ pub fn create_lifecycle_handle<'a>(
     let on_new_want_app = app.clone();
     let on_new_want = env.create_function_from_closure("on_new_want", move |ctx| {
         let data = ctx.first_arg::<Object>()?;
+        let window_id = window_id_arg(&ctx, 1);
         let uri = data.get_named_property::<String>("uri")?;
         let parameters_json = data.get_named_property::<String>("parametersJson")?;
-        // Session state rides the app instance now (issue #87 major-9).
-        on_new_want_app.store_want_parameters(&parameters_json);
-        // isContinuation is optional-with-fallback: missing or wrong type
-        // (older HAR payload) degrades to false rather than failing the callback.
-        let is_continuation = data
-            .get_named_property::<bool>("isContinuation")
-            .unwrap_or(false);
-        on_new_want_app.store_continuation(is_continuation, &parameters_json);
-        if let Some(ref mut h) = *on_new_want_app.event_loop.borrow_mut() {
-            h(Event::NewWant { uri })
+        crate::app::store_want_parameters(window_id, &parameters_json);
+        if window_id == 0 {
+            // isContinuation is optional-with-fallback: missing or wrong type
+            // (older HAR payload) degrades to false rather than failing the callback.
+            // Continuation statics are primary-instance-only (NG5 defers
+            // multi-instance continuation): a spawned instance's new want must not
+            // clear the primary's pending continuation payload.
+            let is_continuation = data.get_named_property::<bool>("isContinuation").unwrap_or(false);
+            crate::app::store_continuation(is_continuation, &parameters_json);
+            if let Some(ref mut h) = *on_new_want_app.event_loop.borrow_mut() {
+                h(Event::NewWant { uri })
+            }
         }
+        // For a spawned instance (window_id > 0) the parameters are stored
+        // per-id above, but `Event::NewWant` is NOT dispatched: there is a
+        // single event loop and no per-window new-want routing. A warm-start
+        // deep link into a spawned instance is therefore recorded (readable
+        // via take_want_parameters_for_window) but raises no event — a known
+        // limitation tracked as design.md NG8 (openspec
+        // multi-uiability-windows).
         Ok(())
     })?;
 
-    let on_ability_create_with_want_app = app.clone();
     let on_ability_create_with_want =
         env.create_function_from_closure("on_ability_create_with_want", move |ctx| {
             let data = ctx.first_arg::<Object>()?;
+            let window_id = window_id_arg(&ctx, 1);
             let uri = data.get_named_property::<String>("uri")?;
-            on_ability_create_with_want_app.store_initial_want_uri(&uri);
-            // Continuation fields are optional-with-fallback: missing or wrong
-            // type (older HAR payload) degrades to false / empty rather than
-            // failing the callback.
-            let is_continuation = data
-                .get_named_property::<bool>("isContinuation")
-                .unwrap_or(false);
-            let parameters_json = data
-                .get_named_property::<String>("parametersJson")
-                .unwrap_or_default();
-            on_ability_create_with_want_app.store_continuation(is_continuation, &parameters_json);
+            crate::app::store_initial_want_uri(window_id, &uri);
+            if window_id == 0 {
+                // Continuation fields are optional-with-fallback: missing or wrong
+                // type (older HAR payload) degrades to false / empty rather than
+                // failing the callback. Continuation storage stays
+                // primary-instance-only (NG5): a spawned instance's cold start must
+                // not clear the primary's pending continuation payload.
+                let is_continuation = data.get_named_property::<bool>("isContinuation").unwrap_or(false);
+                let parameters_json =
+                    data.get_named_property::<String>("parametersJson").unwrap_or_default();
+                crate::app::store_continuation(is_continuation, &parameters_json);
+            }
             Ok(())
         })?;
 
