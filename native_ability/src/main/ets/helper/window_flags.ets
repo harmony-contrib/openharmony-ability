@@ -33,6 +33,13 @@ export function clearClipboardEnabled(windowId: number): void {
 // See ohos-webview-flag-zoom-hotkeys spec.
 const zoomHotkeysEnabledMap: Map<number, boolean> = new Map();
 
+// WindowManager records defaults even when a WebView omits its flags. Native
+// windows have no entries. Like the flags themselves, this policy lasts until
+// window teardown and is shared by WebViews in the same window.
+export function hasWebviewKeyboardPolicy(windowId: number): boolean {
+  return clipboardEnabledMap.has(windowId) || zoomHotkeysEnabledMap.has(windowId);
+}
+
 export function setZoomHotkeysEnabled(windowId: number, enabled: boolean): void {
   zoomHotkeysEnabledMap.set(windowId, enabled);
 }

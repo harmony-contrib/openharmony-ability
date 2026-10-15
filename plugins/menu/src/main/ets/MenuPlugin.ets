@@ -14,6 +14,7 @@ import {
   expectBridgeRequestType,
   isClipboardEnabled,
   isZoomHotkeysEnabled,
+  hasWebviewKeyboardPolicy,
   setMenuBarPort,
   setMenuBarSlotBuilder,
   setPrimaryWebviewControllerCallback,
@@ -21,7 +22,7 @@ import {
   type MenuBarPort,
   type MenuBarSlotProps,
 } from "@ohos-rs/ability";
-import { getAcceleratorMatcher } from "./accelerator_matcher";
+import { getAcceleratorMatcher, resetAcceleratorModifiers } from "./accelerator_matcher";
 import {
   MenuBarComponent,
   getMenuClickHandler,
@@ -49,7 +50,7 @@ const ACKNOWLEDGEMENT_TYPE = "ohos.menu.Acknowledgement";
 
 /**
  * Menubar composition slot: renders MenuBarComponent into the core pages
- * (MainPage unconditionally, FloatPage under its desktop+decorations gate).
+ * (MainPage, native FloatPage windows, and decorated desktop WebView windows).
  * Registered at onInstall, before any page content loads.
  */
 @Builder
@@ -68,19 +69,25 @@ function menuBarBuilder(props: MenuBarSlotProps) {
  */
 class CoreMenuBarPort implements MenuBarPort {
   onKeyPreIme(event: KeyEvent, windowId: number): boolean {
+    const matcher = getAcceleratorMatcher(windowId);
+    matcher.trackModifiers(event);
     if (event.type !== KeyType.Down) {
       return false;
     }
-    const matcher = getAcceleratorMatcher(windowId);
-    // Block native clipboard shortcuts when with_clipboard(false) (ohos-webview-flag-clipboard)
-    if (matcher.matchesClipboardShortcut(event) && !isClipboardEnabled(windowId)) {
-      return true;
+    // WebView restrictions precede application accelerators. Native windows
+    // have no WebView policy, so their registered clipboard actions work too.
+    if (hasWebviewKeyboardPolicy(windowId)) {
+      if (matcher.matchesClipboardShortcut(event) && !isClipboardEnabled(windowId)) {
+        return true;
+      }
+      if (matcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(windowId)) {
+        return true;
+      }
+      // Let ArkWeb handle ordinary editing shortcuts, including undo/redo.
+      if (matcher.matchesNativeClipboardShortcut(event)) {
+        return false;
+      }
     }
-    // Block native zoom hotkeys when with_zoom_hotkeys(false) (ohos-webview-flag-zoom-hotkeys)
-    if (matcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(windowId)) {
-      return true;
-    }
-    // Accelerator matching (non-clipboard shortcuts)
     if (matcher.matches(event)) {
       const matchedItem = matcher.getMatchedItem();
       if (matchedItem) {
@@ -113,6 +120,10 @@ class CoreMenuBarPort implements MenuBarPort {
   onMenuShown(windowId: number, shown: boolean): void {
     const cb = getMenuDataCallback(windowKeyForId(windowId));
     cb?.onMenuShown?.(shown);
+  }
+
+  onWindowFocusLost(windowId: number): void {
+    resetAcceleratorModifiers(windowId);
   }
 }
 

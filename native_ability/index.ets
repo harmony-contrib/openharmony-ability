@@ -57,6 +57,7 @@ export type {
 export {
   setClipboardEnabled,
   isClipboardEnabled,
+  hasWebviewKeyboardPolicy,
   clearClipboardEnabled,
   setZoomHotkeysEnabled,
   isZoomHotkeysEnabled,
