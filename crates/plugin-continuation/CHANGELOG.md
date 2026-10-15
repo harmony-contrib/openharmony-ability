@@ -1,0 +1,10 @@
+# 1.0.0-beta.3
+
+- Introduce `ContinuationExt` and a synchronous client for checking continuation launches and
+  consuming restore data from the app session, including cold-start setup.
+- Add `set_continuation_data` to pre-register the source snapshot read by `onContinue`;
+  reading the snapshot does not consume it, allowing platform retries.
+- This is a Rust-only facade over core lifecycle state and exports, with no separate ArkTS
+  plugin registration or action for starting a migration.
+- Inherit version `1.0.0-beta.3`, Rust edition `2021`, and license `MIT OR Apache-2.0`
+  from the Cargo workspace.

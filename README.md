@@ -4,6 +4,8 @@
 
 `openharmony-ability` provides native integration helpers for OpenHarmony applications: Rust-side lifecycle management plus ArkTS-side entry helpers that can be shared by Rust and C/SDL native modules.
 
+See the [changelog](CHANGELOG.md) for release notes and per-package changes.
+
 ## Architecture
 
 OpenHarmony applications are driven by callbacks, so there are two important constraints:

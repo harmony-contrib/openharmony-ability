@@ -2,6 +2,16 @@
 
 - Add optional `domStorageAccess` to the named `ohos.webview.CreateRequest` contract and apply it
   when constructing ArkWeb content; DOM storage remains disabled when the option is omitted.
+- Add document-start initialization scripts, URL/header and HTML loading, bounds, visibility,
+  background, zoom, focus/reload, cookies, user-agent and debugging controls.
+- Add HTTPS interception, async custom-protocol integration and rollback, plus named callbacks
+  for page lifecycle, drag/drop, new-window requests and window close requests.
+- Add PDF creation/printing and print-state callbacks, page snapshots, viewport PNG capture and
+  RGBA pixel-color queries; release temporary PixelMaps in the same platform action.
+- Harden controller readiness waits, stale-controller rejection and cleanup after failed creation,
+  replacement or plugin disposal.
+- Align the package version to `1.0.0-beta.3` and resolve internal HAR dependencies
+  through `workspace:*`.
 
 ---
 

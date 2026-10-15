@@ -1,3 +1,14 @@
+# 1.0.0-beta.3
+
+- Add main-thread sync `hide-ability`, `show-ability` and `set-color-mode` actions with named
+  request/response types.
+- Defer the platform color-mode change until after the sync callback returns to avoid
+  reentrant configuration-update deadlocks; support dark, light and follow-system modes.
+- Align the package version to `1.0.0-beta.3` and resolve internal HAR dependencies
+  through `workspace:*`.
+
+---
+
 # 1.0.0-beta.1
 
 - **Breaking**: remove the numeric plugin version and module selection from the ArkTS contract;
