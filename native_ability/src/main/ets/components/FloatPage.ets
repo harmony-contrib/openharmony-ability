@@ -396,9 +396,11 @@ struct FloatPage {
           .height(40);
         }
 
-        // Menubar (only on desktop when menu items are available and decorations are enabled).
-        // MenuBarSlotHost reads the slot live, including late plugin registration.
-        if (this.isDesktop && this.decorations) {
+        // Native windows need their own menu host and accelerator registry even
+        // when the shared library was built for the mobile device class. The
+        // menu host stays empty if the application has not supplied any menus.
+        // Preserve the existing decoration gate for webview-only float windows.
+        if (this.nativeModuleName.length > 0 || (this.isDesktop && this.decorations)) {
           MenuBarSlotHost({ windowId: this.windowId });
         }
         Stack() {
