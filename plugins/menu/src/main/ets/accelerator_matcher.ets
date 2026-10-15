@@ -188,13 +188,22 @@ export class AcceleratorMatcher {
     if (this.isModifierPressed(event, "Ctrl")) combo += "ctrl+";
     if (shift) combo += "shift+";
     if (this.isModifierPressed(event, "Alt")) combo += "alt+";
+    if (this.isModifierPressed(event, "Super")) combo += "super+";
     this.matchedItem = this.accelerators.get(combo + key.toLowerCase()) ?? null;
     return this.matchedItem !== null;
   }
 
   private isModifierPressed(event: KeyEvent, modifier: string): boolean {
-    if (event.getModifierKeyState?.([modifier])) {
-      return true;
+    // ArkUI accepts Ctrl/Shift/Alt here; Super is tracked from physical events.
+    // A rejected snapshot must not abort WebView key forwarding.
+    if (modifier !== "Super") {
+      try {
+        if (event.getModifierKeyState?.([modifier])) {
+          return true;
+        }
+      } catch {
+        // Physical Down/Up tracking remains available below.
+      }
     }
     // Some ArkUI function-key events lose the modifier snapshot: on this
     // emulator Alt Down reports true, but the following F4 reports false.
@@ -206,6 +215,8 @@ export class AcceleratorMatcher {
         return this.pressedModifiers.has(2047) || this.pressedModifiers.has(2048);
       case "Alt":
         return this.pressedModifiers.has(2045) || this.pressedModifiers.has(2046);
+      case "Super":
+        return this.pressedModifiers.has(2076) || this.pressedModifiers.has(2077);
       default:
         return false;
     }
@@ -242,7 +253,8 @@ export class AcceleratorMatcher {
     return (
       this.matchesClipboardShortcut(event) &&
       !this.isModifierPressed(event, "Shift") &&
-      !this.isModifierPressed(event, "Alt")
+      !this.isModifierPressed(event, "Alt") &&
+      !this.isModifierPressed(event, "Super")
     );
   }
 
