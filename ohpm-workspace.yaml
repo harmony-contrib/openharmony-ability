@@ -1,5 +1,5 @@
 ### ohpm workspace configuration
-### Members are the source packages that participate in file: dependency
+### Members are the source packages that participate in workspace: dependency
 ### resolution and version management (see ohpm-rs workspace mode).
 
 packages:

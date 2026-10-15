@@ -3,6 +3,7 @@
   "packageManager": "pnpm@10.22.0",
   "scripts": {
     "test:runtime": "node --test scripts/runtime-regressions.cjs",
+    "install:ohpm": "sh scripts/install-ohpm.sh",
     "check": "pnpm run format:check && pnpm run lint",
     "format": "pnpm run format:rs && pnpm run format:oxk",
     "format:rs": "cargo fmt --all",
@@ -17,9 +18,9 @@
     "prek": "prek run",
     "pre-commit": "prek run",
     "prek:all": "prek run --all-files",
-    "prepare": "prek install && cargo install ohpm-cli",
+    "prepare": "prek install",
     "pack": "ohpm-rs pack --workspace",
-    "postinstall": "cargo install ohpm-rs"
+    "postinstall": "cargo install ohpm-cli --version 0.3.0 --locked && pnpm run install:ohpm"
   },
   "devDependencies": {
     "@j178/prek": "^0.4.5",

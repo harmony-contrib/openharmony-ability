@@ -4,7 +4,7 @@
     "email": "southorange0929@foxmail.com",
   },
   "dependencies": {
-    "@ohos-rs/ability": "file:../../native_ability",
+    "@ohos-rs/ability": "workspace:*",
   },
   "description": "Huawei Account one-tap login bridge plugin for @ohos-rs/ability",
   "keywords": [
@@ -21,5 +21,5 @@
   "main": "index.ets",
   "name": "@ohos-rs/ability-plugin-account",
   "repository": "https://github.com/harmony-contrib/openharmony-ability.git",
-  "version": "1.0.0-beta.0",
+  "version": "1.0.0-beta.3",
 }
