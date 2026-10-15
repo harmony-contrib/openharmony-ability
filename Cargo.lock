@@ -88,7 +88,7 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 
 [[package]]
 name = "demo_native"
-version = "0.1.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "futures-channel",
  "futures-executor",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "demo_sub_native"
-version = "0.1.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "log",
  "napi-build-ohos",
@@ -742,7 +742,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openharmony-ability"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "futures-channel",
  "log",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-derive"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-accessibility"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "futures-executor",
  "log",
@@ -784,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-account"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-app-control"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-autostart"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-clipboard"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -822,14 +822,14 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-continuation"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "openharmony-ability",
 ]
 
 [[package]]
 name = "openharmony-ability-plugin-deep-link"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-fault-injection"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-files"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-global-shortcut"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "crossbeam-channel",
  "napi-derive-ohos",
@@ -868,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-menu"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "crossbeam-channel",
  "napi-derive-ohos",
@@ -880,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-notification"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -889,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-permission"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-process"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-resource"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-screenshot"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-ohos",
  "openharmony-ability",
@@ -927,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-statusbar"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "crossbeam-channel",
  "napi-derive-ohos",
@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-system-state"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "crossbeam-channel",
  "napi-derive-ohos",
@@ -949,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-updater"
-version = "1.0.0-beta.0"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-url"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-webview"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 dependencies = [
  "crossbeam-channel",
  "http",
@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-window"
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",

@@ -12,6 +12,6 @@ exclude:
   - "**/src/main/cpp/types/**" # generated NAPI .so type-stub packages
   - "demo/*" # demo entry module(s)
 
-### versioning policy: each package keeps its own version
+### versioning policy: all workspace packages share one version
 version:
-  mode: independent
+  mode: unified
