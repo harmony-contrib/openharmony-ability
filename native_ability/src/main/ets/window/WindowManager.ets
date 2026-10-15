@@ -429,6 +429,12 @@ export class WindowManager {
       } else if (eventType === window.WindowEventType.WINDOW_INACTIVE) {
         this.focusChangeCallback?.({ windowId, focused: false });
       }
+      if (
+        eventType === window.WindowEventType.WINDOW_INACTIVE ||
+        eventType === window.WindowEventType.WINDOW_HIDDEN
+      ) {
+        getMenuBarPort()?.onWindowFocusLost?.(windowId);
+      }
 
       // Consume pending action when system foreground transition completes
       // WINDOW_ACTIVE: window gained focus (marks end of foreground transition)

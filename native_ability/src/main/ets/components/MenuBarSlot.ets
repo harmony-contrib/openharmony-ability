@@ -9,7 +9,7 @@
  * notifications to a registered port:
  *
  *   - MainPage / FloatPage render `MenuBarSlotHost` above their content
- *     (FloatPage keeps its desktop+decorations gating).
+ *     (native FloatPage windows also mount it in mobile-class builds).
  *   - Their onKeyPreIme menu branches (clipboard / zoom flag blocking,
  *     accelerator dispatch, ESC fullscreen recover) delegate to
  *     `getMenuBarPort().onKeyPreIme`.
@@ -53,6 +53,8 @@ export interface MenuBarPort {
   onMenubarVisibility: (windowId: number, visible: boolean) => void;
   /** Popup open state changed for this window (close popups on fullscreen entry). */
   onMenuShown: (windowId: number, shown: boolean) => void;
+  /** Clear held modifiers when key-up may be delivered to another window. */
+  onWindowFocusLost?: (windowId: number) => void;
 }
 
 let menuBarSlotBuilder: MenuBarSlotBuilder | null = null;

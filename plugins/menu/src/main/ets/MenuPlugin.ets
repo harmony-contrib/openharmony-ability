@@ -21,7 +21,7 @@ import {
   type MenuBarPort,
   type MenuBarSlotProps,
 } from "@ohos-rs/ability";
-import { getAcceleratorMatcher } from "./accelerator_matcher";
+import { getAcceleratorMatcher, resetAcceleratorModifiers } from "./accelerator_matcher";
 import {
   MenuBarComponent,
   getMenuClickHandler,
@@ -68,17 +68,10 @@ function menuBarBuilder(props: MenuBarSlotProps) {
  */
 class CoreMenuBarPort implements MenuBarPort {
   onKeyPreIme(event: KeyEvent, windowId: number): boolean {
+    const matcher = getAcceleratorMatcher(windowId);
+    matcher.trackModifiers(event);
     if (event.type !== KeyType.Down) {
       return false;
-    }
-    const matcher = getAcceleratorMatcher(windowId);
-    // Block native clipboard shortcuts when with_clipboard(false) (ohos-webview-flag-clipboard)
-    if (matcher.matchesClipboardShortcut(event) && !isClipboardEnabled(windowId)) {
-      return true;
-    }
-    // Block native zoom hotkeys when with_zoom_hotkeys(false) (ohos-webview-flag-zoom-hotkeys)
-    if (matcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(windowId)) {
-      return true;
     }
     // Accelerator matching (non-clipboard shortcuts)
     if (matcher.matches(event)) {
@@ -89,6 +82,12 @@ class CoreMenuBarPort implements MenuBarPort {
           handler(matchedItem);
         }
       }
+      return true;
+    }
+    if (matcher.matchesClipboardShortcut(event) && !isClipboardEnabled(windowId)) {
+      return true;
+    }
+    if (matcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(windowId)) {
       return true;
     }
     // ESC to exit fullscreen / restore menubar. All fullscreen entry points
@@ -113,6 +112,10 @@ class CoreMenuBarPort implements MenuBarPort {
   onMenuShown(windowId: number, shown: boolean): void {
     const cb = getMenuDataCallback(windowKeyForId(windowId));
     cb?.onMenuShown?.(shown);
+  }
+
+  onWindowFocusLost(windowId: number): void {
+    resetAcceleratorModifiers(windowId);
   }
 }
 

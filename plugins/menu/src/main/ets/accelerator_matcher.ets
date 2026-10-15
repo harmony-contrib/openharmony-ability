@@ -1,4 +1,5 @@
 import { MenuItemData } from "./menu_types";
+import { KeyCode } from "@kit.InputKit";
 
 // NOTE: the per-window clipboard / zoom-hotkey flags that used to live here moved
 // to the core window layer (native_ability/src/main/ets/helper/window_flags.ets):
@@ -24,6 +25,10 @@ export function getAcceleratorMatcher(windowId: number): AcceleratorMatcher {
 
 export function unregisterAcceleratorMatcher(windowId: number): void {
   windowMatchers.delete(windowId);
+}
+
+export function resetAcceleratorModifiers(windowId: number): void {
+  windowMatchers.get(windowId)?.resetModifiers();
 }
 
 const SPECIAL_KEY_MAP: Map<string, string> = new Map([
@@ -73,13 +78,29 @@ const CLIPBOARD_ACCELERATORS: Set<string> = new Set([
 export class AcceleratorMatcher {
   private accelerators: Map<string, MenuItemData> = new Map();
   private matchedItem: MenuItemData | null = null;
+  private pressedModifiers: Set<number> = new Set();
+
+  trackModifiers(event: KeyEvent): void {
+    if (!MODIFIER_KEYCODES.has(event.keyCode)) {
+      return;
+    }
+    if (event.type === KeyType.Down) {
+      this.pressedModifiers.add(event.keyCode);
+    } else if (event.type === KeyType.Up) {
+      this.pressedModifiers.delete(event.keyCode);
+    }
+  }
+
+  resetModifiers(): void {
+    this.pressedModifiers.clear();
+  }
 
   buildFromItems(items: MenuItemData[]): void {
     this.accelerators.clear();
     const queue: MenuItemData[] = [...items];
     while (queue.length > 0) {
       const item = queue.shift()!;
-      if (item.accelerator) {
+      if (item.accelerator && (item.enabled ?? true)) {
         const keyCombo = this.normalizeAccelerator(item.accelerator);
         this.accelerators.set(keyCombo, item);
       }
@@ -90,10 +111,11 @@ export class AcceleratorMatcher {
   }
 
   private normalizeAccelerator(accel: string): string {
-    return accel.toLowerCase();
+    return accel.toLowerCase().replace("pgup", "pageup").replace("pgdn", "pagedown");
   }
 
   matches(event: KeyEvent): boolean {
+    this.matchedItem = null;
     if (event.type !== KeyType.Down) {
       return false;
     }
@@ -114,9 +136,6 @@ export class AcceleratorMatcher {
     if (CLIPBOARD_ACCELERATORS.has(combo)) {
       return false;
     }
-    console.info(
-      `[Accelerator] combo="${combo}", available=[${Array.from(this.accelerators.keys()).join(",")}]`,
-    );
     if (this.accelerators.has(combo)) {
       this.matchedItem = this.accelerators.get(combo)!;
       return true;
@@ -125,10 +144,22 @@ export class AcceleratorMatcher {
   }
 
   private isModifierPressed(event: KeyEvent, modifier: string): boolean {
-    if (!event.getModifierKeyState) {
-      return false;
+    if (event.getModifierKeyState?.([modifier])) {
+      return true;
     }
-    return event.getModifierKeyState([modifier]);
+    // Some ArkUI function-key events lose the modifier snapshot: on this
+    // emulator Alt Down reports true, but the following F4 reports false.
+    // Keep the physical Down/Up sequence per window, cleared on focus loss.
+    switch (modifier) {
+      case "Ctrl":
+        return this.pressedModifiers.has(2072) || this.pressedModifiers.has(2073);
+      case "Shift":
+        return this.pressedModifiers.has(2047) || this.pressedModifiers.has(2048);
+      case "Alt":
+        return this.pressedModifiers.has(2045) || this.pressedModifiers.has(2046);
+      default:
+        return false;
+    }
   }
 
   getMatchedItem(): MenuItemData | null {
@@ -146,6 +177,10 @@ export class AcceleratorMatcher {
       return false;
     }
     if (MODIFIER_KEYCODES.has(event.keyCode)) {
+      return false;
+    }
+    // Shifted terminal shortcuts are application actions, not webview shortcuts.
+    if (this.isModifierPressed(event, "Shift") || this.isModifierPressed(event, "Alt")) {
       return false;
     }
     const keyText = this.getKeyText(event);
@@ -182,6 +217,42 @@ export class AcceleratorMatcher {
   }
 
   private getKeyText(event: KeyEvent): string | null {
+    // Ctrl chords may have an empty or control-character keyText.
+    if (event.keyCode >= KeyCode.KEYCODE_A && event.keyCode <= KeyCode.KEYCODE_Z) {
+      return String.fromCharCode(97 + event.keyCode - KeyCode.KEYCODE_A);
+    }
+    if (event.keyCode >= KeyCode.KEYCODE_0 && event.keyCode <= KeyCode.KEYCODE_9) {
+      return String(event.keyCode - KeyCode.KEYCODE_0);
+    }
+    if (event.keyCode >= KeyCode.KEYCODE_F1 && event.keyCode <= KeyCode.KEYCODE_F12) {
+      return `f${event.keyCode - KeyCode.KEYCODE_F1 + 1}`;
+    }
+    switch (event.keyCode) {
+      case KeyCode.KEYCODE_DPAD_LEFT:
+        return "left";
+      case KeyCode.KEYCODE_DPAD_RIGHT:
+        return "right";
+      case KeyCode.KEYCODE_DPAD_UP:
+        return "up";
+      case KeyCode.KEYCODE_DPAD_DOWN:
+        return "down";
+      case KeyCode.KEYCODE_PAGE_UP:
+        return "pageup";
+      case KeyCode.KEYCODE_PAGE_DOWN:
+        return "pagedown";
+      case KeyCode.KEYCODE_TAB:
+        return "tab";
+      case KeyCode.KEYCODE_MINUS:
+        return "-";
+      case KeyCode.KEYCODE_EQUALS:
+        return "=";
+      case KeyCode.KEYCODE_LEFT_BRACKET:
+        return "[";
+      case KeyCode.KEYCODE_RIGHT_BRACKET:
+        return "]";
+      case KeyCode.KEYCODE_SLASH:
+        return this.isModifierPressed(event, "Shift") ? "?" : "/";
+    }
     const text = event.keyText;
     if (!text) {
       return null;
