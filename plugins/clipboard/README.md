@@ -2,6 +2,14 @@
 
 English | [简体中文](README.zh-CN.md)
 
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-clipboard
+```
+
+## Assembly
+
 Each factory must configure its text metadata MIME through the constructor options object:
 
 ```ts

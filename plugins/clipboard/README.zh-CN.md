@@ -2,6 +2,14 @@
 
 [English](README.md) | 简体中文
 
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-clipboard
+```
+
+## 装配
+
 每个 factory 必须通过构造参数对象配置文本元数据 MIME：
 
 ```ts

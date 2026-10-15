@@ -2,6 +2,14 @@
 
 [English](README.md) | 简体中文
 
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-notification
+```
+
+## 装配
+
 通过 factory 注册新实例。构造函数要求包含 `scheme` 的 options 对象，
 值为不带 `:` 或 `://` 的应用 URI scheme：
 

@@ -2,6 +2,14 @@
 
 English | [简体中文](README.zh-CN.md)
 
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-notification
+```
+
+## Assembly
+
 Register a fresh plugin through a factory. The constructor requires an options
 object with `scheme`, the application's URI scheme without `:` or `://`:
 
