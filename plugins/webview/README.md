@@ -1,11 +1,13 @@
 # @ohos-rs/ability-plugin-webview
 
-这是 `openharmony-ability-plugin-webview` 的 ArkTS HAR。它创建 ArkWeb `Web` / `WebviewController`、
-把 WebView 的 `FrameNode` 挂进当前 native module 对应组件的根树（或 `ohos.node` 容器），并把所有
-controller 操作和 ArkWeb callback 转换为具名 N-API bridge 调用。
+English | [简体中文](README.zh-CN.md)
 
-业务不直接保存 controller，也不应把 WebView 接口重新写回 `DefaultXComponent`。Rust facade 使用
-controller ID 操作 WebView；布局由业务页面 `Stack` 声明顺序决定。
+This HAR pairs with `openharmony-ability-plugin-webview`. It creates ArkWeb `Web` and
+`WebviewController` objects, mounts the WebView FrameNode into the native module's component
+root or an `ohos.node` container, and forwards controller operations/callbacks through named N-API.
+
+Application code uses controller IDs rather than retaining controllers or embedding WebView
+interfaces back into `DefaultXComponent`. Page `Stack` declaration order controls layering.
 
 ## Install
 
@@ -13,12 +15,12 @@ controller ID 操作 WebView；布局由业务页面 `Stack` 声明顺序决定�
 ohpm install @ohos-rs/ability-plugin-webview
 ```
 
-## 装配
+## Assembly
 
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "1.0.0-beta.2",
+    "@ohos-rs/ability": "1.0.0-beta.3",
     "@ohos-rs/ability-plugin-webview": "1.0.0-beta.3",
   },
 }
@@ -33,68 +35,75 @@ export default class EntryAbility extends NativeAbility {
 }
 ```
 
-Rust 侧必须在 `#[ability]` 初始化器注册 `WebviewBridgePlugin`；自定义 scheme 也必须在该阶段通过
-`WebviewProtocol::register` 声明。完整 Rust 用法见
-[Rust facade README](../../crates/plugin-webview/README.md)。
+Register `WebviewBridgePlugin` in the Rust `#[ability]` initializer and declare custom schemes
+there with `WebviewProtocol::register`. See the
+[Rust facade README](../../crates/plugin-webview/README.md).
 
-## Plugin 与 action
+## Plugin and actions
 
-| 项目             | 值                                                                                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`             | `ohos.webview`                                                                                                                                                                       |
-| `execution`      | `async`                                                                                                                                                                              |
-| `requires`       | `["ui-context"]`                                                                                                                                                                     |
-| 挂载             | 当前 module/component 根树（默认全屏）；可选 `parentHandle`（`ohos.node` 容器）                                                                                                    |
-| 创建             | `create`：`CreateRequest { id, parentHandle? }` → `CreateResponse { id }`                                                                                                            |
-| 控制器操作       | `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`get-url`、`cookies-with-url`、`clear-all-browsing-data`、`evaluate-script` |
+| Field | Value |
+| --- | --- |
+| `id` | `ohos.webview` |
+| `execution` | `async` |
+| `requires` | `["ui-context"]` |
+| Mount | Current module/component root (full-screen by default), or optional `parentHandle` container |
+| Creation | `create`: `CreateRequest { id, parentHandle? }` → `CreateResponse { id }` |
+| Controller actions | `set-visible`, `set-background-color`, `remove`, `load-url`, `load-html`, `set-zoom`, `reload`, `focus`, `get-url`, `cookies-with-url`, `clear-all-browsing-data`, `evaluate-script` |
 
-所有 action 都校验 `BridgeTypedValue.typeName`，并只返回对应的具名 response。创建会等待
-controller attach、delegate/protocol/proxy 安装和首次 load 启动；它不是“提交一个未来渲染任务”后
-立刻成功。
+Every action validates `BridgeTypedValue.typeName` and returns its declared response type.
+Creation waits for controller attachment, delegate/protocol/proxy installation and initial
+load startup; it does not return success merely after scheduling future rendering.
 
-## 挂载与混合布局
+## Mounting and mixed layouts
 
-WebView 的 `FrameNode` 默认以 host 内部唯一 key 挂进当前 module 的组件根树，
-全屏显示。Rust 需要组合时，先用内置 `ohos.node` 插件创建容器，把容器句柄作为 `parentHandle` 传入
-create request，WebView 节点就会挂到该容器下；容器最终由 Rust `mount-into-root` 整体挂载。
+The host mounts a WebView FrameNode under a unique internal key in its component root,
+full-screen by default. For composition, Rust creates an `ohos.node` container and passes its
+handle as `parentHandle`; the WebView mounts below it. Rust mounts the container as a whole
+with `mount-into-root`.
 
-业务层级 = 页面 `Stack` 声明顺序，业务内容放在 `DefaultXComponent` 前后即可得到下/上层级：
+Place application content before/after `DefaultXComponent` in a `Stack` for lower/upper layers:
 
 ```ts
 Stack() {
-  this.BusinessUnderlay()                        // 插件树之下
+  this.BusinessUnderlay()                        // Below the plugin tree
   DefaultXComponent({ moduleName: "demo_native" })
-  this.BusinessForeground()                      // 插件树之上
+  this.BusinessForeground()                      // Above the plugin tree
 }
 ```
 
-一个 `DefaultXComponent` 必须使用一个独立 native module；跨窗口组件不能共享 module，也不使用
-`windowKey`/`surfaceKey`。同一 module/component 可按不同 ID 同时持有多个 WebView。WebView ID 是
-不透明、facade-local 的业务标识，不会直接拼接成节点 key 或进程级 ArkWeb tag；HAR 会用
-session + 进程计数器生成内部唯一 native tag，因此同一进程的多个插件实例可安全复用同一业务 ID。
+Each component needs a distinct native module, including components in different windows.
+There are no `windowKey`/`surfaceKey` routes. A module/component may host multiple WebViews by ID.
+IDs are opaque facade-local business identifiers, not node keys or process-global ArkWeb tags.
+The HAR combines session identity with a process counter for unique tags, so instances may reuse
+the same business ID safely.
 
-节点挂载没有计时等待：module 根在 `ui-context-ready` 前已存在，`onInstall` 后即可挂载。
-Ability/session dispose 时，HAR 必须卸载自己创建的节点与 controller 状态（`remove` 走
-`context.removeChild` 或从父容器摘除），不能影响业务节点或其他插件。
+No timer is required for mounting: the module root exists before `ui-context-ready`.
+On Ability/session disposal, the HAR removes its nodes and controller state through
+`context.removeChild` or parent-container detachment, leaving business/other-plugin nodes intact.
 
-## ArkWeb callback、custom protocol 与 JS
+## ArkWeb callbacks, custom protocols and JavaScript
 
-- Rust 在 `create` 前声明 callback 订阅；HAR 依据订阅快照安装 ArkWeb delegate。导航请求、下载开始、
-  下载结束、标题变化、engine/controller lifecycle 全部通过
-  `context.invokeNativeSync` 回到 Rust `on_main_thread_event`。
-- 导航未订阅或 callback 出错时 fail-open（不拦截）；下载开始未订阅或出错时 fail-closed（取消下载）。
-  下载结束、标题等通知型 callback 只记录失败。所有 controller 平台事件同时携带内部 native tag；
-  Rust 会先校验当前 ID 对应的 controller generation，旧实例的延迟导航回调 fail-open、下载开始
-  fail-closed，通知型回调直接丢弃。
-- custom scheme 必须在进程级 engine 初始化前注册；第一个 WebView create 会在初始化前后向所有已
-  激活、装配本插件的 Rust facade 广播具名 engine 事件，先 seal、聚合校验并 flush 各自的 Rust
-  scheme 状态。Ability 重建时可幂等重复相同 scheme + options；engine 启动后新增 scheme 会确定性
-  失败；后加载 facade 只能复用已注册且 options 完全相同的 scheme；不同 facade 对同名 scheme
-  声明不同 options 时也会在 engine 初始化前失败。
-  controller attach 后先安装 tag 对应的 protocol、JS proxy 与 delegate，再进行首次导航。
-- URL custom protocol 与 `window.<object>.<method>()` JavaScript proxy 是不同机制；前者处理资源请求，
-  后者处理页面到 Rust 的方法调用。
-- `.transparent(true)` 的创建语义由 `CreateRequest` 保留：没有显式 background color 时使用透明背景。
+- Rust declares callback subscriptions before creation. The HAR installs delegates from this
+  snapshot and uses `context.invokeNativeSync` to deliver navigation, download start/end, title
+  and engine/controller lifecycle events to Rust `on_main_thread_event`.
+- Navigation is fail-open on missing/failed callbacks; download start is fail-closed.
+  Notification failures are logged. Controller events include the native tag; Rust validates
+  the current generation. Old navigation events fail-open, old download starts fail-closed,
+  and stale notifications are discarded.
+- Schemes must be registered before process-wide engine startup. The first creation broadcasts
+  named engine events to active matching facades, seals/validates declarations and flushes them.
+  Identical scheme/options declarations remain idempotent after Ability reconstruction.
+  New schemes after startup fail; late facades may reuse only identical existing declarations.
+  Conflicting options for a scheme fail before initialization.
+  After attachment, protocol/proxy/delegate installation precedes initial navigation.
+- URL custom protocols handle resource requests; `window.<object>.<method>()` proxies handle
+  page-to-Rust method calls.
+- Creation preserves `transparent(true)`: use a transparent background when no explicit color
+  was supplied.
 
-完整的反向 typeName、线程、生命周期、节点清理与验收条件见
-[插件开发规范](../../docs/plugin-development-standard.md)。
+See the [plugin development standard](../../docs/plugin-development-standard.md) for reverse
+type names, threading, lifecycle, node cleanup and acceptance criteria.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

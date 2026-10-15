@@ -1,5 +1,7 @@
 # Notification plugin
 
+English | [简体中文](README.zh-CN.md)
+
 Register a fresh plugin through a factory. The constructor requires an options
 object with `scheme`, the application's URI scheme without `:` or `://`:
 
@@ -20,3 +22,7 @@ response handler. Existing GPUI integrations can explicitly pass `{ scheme: "gpu
 
 Notifications accept up to three actions. Rust and ArkTS reject excess actions;
 ArkTS validates the whole array before requesting authorization or creating WantAgents.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

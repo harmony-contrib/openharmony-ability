@@ -1,5 +1,7 @@
 # openharmony-ability
 
+English | [简体中文](README.zh-CN.md)
+
 ## Introduce
 
 openharmony-ability is the Rust runtime crate in this repository. It provides lifecycle and runtime helpers for OpenHarmony/HarmonyNext native applications.
@@ -33,13 +35,13 @@ cancellation. It is opt-in and does not enable `keyboard`, `stylus`, or `drag`.
 Consumers can use the re-exported XComponent types without a direct binding dependency:
 
 ```toml
-openharmony-ability = { git = "https://github.com/richerfu/openharmony-ability.git", branch = "feat/ohos-adaptation-runtime-fixes", features = ["mouse"] }
+openharmony-ability = { version = "1.0.0-beta.3", features = ["mouse"] }
 ```
 
 Enhanced ArkUI keyboard delivery is opt-in through the `keyboard` feature:
 
 ```toml
-openharmony-ability = { git = "https://github.com/richerfu/openharmony-ability.git", branch = "feat/ohos-adaptation-runtime-fixes", features = ["keyboard"] }
+openharmony-ability = { version = "1.0.0-beta.3", features = ["keyboard"] }
 ```
 
 `keyboard` enables `KeyboardInputDelivery::ArkUi`, `KeyboardEventData`,
@@ -54,7 +56,7 @@ returns an error. Enabling `drag` does not enable `keyboard`.
 Native file drag/drop is opt-in:
 
 ```toml
-openharmony-ability = { version = "1.0.0-beta.2", features = ["drag"] }
+openharmony-ability = { version = "1.0.0-beta.3", features = ["drag"] }
 ```
 
 The `drag` feature enables `ArkUiInputEvent::Drag`, `DragInputData`, `DragPhase`,
@@ -69,4 +71,4 @@ owns native action disposal, listener removal, data and preview lifetimes.
 
 ## License
 
-This project is licensed under the [MIT license](https://github.com/harmony-contrib/openharmony-ability/blob/main/LICENSE)
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

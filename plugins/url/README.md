@@ -1,7 +1,8 @@
 # @ohos-rs/ability-plugin-url
 
-这是外部 URL 打开能力的 ArkTS HAR，对应 Rust crate `openharmony-ability-plugin-url`。它在
-Ability context 上调用 `context.openLink(url)` 打开外部链接。
+English | [简体中文](README.zh-CN.md)
+
+This external-URL HAR pairs with `openharmony-ability-plugin-url`. It uses the Ability context's `context.openLink(url)` to open external links.
 
 ## Install
 
@@ -9,13 +10,15 @@ Ability context 上调用 `context.openLink(url)` 打开外部链接。
 ohpm install @ohos-rs/ability-plugin-url
 ```
 
-## 装配
+## Assembly
+
+Add the HAR to the application's `oh-package.json5`:
 
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "1.0.0-beta.2",
-    "@ohos-rs/ability-plugin-url": "1.0.0-beta.1"
+    "@ohos-rs/ability": "1.0.0-beta.3",
+    "@ohos-rs/ability-plugin-url": "1.0.0-beta.3"
   }
 }
 ```
@@ -29,24 +32,27 @@ export default class EntryAbility extends NativeAbility {
 }
 ```
 
-Rust 侧还需注册 `UrlBridgePlugin`，并通过 `UrlExt::open_url` 发起调用。使用示例见
-[Rust facade README](../../crates/plugin-url/README.md)。
+Register `UrlBridgePlugin` in Rust and call `UrlExt::open_url`. See the [Rust facade README](../../crates/plugin-url/README.md).
 
-## Plugin 契约
+## Plugin contract
 
-| 字段 | 值 |
+| Field | Value |
 | --- | --- |
 | `id` | `ohos.url` |
 | `execution` | `async` |
 | `requires` | `["ability"]` |
-| 支持 action | `open-url` |
+| Actions | `open-url` |
 | request → response | `ohos.url.OpenRequest { url }` → `ohos.url.OpenResponse { accepted }` |
 
-## 行为
+## Behavior
 
-- `url` 必须是带 scheme 的绝对 URL；缺失 scheme 或空字符串直接抛错。
-- `openLink` 失败或 Ability 在调用期间销毁时，Promise 以明确错误结束。
-- request/response 是具名 N-API object，禁止 JSON transport。
+- `url` must be absolute and include a scheme. Empty strings and missing schemes throw.
+- Platform `openLink` failures or Ability destruction reject the Promise with an explicit error.
+- Requests/responses are named N-API objects, without JSON transport.
 
-完整线程、生命周期与契约变更规则见
-[插件开发规范](../../docs/plugin-development-standard.md)。
+See the [plugin development standard](../../docs/plugin-development-standard.md) for threading,
+lifecycle and contract acceptance rules.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

@@ -1,5 +1,7 @@
 # OpenHarmony Ability
 
+English | [简体中文](README.zh-CN.md)
+
 > This project is in progress, and the API is not stable.
 
 `openharmony-ability` provides native integration helpers for OpenHarmony applications: Rust-side lifecycle management plus ArkTS-side entry helpers that can be shared by Rust and C/SDL native modules.
@@ -82,10 +84,10 @@ import { AbilityConstant } from "@kit.AbilityKit";
 export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
 
-  async onCreate(
+  onCreate(
     want: Want,
     launchParam: AbilityConstant.LaunchParam
-  ): Promise<void> {
+  ): void {
     super.onCreate(want, launchParam);
   }
 }
@@ -117,4 +119,4 @@ Register the standalone plugin factories in the Ability's `bridgePlugins` array.
 
 ## License
 
-[MIT](./LICENSE)
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
