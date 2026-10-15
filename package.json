@@ -18,7 +18,8 @@
     "pre-commit": "prek run",
     "prek:all": "prek run --all-files",
     "prepare": "prek install && cargo install ohpm-cli",
-    "pack": "ohpm-rs pack --workspace"
+    "pack": "ohpm-rs pack --workspace",
+    "postinstall": "cargo install ohpm-rs"
   },
   "devDependencies": {
     "@j178/prek": "^0.4.5",
