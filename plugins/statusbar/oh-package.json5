@@ -4,8 +4,8 @@
     "email": "southorange0929@foxmail.com",
   },
   "dependencies": {
-    "@ohos-rs/ability": "file:../../native_ability",
-    "@ohos-rs/ability-plugin-menu": "file:../menu",
+    "@ohos-rs/ability": "workspace:*",
+    "@ohos-rs/ability-plugin-menu": "workspace:*",
   },
   "description": "Status bar capability plugin for @ohos-rs/ability",
   "keywords": [
@@ -22,5 +22,5 @@
   "main": "index.ets",
   "name": "@ohos-rs/ability-plugin-statusbar",
   "repository": "https://github.com/harmony-contrib/openharmony-ability.git",
-  "version": "1.0.0-beta.0",
+  "version": "1.0.0-beta.3",
 }

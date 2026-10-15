@@ -4,7 +4,7 @@
     "email": "southorange0929@foxmail.com",
   },
   "dependencies": {
-    "@ohos-rs/ability": "file:../../native_ability",
+    "@ohos-rs/ability": "workspace:*",
   },
   "description": "WebView capability plugin for @ohos-rs/ability",
   "keywords": ["ohos-rs", "NAPI", "Rust", "node-addon", "openharmony", "harmonynext"],

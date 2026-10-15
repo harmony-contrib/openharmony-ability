@@ -4,7 +4,7 @@
     "email": "southorange0929@foxmail.com",
   },
   "dependencies": {
-    "@ohos-rs/ability": "file:../../native_ability",
+    "@ohos-rs/ability": "workspace:*",
   },
   "description": "Autostart capability plugin for @ohos-rs/ability",
   "keywords": ["ohos-rs", "NAPI", "Rust", "node-addon", "openharmony", "harmonynext", "autostart"],
@@ -12,5 +12,5 @@
   "main": "index.ets",
   "name": "@ohos-rs/ability-plugin-autostart",
   "repository": "https://github.com/harmony-contrib/openharmony-ability.git",
-  "version": "1.0.0-beta.0",
+  "version": "1.0.0-beta.3",
 }

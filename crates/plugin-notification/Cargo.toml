@@ -1,8 +1,8 @@
 [package]
 name = "openharmony-ability-plugin-notification"
-version = "1.0.0-beta.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "System notification bridge plugin for openharmony-ability"
 
 [dependencies]

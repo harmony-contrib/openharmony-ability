@@ -18,9 +18,30 @@ OpenHarmony applications are driven by callbacks, so there are two important con
 - `crates/ability` — Rust lifecycle/runtime support
 - `crates/derive` — `#[ability]` macro
 - `native_ability` — ArkTS package source shared by Rust and C/SDL native modules
-- `package` — packaged ohpm artifact source
+- `plugins/*` — standalone ArkTS capability packages
 - `demo` — unified Harmony demo project
 - `rust_example/demo_native` — unified native demo implementation
+
+## Development setup
+
+```bash
+pnpm install
+```
+
+This installs the `ohpm-rs` CLI from `ohpm-cli` 0.3.0 and installs ArkTS dependencies
+for the workspace packages and demo. Internal ArkTS dependencies use `workspace:*`
+and resolve to the source packages listed in `ohpm-workspace.yaml`.
+Run `pnpm run install:ohpm` to reinstall ArkTS dependencies after changing a manifest.
+
+The repository commands use Node and Rust tools on Linux and macOS. Native Windows
+is currently blocked by `ohpm-cli` 0.3.0's Unix-only dependency-link implementation;
+use WSL with Linux tools and SDK until the CLI supports Windows.
+
+Run `npm run pack` to create one HAR per workspace package in `dist/`.
+
+Run `npm run format` to format Rust and ArkTS sources. Git hooks run formatting and
+lint checks through prek; CI runs prek for all files and Rust clippy for each
+supported OpenHarmony target.
 
 ## Usage
 
@@ -90,21 +111,7 @@ new LazyPlugin(() => new ClipboardPlugin({ metadataMimeType: "application/x-my-a
 new LazyPlugin(() => new NotificationPlugin({ scheme: "my-app-notification" }));
 ```
 
-The aggregate HAR exports `createAllBridgePlugins({ clipboard: { metadataMimeType }, notification: { scheme } })`
-to create its factory array with the same required configuration.
-
-## Runtime regression tests
-
-With Node 22+ and an OpenHarmony SDK installed:
-
-```bash
-OHOS_SDK_HOME=/path/to/sdk/openharmony pnpm run test:runtime
-```
-
-These host tests load the ArkTS implementation with the SDK parser and mock platform APIs.
-They cover clipboard order, window failure rollback and operation queues, prompt positioning,
-and subscription ownership across sessions. HAR compilation and device checks are still required
-to verify declarative UI layout and real platform behavior.
+Register the standalone plugin factories in the Ability's `bridgePlugins` array.
 
 ## License
 

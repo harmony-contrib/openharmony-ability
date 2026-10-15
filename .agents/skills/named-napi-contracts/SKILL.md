@@ -183,7 +183,7 @@ ArkTS object/function，也不得将响应交给 worker 后再返回。完整线
 - [ ] demo 接入（如 `demo/entry/.../EntryAbility.ets` 的 `bridgePlugins` 数组）
 - [ ] 文档：`docs/plugin-development-standard.md` §3.3 契约基线补充新行
 - [ ] 验证：`cargo check --workspace`、`cargo clippy --workspace --all-targets`、
-  `cargo test -p openharmony-ability-plugin-<name> --lib`、`pnpm run format:check`
+  `cargo test -p openharmony-ability-plugin-<name> --lib`、`pnpm run prek --all-files`
 
 ## 7. Review 时快速排查
 

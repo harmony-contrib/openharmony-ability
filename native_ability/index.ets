@@ -83,8 +83,7 @@ export {
 // DOMAIN used to be re-declared in every plugin that logs via hilog; the
 // request-type validator and the { accepted: boolean } acknowledgement shape
 // were duplicated per plugin with drifting signatures. Plugins import these
-// from "@ohos-rs/ability" instead (pack-plugins.ps1 rewrites that specifier
-// to the internal path when assembling the published HAR).
+// from "@ohos-rs/ability" in their standalone workspace packages.
 export { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from "./src/main/ets/helper/constants";
 export {
   expectBridgeRequestType,

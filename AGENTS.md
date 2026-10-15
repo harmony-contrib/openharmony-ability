@@ -17,12 +17,12 @@ cargo test -p openharmony-ability-plugin-<name> --lib
 # (clippy excludes webview_example and xcomponent_example)
 pnpm run lint
 
-# Format: cargo fmt + oxk format for **/*.{ets,js,ts,json5}
-pnpm run format
-pnpm run format:check   # CI check-only form
+# Format Rust and ArkTS sources
+npm run format
 
 # Pre-commit hooks (rustfmt, oxk format, oxk lint)
 pnpm run prek
+pnpm run prek --all-files   # All files; also run by CI
 
 # Build the native demo cdylib for a device
 cd rust_example/demo_native && ohrs build --arch arm64

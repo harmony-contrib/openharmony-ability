@@ -6,8 +6,7 @@
 .vscode
 *.so
 *.har
-# package/ is pack.bat/pack-plugins.ps1 release staging — fully generated,
-# never hand-edited (issue #87 minor-8). Untracked from git 2026-09-03.
+# Legacy generated release staging.
 package/
 dist
 .omc
