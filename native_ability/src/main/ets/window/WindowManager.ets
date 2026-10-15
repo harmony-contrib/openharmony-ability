@@ -11,6 +11,8 @@ import { DOMAIN } from "../helper/constants";
 import {
   clearClipboardEnabled,
   clearZoomHotkeysEnabled,
+  isClipboardEnabled,
+  isZoomHotkeysEnabled,
   setClipboardEnabled,
   setZoomHotkeysEnabled,
 } from "../helper/window_flags";
@@ -2154,12 +2156,10 @@ export class WindowManager {
   // .enable_clipboard_access(). This matches the spec intent (see audit APPROVED WITH NOTES).
   // See ohos-webview-flag-clipboard / ohos-webview-flag-zoom-hotkeys specs.
   setWebviewFlags(windowId: number, clipboard?: boolean, zoomHotkeys?: boolean): void {
-    if (clipboard !== undefined) {
-      setClipboardEnabled(windowId, clipboard);
-    }
-    if (zoomHotkeys !== undefined) {
-      setZoomHotkeysEnabled(windowId, zoomHotkeys);
-    }
+    // Record the WebView policy even for omitted flags. Preserve any policy
+    // already configured by another WebView in this window.
+    setClipboardEnabled(windowId, clipboard ?? isClipboardEnabled(windowId));
+    setZoomHotkeysEnabled(windowId, zoomHotkeys ?? isZoomHotkeysEnabled(windowId));
   }
 
   // Remove window: clean up all per-window state to prevent memory leaks.

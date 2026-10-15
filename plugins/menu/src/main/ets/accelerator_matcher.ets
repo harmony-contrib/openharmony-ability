@@ -65,7 +65,8 @@ const MODIFIER_KEYCODES: Set<number> = new Set([
   2077, // KEYCODE_META_RIGHT
 ]);
 
-// Clipboard accelerators handled natively by webview — intercepting them breaks paste/copy/cut
+// The menu port uses these to preserve WebView editing policy. Matching itself
+// is independent of the window's renderer.
 const CLIPBOARD_ACCELERATORS: Set<string> = new Set([
   "ctrl+c", // copy
   "ctrl+x", // cut
@@ -74,6 +75,33 @@ const CLIPBOARD_ACCELERATORS: Set<string> = new Set([
   "ctrl+z", // undo
   "ctrl+y", // redo
 ]);
+
+// Used only when ArkUI supplies a key name/empty text instead of a character.
+// A printable keyText always takes precedence, including non-US layouts.
+const SHIFTED_KEYS: Map<string, string> = new Map([
+  ["1", "!"],
+  ["2", "@"],
+  ["3", "#"],
+  ["4", "$"],
+  ["5", "%"],
+  ["6", "^"],
+  ["7", "&"],
+  ["8", "*"],
+  ["9", "("],
+  ["0", ")"],
+  ["-", "_"],
+  ["=", "+"],
+  ["[", "{"],
+  ["]", "}"],
+  ["\\", "|"],
+  [";", ":"],
+  ["'", '"'],
+  [",", "<"],
+  [".", ">"],
+  ["/", "?"],
+  ["`", "~"],
+]);
+const SHIFTED_CHARACTERS: Set<string> = new Set(SHIFTED_KEYS.values());
 
 export class AcceleratorMatcher {
   private accelerators: Map<string, MenuItemData> = new Map();
@@ -100,7 +128,10 @@ export class AcceleratorMatcher {
     const queue: MenuItemData[] = [...items];
     while (queue.length > 0) {
       const item = queue.shift()!;
-      if (item.accelerator && (item.enabled ?? true)) {
+      if (item.enabled === false) {
+        continue;
+      }
+      if (item.accelerator) {
         const keyCombo = this.normalizeAccelerator(item.accelerator);
         this.accelerators.set(keyCombo, item);
       }
@@ -127,20 +158,38 @@ export class AcceleratorMatcher {
     if (!keyText) {
       return false;
     }
-    let combo = "";
-    if (this.isModifierPressed(event, "Ctrl")) combo += "ctrl+";
-    if (this.isModifierPressed(event, "Shift")) combo += "shift+";
-    if (this.isModifierPressed(event, "Alt")) combo += "alt+";
-    combo += keyText.toLowerCase();
-    // Clipboard shortcuts handled natively by webview — don't intercept
-    if (CLIPBOARD_ACCELERATORS.has(combo)) {
-      return false;
+    const shift = this.isModifierPressed(event, "Shift");
+    const candidates: string[] = [keyText];
+    if (shift && this.printableKeyText(event) === null) {
+      const shifted = SHIFTED_KEYS.get(keyText);
+      if (shifted) {
+        candidates.unshift(shifted);
+      }
     }
-    if (this.accelerators.has(combo)) {
-      this.matchedItem = this.accelerators.get(combo)!;
-      return true;
+    for (const key of candidates) {
+      if (this.matchKey(event, key, shift)) {
+        return true;
+      }
+    }
+    // Logical accelerators such as Ctrl++ may omit the Shift used to type +.
+    // An explicitly registered Shift chord always wins over this fallback.
+    if (shift) {
+      for (const key of candidates) {
+        if (SHIFTED_CHARACTERS.has(key) && this.matchKey(event, key, false)) {
+          return true;
+        }
+      }
     }
     return false;
+  }
+
+  private matchKey(event: KeyEvent, key: string, shift: boolean): boolean {
+    let combo = "";
+    if (this.isModifierPressed(event, "Ctrl")) combo += "ctrl+";
+    if (shift) combo += "shift+";
+    if (this.isModifierPressed(event, "Alt")) combo += "alt+";
+    this.matchedItem = this.accelerators.get(combo + key.toLowerCase()) ?? null;
+    return this.matchedItem !== null;
   }
 
   private isModifierPressed(event: KeyEvent, modifier: string): boolean {
@@ -169,18 +218,14 @@ export class AcceleratorMatcher {
   /**
    * Returns true if the key event is a clipboard accelerator (Ctrl+C/X/V/A/Z/Y).
    * Used by onKeyPreIme to block native clipboard shortcuts when with_clipboard(false).
-   * Orthogonal to matches(): matches() always skips clipboard keys (lets ArkWeb handle);
-   * this method identifies them so the caller can consume them when clipboard is disabled.
+   * Includes modified variants so disabling WebView editing also blocks those.
+   * The menu port, rather than the matcher, decides whether this policy applies.
    */
   matchesClipboardShortcut(event: KeyEvent): boolean {
     if (event.type !== KeyType.Down) {
       return false;
     }
     if (MODIFIER_KEYCODES.has(event.keyCode)) {
-      return false;
-    }
-    // Shifted terminal shortcuts are application actions, not webview shortcuts.
-    if (this.isModifierPressed(event, "Shift") || this.isModifierPressed(event, "Alt")) {
       return false;
     }
     const keyText = this.getKeyText(event);
@@ -191,6 +236,14 @@ export class AcceleratorMatcher {
     if (this.isModifierPressed(event, "Ctrl")) combo += "ctrl+";
     combo += keyText.toLowerCase();
     return CLIPBOARD_ACCELERATORS.has(combo);
+  }
+
+  matchesNativeClipboardShortcut(event: KeyEvent): boolean {
+    return (
+      this.matchesClipboardShortcut(event) &&
+      !this.isModifierPressed(event, "Shift") &&
+      !this.isModifierPressed(event, "Alt")
+    );
   }
 
   /**
@@ -213,11 +266,23 @@ export class AcceleratorMatcher {
       return false;
     }
     const k = keyText.toLowerCase();
-    return k === "=" || k === "0" || k === "-" || k === "equals" || k === "minus";
+    return k === "+" || k === "=" || k === "0" || k === "-" || k === "equals" || k === "minus";
+  }
+
+  private printableKeyText(event: KeyEvent): string | null {
+    const text = event.keyText;
+    if (text && Array.from(text).length === 1 && text.charCodeAt(0) >= 32 && text !== "\u007f") {
+      return text === " " ? "Space" : text;
+    }
+    return null;
   }
 
   private getKeyText(event: KeyEvent): string | null {
-    // Ctrl chords may have an empty or control-character keyText.
+    const character = this.printableKeyText(event);
+    if (character !== null) {
+      return character;
+    }
+    // Ctrl chords may have an empty, symbolic or control-character keyText.
     if (event.keyCode >= KeyCode.KEYCODE_A && event.keyCode <= KeyCode.KEYCODE_Z) {
       return String.fromCharCode(97 + event.keyCode - KeyCode.KEYCODE_A);
     }
@@ -242,6 +307,22 @@ export class AcceleratorMatcher {
         return "pagedown";
       case KeyCode.KEYCODE_TAB:
         return "tab";
+      case KeyCode.KEYCODE_ESCAPE:
+        return "esc";
+      case KeyCode.KEYCODE_FORWARD_DEL:
+        return "del";
+      case KeyCode.KEYCODE_DEL:
+        return "backspace";
+      case KeyCode.KEYCODE_INSERT:
+        return "ins";
+      case KeyCode.KEYCODE_MOVE_HOME:
+        return "home";
+      case KeyCode.KEYCODE_MOVE_END:
+        return "end";
+      case KeyCode.KEYCODE_ENTER:
+        return "enter";
+      case KeyCode.KEYCODE_SPACE:
+        return "space";
       case KeyCode.KEYCODE_MINUS:
         return "-";
       case KeyCode.KEYCODE_EQUALS:
@@ -251,10 +332,22 @@ export class AcceleratorMatcher {
       case KeyCode.KEYCODE_RIGHT_BRACKET:
         return "]";
       case KeyCode.KEYCODE_SLASH:
-        return this.isModifierPressed(event, "Shift") ? "?" : "/";
+        return "/";
+      case KeyCode.KEYCODE_BACKSLASH:
+        return "\\";
+      case KeyCode.KEYCODE_SEMICOLON:
+        return ";";
+      case KeyCode.KEYCODE_APOSTROPHE:
+        return "'";
+      case KeyCode.KEYCODE_COMMA:
+        return ",";
+      case KeyCode.KEYCODE_PERIOD:
+        return ".";
+      case KeyCode.KEYCODE_GRAVE:
+        return "`";
     }
     const text = event.keyText;
-    if (!text) {
+    if (!text || text.charCodeAt(0) < 32) {
       return null;
     }
     if (SPECIAL_KEY_MAP.has(text)) {

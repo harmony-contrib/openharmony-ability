@@ -14,6 +14,7 @@ import {
   expectBridgeRequestType,
   isClipboardEnabled,
   isZoomHotkeysEnabled,
+  hasWebviewKeyboardPolicy,
   setMenuBarPort,
   setMenuBarSlotBuilder,
   setPrimaryWebviewControllerCallback,
@@ -49,7 +50,7 @@ const ACKNOWLEDGEMENT_TYPE = "ohos.menu.Acknowledgement";
 
 /**
  * Menubar composition slot: renders MenuBarComponent into the core pages
- * (MainPage unconditionally, FloatPage under its desktop+decorations gate).
+ * (MainPage, native FloatPage windows, and decorated desktop WebView windows).
  * Registered at onInstall, before any page content loads.
  */
 @Builder
@@ -73,7 +74,20 @@ class CoreMenuBarPort implements MenuBarPort {
     if (event.type !== KeyType.Down) {
       return false;
     }
-    // Accelerator matching (non-clipboard shortcuts)
+    // WebView restrictions precede application accelerators. Native windows
+    // have no WebView policy, so their registered clipboard actions work too.
+    if (hasWebviewKeyboardPolicy(windowId)) {
+      if (matcher.matchesClipboardShortcut(event) && !isClipboardEnabled(windowId)) {
+        return true;
+      }
+      if (matcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(windowId)) {
+        return true;
+      }
+      // Let ArkWeb handle ordinary editing shortcuts, including undo/redo.
+      if (matcher.matchesNativeClipboardShortcut(event)) {
+        return false;
+      }
+    }
     if (matcher.matches(event)) {
       const matchedItem = matcher.getMatchedItem();
       if (matchedItem) {
@@ -82,12 +96,6 @@ class CoreMenuBarPort implements MenuBarPort {
           handler(matchedItem);
         }
       }
-      return true;
-    }
-    if (matcher.matchesClipboardShortcut(event) && !isClipboardEnabled(windowId)) {
-      return true;
-    }
-    if (matcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(windowId)) {
       return true;
     }
     // ESC to exit fullscreen / restore menubar. All fullscreen entry points
