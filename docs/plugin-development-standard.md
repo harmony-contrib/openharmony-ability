@@ -685,7 +685,7 @@ ResourceManager 通过 `registered_plugin::<ResourceBridgePlugin>()` 读取，�
 cargo check --workspace
 cargo test -p openharmony-ability-plugin-<name> --lib
 cargo clippy --workspace --all-targets -- -D warnings
-pnpm run format:check
+pnpm run prek --all-files
 rg -n "BridgeJson|call_json|bridgeJson|requireBridgeJson|JSON\\.stringify|JSON\\.parse" \
   crates/plugin-<name> plugins/<name> native_ability
 ```

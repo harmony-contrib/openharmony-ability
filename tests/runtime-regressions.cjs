@@ -1,4 +1,4 @@
-// Run with Node 22+ and OHOS_SDK_HOME pointing at the OpenHarmony SDK directory.
+// Run via pnpm run test:runtime with Node 22+ and OHOS_SDK_HOME pointing at the SDK.
 // The SDK parser loads real ArkTS classes; only platform APIs and the UI builder
 // are mocked. These tests verify ordering, failure rollback and session ownership.
 const assert = require("node:assert/strict");

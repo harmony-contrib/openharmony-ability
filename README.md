@@ -33,6 +33,10 @@ for the workspace packages and demo. Internal ArkTS dependencies use `workspace:
 and resolve to the source packages listed in `ohpm-workspace.yaml`.
 Run `pnpm run install:ohpm` to reinstall ArkTS dependencies after changing a manifest.
 
+Run `npm run format` to format Rust and ArkTS sources. Git hooks run formatting and
+lint checks through prek; CI runs prek for all files and Rust clippy for each
+supported OpenHarmony target.
+
 ## Usage
 
 1. Add Rust dependencies:
