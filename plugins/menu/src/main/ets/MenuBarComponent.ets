@@ -87,6 +87,11 @@ const menubarVisibilityTracker: Map<number, boolean> = new Map();
 export function isMenubarVisible(windowId: number): boolean {
   return menubarVisibilityTracker.get(windowId) ?? true;
 }
+
+interface MenuRenderData {
+  items: MenuItemData[];
+  revision: number;
+}
 @Component
 export struct MenuBarComponent {
   @Prop windowId: number = 0;
@@ -112,6 +117,8 @@ export struct MenuBarComponent {
   @State private activeDropdownId: string = "";
   @State private activeDropdownShown: boolean = false;
   @State private hoveredItemId: string = "";
+  @State private popupRevision: number = 0;
+  @State private menubarRevision: number = 0;
 
   private iconPixelMaps: Map<string, image.PixelMap> = new Map();
   private popupIconIds: Set<string> = new Set();
@@ -127,10 +134,12 @@ export struct MenuBarComponent {
       this.prepareIcons(items);
       this.cleanupStaleIcons();
       this.menuItems = items;
+      this.popupRevision++;
     } catch (e) {
       this.popupIconIds.clear();
       this.cleanupStaleIcons();
       this.menuItems = [];
+      this.popupRevision++;
     }
   }
 
@@ -143,6 +152,12 @@ export struct MenuBarComponent {
       this.cleanupStaleIcons();
       this.menubarItems = items.filter((i) => i.type === "submenu" && i.text);
       this.acceleratorMatcher.buildFromItems(items);
+      this.menubarRevision++;
+      const activeItem = this.getMenubarItem(this.activeDropdownId);
+      if (!activeItem || activeItem.enabled === false) {
+        this.activeDropdownShown = false;
+        this.activeDropdownId = "";
+      }
       const submenuDetails = this.menubarItems.map(
         (i) => `${i.text}: [${(i.submenuItems ?? []).map((s) => s.text ?? s.id).join(",")}]`,
       );
@@ -150,11 +165,14 @@ export struct MenuBarComponent {
         `[Menubar] onMenubarJsonChange: items=${items.length}, ` +
           `submenuItems=${this.menubarItems.length}, details=${submenuDetails.join("; ")}`,
       );
-      // State updates rebuild menu contents without dismissing the focused popup.
+      // Revision keys rebuild popup contents while keeping its anchor mounted.
     } catch (e) {
       this.menubarIconIds.clear();
       this.cleanupStaleIcons();
       this.menubarItems = [];
+      this.acceleratorMatcher.buildFromItems([]);
+      this.activeDropdownShown = false;
+      this.activeDropdownId = "";
       console.error(`[Menubar] onMenubarJsonChange failed: ${e}`);
     }
   }
@@ -246,9 +264,9 @@ export struct MenuBarComponent {
   // --- Menu builders ---
 
   @Builder
-  RenderMenuItems(items: MenuItemData[]) {
+  RenderMenuItems(data: MenuRenderData) {
     ForEach(
-      this.splitByDivider(items),
+      this.splitByDivider(data.items),
       (group: MenuItemData[], index: number) => {
         MenuItemGroup() {
           ForEach(
@@ -257,14 +275,19 @@ export struct MenuBarComponent {
               if (item.type === "submenu") {
                 MenuItem({
                   content: item.text ?? "",
-                  builder: (): void => this.SubmenuContent(item.submenuItems ?? []),
+                  builder: (): void =>
+                    this.SubmenuContent({
+                      items: item.submenuItems ?? [],
+                      revision: data.revision,
+                    }),
                   symbolStartIcon: item.nativeIcon
                     ? this.nativeIconSymbol(item.nativeIcon)
                     : undefined,
-                });
+                }).enabled(item.enabled ?? true);
               } else if (item.type === "check") {
                 MenuItem({
                   content: item.text ?? "",
+                  labelInfo: item.accelerator,
                   symbolStartIcon: item.nativeIcon
                     ? this.nativeIconSymbol(item.nativeIcon)
                     : undefined,
@@ -325,7 +348,7 @@ export struct MenuBarComponent {
           )
         };
       },
-      (_group: MenuItemData[], index: number) => `group_${index}`,
+      (_group: MenuItemData[], index: number) => `${data.revision}:group_${index}`,
     );
   }
 
@@ -352,16 +375,16 @@ export struct MenuBarComponent {
   }
 
   @Builder
-  SubmenuContent(items: MenuItemData[]) {
+  SubmenuContent(data: MenuRenderData) {
     Menu() {
-      this.RenderMenuItems(items)
+      this.RenderMenuItems({ items: data.items, revision: data.revision })
     };
   }
 
   @Builder
   MenuContent() {
     Menu() {
-      this.RenderMenuItems(this.menuItems)
+      this.RenderMenuItems({ items: this.menuItems, revision: this.popupRevision })
     };
   }
 
@@ -369,29 +392,31 @@ export struct MenuBarComponent {
   MenuBarRow() {
     Row() {
       ForEach(
-        this.menubarItems,
-        (item: MenuItemData) => {
+        this.menubarItems.map((item: MenuItemData) => item.id),
+        (itemId: string) => {
           Row() {
-            if (item.icon && this.iconPixelMaps.has(item.id)) {
-              Image(this.iconPixelMaps.get(item.id)).width(16).height(16).margin({ right: 4 });
-            } else if (item.nativeIcon && this.nativeIconResource(item.nativeIcon)) {
+            if (this.getMenubarItem(itemId)?.icon && this.iconPixelMaps.has(itemId)) {
+              Image(this.iconPixelMaps.get(itemId)).width(16).height(16).margin({ right: 4 });
+            } else if (this.nativeIconResource(this.getMenubarItem(itemId)?.nativeIcon ?? "")) {
               // Top-level nativeIcon: render as a system symbol, mirroring the
               // Image branch above (submenu icon and nativeIcon are mutually exclusive)
-              SymbolGlyph(this.nativeIconResource(item.nativeIcon) as Resource)
+              SymbolGlyph(
+                this.nativeIconResource(this.getMenubarItem(itemId)?.nativeIcon ?? "") as Resource,
+              )
                 .fontSize(16)
                 .margin({ right: 4 });
             }
-            Text(item.text ?? "")
+            Text(this.getMenubarItem(itemId)?.text ?? "")
               .fontSize(14)
-              .fontColor((item.enabled ?? true) ? "#333333" : "#999999")
+              .fontColor((this.getMenubarItem(itemId)?.enabled ?? true) ? "#333333" : "#999999")
           }
           .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-          .enabled(item.enabled ?? true)
-          .opacity((item.enabled ?? true) ? 1.0 : 0.5)
+          .enabled(this.getMenubarItem(itemId)?.enabled ?? true)
+          .opacity((this.getMenubarItem(itemId)?.enabled ?? true) ? 1.0 : 0.5)
           .backgroundColor(
-            this.activeDropdownId === item.id
+            this.activeDropdownId === itemId
               ? "#E0E0E0"
-              : this.hoveredItemId === item.id
+              : this.hoveredItemId === itemId
                 ? "#EBEBEB"
                 : "#F5F5F5",
           )
@@ -403,20 +428,20 @@ export struct MenuBarComponent {
               0x1999,
               "MenuBar",
               "dropdown onClick id=%{public}s prevShown=%{public}s prevActive=%{public}s",
-              item.id,
+              itemId,
               this.activeDropdownShown,
               this.activeDropdownId,
             );
             menuWillOpenHandler?.(this.windowId);
-            this.activeDropdownId = item.id;
+            this.activeDropdownId = itemId;
             this.activeDropdownShown = true;
           })
           .onHover((isHover: boolean) => {
-            this.hoveredItemId = isHover ? item.id : "";
+            this.hoveredItemId = isHover ? itemId : "";
           })
           .bindMenu(
-            this.activeDropdownShown && this.activeDropdownId === item.id,
-            this.MenubarDropdownContent(item),
+            this.activeDropdownShown && this.activeDropdownId === itemId,
+            this.MenubarDropdownContent(itemId),
             {
               showInSubWindow: true,
               onWillDisappear: () => {
@@ -427,7 +452,7 @@ export struct MenuBarComponent {
                   "onWillDisappear activeId=%{public}s",
                   this.activeDropdownId,
                 );
-                if (this.activeDropdownId === item.id) {
+                if (this.activeDropdownId === itemId) {
                   this.activeDropdownShown = false;
                   this.activeDropdownId = "";
                 }
@@ -435,7 +460,7 @@ export struct MenuBarComponent {
             },
           );
         },
-        (item: MenuItemData) => item.id,
+        (itemId: string) => itemId,
       )
     }
     .width("100%")
@@ -445,15 +470,19 @@ export struct MenuBarComponent {
   }
 
   @Builder
-  MenubarDropdownContent(item: MenuItemData) {
+  MenubarDropdownContent(itemId: string) {
     Menu() {
-      this.RenderMenuItems(this.getActiveDropdownItem()?.submenuItems ?? [])
+      // Object-literal reference passing keeps an already-open popup reactive.
+      this.RenderMenuItems({
+        items: this.getMenubarItem(itemId)?.submenuItems ?? [],
+        revision: this.menubarRevision,
+      })
     };
   }
 
-  private getActiveDropdownItem(): MenuItemData | null {
+  private getMenubarItem(itemId: string): MenuItemData | null {
     for (const item of this.menubarItems) {
-      if (item.id === this.activeDropdownId) {
+      if (item.id === itemId) {
         return item;
       }
     }
