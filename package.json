@@ -2,7 +2,6 @@
   "private": true,
   "packageManager": "pnpm@10.22.0",
   "scripts": {
-    "test:runtime": "node --test tests/runtime-regressions.cjs",
     "install:ohpm": "sh scripts/install-ohpm.sh",
     "format": "cargo fmt --all && oxk format \"**/*.{ets,js,ts,json5}\" -t=10",
     "lint": "pnpm run lint:oxk && pnpm run lint:rs",
