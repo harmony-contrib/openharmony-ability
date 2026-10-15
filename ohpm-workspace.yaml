@@ -7,7 +7,7 @@ packages:
   - "plugins/*" # @ohos-rs/ability-plugin-* capability plugins
 
 exclude:
-  - "package" # publish staging dir; duplicate @ohos-rs/ability name
+  - "package" # legacy generated staging; duplicate @ohos-rs/ability name
   - "demo/.hvigor/**" # hvigor-generated dependencyMap manifests
   - "**/src/main/cpp/types/**" # generated NAPI .so type-stub packages
   - "demo/*" # demo entry module(s)
