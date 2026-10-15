@@ -12,6 +12,7 @@ import {
   demoPluginProfile,
   demoPluginSyncContext,
   demoPluginSyncFromWorker,
+  demoFaultInjectionCheck,
   demoPluginString,
   demoOpenUrl,
   demoFileDialogOpen,
@@ -37,6 +38,7 @@ struct Index {
   @State loginResult: string = "";
   @State mainThreadResult: string = "";
   @State syncFromWorkerResult: string = "";
+  @State faultInjectionResult: string = "";
   @State rawPayloadResult: string = "";
   @State profileResult: string = "";
   @State interceptResult: string = "";
@@ -119,6 +121,19 @@ struct Index {
       this.syncFromWorkerResult = `✓ ${await demoPluginSyncFromWorker()}`;
     } catch (error) {
       this.syncFromWorkerResult = `✗ ${String(error)}`;
+    } finally {
+      this.busyKey = "";
+    }
+  }
+
+  async handleFaultInjectionCheck() {
+    this.busyKey = "fault";
+    this.faultInjectionResult = "";
+    try {
+      const report = await demoFaultInjectionCheck();
+      this.faultInjectionResult = `✓ ${report}`;
+    } catch (error) {
+      this.faultInjectionResult = `✗ ${String(error)}`;
     } finally {
       this.busyKey = "";
     }
@@ -432,6 +447,18 @@ struct Index {
           buttons: [
             new DemoButton("inspect (Rust worker)", (): void => {
               this.handleSyncPluginFromWorker();
+            }),
+          ],
+        })
+        DemoCard({
+          title: "Fault injection",
+          hint: "ohos.fault-injection plugin · async + sync dispatch hooks",
+          statusText: this.statusTextOf("fault", this.faultInjectionResult),
+          statusColor: this.statusColorOf("fault", this.faultInjectionResult),
+          busy: this.busyKey === "fault",
+          buttons: [
+            new DemoButton("self-check", (): void => {
+              this.handleFaultInjectionCheck();
             }),
           ],
         })

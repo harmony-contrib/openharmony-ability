@@ -3,6 +3,12 @@ import { FrameNode } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import window from "@ohos.window";
 import {
+  WindowManager,
+  WindowSizeEventWrap,
+  WindowRectEventWrap,
+  WindowAvoidAreaEventWrap,
+} from "../window/WindowManager";
+import {
   ApplicationLifecycle,
   BridgeCallContext,
   BridgeContextRequirement,
@@ -14,13 +20,18 @@ import {
   BridgePlugin,
   BridgePluginContext,
   BridgePluginDeclaration,
+  BridgeDispatchHook,
   BridgePluginFactory,
   BridgePluginHookContext,
 } from "../ability/type";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import { CancellableTaskScope, TaskCancellationSignal } from "../runtime/CancellableTaskScope";
 
-const MAX_TIMEOUT_MS = 60_000;
+// Upper bound for per-call timeouts (callers opt in via bridgeInvoke's timeoutMs).
+// 5 minutes: interactive flows that put up system UI (e.g. Huawei account login
+// panel with SMS verification) can legitimately take minutes; the Rust-side
+// default of 15s stays for non-interactive calls.
+const MAX_TIMEOUT_MS = 300_000;
 const MAX_PAYLOAD_BYTES = 512 * 1024;
 const MAX_LIFECYCLE_HISTORY = 16;
 const PLUGIN_HOOK_TIMEOUT_MS = 5_000;
@@ -257,6 +268,10 @@ class BridgeHost {
   private readonly moduleName: string;
   private readonly abilityContext: common.UIAbilityContext;
   private readonly pluginFactories: BridgePluginFactory[];
+  // Cross-cutting dispatch hooks registered by plugins (registerDispatchHook).
+  // Consulted before every plugin invocation on this host — see the two
+  // dispatch points in invokeAsyncInternal / invokeSyncInternal.
+  private readonly dispatchHooks: BridgeDispatchHook[] = [];
   private pluginsConfigured: boolean = false;
   private applicationLifecycle?: ApplicationLifecycle;
   // One native module owns one DefaultXComponent/root tree. Multiple components in an Ability
@@ -570,7 +585,25 @@ class BridgeHost {
         return;
       }
       try {
-        this.applicationLifecycle?.windowStageEventCallback.onWindowSizeChange(size);
+        // Phase 3 (design.md D2/D3): route through per-window(0) throttle. This is the
+        // main-window component window's second windowSizeChange registration (the first
+        // is in NativeAbility.ets) — the throttle merges both sources for windowId=0.
+        const wrapped: WindowSizeEventWrap = {
+          windowId: 0,
+          width: size.width,
+          height: size.height,
+        };
+        WindowManager.getInstance().throttledRectDispatch(
+          0,
+          wrapped,
+          (w: object) => {
+            if (this.component !== state || this.closing || this.disposed) {
+              return;
+            }
+            this.applicationLifecycle?.windowStageEventCallback.onWindowSizeChange(w);
+          },
+          "size",
+        );
       } catch {}
     };
     const onRectChange = (options: window.RectChangeOptions): void => {
@@ -578,7 +611,29 @@ class BridgeHost {
         return;
       }
       try {
-        this.applicationLifecycle?.windowStageEventCallback.onWindowRectChange(options);
+        // Phase 3 (design.md D2/D3/D5): route through per-window(0) throttle.
+        // Deep-copy rect fields (not system object ref) per design.md D5.
+        const wrapped: WindowRectEventWrap = {
+          windowId: 0,
+          reason: options.reason,
+          rect: {
+            left: options.rect.left,
+            top: options.rect.top,
+            width: options.rect.width,
+            height: options.rect.height,
+          },
+        };
+        WindowManager.getInstance().throttledRectDispatch(
+          0,
+          wrapped,
+          (w: object) => {
+            if (this.component !== state || this.closing || this.disposed) {
+              return;
+            }
+            this.applicationLifecycle?.windowStageEventCallback.onWindowRectChange(w);
+          },
+          "rect",
+        );
       } catch {}
     };
     const onAvoidAreaChange = (options: window.AvoidAreaOptions): void => {
@@ -586,7 +641,12 @@ class BridgeHost {
         return;
       }
       try {
-        this.applicationLifecycle?.windowStageEventCallback.onAvoidAreaChange(options);
+        const wrapped: WindowAvoidAreaEventWrap = {
+          windowId: 0,
+          type: options.type,
+          area: options.area,
+        };
+        this.applicationLifecycle?.windowStageEventCallback.onAvoidAreaChange(wrapped);
       } catch {}
     };
     const onKeyboardHeightChange = (height: number): void => {
@@ -877,6 +937,13 @@ class BridgeHost {
       .then(async (): Promise<BridgeTypedValue> => {
         await this.ensureActive(entry, callState);
         this.assertCallActive(pluginId, action, callState, "before invocation");
+        // ── Dispatch hooks (async path) ──
+        // Cross-cutting hooks registered via registerDispatchHook (e.g. the
+        // fault-injection plugin) run before invocation: a throw fails the
+        // call, a returned Promise delays it.
+        for (const hook of this.dispatchHooks) {
+          await hook.onDispatchAsync(pluginId, action);
+        }
         const result = await asyncPlugin.invokeAsync(
           action,
           request,
@@ -934,6 +1001,12 @@ class BridgeHost {
       cancelled: false,
       cancelListeners: [],
     };
+    // ── Dispatch hooks (sync path) ──
+    // Same cross-cutting hooks as the async path, sync member: a throw fails
+    // the call. The sync member cannot delay — see BridgeDispatchHook.
+    for (const hook of this.dispatchHooks) {
+      hook.onDispatchSync(pluginId, action);
+    }
     const result = syncPlugin.invokeSync(
       action,
       request,
@@ -1254,7 +1327,26 @@ class BridgeHost {
           responseTypeName,
           value,
         ),
+      registerDispatchHook: (hook: BridgeDispatchHook): void =>
+        this.registerDispatchHook(pluginId, hook),
     };
+  }
+
+  /**
+   * Adds a cross-cutting dispatch hook for this host. Idempotent per hook
+   * instance; hooks are dropped with the host (session lifetime), so plugins
+   * register in `onInstall` and never unregister.
+   */
+  private registerDispatchHook(ownerPluginId: string, hook: BridgeDispatchHook): void {
+    if (this.dispatchHooks.includes(hook)) {
+      return;
+    }
+    if (this.closing || this.disposed) {
+      throw new Error(
+        `Bridge plugin '${ownerPluginId}' cannot register a dispatch hook on a closing host`,
+      );
+    }
+    this.dispatchHooks.push(hook);
   }
 
   private callContext(
@@ -1300,6 +1392,53 @@ class BridgeHost {
         value: ESObject,
       ): ESObject[] =>
         context.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
+      registerDispatchHook: (hook: BridgeDispatchHook): void =>
+        this.registerDispatchHook(pluginId, hook),
+    };
+  }
+
+  // Shared builder for the cancellable-context family (issue #87 minor-5): the
+  // platform members are delegated from a base pluginContext, the three
+  // cancellation members are injected — pluginHookContext used to duplicate all
+  // of this field-by-field. (callContext keeps its own literal: ArkTS forbids
+  // assigning a BridgePluginHookContext value to the BridgeCallContext return
+  // type, so its extra action/timeoutMs members rule out the factory.)
+  private cancellableContext(
+    base: BridgePluginContext,
+    isActive: () => boolean,
+    isCancelled: () => boolean,
+    onCancel: (listener: () => void) => () => void,
+  ): BridgePluginHookContext {
+    return {
+      pluginId: base.pluginId,
+      sessionId: base.sessionId,
+      abilityContext: base.abilityContext,
+      isActive,
+      isCancelled,
+      onCancel,
+      getWindowStage: (): window.WindowStage => base.getWindowStage(),
+      getWindow: (): window.Window => base.getWindow(),
+      getUIContext: (): UIContext => base.getUIContext(),
+      getRootFrameNode: (): FrameNode => base.getRootFrameNode(),
+      appendChild: (key: string, node: FrameNode, cleanup?: () => void): void =>
+        base.appendChild(key, node, cleanup),
+      removeChild: (key: string): void => base.removeChild(key),
+      getFrameNode: (handle: number): FrameNode => base.getFrameNode(handle),
+      invokeNativeSync: (
+        event: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+      ): ESObject => base.invokeNativeSync(event, requestTypeName, responseTypeName, value),
+      invokeNativeSyncProcessWide: (
+        event: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+      ): ESObject[] =>
+        base.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
+      registerDispatchHook: (hook: BridgeDispatchHook): void =>
+        this.registerDispatchHook(base.pluginId, hook),
     };
   }
 
@@ -1307,37 +1446,13 @@ class BridgeHost {
     pluginId: string,
     signal: TaskCancellationSignal,
   ): BridgePluginHookContext {
-    const context = this.pluginContext(pluginId);
-    return {
-      pluginId,
-      sessionId: this.sessionId,
-      abilityContext: this.abilityContext,
-      isActive: (): boolean => context.isActive() && !signal.isCancelled(),
-      isCancelled: (): boolean => signal.isCancelled() || this.disposed,
-      onCancel: (listener: () => void): (() => void) => signal.onCancel(listener),
-      getWindowStage: (): window.WindowStage => context.getWindowStage(),
-      getWindow: (): window.Window => context.getWindow(),
-      getUIContext: (): UIContext => context.getUIContext(),
-      getRootFrameNode: (): FrameNode => context.getRootFrameNode(),
-      appendChild: (key: string, node: FrameNode, cleanup?: () => void): void =>
-        context.appendChild(key, node, cleanup),
-      removeChild: (key: string): void => context.removeChild(key),
-      getFrameNode: (handle: number): FrameNode => context.getFrameNode(handle),
-      invokeNativeSync: (
-        event: string,
-        requestTypeName: string,
-        responseTypeName: string,
-        value: ESObject,
-      ): ESObject =>
-        this.invokeNativeSync(pluginId, event, requestTypeName, responseTypeName, value),
-      invokeNativeSyncProcessWide: (
-        event: string,
-        requestTypeName: string,
-        responseTypeName: string,
-        value: ESObject,
-      ): ESObject[] =>
-        context.invokeNativeSyncProcessWide(event, requestTypeName, responseTypeName, value),
-    };
+    const base = this.pluginContext(pluginId);
+    return this.cancellableContext(
+      base,
+      (): boolean => base.isActive() && !signal.isCancelled(),
+      (): boolean => signal.isCancelled() || this.disposed,
+      (listener: () => void): (() => void) => signal.onCancel(listener),
+    );
   }
 
   private async runPluginHook(
@@ -1584,6 +1699,10 @@ class BridgeHost {
     if (value === undefined || typeof value === "function" || typeof value === "symbol") {
       throw new Error(`Bridge ${role} '${payload.typeName}' is not an N-API data value`);
     }
+    // The size cap only applies to BARE top-level string/Uint8Array values.
+    // Object payloads are deliberately exempt: actions like capture-webview return
+    // a multi-hundred-KB base64 wrapped in an object ({ pngBase64, width, height }),
+    // and the Rust side applies no equivalent cap.
     if (
       (typeof value === "string" || value instanceof Uint8Array) &&
       value.length > MAX_PAYLOAD_BYTES

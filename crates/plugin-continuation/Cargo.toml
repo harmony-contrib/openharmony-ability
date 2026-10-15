@@ -1,0 +1,9 @@
+[package]
+name = "openharmony-ability-plugin-continuation"
+version = "1.0.0-beta.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "App continuation facade for openharmony-ability"
+
+[dependencies]
+openharmony-ability = { workspace = true }

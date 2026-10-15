@@ -82,5 +82,49 @@
       "name": "plugin_files",
       "srcPath": "../plugins/files",
     },
+    {
+      "name": "plugin_clipboard",
+      "srcPath": "../plugins/clipboard",
+    },
+    {
+      "name": "plugin_global_shortcut",
+      "srcPath": "../plugins/global-shortcut",
+    },
+    {
+      "name": "plugin_deep_link",
+      "srcPath": "../plugins/deep-link",
+    },
+    {
+      "name": "plugin_fault_injection",
+      "srcPath": "../plugins/faultinjection",
+    },
+    {
+      "name": "plugin_autostart",
+      "srcPath": "../plugins/autostart",
+    },
+    {
+      "name": "plugin_menu",
+      "srcPath": "../plugins/menu",
+    },
+    {
+      "name": "plugin_statusbar",
+      "srcPath": "../plugins/statusbar",
+    },
+    {
+      "name": "plugin_process",
+      "srcPath": "../plugins/process",
+    },
+    {
+      "name": "plugin_account",
+      "srcPath": "../plugins/account",
+    },
+    {
+      "name": "plugin_accessibility",
+      "srcPath": "../plugins/accessibility",
+    },
+    {
+      "name": "plugin_updater",
+      "srcPath": "../plugins/updater",
+    },
   ],
 }

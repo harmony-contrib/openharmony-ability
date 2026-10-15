@@ -17,10 +17,23 @@ pub enum Event<'a> {
     WindowDestroy,
 
     WindowRedraw(IntervalInfo),
+    /// Frame callback from a native XComponent in a Float sub-window.
+    SubWindowRedraw {
+        window_id: i64,
+        interval: IntervalInfo,
+    },
     /// window resize event
     /// alias window.on("windowSizeChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowsizechange7
-    WindowResize(Size),
+    ///
+    /// `window_id` is the OHOS window this resize originated from (0 = main,
+    /// \>0 = Float sub-window). Populated by the window_resize lifecycle closure
+    /// from the `windowId` field ArkTS wraps into the options (design.md D2/D6).
+    /// Phase 3: tao's run_loop routes the event by this id.
+    WindowResize {
+        window_id: i64,
+        size: Size,
+    },
     /// window rect change event
     /// alias window.on("windowRectChange")
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-window-V5#onwindowrectchange12
@@ -51,6 +64,11 @@ pub enum Event<'a> {
     /// window stage unfocus event
     /// alias WindowStageEventType.INAVTIVE
     LostFocus,
+    /// Focus change for a specific OHOS window (0 = main window).
+    WindowFocusChanged {
+        window_id: i64,
+        focused: bool,
+    },
     /// window resume
     /// alias WindowStageEventType.RESUMED
     Resume(SaveLoader<'a>),
@@ -78,17 +96,31 @@ pub enum Event<'a> {
     /// alias onSurfaceCreated for XComponent
     /// We can render EGL/OpenGL in this event
     SurfaceCreate,
+    SubWindowSurfaceCreate(i64),
     /// surface destroy event
     /// alias onSurfaceDestroyed for XComponent
     SurfaceDestroy,
+    SubWindowSurfaceDestroy(i64),
+    SubWindowClosed(i64),
     /// surface input event
     /// IME
     Input(InputEvent),
+    SubWindowInput {
+        window_id: i64,
+        event: InputEvent,
+    },
 
     /// keyboard event
     /// alias onKeyboardHeightChange
     /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references/arkts-apis-window-window#onkeyboardheightchange7
     KeyboardEvent(i32),
+
+    /// ability new want event (deep link / URL scheme)
+    /// alias onNewWant
+    /// https://developer.huawei.com/consumer/cn/doc/harmonyos-references-V5/js-apis-app-ability-uiAbility-V5#uiabilityonnewwant
+    NewWant {
+        uri: String,
+    },
 
     UserEvent,
 }
@@ -99,7 +131,8 @@ impl<'a> Event<'a> {
             Event::WindowCreate => "WindowCreate",
             Event::WindowDestroy => "WindowDestroy",
             Event::WindowRedraw(_) => "WindowRedraw",
-            Event::WindowResize(_) => "WindowResize",
+            Event::SubWindowRedraw { .. } => "SubWindowRedraw",
+            Event::WindowResize { .. } => "WindowResize",
             Event::ContentRectChange(_) => "ContentRectChange",
             Event::AvoidAreaChange(_) => "AvoidAreaChange",
             Event::ConfigChanged(_) => "ConfigChanged",
@@ -107,6 +140,7 @@ impl<'a> Event<'a> {
             Event::Start => "Start",
             Event::GainedFocus => "GainedFocus",
             Event::LostFocus => "LostFocus",
+            Event::WindowFocusChanged { .. } => "WindowFocusChanged",
             Event::Resume(_) => "Resume",
             Event::Pause => "Pause",
             Event::Stop => "Stop",
@@ -114,10 +148,15 @@ impl<'a> Event<'a> {
             Event::Create => "Create",
             Event::Destroy => "Destroy",
             Event::SurfaceCreate => "SurfaceCreate",
+            Event::SubWindowSurfaceCreate(_) => "SubWindowSurfaceCreate",
             Event::SurfaceDestroy => "SurfaceDestroy",
+            Event::SubWindowSurfaceDestroy(_) => "SubWindowSurfaceDestroy",
+            Event::SubWindowClosed(_) => "SubWindowClosed",
             Event::Input(_) => "Input",
+            Event::SubWindowInput { .. } => "SubWindowInput",
             Event::UserEvent => "UserEvent",
             Event::KeyboardEvent(_) => "KeyboardEvent",
+            Event::NewWant { .. } => "NewWant",
         }
     }
 }

@@ -1,0 +1,16 @@
+{
+  "author": {
+    "name": "richerfu",
+    "email": "southorange0929@foxmail.com",
+  },
+  "dependencies": {
+    "@ohos-rs/ability": "file:../../native_ability",
+  },
+  "description": "Menu capability plugin for @ohos-rs/ability",
+  "keywords": ["ohos-rs", "NAPI", "Rust", "node-addon", "openharmony", "harmonynext", "menu"],
+  "license": "MIT OR Apache-2.0",
+  "main": "index.ets",
+  "name": "@ohos-rs/ability-plugin-menu",
+  "repository": "https://github.com/harmony-contrib/openharmony-ability.git",
+  "version": "1.0.0-beta.0",
+}

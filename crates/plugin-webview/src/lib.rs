@@ -5,9 +5,14 @@
 //! root, or under a caller-provided `ohos.node` container handle.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Unknown, Either, Error, Result};
+use napi_ohos::{bindgen_prelude::Unknown, Error, Result};
+// Re-export Either so downstream crates (e.g. the webview consumer) can construct
+// `WebviewStyle` fields without directly depending on `napi-ohos`.
+pub use napi_ohos::Either;
 use ohos_web_binding::Web;
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
@@ -16,7 +21,7 @@ use openharmony_ability::{
 };
 
 mod callbacks;
-mod controller;
+pub mod controller;
 mod js_proxy;
 mod protocol;
 
@@ -100,9 +105,59 @@ impl BridgePlugin for WebviewBridgePlugin {
                 let request = event.decode::<WebviewNavigationRequest>()?;
                 event.respond(callbacks::navigation_decision(request)?)
             }
+            "drag-enter" => {
+                let drag_event = event.decode::<WebviewDragEvent>()?;
+                callbacks::dispatch_drag_enter(drag_event)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "drag-over" => {
+                let drag_event = event.decode::<WebviewDragEvent>()?;
+                callbacks::dispatch_drag_over(drag_event)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "drag-drop" => {
+                let drop_event = event.decode::<WebviewDropEvent>()?;
+                callbacks::dispatch_drag_drop(drop_event)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "drag-leave" => {
+                let drag_event = event.decode::<WebviewDragEvent>()?;
+                callbacks::dispatch_drag_leave(drag_event)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "new-window-request" => {
+                let request = event.decode::<WebviewNewWindowRequest>()?;
+                event.respond(callbacks::new_window_decision(request)?)
+            }
+            "page-begin" => {
+                let page_event = event.decode::<WebviewPageEvent>()?;
+                callbacks::dispatch_page_begin(page_event)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "page-end" => {
+                let page_event = event.decode::<WebviewPageEvent>()?;
+                callbacks::dispatch_page_end(page_event)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
             "download-start" => {
                 let request = event.decode::<WebviewDownloadStartRequest>()?;
                 event.respond(callbacks::download_start_decision(request)?)
+            }
+            "https-intercept" => {
+                let request = event.decode::<WebviewHttpsInterceptRequest>()?;
+                log::debug!(
+                    "[bridge https-intercept] received: id={} native_tag={} url={}",
+                    request.id,
+                    request.native_tag,
+                    request.url
+                );
+                let result = callbacks::https_intercept_decision(request)?;
+                log::debug!(
+                    "[bridge https-intercept] decision: handled={} status={}",
+                    result.handled,
+                    result.status
+                );
+                event.respond(result)
             }
             "download-end" => {
                 let notification = event.decode::<WebviewDownloadEndEvent>()?;
@@ -112,6 +167,13 @@ impl BridgePlugin for WebviewBridgePlugin {
             "title-change" => {
                 let notification = event.decode::<WebviewTitleChangeEvent>()?;
                 callbacks::dispatch_title_change(notification)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "print-state" => {
+                // Fire-and-forget: non-blocking unbounded send; the consumer polls on a
+                // worker thread (never recv on the main thread — deadlock precedent).
+                let notification = event.decode::<WebviewPrintStateEvent>()?;
+                let _ = print_state_channel().0.send(notification);
                 event.respond(WebviewEventAcknowledgement { accepted: true })
             }
             _ => Err(Error::from_reason(format!(
@@ -267,6 +329,14 @@ pub struct WebviewCallbackOptions {
     pub download_start: bool,
     pub download_end: bool,
     pub title_change: bool,
+    /// True when any drag callback (enter/over/drop/leave) is registered.
+    pub drag_drop: bool,
+    /// True when a new-window callback is registered.
+    pub new_window: bool,
+    /// True when a page-begin callback is registered.
+    pub page_begin: bool,
+    /// True when a page-end callback is registered.
+    pub page_end: bool,
 }
 
 /// A document-start script and the URL rules for pages where ArkWeb may inject it.
@@ -285,14 +355,18 @@ pub struct WebviewCreateRequest {
     /// the ArkTS host appends the WebView FrameNode under that container instead of this native
     /// module's DefaultXComponent root.
     pub parent_handle: Option<u32>,
+    /// OHOS window ID for sub-window webview mounting. When non-zero, the webview's FrameNode
+    /// is mounted into the specified window's component root (from WindowManager) instead of
+    /// this module's DefaultXComponent root.
+    pub window_id: Option<i64>,
     pub url: Option<String>,
     pub html: Option<String>,
     pub style: WebviewStyle,
     pub javascript_enabled: Option<bool>,
+    pub devtools: Option<bool>,
     /// Enables ArkWeb DOM storage (localStorage/sessionStorage). ArkWeb disables it by
     /// default; when unset, DOM storage stays disabled, so callers opt in with `true`.
     pub dom_storage_access: Option<bool>,
-    pub devtools: Option<bool>,
     pub user_agent: Option<String>,
     pub autoplay: Option<bool>,
     pub initialization_scripts: Option<Vec<WebviewInitializationScript>>,
@@ -300,6 +374,21 @@ pub struct WebviewCreateRequest {
     /// Restores the legacy creation-time transparent-background policy. An explicit style
     /// background color takes precedence.
     pub transparent: Option<bool>,
+    /// Enable ArkWeb native clipboard (Ctrl+C/V/X/A/Z/Y). Defaults to true (ArkWeb default).
+    /// false disables native clipboard so accelerator_matcher can intercept clipboard shortcuts.
+    pub clipboard: Option<bool>,
+    /// Enable zoom hotkeys (Ctrl+/-/0). Defaults to false.
+    pub zoom_hotkeys: Option<bool>,
+    /// Use a transparent Stack overlay to receive drag events (instead of binding directly on the
+    /// Web component). Defaults to false. Use when ArkWeb drag events are unreliable.
+    pub drag_drop_overlay: Option<bool>,
+    /// https-scheme protocols to intercept at create time. Seeds the ArkTS
+    /// `httpsInterceptProtocols` Set before the first `loadUrl`, fixing the
+    /// create-vs-register race that left the Set empty and caused `onInterceptRequest`
+    /// to early-return null → ArkWeb fetched the consumer-registered custom protocol for real →
+    /// `arkweb-error://webdata/` → `isSecureContext=false`. Late `register_https_intercept`
+    /// remains as a runtime add path (Set.add is idempotent).
+    pub https_intercept_protocol_list: Option<Vec<String>>,
     #[doc(hidden)]
     pub event_options: WebviewCallbackOptions,
 }
@@ -311,17 +400,22 @@ impl WebviewCreateRequest {
         Self {
             id: id.into(),
             parent_handle: None,
+            window_id: None,
             url: None,
             html: None,
             style: WebviewStyle::default(),
             javascript_enabled: None,
-            dom_storage_access: None,
             devtools: None,
+            dom_storage_access: None,
             user_agent: None,
             autoplay: None,
             initialization_scripts: None,
             headers: None,
             transparent: None,
+            clipboard: None,
+            zoom_hotkeys: None,
+            drag_drop_overlay: None,
+            https_intercept_protocol_list: None,
             event_options: WebviewCallbackOptions::default(),
         }
     }
@@ -447,6 +541,74 @@ impl WebviewDownloadStartResponse {
     }
 }
 
+// ── https-intercept ─────────────────────────────────────────────────────────────
+
+/// Synchronous https intercept request delivered from ArkWeb `onInterceptRequest`.
+///
+/// When the request URL matches `https://<protocol>.localhost/<path>` and `<protocol>` is in the
+/// WebView's live protocol set, ArkTS dispatches this event synchronously through
+/// `context.invokeNativeSync`. The Rust handler must produce a response before the NAPI environment
+/// is released, because `onInterceptRequest` is a synchronous ArkWeb callback.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewHttpsInterceptRequest {
+    pub id: String,
+    /// Process-unique controller generation used to reject callbacks from a replaced WebView.
+    pub native_tag: String,
+    pub url: String,
+}
+
+impl_bridge_napi_type!(
+    WebviewHttpsInterceptRequest,
+    "ohos.webview.HttpsInterceptRequest"
+);
+
+/// Synchronous https intercept response. `handled: false` lets ArkWeb fall through to its default
+/// network stack; `handled: true` returns the embedded response to ArkWeb.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewHttpsInterceptResponse {
+    pub handled: bool,
+    pub status: u16,
+    pub mime_type: String,
+    /// Raw response body bytes transported as `Uint8Array` across the NAPI boundary.
+    pub body: Vec<u8>,
+}
+
+impl_bridge_napi_type!(
+    WebviewHttpsInterceptResponse,
+    "ohos.webview.HttpsInterceptResponse"
+);
+
+impl WebviewHttpsInterceptResponse {
+    /// Returns the passthrough response: ArkWeb continues with its default network stack.
+    pub fn passthrough() -> Self {
+        Self {
+            handled: false,
+            status: 0,
+            mime_type: String::new(),
+            body: Vec::new(),
+        }
+    }
+}
+
+/// Outbound request that registers custom-protocol names for https interception on a WebView.
+///
+/// Rust (typically the webview consumer's `with_webview` hook) sends this async action so ArkTS merges the protocol
+/// names into the WebView's live protocol set. Subsequent `onInterceptRequest` callbacks check this
+/// set before dispatching through the bridge.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewRegisterHttpsInterceptRequest {
+    pub id: String,
+    pub protocols: Vec<String>,
+}
+
+impl_bridge_napi_type!(
+    WebviewRegisterHttpsInterceptRequest,
+    "ohos.webview.RegisterHttpsInterceptRequest"
+);
+
 /// Completion notification delivered directly through a named N-API callback.
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -484,6 +646,242 @@ impl_bridge_napi_type!(
     "ohos.webview.EventAcknowledgement"
 );
 
+// ── create-pdf ──────────────────────────────────────────────────────────────────
+
+/// Optional PDF generation configuration, mirroring `webview.PdfConfiguration`.
+/// Every field is optional — when `None`, the ArkTS side falls back to its
+/// defaults (A4 8.27×11.69in, zero margins, background printing on).
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct WebviewPdfConfig {
+    /// Page width in inches.
+    pub width: Option<f64>,
+    /// Page height in inches.
+    pub height: Option<f64>,
+    pub margin_top: Option<f64>,
+    pub margin_bottom: Option<f64>,
+    pub margin_left: Option<f64>,
+    pub margin_right: Option<f64>,
+    /// Page scale factor (e.g. 1.0).
+    pub scale: Option<f64>,
+    /// Whether to print background colors/images.
+    pub should_print_background: Option<bool>,
+}
+
+/// Request to generate a PDF file from the current WebView page.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPrintRequest {
+    pub id: String,
+    /// Target PDF file absolute path on the device filesystem.
+    pub path: String,
+    /// Optional PDF layout configuration. When absent the ArkTS side uses
+    /// fixed A4 defaults; when present the provided values override per-field.
+    pub pdf_config: Option<WebviewPdfConfig>,
+}
+
+impl_bridge_napi_type!(WebviewPrintRequest, "ohos.webview.PrintRequest");
+
+/// Response for create-pdf. `success` indicates the PDF was written to `path`.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPrintResponse {
+    pub success: bool,
+}
+
+impl_bridge_napi_type!(WebviewPrintResponse, "ohos.webview.PrintResponse");
+
+// ── print-state ─────────────────────────────────────────────────────────────────
+
+/// Terminal state of an OHOS system print job (PrintTask event).
+///
+/// Pushed from ArkTS `WebviewPlugin.ets` PrintTask `.on("succeed"|"fail"|"cancel"|"block")`
+/// handlers through the `print-state` main-thread event. Decoded on the NAPI main thread and
+/// forwarded through a process-wide crossbeam channel — never blocked on from the main
+/// thread (the consumer polls on a worker thread, see `print_state_receiver`).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPrintStateEvent {
+    /// The WebView id that initiated `printPdf` (correlation key for the consumer).
+    pub id: String,
+    /// One of: `"succeed"`, `"fail"`, `"cancel"`, `"block"`.
+    pub state: String,
+    /// Error message for `state == "fail"` (absent otherwise).
+    pub error: Option<String>,
+}
+
+impl_bridge_napi_type!(WebviewPrintStateEvent, "ohos.webview.PrintStateEvent");
+
+static PRINT_STATE_CHANNEL: OnceLock<(
+    Sender<WebviewPrintStateEvent>,
+    Receiver<WebviewPrintStateEvent>,
+)> = OnceLock::new();
+
+fn print_state_channel() -> &'static (
+    Sender<WebviewPrintStateEvent>,
+    Receiver<WebviewPrintStateEvent>,
+) {
+    PRINT_STATE_CHANNEL.get_or_init(unbounded)
+}
+
+/// Returns the process-wide receiver for OHOS print-job terminal-state events.
+///
+/// Each `printPdf` terminal state (`succeed`/`fail`/`cancel`/`block`) produces one event
+/// carrying the originating WebView `id`. The receiver is `'static` and safe to poll on a
+/// worker thread (do NOT `recv` on the NAPI main thread — that would deadlock). Consumer
+/// pattern: spawn a thread, `while let Ok(event) = receiver.recv() { ... }`, then emit an
+/// event to the embedding runtime via the app handle.
+pub fn print_state_receiver() -> &'static Receiver<WebviewPrintStateEvent> {
+    &print_state_channel().1
+}
+
+// ── web-page-snapshot ──────────────────────────────────────────────────────────
+
+/// Request to capture a WebView snapshot (RGBA pixel data).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewSnapshotRequest {
+    pub id: String,
+}
+
+impl_bridge_napi_type!(WebviewSnapshotRequest, "ohos.webview.SnapshotRequest");
+
+/// Response for web-page-snapshot. `rgba_len` is the byte count of the RGBA
+/// pixel buffer (width * height * 4), verified without transferring the full buffer.
+/// The full RGBA is NOT sent across the bridge for efficiency (1.9MB for 800×600).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewSnapshotResponse {
+    pub success: bool,
+    pub width: u32,
+    pub height: u32,
+    pub rgba_len: u32,
+}
+
+impl_bridge_napi_type!(WebviewSnapshotResponse, "ohos.webview.SnapshotResponse");
+
+// ── capture-webview / pick-color ────────────────────────────────────────────────
+
+/// Response for `capture-webview`: the viewport snapshot (the on-screen area, not the
+/// full scrollable page) encoded as a base64 PNG string plus its pixel dimensions.
+/// base64 (not raw bytes) — a `Vec<u8>` in a napi object would
+/// serialize as `Array<number>`, inflating a multi-hundred-KB PNG ~8x in memory.
+/// Requests reuse [`WebviewControllerRequest`].
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewCaptureResponse {
+    pub png_base64: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl_bridge_napi_type!(WebviewCaptureResponse, "ohos.webview.CaptureResponse");
+
+/// Response for `pick-color`: the pixel at snapshot coordinates (x, y). The ArkTS side
+/// reads a 1px region via `readPixels` (which always outputs BGRA_8888 bytes regardless
+/// of the PixelMap format) and converts the channels to RGBA before crossing the bridge.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPickColorResponse {
+    pub r: u32,
+    pub g: u32,
+    pub b: u32,
+    pub a: u32,
+}
+
+impl_bridge_napi_type!(WebviewPickColorResponse, "ohos.webview.PickColorResponse");
+
+// ── set-cookie ──────────────────────────────────────────────────────────────────
+
+/// Request to set a cookie for a specific URL via `WebCookieManager.configCookieSync`.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewSetCookieRequest {
+    pub id: String,
+    pub url: String,
+    /// Set-Cookie formatted value string (RFC 6265).
+    pub value: String,
+}
+
+impl_bridge_napi_type!(WebviewSetCookieRequest, "ohos.webview.SetCookieRequest");
+
+// ── set-user-agent ──────────────────────────────────────────────────────────────
+
+/// Request to set the WebView's custom user agent string.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewUserAgentRequest {
+    pub id: String,
+    pub user_agent: String,
+}
+
+impl_bridge_napi_type!(WebviewUserAgentRequest, "ohos.webview.UserAgentRequest");
+
+// ── drag events ─────────────────────────────────────────────────────────────────
+
+/// Drag enter/over/leave event (no file paths; `getData()` is only valid in onDrop).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewDragEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+impl_bridge_napi_type!(WebviewDragEvent, "ohos.webview.DragEvent");
+
+/// Drop event carrying extracted file paths from UDMF records.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewDropEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub x: f64,
+    pub y: f64,
+    /// Extracted absolute file paths. Empty for enter/over/leave.
+    pub paths: Vec<String>,
+}
+
+impl_bridge_napi_type!(WebviewDropEvent, "ohos.webview.DropEvent");
+
+// ── new-window-request ──────────────────────────────────────────────────────────
+
+/// Request delivered when ArkWeb asks to open a new window.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewNewWindowRequest {
+    pub id: String,
+    pub native_tag: String,
+    pub target_url: String,
+    pub is_alert: bool,
+    pub is_user_trigger: bool,
+}
+
+impl_bridge_napi_type!(WebviewNewWindowRequest, "ohos.webview.NewWindowRequest");
+
+/// Synchronous new-window decision.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewNewWindowResponse {
+    pub allow: bool,
+}
+
+impl_bridge_napi_type!(WebviewNewWindowResponse, "ohos.webview.NewWindowResponse");
+
+// ── page-begin / page-end ───────────────────────────────────────────────────────
+
+/// Page navigation event (begin or end) carrying the page URL.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPageEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub url: String,
+}
+
+impl_bridge_napi_type!(WebviewPageEvent, "ohos.webview.PageEvent");
+
 #[derive(Clone)]
 pub struct WebviewClient {
     bridge: BridgeRuntime,
@@ -494,6 +892,13 @@ impl WebviewClient {
         Ok(Self {
             bridge: app.bridge()?,
         })
+    }
+
+    /// Constructs a `WebviewClient` from an existing `BridgeRuntime` without requiring
+    /// an `OpenHarmonyApp`. Used by the webview consumer's bridge-based webview backend where the runtime
+    /// is passed through `PlatformSpecificWebViewAttributes::bridge_runtime`.
+    pub fn from_bridge(bridge: BridgeRuntime) -> Self {
+        Self { bridge }
     }
 
     pub async fn create(&self, mut request: WebviewCreateRequest) -> Result<WebviewHandle> {
@@ -557,18 +962,200 @@ impl WebviewClient {
         bind_custom_protocol_async(webview_id, scheme, callback)
     }
 
+    /// Registers custom-protocol names for https interception on the given WebView.
+    ///
+    /// This is the outbound companion to `WebviewCallbacksBuilder::on_https_intercept_request`.
+    /// Typically called from the webview consumer's `with_webview` hook after the WebView has been created.
+    pub async fn register_https_intercept(
+        &self,
+        webview_id: impl Into<String>,
+        protocols: Vec<String>,
+    ) -> Result<()> {
+        let id = webview_id.into();
+        self.bridge
+            .call_async::<WebviewBridgePlugin, WebviewRegisterHttpsInterceptRequest, WebviewAcknowledgement>(
+                "register-https-intercept",
+                WebviewRegisterHttpsInterceptRequest { id, protocols },
+                BridgeCallOptions::default(),
+            )
+            .await?
+            .ensure()
+    }
+
+    /// Rolls back the per-WebView registry entries installed while preparing a
+    /// `create` that ended up failing: the callback bundle
+    /// ([`WebviewCallbacksBuilder`]), the queued JavaScript proxy
+    /// declarations ([`WebviewJavascriptProxyBuilder`]), and the per-WebView
+    /// custom-scheme handler declarations (`custom_protocol_async`).
+    ///
+    /// wry registers all of these BEFORE spawning the async bridge `create`;
+    /// on failure the entries would otherwise stay in the process-global
+    /// registries forever, because wry webview ids are per-attempt. A failed
+    /// create attached no ArkTS controller, so nothing was installed on the
+    /// ArkWeb side — dropping the queued Rust entries is the complete cleanup.
+    ///
+    /// The PROCESS-GLOBAL scheme declarations (`WebviewProtocol::register`)
+    /// are intentionally retained: they are shared across webviews, idempotent
+    /// to re-declare, and bounded by the app's scheme list, not by create
+    /// attempts.
+    pub fn rollback_registrations(&self, webview_id: &str) -> Result<()> {
+        let callbacks_removed = callbacks::remove(webview_id)?;
+        let proxies_dropped = js_proxy::remove_declarations(webview_id)?;
+        let schemes_dropped = protocol::remove_declarations(webview_id)?;
+        log::debug!(
+            "[webview] rolled back registrations for failed create of '{}': \
+             callbacks={}, proxy declarations={}, protocol schemes={}",
+            webview_id,
+            callbacks_removed,
+            proxies_dropped,
+            schemes_dropped
+        );
+        Ok(())
+    }
+
     async fn call<Request, Response>(&self, action: &str, request: Request) -> Result<Response>
     where
         Request: BridgeNapiType,
         Response: BridgeNapiType,
     {
-        self.bridge
-            .call_async::<WebviewBridgePlugin, Request, Response>(
-                action,
-                request,
-                BridgeCallOptions::default(),
-            )
+        self.call_with_options(action, request, BridgeCallOptions::default())
             .await
+    }
+
+    /// Like [`call`] with an explicit per-call policy — heavy actions override the
+    /// 15s default timeout via [`snapshot_call_options`].
+    async fn call_with_options<Request, Response>(
+        &self,
+        action: &str,
+        request: Request,
+        options: BridgeCallOptions,
+    ) -> Result<Response>
+    where
+        Request: BridgeNapiType,
+        Response: BridgeNapiType,
+    {
+        self.bridge
+            .call_async::<WebviewBridgePlugin, Request, Response>(action, request, options)
+            .await
+    }
+}
+
+/// Snapshot actions run a 10s-capped ArkWeb capture (up to 3 retries) plus, for
+/// `capture-webview`, PNG packing of a potentially multi-MB image; give them a wider
+/// budget than the 15s bridge default (aligned with the plugin-files/plugin-permission
+/// precedent of 60s for heavy actions).
+fn snapshot_call_options() -> BridgeCallOptions {
+    BridgeCallOptions::default().with_timeout_ms(60_000)
+}
+
+/// Returns the active ArkWeb engine version, e.g. `"M132"` / `"M132 (evergreen)"`.
+///
+/// ArkWeb identifies its engine by kernel generation rather than a semantic
+/// version string — there is no `getWebVersion()`-style API; the public native
+/// surface is `OH_NativeArkWeb_GetActiveWebEngineVersion` (API 20+) from
+/// `libohweb.so`, resolved lazily via dlopen+dlsym (same pattern as the
+/// cursor-lock C API in the window module) so systems below API 20 degrade to
+/// an error instead of a load-time link failure. No ArkTS round-trip is
+/// involved: consumers may call this during app bootstrap, while the Rust
+/// main thread is still inside the NAPI `openharmony()` entry and the ArkTS
+/// loop cannot answer a bridge call.
+pub fn arkweb_engine_version() -> Result<String> {
+    arkweb_version_capi::engine_version().map_err(Error::from_reason)
+}
+
+/// `ArkWebEngineVersion` values from `native_interface_arkweb.h`.
+mod arkweb_version_capi {
+    use std::ffi::{c_char, c_int, c_void};
+    use std::sync::OnceLock;
+
+    const ENGINE_VERSION_M114: i32 = 1;
+    const ENGINE_VERSION_M132: i32 = 2;
+    const ENGINE_VERSION_M144: i32 = 3;
+    const ENGINE_VERSION_EVERGREEN: i32 = 99999;
+
+    type GetActiveWebEngineVersionFn = unsafe extern "C" fn() -> i32;
+    type IsActiveWebEngineEvergreenFn = unsafe extern "C" fn() -> bool;
+
+    struct ArkWebVersionApi {
+        get_active_web_engine_version: GetActiveWebEngineVersionFn,
+        // API 23+; `None` on older systems (the flag is informational only).
+        is_active_web_engine_evergreen: Option<IsActiveWebEngineEvergreenFn>,
+    }
+
+    static ARKWEB_VERSION_API: OnceLock<Option<ArkWebVersionApi>> = OnceLock::new();
+
+    extern "C" {
+        fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+    }
+
+    /// Resolves the ArkWeb version C API once per process; `Err` when the
+    /// system does not provide it (below API 20). The handle is intentionally
+    /// never closed — the library stays loaded for the process lifetime.
+    fn api() -> Option<&'static ArkWebVersionApi> {
+        ARKWEB_VERSION_API
+            .get_or_init(|| unsafe {
+                // RTLD_NOW | RTLD_LOCAL = 2 on OHOS musl.
+                let handle = dlopen(c"libohweb.so".as_ptr(), 2);
+                if handle.is_null() {
+                    log::warn!("[webview] dlopen libohweb.so failed — ArkWeb version unavailable");
+                    return None;
+                }
+                let get_version = dlsym(
+                    handle,
+                    c"OH_NativeArkWeb_GetActiveWebEngineVersion".as_ptr(),
+                );
+                if get_version.is_null() {
+                    log::warn!(
+                        "[webview] OH_NativeArkWeb_GetActiveWebEngineVersion not exported \
+                         (API < 20) — ArkWeb version unavailable"
+                    );
+                    return None;
+                }
+                let is_evergreen = dlsym(
+                    handle,
+                    c"OH_NativeArkWeb_IsActiveWebEngineEvergreen".as_ptr(),
+                );
+                Some(ArkWebVersionApi {
+                    get_active_web_engine_version: std::mem::transmute::<
+                        *mut c_void,
+                        GetActiveWebEngineVersionFn,
+                    >(get_version),
+                    is_active_web_engine_evergreen: (!is_evergreen.is_null()).then(|| {
+                        std::mem::transmute::<*mut c_void, IsActiveWebEngineEvergreenFn>(
+                            is_evergreen,
+                        )
+                    }),
+                })
+            })
+            .as_ref()
+    }
+
+    pub fn engine_version() -> Result<String, String> {
+        let api = api().ok_or(
+            "libohweb.so does not export OH_NativeArkWeb_GetActiveWebEngineVersion \
+             (device below API 20)"
+                .to_string(),
+        )?;
+        let version = unsafe { (api.get_active_web_engine_version)() };
+        let mut name = match version {
+            ENGINE_VERSION_M114 => "M114",
+            ENGINE_VERSION_M132 => "M132",
+            ENGINE_VERSION_M144 => "M144",
+            ENGINE_VERSION_EVERGREEN => "ARKWEB_EVERGREEN",
+            // 0 (SYSTEM_DEFAULT): the app never pinned an engine, so the
+            // system default applies (M132 on 6.0, M144 on 7.0). Any other
+            // value is a future generation — report the raw enum number.
+            0 => "SYSTEM_DEFAULT",
+            other => return Ok(format!("ArkWebEngineVersion({other})")),
+        }
+        .to_string();
+        if let Some(is_evergreen) = api.is_active_web_engine_evergreen {
+            if unsafe { is_evergreen() } {
+                name.push_str(" (evergreen)");
+            }
+        }
+        Ok(name)
     }
 }
 
@@ -602,6 +1189,10 @@ impl WebviewHandle {
             html: None,
             headers: None,
             zoom: None,
+            x: None,
+            y: None,
+            width: None,
+            height: None,
         }
     }
 
@@ -646,6 +1237,25 @@ impl WebviewHandle {
             .custom_protocol_async(&self.id, scheme, callback)
     }
 
+    /// Registers custom-protocol names for https interception on this WebView.
+    ///
+    /// The protocols are merged into the ArkTS-side live protocol set. Subsequent
+    /// `onInterceptRequest` callbacks matching `https://<protocol>.localhost/<path>` will be
+    /// dispatched synchronously through the `https-intercept` bridge event. This is the outbound
+    /// companion to the `WebviewCallbacksBuilder::on_https_intercept_request` Rust handler.
+    pub async fn register_https_intercept(&self, protocols: Vec<String>) -> Result<()> {
+        self.client
+            .call::<_, WebviewAcknowledgement>(
+                "register-https-intercept",
+                WebviewRegisterHttpsInterceptRequest {
+                    id: self.id.clone(),
+                    protocols,
+                },
+            )
+            .await?
+            .ensure()
+    }
+
     /// Registers a native ArkWeb controller-attached callback for the currently attached
     /// controller. The public ID is resolved to the process-unique native tag first.
     pub fn on_controller_attach<F>(&self, callback: F) -> Result<()>
@@ -661,6 +1271,15 @@ impl WebviewHandle {
             })
     }
 
+    /// Registers a page-begin callback via the ArkWeb C-API binding path.
+    ///
+    /// **Deprecated**: use `WebviewCallbacksBuilder::on_page_begin` instead. The bridge
+    /// `page-begin` reverse event path is the unified route; both paths active will fire the
+    /// callback twice. This C-API path will be removed in the B2 webview consumer rewrite.
+    #[deprecated(
+        since = "1.0.0-beta.0",
+        note = "use WebviewCallbacksBuilder::on_page_begin via the bridge reverse-event path"
+    )]
     pub fn on_page_begin<F>(&self, callback: F) -> Result<()>
     where
         F: FnMut() + 'static,
@@ -674,6 +1293,15 @@ impl WebviewHandle {
             })
     }
 
+    /// Registers a page-end callback via the ArkWeb C-API binding path.
+    ///
+    /// **Deprecated**: use `WebviewCallbacksBuilder::on_page_end` instead. The bridge
+    /// `page-end` reverse event path is the unified route; both paths active will fire the
+    /// callback twice. This C-API path will be removed in the B2 webview consumer rewrite.
+    #[deprecated(
+        since = "1.0.0-beta.0",
+        note = "use WebviewCallbacksBuilder::on_page_end via the bridge reverse-event path"
+    )]
     pub fn on_page_end<F>(&self, callback: F) -> Result<()>
     where
         F: FnMut() + 'static,
@@ -810,9 +1438,176 @@ impl WebviewHandle {
             .await
     }
 
+    /// Updates the WebView bounds (position + size) in vp units.
+    pub async fn set_bounds(&self, x: f64, y: f64, width: f64, height: f64) -> Result<()> {
+        self.acknowledge(
+            "set-bounds",
+            WebviewControllerRequest {
+                x: Some(x),
+                y: Some(y),
+                width: Some(width),
+                height: Some(height),
+                ..self.controller_request()
+            },
+        )
+        .await
+    }
+
+    /// Sets a cookie for the given URL using `WebCookieManager.configCookieSync`.
+    /// `value` should be a Set-Cookie formatted string (RFC 6265).
+    pub async fn set_cookie(&self, url: impl Into<String>, value: impl Into<String>) -> Result<()> {
+        self.client
+            .call::<_, WebviewAcknowledgement>(
+                "set-cookie",
+                WebviewSetCookieRequest {
+                    id: self.id.clone(),
+                    url: url.into(),
+                    value: value.into(),
+                },
+            )
+            .await?
+            .ensure()
+    }
+
+    /// Prints a previously generated PDF file at `path` using `@ohos.print`.
+    pub async fn print(&self, path: impl Into<String>) -> Result<()> {
+        self.client
+            .call::<_, WebviewAcknowledgement>(
+                "print",
+                WebviewPrintRequest {
+                    id: self.id.clone(),
+                    path: path.into(),
+                    pdf_config: None,
+                },
+            )
+            .await?
+            .ensure()
+    }
+
+    /// Toggles `WebviewController.setWebDebuggingAccess` (process-global static).
+    /// This is a bridge action because the old ArkTS ObjectRef path is no longer
+    /// available in the bridge architecture.
+    pub async fn set_web_debugging_access(&self, enabled: bool) -> Result<()> {
+        self.acknowledge(
+            "set-web-debugging-access",
+            WebviewControllerRequest {
+                visible: Some(enabled),
+                ..self.controller_request()
+            },
+        )
+        .await
+    }
+
     /// Named replacement for the old `dispose` controller operation.
     pub async fn dispose(&self) -> Result<()> {
         self.remove().await
+    }
+
+    /// Generates a PDF from the currently loaded page and writes it to `path`.
+    ///
+    /// When `pdf_config` is provided, its values override the ArkTS-side defaults
+    /// (A4 8.27×11.69in, zero margins, background printing on) per-field.
+    /// The ArkTS side guards `createPdf()` with an API 14+ version check; on older
+    /// devices it returns `success: false`. Callers should invoke this after
+    /// `page-end` to ensure the page is fully loaded.
+    pub async fn create_pdf(
+        &self,
+        path: impl Into<String>,
+        pdf_config: Option<WebviewPdfConfig>,
+    ) -> Result<()> {
+        let response = self
+            .client
+            .call::<_, WebviewPrintResponse>(
+                "create-pdf",
+                WebviewPrintRequest {
+                    id: self.id.clone(),
+                    path: path.into(),
+                    pdf_config,
+                },
+            )
+            .await?;
+        if response.success {
+            Ok(())
+        } else {
+            Err(Error::from_reason(
+                "WebView create-pdf failed (API 14+ required or page not loaded)",
+            ))
+        }
+    }
+
+    /// Captures a snapshot of the current WebView page as RGBA pixel data.
+    ///
+    /// The ArkTS side uses `WebviewController.webPageSnapshot()` with up to 3 retries
+    /// and a 10s overall timeout. Returns the raw RGBA bytes and dimensions.
+    /// Note: `rgba` is serialized as `Array<number>` via NAPI — callers must convert
+    /// to `Uint8Array` on the JS side if needed.
+    pub async fn web_page_snapshot(&self) -> Result<WebviewSnapshotResponse> {
+        let response = self
+            .client
+            .call_with_options::<_, WebviewSnapshotResponse>(
+                "web-page-snapshot",
+                WebviewSnapshotRequest {
+                    id: self.id.clone(),
+                },
+                snapshot_call_options(),
+            )
+            .await?;
+        if response.success {
+            Ok(response)
+        } else {
+            Err(Error::from_reason(
+                "WebView web-page-snapshot failed (page not loaded or snapshot error)",
+            ))
+        }
+    }
+
+    /// Captures the current page as a base64-encoded PNG image with its dimensions.
+    ///
+    /// The ArkTS side uses the same `webPageSnapshot` retry+timeout wrapper as
+    /// [`WebviewHandle::web_page_snapshot`], then packs the PixelMap as PNG via
+    /// `image.ImagePacker`. The PixelMap and ImagePacker are released on the ArkTS side.
+    pub async fn capture_webview(&self) -> Result<WebviewCaptureResponse> {
+        self.client
+            .call_with_options::<_, WebviewCaptureResponse>(
+                "capture-webview",
+                self.controller_request(),
+                snapshot_call_options(),
+            )
+            .await
+    }
+
+    /// Reads the color of a single pixel at snapshot coordinates (x, y).
+    ///
+    /// Both coordinates are pixel offsets into the snapshot, i.e. the same coordinate
+    /// system as the width/height returned by [`WebviewHandle::capture_webview`].
+    /// Coordinates outside the snapshot surface reject with a structured error.
+    pub async fn pick_color(&self, x: u32, y: u32) -> Result<WebviewPickColorResponse> {
+        let mut request = self.controller_request();
+        request.x = Some(x as f64);
+        request.y = Some(y as f64);
+        self.client
+            .call_with_options::<_, WebviewPickColorResponse>(
+                "pick-color",
+                request,
+                snapshot_call_options(),
+            )
+            .await
+    }
+    ///
+    /// OHOS recommends setting the user agent in `onControllerAttached`; runtime dynamic
+    /// setting is supported but may probabilistically fail. The ArkTS side wraps this in
+    /// try-catch.
+    pub async fn set_user_agent(&self, user_agent: impl Into<String>) -> Result<()> {
+        self.client
+            .call::<_, WebviewAcknowledgement>(
+                "set-user-agent",
+                WebviewUserAgentRequest {
+                    id: self.id.clone(),
+                    user_agent: user_agent.into(),
+                },
+            )
+            .await?
+            .ensure()
     }
 
     /// Evaluates JavaScript in the currently loaded page and returns its string result.
@@ -882,6 +1677,14 @@ pub struct WebviewControllerRequest {
     pub html: Option<String>,
     pub headers: Option<BTreeMap<String, String>>,
     pub zoom: Option<f64>,
+    /// Optional bounds x position (vp). Used by the `set-bounds` action.
+    pub x: Option<f64>,
+    /// Optional bounds y position (vp). Used by the `set-bounds` action.
+    pub y: Option<f64>,
+    /// Optional bounds width (vp). Used by the `set-bounds` action.
+    pub width: Option<f64>,
+    /// Optional bounds height (vp). Used by the `set-bounds` action.
+    pub height: Option<f64>,
 }
 
 impl_bridge_napi_type!(WebviewControllerRequest, "ohos.webview.ControllerRequest");
@@ -939,6 +1742,15 @@ mod tests {
     fn create_request_defaults_to_session_root_mount() {
         let request = WebviewCreateRequest::new("webview").html("<p>hi</p>");
         assert!(request.parent_handle.is_none());
+    }
+
+    #[test]
+    fn create_request_accepts_optional_clipboard_and_drag_fields() {
+        let request = WebviewCreateRequest::new("webview").url("https://example.test");
+        assert!(request.clipboard.is_none());
+        assert!(request.zoom_hotkeys.is_none());
+        assert!(request.drag_drop_overlay.is_none());
+        // The fields exist and default to None in new().
     }
 
     #[test]
@@ -1037,6 +1849,50 @@ mod tests {
             <WebviewEventAcknowledgement as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.EventAcknowledgement"
         );
+        assert_eq!(
+            <WebviewPrintRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PrintRequest"
+        );
+        assert_eq!(
+            <WebviewPrintResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PrintResponse"
+        );
+        assert_eq!(
+            <WebviewUserAgentRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.UserAgentRequest"
+        );
+        assert_eq!(
+            <WebviewDragEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.DragEvent"
+        );
+        assert_eq!(
+            <WebviewDropEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.DropEvent"
+        );
+        assert_eq!(
+            <WebviewNewWindowRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.NewWindowRequest"
+        );
+        assert_eq!(
+            <WebviewNewWindowResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.NewWindowResponse"
+        );
+        assert_eq!(
+            <WebviewPageEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PageEvent"
+        );
+        assert_eq!(
+            <WebviewHttpsInterceptRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.HttpsInterceptRequest"
+        );
+        assert_eq!(
+            <WebviewHttpsInterceptResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.HttpsInterceptResponse"
+        );
+        assert_eq!(
+            <WebviewRegisterHttpsInterceptRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.RegisterHttpsInterceptRequest"
+        );
     }
 
     #[test]
@@ -1058,5 +1914,57 @@ mod tests {
             plugin.required_contexts_for_main_thread_event(CONTROLLER_ATTACHED_EVENT),
             &[BridgeContextRequirement::UiContext]
         );
+    }
+
+    // ── expect_engine_phase ───────────────────────────────────────────────
+
+    #[test]
+    fn expect_engine_phase_matches() {
+        let event = WebviewEngineLifecycleEvent {
+            phase: "before-init".to_string(),
+            schemes: vec![],
+        };
+        assert!(expect_engine_phase(&event, "before-init").is_ok());
+    }
+
+    #[test]
+    fn expect_engine_phase_mismatch_returns_error() {
+        let event = WebviewEngineLifecycleEvent {
+            phase: "initialized".to_string(),
+            schemes: vec![],
+        };
+        assert!(expect_engine_phase(&event, "before-init").is_err());
+    }
+
+    // ── engine_scheme_pairs ──────────────────────────────────────────────
+
+    #[test]
+    fn engine_scheme_pairs_extracts_scheme_and_options() {
+        let event = WebviewEngineLifecycleEvent {
+            phase: "before-init".to_string(),
+            schemes: vec![
+                WebviewSchemeDeclaration {
+                    scheme: "tauri".to_string(),
+                    options: 1,
+                },
+                WebviewSchemeDeclaration {
+                    scheme: "myapp".to_string(),
+                    options: 2,
+                },
+            ],
+        };
+        let pairs = engine_scheme_pairs(&event);
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0], ("tauri".to_string(), 1u32));
+        assert_eq!(pairs[1], ("myapp".to_string(), 2u32));
+    }
+
+    #[test]
+    fn engine_scheme_pairs_empty_schemes() {
+        let event = WebviewEngineLifecycleEvent {
+            phase: "before-init".to_string(),
+            schemes: vec![],
+        };
+        assert!(engine_scheme_pairs(&event).is_empty());
     }
 }

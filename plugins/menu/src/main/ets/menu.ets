@@ -1,0 +1,479 @@
+import { MenuItemData, PredefinedType, AboutMetadataData } from "./menu_types";
+import web_webview from "@ohos.web.webview";
+import window from "@ohos.window";
+import common from "@ohos.app.ability.common";
+import { Want } from "@kit.AbilityKit";
+import { pasteboard } from "@kit.BasicServicesKit";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import {
+  type Module,
+  WindowManager,
+  DOMAIN,
+  NATIVE_MODULE_STORAGE_KEY,
+  MAIN_WINDOW_ID,
+} from "@ohos-rs/ability";
+import { getMenuDataCallback } from "./MenuBarComponent";
+
+// Global executor singleton — shared by Menu and Tray execution paths
+let globalExecutor: PredefinedActionExecutor | null = null;
+
+interface TargetWindow {
+  win: window.Window | null;
+  windowId: number;
+}
+
+export function setPredefinedActionExecutor(executor: PredefinedActionExecutor): void {
+  globalExecutor = executor;
+}
+
+export function getPredefinedActionExecutor(): PredefinedActionExecutor | null {
+  return globalExecutor;
+}
+
+export class PredefinedActionExecutor {
+  private controller: web_webview.WebviewController | null = null;
+  private win: window.Window | null = null;
+  private context: common.UIAbilityContext | null = null;
+  private exitFn: (code: number) => void;
+  private showAboutFn: ((metadata: AboutMetadataData) => void) | null = null;
+
+  constructor(exitFn: (code: number) => void) {
+    this.exitFn = exitFn;
+  }
+
+  setController(controller: web_webview.WebviewController): void {
+    this.controller = controller;
+  }
+
+  setWindow(win: window.Window): void {
+    this.win = win;
+  }
+
+  setContext(context: common.UIAbilityContext): void {
+    this.context = context;
+  }
+
+  setShowAboutFn(fn: (metadata: AboutMetadataData) => void): void {
+    this.showAboutFn = fn;
+  }
+
+  /**
+   * Hide the entire Ability (app) to background.
+   * Equivalent to macOS Cmd+H (hide:) — all windows become invisible, process stays alive.
+   * This is an app-level operation, does not depend on window focus.
+   */
+  private async hideAbility(): Promise<void> {
+    await WindowManager.getInstance().hideAbility();
+  }
+
+  /**
+   * Restore the Ability (app) from background.
+   * Called when user clicks the tray icon to bring the app back to foreground.
+   * Uses startAbility() to bring the hidden Ability back to front.
+   */
+  async showAbility(): Promise<void> {
+    if (!this.context) {
+      hilog.warn(DOMAIN, "Menu", "showAbility: context not set");
+      return;
+    }
+    try {
+      const bundleName = this.context.abilityInfo.bundleName;
+      const abilityName = this.context.abilityInfo.name;
+      const want: Want = { bundleName, abilityName };
+      await this.context.startAbility(want);
+    } catch (e) {
+      hilog.warn(DOMAIN, "Menu", "showAbility failed: %{public}s", String(e));
+    }
+  }
+
+  /**
+   * Restore all windows to foreground.
+   * Used by showAll and bringAllToFront predefined actions.
+   * On OHOS these are semantically equivalent (unlike macOS where they differ).
+   */
+  private async restoreAll(): Promise<void> {
+    // 1. Restore Ability from hidden/background state
+    await this.showAbility();
+
+    // 2. Show all windows (restore from minimized state)
+    try {
+      const wm = WindowManager.getInstance();
+      for (const id of wm.getAllWindowIds()) {
+        const w = wm.getWindow(id);
+        if (w) {
+          try {
+            await w.showWindow();
+          } catch (e) {
+            hilog.warn(
+              DOMAIN,
+              "Menu",
+              "showWindow failed for window %{public}d: %{public}s",
+              id,
+              String(e),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, "Menu", "restoreAll window iteration failed: %{public}s", String(e));
+    }
+  }
+
+  /**
+   * Get the target window for window-level operations (Minimize, CloseWindow).
+   *
+   * Strategy depends on call source:
+   * - Window Menu Bar (targetWindowId has value): Use the menu's parent window directly
+   * - Tray Menu (targetWindowId is undefined): Use lastUserInteractedWindow (onTouch-based)
+   *
+   * Fallback chain:
+   * 1. targetWindowId (if provided) — Window Menu Bar path
+   * 2. WindowManager.getUserInteractedWindow() — last physically touched window (Tray path)
+   * 3. Main window (this.win) — final fallback
+   */
+  private getTargetWindow(targetWindowId?: number): TargetWindow {
+    const wm = WindowManager.getInstance();
+
+    // Strategy 1: Use targetWindowId if provided (Window Menu Bar path)
+    if (targetWindowId !== undefined && targetWindowId > 0) {
+      const win = wm.getWindow(targetWindowId);
+      if (win) {
+        hilog.info(DOMAIN, "Menu", "Using targetWindowId: %{public}d", targetWindowId);
+        return { win, windowId: targetWindowId };
+      }
+    }
+
+    // Strategy 2: Use lastUserInteractedWindow (onTouch-based window targeting)
+    // Unlike WINDOW_ACTIVE, onTouch is immune to cascade broadcasts and system events
+    const lastInteracted = wm.getUserInteractedWindow();
+    if (lastInteracted) {
+      const lastInteractedId = wm.getUserInteractedWindowId();
+      hilog.info(DOMAIN, "Menu", "Using lastUserInteractedWindow: id=%{public}d", lastInteractedId);
+      return { win: lastInteracted, windowId: lastInteractedId };
+    }
+
+    // Strategy 3: Fallback to main window
+    hilog.info(DOMAIN, "Menu", "Using main window fallback");
+    return { win: this.win, windowId: MAIN_WINDOW_ID };
+  }
+
+  private getTargetController(windowId: number): web_webview.WebviewController | null {
+    const wm = WindowManager.getInstance();
+    // Sub-window path: raw controller registered by WebviewPlugin.handleControllerAttached.
+    // Main window (id=0) and not-yet-attached sub-windows fall through to the one-shot
+    // executor.controller (captured from the first main-window attach).
+    const fromWm = wm.getWebviewController(windowId);
+    const wmHit = fromWm !== undefined;
+    hilog.info(
+      DOMAIN,
+      "Menu",
+      "[TrayCopyDiag] T2 getTargetController windowId=%{public}d wmHit=%{public}s fallbackToExecutor=%{public}s",
+      windowId,
+      wmHit ? "true" : "false",
+      !wmHit ? "true" : "false",
+    );
+    return fromWm ?? this.controller;
+  }
+
+  /**
+   * Minimize the target window (macOS-like: window-level operation).
+   * - Window Menu Bar: minimize the menu's parent window (targetWindowId provided)
+   * - Tray Menu: minimize the last focused window (targetWindowId undefined)
+   */
+  private async minimizeWindow(targetWindowId?: number): Promise<void> {
+    const target = this.getTargetWindow(targetWindowId);
+    const win = target.win;
+    const windowId = target.windowId;
+    if (!win) {
+      return;
+    }
+
+    // WindowManager.minimizeWindow is fire-and-forget (void + internal .catch),
+    // so no await/try-catch here — awaiting a void would resolve immediately and
+    // mask the async failure path that is now handled inside WindowManager.
+    WindowManager.getInstance().minimizeWindow(windowId);
+  }
+
+  /**
+   * Close the target window (macOS-like: window-level operation).
+   * - Sub-window (id > 0): notify Rust + destroyWindow via WindowManager
+   * - Main window (id = 0): hideAbility() — cannot destroy main window (WindowStage becomes invalid)
+   *
+   * Target determination:
+   * - Window Menu Bar: close the menu's parent window (targetWindowId provided)
+   * - Tray Menu: close the last focused window (targetWindowId undefined)
+   */
+  private async closeWindow(targetWindowId?: number): Promise<void> {
+    const target = this.getTargetWindow(targetWindowId);
+    const win = target.win;
+    const windowId = target.windowId;
+    if (!win) {
+      return;
+    }
+
+    const isSubWindow = windowId > 0;
+
+    if (isSubWindow) {
+      // Sub-window: notify Rust + use WindowManager.closeWindow()
+      try {
+        const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+        if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
+          nativeModule.notifyWindowClose(windowId);
+        }
+        await WindowManager.getInstance().closeWindow(windowId);
+      } catch (e) {
+        hilog.warn(DOMAIN, "Menu", "Close sub-window failed: %{public}s", String(e));
+      }
+    } else {
+      // Main window: hideAbility (cannot destroyWindow as WindowStage becomes invalid)
+      await this.hideAbility();
+    }
+  }
+
+  async execute(
+    type: PredefinedType,
+    aboutMetadata?: AboutMetadataData,
+    targetWindowId?: number,
+  ): Promise<void> {
+    try {
+      // Resolve target window for window operations
+      // getTargetWindow() handles both Menu Bar (targetWindowId provided) and Tray (undefined → lastUserInteractedWindow)
+      const target = this.getTargetWindow(targetWindowId);
+      const win = target.win;
+      const resolvedWindowId = target.windowId;
+
+      hilog.info(
+        DOMAIN,
+        "Menu",
+        "[TrayCopyDiag] T1 execute type=%{public}s targetWindowIdParam=%{public}s resolvedWindowId=%{public}d",
+        String(type),
+        targetWindowId === undefined ? "undefined(tray)" : String(targetWindowId),
+        resolvedWindowId,
+      );
+
+      // Get target window's webview controller for clipboard/edit operations (fallback to this.controller)
+      const targetController = this.getTargetController(resolvedWindowId);
+
+      switch (type) {
+        case "copy": {
+          try {
+            const raw = await targetController?.runJavaScript("window.getSelection().toString()");
+            const rawDefined = raw !== undefined && raw !== null;
+            const rawLen = rawDefined ? String(raw).length : -1;
+            hilog.info(
+              DOMAIN,
+              "Menu",
+              "[TrayCopyDiag] T4a copy rawDefined=%{public}s rawLen=%{public}d",
+              rawDefined ? "true" : "false",
+              rawLen,
+            );
+            if (raw) {
+              // runJavaScript returns a JSON-encoded string; parse to unwrap quotes.
+              // Fallback to raw if parse fails (defensive against non-JSON returns).
+              let text: string;
+              try {
+                text = JSON.parse(raw as string) as string;
+              } catch {
+                text = raw as string;
+              }
+              hilog.info(
+                DOMAIN,
+                "Menu",
+                "[TrayCopyDiag] T4b copy textLen=%{public}d",
+                text !== undefined && text !== null ? text.length : -1,
+              );
+              if (text) {
+                const pasteData = pasteboard.createData(
+                  pasteboard.MIMETYPE_TEXT_PLAIN,
+                  text as string,
+                );
+                const sysPasteboard = pasteboard.getSystemPasteboard();
+                await sysPasteboard.setData(pasteData);
+              }
+            }
+          } catch (e) {
+            hilog.warn(DOMAIN, "Menu", "Clipboard copy failed: %{public}s", String(e));
+          }
+          break;
+        }
+        case "cut": {
+          try {
+            const raw = await targetController?.runJavaScript("window.getSelection().toString()");
+            hilog.info(
+              DOMAIN,
+              "Menu",
+              "[TrayCopyDiag] T5cut rawDefined=%{public}s rawLen=%{public}d",
+              raw !== undefined && raw !== null ? "true" : "false",
+              raw !== undefined && raw !== null ? String(raw).length : -1,
+            );
+            if (raw) {
+              let text: string;
+              try {
+                text = JSON.parse(raw as string) as string;
+              } catch {
+                text = raw as string;
+              }
+              if (text) {
+                const pasteData = pasteboard.createData(
+                  pasteboard.MIMETYPE_TEXT_PLAIN,
+                  text as string,
+                );
+                const sysPasteboard = pasteboard.getSystemPasteboard();
+                await sysPasteboard.setData(pasteData);
+                await targetController?.runJavaScript('document.execCommand("delete")');
+              }
+            }
+          } catch (e) {
+            hilog.warn(DOMAIN, "Menu", "Clipboard cut failed: %{public}s", String(e));
+          }
+          break;
+        }
+        case "paste": {
+          try {
+            const sysPasteboard = pasteboard.getSystemPasteboard();
+            const pasteData = await sysPasteboard.getData();
+            const text = pasteData.getPrimaryText();
+            hilog.info(
+              DOMAIN,
+              "Menu",
+              "[TrayCopyDiag] T5paste textLen=%{public}d",
+              text !== undefined && text !== null ? text.length : -1,
+            );
+            if (text) {
+              // Use JSON.stringify for safe JS string escaping (prevents JS injection)
+              const safeText = JSON.stringify(text);
+              await targetController?.runJavaScript(
+                `document.execCommand("insertText", false, ${safeText})`,
+              );
+            }
+          } catch (e) {
+            hilog.warn(DOMAIN, "Menu", "Clipboard paste failed: %{public}s", String(e));
+          }
+          break;
+        }
+        case "selectAll":
+          hilog.info(DOMAIN, "Menu", "[TrayCopyDiag] T5selAll invoked");
+          await targetController?.runJavaScript('document.execCommand("selectAll")');
+          break;
+        case "undo":
+          await targetController?.runJavaScript('document.execCommand("undo")');
+          break;
+        case "redo":
+          await targetController?.runJavaScript('document.execCommand("redo")');
+          break;
+        case "minimize":
+          await this.minimizeWindow(targetWindowId);
+          break;
+        case "hide":
+          // Hide entire Ability (app) to background — equivalent to macOS Cmd+H (app-level)
+          await this.hideAbility();
+          break;
+        case "close":
+          // Close the target window — equivalent to macOS Cmd+W (window-level)
+          await this.closeWindow(targetWindowId);
+          break;
+        case "maximize":
+          // Use FOLLOW_APP_IMMERSIVE_SETTING to preserve existing fullscreen layout (avoid white bar).
+          // ENTER_IMMERSIVE explicitly enters/exits fullscreen on maximize/recover, causing a layout gap.
+          await win?.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
+          break;
+        case "fullscreen": {
+          // Delegate to WindowManager.setFullscreen so predefined fullscreen
+          // matches the window-API (WindowPlugin set-fullscreen) behaviour:
+          // desktop maximize(ENTER_IMMERSIVE) + hide title bar/Dock hover,
+          // mobile layout fullscreen + hide system bars, serializeOp-guarded,
+          // and the Tauri menubar hides via MW-5 callbacks (centralized in
+          // WindowManager.setFullscreen). The previous inline version only did
+          // a bare immersive maximize on desktop — the system title bar / Dock
+          // stayed visible, diverging from set_fullscreen().
+          WindowManager.getInstance().setFullscreen(resolvedWindowId, true);
+          break;
+        }
+        case "recover": {
+          // Exit via the same dual-path (desktop recover() + restore title
+          // bar/Dock hover; mobile exit layout fullscreen + restore system
+          // bars; menubar restored via MW-5 callbacks). Harmless when the
+          // window is not fullscreen — the desktop recover() also serves the
+          // plain un-maximize case.
+          WindowManager.getInstance().setFullscreen(resolvedWindowId, false);
+          break;
+        }
+        case "quit":
+          this.exitFn(0);
+          break;
+        case "hideOthers":
+          break;
+        case "showAll":
+        case "bringAllToFront":
+          await this.restoreAll();
+          break;
+        case "about":
+          this.showAboutFn?.(aboutMetadata ?? ({} as AboutMetadataData));
+          break;
+        case "restore":
+          break;
+      }
+    } catch (e) {
+      hilog.warn(
+        DOMAIN,
+        "Menu",
+        "execute(%{public}s) unhandled error: %{public}s",
+        String(type),
+        String(e),
+      );
+    }
+  }
+}
+
+export class MenuManager {
+  private executor: PredefinedActionExecutor;
+  private emitMenuEventFn: (menuId: string, windowId?: string) => void;
+  private currentWindowId: string = "main";
+  private currentWindowIdNumeric: number = MAIN_WINDOW_ID;
+
+  constructor(
+    executor: PredefinedActionExecutor,
+    emitMenuEventFn: (menuId: string, windowId?: string) => void,
+  ) {
+    this.executor = executor;
+    this.emitMenuEventFn = emitMenuEventFn;
+  }
+
+  popupFromJson(jsonData: string, x?: number, y?: number, windowId?: string): void {
+    try {
+      const wid = windowId ?? "main";
+      this.currentWindowId = wid;
+      this.currentWindowIdNumeric = wid === "main" ? MAIN_WINDOW_ID : Number(wid);
+
+      // Use callback to push data to the correct MenuBarComponent instance (MW-5)
+      const cb = getMenuDataCallback(wid);
+      if (cb) {
+        cb.onMenuPopup?.(jsonData, x ?? 0, y ?? 0);
+      } else {
+        console.error(`[Menu] No callback registered for window "${wid}"`);
+      }
+    } catch (e) {
+      console.error("[Menu] Failed to popup menu:", e);
+    }
+  }
+
+  handleItemClick(item: MenuItemData, windowId: string = this.currentWindowId): void {
+    hilog.info(
+      DOMAIN,
+      "Menu",
+      "handleItemClick ENTER id=%{public}s type=%{public}s predefinedType=%{public}s",
+      item.id,
+      item.type,
+      item.predefinedType ?? "none",
+    );
+    if (item.type === "predefined" && item.predefinedType) {
+      this.executor.execute(
+        item.predefinedType,
+        item.aboutMetadata,
+        windowId === "main" ? MAIN_WINDOW_ID : Number(windowId),
+      );
+    } else {
+      this.emitMenuEventFn(item.id, windowId);
+    }
+  }
+}

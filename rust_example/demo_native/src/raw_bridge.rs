@@ -13,7 +13,8 @@ impl BridgePlugin for DemoTypedPlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "demo.raw";
-    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] = &[];
+    const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
+        &[BridgeContextRequirement::Ability];
 }
 
 pub async fn echo_string(bridge: BridgeRuntime, value: impl Into<String>) -> Result<String> {

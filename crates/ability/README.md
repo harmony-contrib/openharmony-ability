@@ -24,6 +24,49 @@ do not need to derive gesture recognition from XComponent touch points.
 
 Gesture handles are owned by the active render and are detached and disposed with that render.
 
+## Optional mouse, keyboard, and drag/drop support
+
+Raw XComponent keyboard and pointer input are available with the default features.
+The `mouse` feature forwards `ohos-xcomponent-binding/api-18`, exposing
+`openharmony_ability::xcomponent::MouseAction::Cancel` for native mouse
+cancellation. It is opt-in and does not enable `keyboard`, `stylus`, or `drag`.
+Consumers can use the re-exported XComponent types without a direct binding dependency:
+
+```toml
+openharmony-ability = { git = "https://github.com/richerfu/openharmony-ability.git", branch = "feat/ohos-adaptation-runtime-fixes", features = ["mouse"] }
+```
+
+Enhanced ArkUI keyboard delivery is opt-in through the `keyboard` feature:
+
+```toml
+openharmony-ability = { git = "https://github.com/richerfu/openharmony-ability.git", branch = "feat/ohos-adaptation-runtime-fixes", features = ["keyboard"] }
+```
+
+`keyboard` enables `KeyboardInputDelivery::ArkUi`, `KeyboardEventData`,
+`KeyboardEventResponse`, and `ArkUiInputEvent::{KeyPreIme, Key}`. It forwards
+`ohos-arkui-binding/api-14` and is not part of the default feature set. The
+default stream remains raw XComponent input; select
+`OpenHarmonyApp::set_keyboard_input_delivery(KeyboardInputDelivery::ArkUi)`
+before rendering to receive Unicode, held-key state, optional lock state, and
+synchronous key consumption. Selecting ArkUI delivery on a runtime below API 14
+returns an error. Enabling `drag` does not enable `keyboard`.
+
+Native file drag/drop is opt-in:
+
+```toml
+openharmony-ability = { version = "1.0.0-beta.2", features = ["drag"] }
+```
+
+The `drag` feature enables `ArkUiInputEvent::Drag`, `DragInputData`, `DragPhase`,
+`DragResponse` and `NativeFileDrag`, registers native drag/drop callbacks, and enables
+the ArkUI UDMF/image bindings. It is not part of the default feature set.
+
+`NativeFileDrag::node_handle` returns a typed XComponent view. Capture it while the
+source surface is retained, then release the surface lock before `start`: starting
+a native drag can synchronously reenter input dispatch. Keep the source surface
+alive until completion, and drop the drag before releasing the surface. The binding
+owns native action disposal, listener removal, data and preview lifetimes.
+
 ## License
 
 This project is licensed under the [MIT license](https://github.com/harmony-contrib/openharmony-ability/blob/main/LICENSE)

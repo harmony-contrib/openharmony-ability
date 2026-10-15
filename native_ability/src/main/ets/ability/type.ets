@@ -4,6 +4,13 @@ import { FrameNode } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import resourceManager from "@ohos.resourceManager";
 import window from "@ohos.window";
+import { image } from "@kit.ImageKit";
+import { emitter } from "@kit.BasicServicesKit";
+
+export interface WindowAvoidAreaInfo {
+  type: number;
+  area: Object;
+}
 
 export interface ApplicationLifecycle {
   bridgePlugins: BridgePluginDeclaration[];
@@ -21,16 +28,88 @@ export interface KeyboardCallback {
   onKeyboardHeightChange: (height: number) => void;
 }
 
+// NewWantData payload for onNewWant. Optional continuation fields are read with
+// unwrap_or fallbacks on the Rust side (lifecycle.rs), so older payloads without
+// them stay valid. isContinuation is the symbolic result of comparing
+// launchParam.launchReason === AbilityConstant.LaunchReason.CONTINUATION.
+export interface NewWantData {
+  uri: string;
+  parametersJson: string;
+  isContinuation?: boolean;
+}
+
+export interface CreateWithWantData {
+  uri: string;
+  isContinuation?: boolean;
+  parametersJson?: string;
+}
+
 export interface WindowStageEventCallback {
   onWindowStageCreate: () => void;
   onWindowStageDestroy: () => void;
   onAbilityCreate: (arg: string) => void;
+  onAbilityCreateWithWant: (data: CreateWithWantData) => void;
   onAbilityDestroy: () => void;
   onAbilitySaveState: () => string;
   onWindowStageEvent: (arg: number) => void;
   onWindowSizeChange: (arg: object) => void;
   onWindowRectChange: (arg: object) => void;
+  onWindowFocusChange: (arg: object) => void;
   onAvoidAreaChange: (arg: object) => void;
+  onNewWant: (data: NewWantData) => void;
+}
+
+export interface WebViewComponentEventCallback {
+  onComponentCreated: () => void;
+  onComponentDestroyed: () => void;
+}
+
+export interface OnDownloadStartResult {
+  allow?: boolean;
+  tempPath?: string;
+}
+
+export interface OnWindowNewResult {
+  allow: boolean;
+  isCreate: boolean;
+}
+
+export interface WebViewInitData {
+  url?: string;
+  id?: string;
+  windowId?: number;
+  style?: WebViewStyle;
+  javascriptEnable?: boolean;
+  devtools?: boolean;
+  transparent?: boolean;
+  clipboard?: boolean;
+  zoomHotkeysEnabled?: boolean;
+  dragDropOverlay?: boolean;
+  autoplay?: boolean;
+  userAgent?: string;
+  initializationScripts?: string[];
+  headers?: Record<string, string>;
+  html?: string;
+  useHttpsIntercept?: boolean;
+  httpsInterceptProtocols?: string[];
+  onDragAndDrop?: (event: string) => void;
+  onDownloadStart?: (url: string, tempPath: string | undefined) => OnDownloadStartResult;
+  onDownloadEnd?: (url: string, tempPath: string | undefined, success: boolean) => void;
+  onNavigationRequest?: (url: string) => boolean;
+  onTitleChange?: (title: string) => void;
+  onPageBegin?: (url: string) => void;
+  onPageEnd?: (url: string) => void;
+  onCloseWindow?: () => void;
+  onWindowNew?: (targetUrl: string, isAlert: boolean, isUserTrigger: boolean) => OnWindowNewResult;
+}
+
+export interface WebViewStyle {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  visible?: boolean;
+  backgroundColor?: string | Color | number;
 }
 
 export interface AbilityInitContext {
@@ -39,6 +118,8 @@ export interface AbilityInitContext {
   preferredLocales?: string;
   moduleName?: string;
   resourceManager?: resourceManager.ResourceManager;
+  sdkApiVersion?: number;
+  distributionOSApiVersion?: number;
 }
 
 /**
@@ -88,6 +169,9 @@ export interface Module {
    * DefaultXComponent must use a different native module.
    */
   render: (slot: NodeContent, renderOwner: string) => void;
+  /** Mounts a second native render surface in the specified Float sub-window. */
+  renderWindow?: (slot: NodeContent, renderOwner: string, windowId: number) => void;
+  notifyNativeWindowClose?: (windowId: number) => void;
   /** Releases only the render tree owned by `renderOwner`. */
   disposeRender: (renderOwner: string) => void;
   /** Releases the remaining render tree when the WindowStage is torn down. */
@@ -96,6 +180,23 @@ export interface Module {
   onBackPressIntercept?: () => boolean;
   /** Legacy N-API spelling retained for modules built before camel-case code generation. */
   on_back_press_intercept?: () => boolean;
+  // ─── Optional NAPI free-function exports (issue #87 minor-4) ───
+  // Crate-level `#[napi]` fns that the platform layer calls directly. Declared
+  // optional: pre-pluginize legacy modules lack them, so callers keep their
+  // typeof-probes before invoking. These used to be duck-typed via `as ESObject`.
+  /** `is_desktop_device` — desktop form-factor probe (setupMenuPopup guard,
+   *  FloatPage `__openharmony_ability_is_desktop__`). */
+  isDesktopDevice?: () => boolean;
+  /** `notify_window_close` — Float close-button / FloatPage aboutToDisappear. */
+  notifyWindowClose?: (windowId: number) => void;
+  /** `notify_window_status` — NativeAbility windowStatusChange fan-in. */
+  notifyWindowStatus?: (windowId: number, status: number) => void;
+  /** `read_continue_snapshot` — onContinue source-side snapshot read. */
+  readContinueSnapshot?: () => string;
+  /** `update_cursor_position` — MainPage onMouse cursor tracking. */
+  updateCursorPosition?: (x: number, y: number) => void;
+  /** `register_create_sub_window_tsfn` — legacy create_os_window path hookup. */
+  registerCreateSubWindowTsfn?: (createSubWindow: (config: ESObject) => Promise<number>) => void;
   /**
    * Synchronous ArkTS platform callback -> Rust plugin decision. The value is a named N-API
    * object and must be returned before the platform callback resumes.
@@ -108,7 +209,51 @@ export interface Module {
     value: ESObject,
   ) => ESObject;
   onBridgeLifecycle?: (kind: string) => void;
+  /**
+   * Legacy opt-in for native modules that register a custom `webview` URL scheme. Retained so
+   * ProcessInitializer can probe for web-engine requirements on pre-pluginize modules. New
+   * modules register schemes through their bridge plugin instead.
+   */
+  registerCustomProtocol?: () => void;
 }
+
+export interface WindowConfig {
+  name: string;
+  /** @deprecated Unused — OHOS createSubWindow only accepts name. Retained for NAPI compat. */
+  type: number;
+  windowId: number;
+  width?: number;
+  height?: number;
+  x?: number;
+  y?: number;
+  decorations?: boolean; // Phase 2: show/hide title bar, default true
+  transparent?: boolean; // Phase 3: window background transparent, default false
+  backgroundColor?: number; // Phase 3: window background color in 0xAARRGGBB format
+}
+
+/**
+ * Huawei account info returned by Account Kit login (canonical camelCase keys,
+ * read by Rust `parse_account_info`). `accessToken` is only present in some
+ * scenarios; other fields are empty strings when Account Kit omits them.
+ */
+export interface AccountInfo {
+  uid: string;
+  openId: string;
+  unionId: string;
+  displayName: string;
+  avatarUri: string;
+  authorizationCode: string;
+  accessToken: string | null;
+}
+
+// (Removed) `export interface ArkHelper { ... }` — the ArkHelper class/object
+// was the pre-bridge-plugin transport. `createArkHelper()` had zero callers
+// (ArkHelper.ets deleted), and `set_helper` was never invoked after the
+// #[ability] derive refactor, so no ArkHelper instance ever existed at runtime.
+// All capability now flows through bridge plugins (WindowClient / MenuPlugin /
+// StatusbarPlugin / ClipboardClient / AutostartClient etc.). Removed in
+// decoupling task #6 (A-group). Do NOT reintroduce a monolithic helper type —
+// add capability via a new bridge plugin instead.
 
 export type BridgePluginExecution = "async" | "sync-main-thread";
 export type BridgeContextRequirement = "ability" | "window-stage" | "ui-context";
@@ -230,19 +375,42 @@ export interface BridgePluginContext {
     responseTypeName: string,
     value: ESObject,
   ) => ESObject[];
+  /**
+   * Registers a cross-cutting dispatch hook on this host. The hook runs before EVERY plugin
+   * invocation on the host — including the registering plugin's own calls. Throwing from a
+   * hook member fails the intercepted call; an async hook may return a Promise to delay
+   * async dispatch. Hooks live for the Ability session: they are dropped when the host
+   * disposes, so plugins typically register in `onInstall` and never unregister.
+   */
+  registerDispatchHook: (hook: BridgeDispatchHook) => void;
 }
 
-export interface BridgeCallContext extends BridgePluginContext {
+/**
+ * Cross-cutting observer for bridge dispatch, registered via
+ * `BridgePluginContext.registerDispatchHook`. The two members mirror the two
+ * dispatch paths; a hook is consulted before every plugin invocation on the
+ * host that registered it.
+ */
+export interface BridgeDispatchHook {
+  /**
+   * Async dispatch: runs after the call is admitted and before `invokeAsync`.
+   * Throw (synchronously or from the returned Promise) to fail the call;
+   * return a Promise that resolves later to delay it.
+   */
+  onDispatchAsync: (pluginId: string, action: string) => void | Promise<void>;
+  /**
+   * Sync-main-thread dispatch: runs before `invokeSync`. Throw to fail the
+   * call. Must not return a Promise — the sync path cannot await one.
+   */
+  onDispatchSync: (pluginId: string, action: string) => void;
+}
+
+// Extends BridgePluginHookContext (not BridgePluginContext directly) so the
+// cancellation members are declared exactly once (issue #87 minor-5). The
+// member set is unchanged for every consumer.
+export interface BridgeCallContext extends BridgePluginHookContext {
   action: string;
   timeoutMs: number;
-  isCancelled: () => boolean;
-  /**
-   * Registers a listener that is invoked once when this asynchronous call is cancelled (for
-   * example because its caller timed out or its Ability session was disposed). The returned
-   * function removes the listener. This is the lifecycle signal for waits on ArkUI state; it is
-   * deliberately separate from a timer-based readiness heuristic.
-   */
-  onCancel: (listener: () => void) => () => void;
 }
 
 /**

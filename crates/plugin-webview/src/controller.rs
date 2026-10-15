@@ -58,7 +58,7 @@ pub(crate) fn on_removed(webview_id: &str, native_tag: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn native_tag_for(webview_id: &str) -> Result<String> {
+pub fn native_tag_for(webview_id: &str) -> Result<String> {
     CONTROLLERS
         .read()
         .map_err(|_| Error::from_reason("Failed to read WebView controller tag registry"))?

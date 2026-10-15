@@ -24,10 +24,12 @@
 
 每个插件必须满足以下边界：
 
-- Rust crate 位于 `crates/plugin-<name>`，只能依赖 `openharmony-ability`，不能依赖 ArkTS
+- Rust crate 位于 `crates/plugin-<name>`，依赖 `openharmony-ability`；需要复用其他插件类型时依赖
+  对应的 `plugin-*` crate（如 `plugin-statusbar` 复用 `plugin-menu` 的类型），但不能依赖 ArkTS
   实现或应用页面；对外通过扩展 trait/client 暴露能力。
-- ArkTS HAR 位于 `plugins/<name>`，只能依赖 `@ohos-rs/ability` 和需要的平台 Kit；导出一个
-  `BridgePluginFactory`。
+- ArkTS HAR 位于 `plugins/<name>`，依赖 `@ohos-rs/ability` 和需要的平台 Kit；Rust 侧依赖了兄弟
+  插件 crate 时，HAR 同样依赖对应的 `@ohos-rs/ability-plugin-<name>`（rs 层与 ets 层的依赖
+  方向保持一致）；导出一个 `BridgePluginFactory`。
 - 应用入口显式同时组合 Rust 插件 facade 与 ArkTS factory；core 不能反向 import 任意
   `plugin-*` crate/HAR。
 - 一个插件只能管理自己的资源、回调和节点。布局、业务页面状态和其他插件资源仍由应用拥有。
@@ -209,6 +211,17 @@ export { LoginPlugin };
 | --- | --- | --- |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
+| `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
+| `ohos.clipboard` / `write-records` | `ohos.clipboard.WriteRecordsRequest { records: Record[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；1..512 个文本（可带 metadata）、图片或文件 URI 记录，保持顺序 |
+| `ohos.clipboard` / `read-records` | `ohos.clipboard.ReadTextRequest {}` → `ohos.clipboard.ReadRecordsResponse { records: Record[] }` | async / `ability`；`Record { text?, metadata?, encodedImage?, uri? }` 每条仅一种主内容；需要 READ_PASTEBOARD 的 ACL 和运行时授权 |
+| `ohos.clipboard` / 入站 `changed` | `ohos.clipboard.ChangedEvent {}` → `std.bool` | 系统 pasteboard update 使 Rust revision 递增；监听随插件生命周期释放 |
+| `ohos.window` / `show-prompt` | `ohos.window.PromptRequest { windowId, message, detail?, level, buttons, cancelIndex?, anchor?: PromptAnchor }` → `ohos.window.PromptResponse { index }` | async / `ui-context`；`PromptAnchor { x, y }` 为目标窗口内容局部逻辑坐标，单位 vp，不是物理 px 或屏幕全局坐标；弹窗按实际尺寸限制在窗口可用区域内；原生弹窗取消、调用取消和销毁均释放组件 |
+| `ohos.window` / `get-window-stack` | `ohos.window.StackRequest { displayId, windowIds }` → `ohos.window.StackResponse { windowIds }` | async / `ui-context`；从 SDK 可见窗口顺序中筛选请求的本应用窗口，顶部在前 |
+| `ohos.window` / `set-custom-cursor` | `ohos.window.CustomCursorRequest { windowId, rgba, width, height, hotspotX, hotspotY }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；RGBA8888，尺寸 1–256 px，热点必须位于图像内；PixelMap 在成功、失败和取消后释放 |
+| `ohos.window` / `set-window-icon` | `ohos.window.WindowIconRequest { windowId, rgba, size }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；API 22+ PC/2in1 主窗口，正方形 RGBA8888，最大 1024 px；size=0 且 rgba 为空时恢复应用资源图标 |
+| `ohos.notification` / `show` | `ohos.notification.ShowRequest { tag, title, body, actions }` → `ohos.notification.Acknowledgement { accepted }` | async / `ability`；最多 3 个 action；响应 URI scheme 由 ArkTS 工厂的 `NotificationPlugin({ scheme })` 配置 |
+| `ohos.system-state` | `ohos.system-state.*` 具名类型 | async / `ability`；ID 与 typeName 前缀统一；Rust facade 和 ArkTS HAR 必须配套更新，旧 `ohos.system_state.*` 类型名不再使用 |
+| `ohos.menu` / 入站 `menu-open` | `ohos.menu.MenuOpenEvent { windowId }` → `std.bool` | 菜单打开通道传递完整事件和来源窗口 ID（主窗为 `main`），消费者可按窗口处理 |
 | `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | async / `ui-context`；查询当前 component 所在窗口 |
 | `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | async / `ui-context` |
 | `ohos.window` / `set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window` | `ohos.window.*Request { windowId, ... }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context` |
@@ -412,6 +425,10 @@ context.appendChild(
 - `context.appendChild(key, node, cleanup)` / `context.removeChild(key)`：key 必须以插件 ID 为前缀
   且在插件内唯一，是插件的清理凭证。session dispose 时 `BridgeHost` 级联卸载并执行 cleanup。
 - 根 `FrameNode` 归 `DefaultXComponent` 所有（`NodeController` 内部状态），UI 消失时由它整树销毁。
+- 覆盖层的全窗口布局容器使用 `HitTestMode.None`，让未被插件内容覆盖的区域继续交给下层
+  XComponent。插件中实际接收触摸的 ArkUI 组件应在自身范围设置
+  `.hitTestBehavior(HitTestMode.Block)`，避免同一次触摸同时触发插件和下层 GPUI；不要把
+  `Block` 放在全窗口容器上，否则会吞掉内容外的触摸。WebView 插件在 `Web` 节点上设置该规则。
 - Rust 通过内置 `ohos.node` 插件以**不透明 u32 句柄**组树（`create-container` / `append-child` /
   `mount-into-root` / `dispose`）；`FrameNode` 值本身不跨 N-API 边界。Rust 可用
   `app.node()?.create_container()` 建容器，把 WebView 等插件节点作为子节点挂进去，再

@@ -10,6 +10,15 @@ use openharmony_ability::{
     BridgeContextRequirement, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp, Rect,
 };
 
+mod cursor;
+pub use cursor::{CustomCursorRequest, WindowIconRequest};
+
+mod stack;
+pub use stack::{WindowStackRequest, WindowStackResponse};
+
+mod prompt;
+pub use prompt::{WindowPromptAnchor, WindowPromptRequest, WindowPromptResponse};
+
 pub struct WindowBridgePlugin;
 
 impl BridgePlugin for WindowBridgePlugin {
@@ -139,6 +148,15 @@ impl_bridge_napi_type!(WindowDecorationsRequest, "ohos.window.DecorationsRequest
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+pub struct WindowFullscreenRequest {
+    pub window_id: i64,
+    pub on: bool,
+}
+
+impl_bridge_napi_type!(WindowFullscreenRequest, "ohos.window.FullscreenRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
 pub struct WindowColorRequest {
     pub window_id: i64,
     pub color: u32,
@@ -183,6 +201,121 @@ pub struct WindowFocusableRequest {
 }
 
 impl_bridge_napi_type!(WindowFocusableRequest, "ohos.window.FocusableRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowTouchableRequest {
+    pub window_id: i64,
+    pub touchable: bool,
+}
+
+impl_bridge_napi_type!(WindowTouchableRequest, "ohos.window.TouchableRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowTopmostRequest {
+    pub window_id: i64,
+    pub topmost: bool,
+}
+
+impl_bridge_napi_type!(WindowTopmostRequest, "ohos.window.TopmostRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowTitleRequest {
+    pub window_id: i64,
+    pub title: String,
+}
+
+impl_bridge_napi_type!(WindowTitleRequest, "ohos.window.TitleRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowLimitsRequest {
+    pub window_id: i64,
+    pub min_width: i64,
+    pub min_height: i64,
+    pub max_width: i64,
+    pub max_height: i64,
+}
+
+impl_bridge_napi_type!(WindowLimitsRequest, "ohos.window.LimitsRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ImePositionRequest {
+    pub window_id: i64,
+    pub x: i64,
+    pub y: i64,
+}
+
+impl_bridge_napi_type!(ImePositionRequest, "ohos.window.ImePositionRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ImePositionResponse {
+    pub ok: bool,
+    pub code: i32,
+    pub message: String,
+}
+
+impl_bridge_napi_type!(ImePositionResponse, "ohos.window.ImePositionResponse");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowDraggableRequest {
+    pub window_id: i64,
+    pub enable: bool,
+}
+
+impl_bridge_napi_type!(WindowDraggableRequest, "ohos.window.DraggableRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowKeepScreenOnRequest {
+    pub window_id: i64,
+    pub on: bool,
+}
+
+impl_bridge_napi_type!(WindowKeepScreenOnRequest, "ohos.window.KeepScreenOnRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct CursorIconRequest {
+    pub window_id: i64,
+    /// PointerStyle id as understood by WindowManager.setPointerStyle.
+    pub style: i32,
+}
+
+impl_bridge_napi_type!(CursorIconRequest, "ohos.window.CursorIconRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct CursorVisibleRequest {
+    /// Global pointer visibility. `pointer.setPointerVisible` is process-wide
+    /// (not per-window), so this request deliberately carries no window id.
+    pub visible: bool,
+}
+
+impl_bridge_napi_type!(CursorVisibleRequest, "ohos.window.CursorVisibleRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct DecorationFlagsRequest {
+    pub window_id: i64,
+    /// FLAG bit-field (closable=1, maximizable=2, minimizable=4, resizable=8).
+    pub flags: i32,
+}
+
+impl_bridge_napi_type!(DecorationFlagsRequest, "ohos.window.DecorationFlagsRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct RealWindowIdResponse {
+    pub window_id: i64,
+}
+
+impl_bridge_napi_type!(RealWindowIdResponse, "ohos.window.RealWindowIdResponse");
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -239,7 +372,7 @@ pub struct WindowClient {
 }
 
 impl WindowClient {
-    fn new(app: &OpenHarmonyApp) -> Result<Self> {
+    pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
         })
@@ -273,6 +406,17 @@ impl WindowClient {
     }
 
     /// Creates and fully configures an OS sub-window before returning its platform window id.
+    ///
+    /// NOTE: no production callers — window creation goes through the core path
+    /// (`openharmony_ability::window::create_os_window`, NEXT_WINDOW_ID + TSFN →
+    /// WindowManager.createSubWindow), which tao's `Window::new` invokes. This
+    /// bridge-path variant returns an OHOS-assigned id disconnected from the
+    /// NEXT_WINDOW_ID registry (no tao Window, no per-window rect registration,
+    /// not tracked by window-state). See openspec change
+    /// p1-window-state-per-window-rect design.md Non-Goals, and
+    /// docs/decoupling-plan-v2.md N12 — if that migration ever routes window
+    /// creation through this client, id-registry alignment + rect registration
+    /// must be designed as part of it.
     pub async fn create_os_window(&self, request: WindowCreateRequest) -> Result<i64> {
         request.validate()?;
         let window_id = self
@@ -296,6 +440,20 @@ impl WindowClient {
         .ensure()
     }
 
+    /// Toggles immersive fullscreen layout. `on=true` enters fullscreen
+    /// (`setWindowLayoutFullScreen(true)` + hide system bars); `on=false`
+    /// reverses it. Replaces the legacy top-level `set_fullscreen` which went
+    /// through the dead `get_helper()` transport.
+    pub async fn set_fullscreen(&self, window_id: i64, on: bool) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowFullscreenRequest, WindowAcknowledgement>(
+            "set-fullscreen",
+            WindowFullscreenRequest { window_id, on },
+        )
+        .await?
+        .ensure()
+    }
+
     pub async fn set_window_background_color(&self, window_id: i64, color: u32) -> Result<()> {
         validate_window_id(window_id)?;
         self.call::<WindowColorRequest, WindowAcknowledgement>(
@@ -306,12 +464,12 @@ impl WindowClient {
         .ensure()
     }
 
-    /// Sets the platform sub-window shadow radius. The ArkTS side rejects unsupported API levels.
+    /// Sets the background blur radius for a window's WebView and native render surface.
     pub async fn set_window_blur(&self, window_id: i64, radius: f64) -> Result<()> {
         validate_window_id(window_id)?;
         if !radius.is_finite() || radius < 0.0 {
             return Err(Error::from_reason(
-                "window shadow radius must be a non-negative finite number",
+                "window backdrop blur radius must be a non-negative finite number",
             ));
         }
         self.call::<WindowBlurRequest, WindowAcknowledgement>(
@@ -333,6 +491,23 @@ impl WindowClient {
             WindowFocusableRequest {
                 window_id,
                 focusable,
+            },
+        )
+        .await?
+        .ensure()
+    }
+
+    /// Sets whether a window consumes touch/mouse events.
+    ///
+    /// `touchable = false` makes the window pass-through (maps to the consumer's
+    /// ignore-cursor-events API). The negation is applied by the windowing backend caller.
+    pub async fn set_window_touchable(&self, window_id: i64, touchable: bool) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowTouchableRequest, WindowAcknowledgement>(
+            "set-touchable",
+            WindowTouchableRequest {
+                window_id,
+                touchable,
             },
         )
         .await?
@@ -403,6 +578,172 @@ impl WindowClient {
 
     pub async fn is_window_minimized(&self, window_id: i64) -> Result<bool> {
         self.window_state("is-minimized", window_id).await
+    }
+
+    /// Keeps the window above all others. Requires API14+ and the
+    /// `ohos.permission.WINDOW_TOPMOST` permission (ArkTS side rejects otherwise).
+    pub async fn set_window_topmost(&self, window_id: i64, topmost: bool) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowTopmostRequest, WindowAcknowledgement>(
+            "set-topmost",
+            WindowTopmostRequest { window_id, topmost },
+        )
+        .await?
+        .ensure()
+    }
+
+    pub async fn set_window_title(&self, window_id: i64, title: String) -> Result<()> {
+        validate_window_id(window_id)?;
+        if title.chars().count() > 1024 {
+            return Err(Error::from_reason(
+                "window title must be at most 1024 characters",
+            ));
+        }
+        self.call::<WindowTitleRequest, WindowAcknowledgement>(
+            "set-title",
+            WindowTitleRequest { window_id, title },
+        )
+        .await?
+        .ensure()
+    }
+
+    /// Sets min/max window size limits in physical pixels; 0 means no limit
+    /// (system default). Requires API11+.
+    pub async fn set_window_limits(
+        &self,
+        window_id: i64,
+        min_width: i64,
+        min_height: i64,
+        max_width: i64,
+        max_height: i64,
+    ) -> Result<()> {
+        validate_window_id(window_id)?;
+        for (name, value) in [
+            ("minWidth", min_width),
+            ("minHeight", min_height),
+            ("maxWidth", max_width),
+            ("maxHeight", max_height),
+        ] {
+            if value < 0 {
+                return Err(Error::from_reason(format!(
+                    "window limit {name} must be non-negative"
+                )));
+            }
+            validate_platform_integer(name, value)?;
+        }
+        self.call::<WindowLimitsRequest, WindowAcknowledgement>(
+            "set-limits",
+            WindowLimitsRequest {
+                window_id,
+                min_width,
+                min_height,
+                max_width,
+                max_height,
+            },
+        )
+        .await?
+        .ensure()
+    }
+
+    /// Emulates user attention via a system notification. Fire-and-forget on the
+    /// ArkTS side: publish failures (including the 1600004 enable-notification
+    /// retry path) are logged, not propagated — attention is best-effort.
+    pub async fn request_user_attention(&self, window_id: i64) -> Result<()> {
+        self.window_command("request-user-attention", window_id)
+            .await
+    }
+
+    /// Notifies the IME of the cursor rect (physical pixels). Requires a focused
+    /// editor; `ok=false, code=12800009` means none was focused, which is normal.
+    pub async fn set_ime_position(
+        &self,
+        window_id: i64,
+        x: i64,
+        y: i64,
+    ) -> Result<ImePositionResponse> {
+        validate_window_id(window_id)?;
+        validate_platform_integer("x coordinate", x)?;
+        validate_platform_integer("y coordinate", y)?;
+        self.call::<ImePositionRequest, ImePositionResponse>(
+            "set-ime-position",
+            ImePositionRequest { window_id, x, y },
+        )
+        .await
+    }
+
+    /// Allows/forbids edge-drag resizing. Requires API20+.
+    pub async fn set_window_draggable(&self, window_id: i64, enable: bool) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowDraggableRequest, WindowAcknowledgement>(
+            "set-draggable",
+            WindowDraggableRequest { window_id, enable },
+        )
+        .await?
+        .ensure()
+    }
+
+    pub async fn set_keep_screen_on(&self, window_id: i64, on: bool) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowKeepScreenOnRequest, WindowAcknowledgement>(
+            "set-keep-screen-on",
+            WindowKeepScreenOnRequest { window_id, on },
+        )
+        .await?
+        .ensure()
+    }
+
+    /// Sets the pointer cursor style for one window (PointerStyle id, resolved
+    /// by the caller from `window::CursorIcon`; ArkTS validates the range).
+    pub async fn set_cursor_icon(&self, window_id: i64, style: i32) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<CursorIconRequest, WindowAcknowledgement>(
+            "set-cursor-icon",
+            CursorIconRequest { window_id, style },
+        )
+        .await?
+        .ensure()
+    }
+
+    /// Sets the GLOBAL pointer visibility (pointer.setPointerVisible — there
+    /// is no per-window variant on OHOS). Restores the dispatch that the
+    /// bridge facade migration (tao 73212e1e) dropped to a no-op, breaking
+    /// `set_cursor_visible` on the Rust side even though the ArkTS
+    /// WindowManager.setPointerVisible implementation survived.
+    pub async fn set_cursor_visible(&self, visible: bool) -> Result<()> {
+        self.call::<CursorVisibleRequest, WindowAcknowledgement>(
+            "set-cursor-visible",
+            CursorVisibleRequest { visible },
+        )
+        .await?
+        .ensure()
+    }
+
+    /// Applies the decoration flag bit-field (closable=1, maximizable=2,
+    /// minimizable=4, resizable=8) that gates the matching window operations
+    /// on the ArkTS side.
+    pub async fn set_window_decoration_flags(&self, window_id: i64, flags: i32) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<DecorationFlagsRequest, WindowAcknowledgement>(
+            "set-decoration-flags",
+            DecorationFlagsRequest { window_id, flags },
+        )
+        .await?
+        .ensure()
+    }
+
+    /// Resolves the tao placeholder window id (0 = main window) to the real
+    /// OHOS window id required by native `OH_WindowManager_*` C APIs.
+    pub async fn get_real_window_id(&self, window_id: i64) -> Result<i64> {
+        validate_window_id(window_id)?;
+        let real_id = self
+            .call::<WindowIdRequest, RealWindowIdResponse>(
+                "get-real-window-id",
+                WindowIdRequest { window_id },
+            )
+            .await?
+            .window_id;
+        validate_window_id(real_id)?;
+        Ok(real_id)
     }
 
     async fn window_command(&self, action: &str, window_id: i64) -> Result<()> {

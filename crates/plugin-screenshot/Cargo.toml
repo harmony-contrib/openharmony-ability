@@ -1,0 +1,11 @@
+[package]
+name = "openharmony-ability-plugin-screenshot"
+version = "1.0.0-beta.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Screenshot facade for openharmony-ability webviews (capture + pick color)"
+
+[dependencies]
+openharmony-ability = { workspace = true }
+openharmony-ability-plugin-webview = { workspace = true }
+napi-ohos = { workspace = true }

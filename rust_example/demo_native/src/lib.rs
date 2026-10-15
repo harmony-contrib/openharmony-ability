@@ -23,9 +23,15 @@ use openharmony_ability::{
 };
 use openharmony_ability_derive::ability;
 use openharmony_ability_plugin_app_control::AppControlBridgePlugin;
+use openharmony_ability_plugin_autostart::AutostartBridgePlugin;
+use openharmony_ability_plugin_deep_link::DeepLinkBridgePlugin;
+use openharmony_ability_plugin_fault_injection::{
+    FaultInjectionBridgePlugin, FaultInjectionExt, FaultOutcomeWire, FaultRuleWire,
+};
 use openharmony_ability_plugin_files::{
     dialog_type, FileDialogFilter, FileDialogOptions, FilesExt,
 };
+use openharmony_ability_plugin_global_shortcut::GlobalShortcutBridgePlugin;
 use openharmony_ability_plugin_permission::{PermissionBridgePlugin, PermissionExt};
 use openharmony_ability_plugin_resource::{ResourceBridgePlugin, ResourceExt};
 use openharmony_ability_plugin_url::UrlExt;
@@ -220,6 +226,78 @@ pub async fn demo_plugin_sync_from_worker() -> Result<String> {
         .map_err(Error::from_reason)
 }
 
+/// End-to-end self-check for the fault-injection plugin (migrated from the
+/// former BridgeHost built-in): arms an error rule on `demo.login/authorize`
+/// and expects the injected marker on the async dispatch path, does the same
+/// for `demo.main-thread/inspect` through the sync-from-worker path, then
+/// verifies clean retries after clearing the registry.
+#[napi]
+pub async fn demo_fault_injection_check() -> Result<String> {
+    let app = current_app()?;
+    let bridge = app.bridge()?;
+    let fault = app.fault_injection()?;
+    let error_rule = |plugin: &str, action: &str| FaultRuleWire {
+        plugin_id: plugin.to_owned(),
+        action: Some(action.to_owned()),
+        outcome: FaultOutcomeWire {
+            kind: "error".to_owned(),
+            code: Some(77),
+            message: Some("demo-fault-check".to_owned()),
+            ms: None,
+        },
+        hits: Some(1),
+    };
+
+    // Async dispatch path: demo.login/authorize must fail with the marker.
+    fault
+        .set_fault_rule(error_rule("demo.login", "authorize"))
+        .await?;
+    let async_marker = match login_bridge::login_from_worker(bridge.clone()).await {
+        Ok(token) => {
+            return Err(Error::from_reason(format!(
+                "async hook did not intercept: demo.login authorize succeeded ({token})"
+            )))
+        }
+        Err(error) => error.to_string(),
+    };
+    if !async_marker.contains("77:demo-fault-check") {
+        return Err(Error::from_reason(format!(
+            "async hook failed with unexpected error: {async_marker}"
+        )));
+    }
+
+    // Sync dispatch path (worker -> TSFN -> main thread): demo.main-thread/inspect.
+    fault
+        .set_fault_rule(error_rule("demo.main-thread", "inspect"))
+        .await?;
+    let sync_marker = match tsfn_sync_bridge::inspect_from_worker(&bridge).await {
+        Ok(report) => {
+            return Err(Error::from_reason(format!(
+                "sync hook did not intercept: demo.main-thread inspect succeeded ({report})"
+            )))
+        }
+        Err(error) => error.to_string(),
+    };
+    if !sync_marker.contains("77:demo-fault-check") {
+        return Err(Error::from_reason(format!(
+            "sync hook failed with unexpected error: {sync_marker}"
+        )));
+    }
+
+    // Clear and retry both paths — no rule applies anymore.
+    fault.clear_fault_rules().await?;
+    let token = login_bridge::login_from_worker(bridge.clone())
+        .await
+        .map_err(|error| Error::from_reason(format!("async retry after clear failed: {error}")))?;
+    let report = tsfn_sync_bridge::inspect_from_worker(&bridge)
+        .await
+        .map_err(|error| Error::from_reason(format!("sync retry after clear failed: {error}")))?;
+
+    Ok(format!(
+        "PASS async='{async_marker}' sync='{sync_marker}' retry=ok token={token} {report}"
+    ))
+}
+
 /// `String` travels as the named `std.string` N-API type, without JSON serialization.
 #[napi]
 pub async fn demo_plugin_string() -> Result<String> {
@@ -383,6 +461,18 @@ fn openharmony_app(app: OpenHarmonyApp) {
         .expect("demo WebView facade must be registered");
     app.register_plugin(WindowBridgePlugin)
         .expect("demo Window facade must be registered");
+    if let Err(error) = app.register_plugin(GlobalShortcutBridgePlugin) {
+        hilog_info!(format!("failed to register global-shortcut facade: {error}").as_str());
+    }
+    if let Err(error) = app.register_plugin(DeepLinkBridgePlugin) {
+        hilog_info!(format!("failed to register deep-link facade: {error}").as_str());
+    }
+    if let Err(error) = app.register_plugin(FaultInjectionBridgePlugin) {
+        hilog_info!(format!("failed to register fault-injection facade: {error}").as_str());
+    }
+    if let Err(error) = app.register_plugin(AutostartBridgePlugin) {
+        hilog_info!(format!("failed to register autostart facade: {error}").as_str());
+    }
     if let Err(error) = app.register_plugin(openharmony_ability_plugin_url::UrlBridgePlugin) {
         hilog_info!(format!("failed to register url facade: {error}").as_str());
     }

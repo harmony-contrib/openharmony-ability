@@ -373,6 +373,25 @@ pub(crate) fn clear_attached() -> Result<()> {
     Ok(())
 }
 
+/// Drops the per-WebView protocol handler declarations for `webview_id`, if any.
+///
+/// Create-failure rollback path (see `callbacks::remove`): a failed create
+/// attached no controller, so no handler was installed — only the queued
+/// declarations need removing. The PROCESS-GLOBAL scheme set
+/// (`WebviewProtocol::register`) is intentionally untouched: it is shared
+/// across webviews, idempotent to re-declare, and bounded by the app's scheme
+/// list rather than by create attempts. Returns how many schemes were dropped.
+pub fn remove_declarations(webview_id: &str) -> Result<usize> {
+    let dropped = PROTOCOL_STATE
+        .lock()
+        .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?
+        .declarations
+        .remove(webview_id)
+        .map(|schemes| schemes.len())
+        .unwrap_or(0);
+    Ok(dropped)
+}
+
 fn reserve_installation(state: &mut ProtocolState, native_tag: &str, scheme: &str) -> bool {
     if state
         .installed_schemes

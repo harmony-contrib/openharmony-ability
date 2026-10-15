@@ -10,5 +10,26 @@
         "minApiVersion": 12
       }
     ]
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "plugins/notification/src/main/ets/NotificationPlugin.ets",
+        "plugins/window/src/main/ets/WindowPlugin.ets"
+      ],
+      "rules": {
+        "arkts/system-api-version": [
+          "error",
+          {
+            "minApiVersion": 12,
+            // Both plugins use requestEnableNotification(context), supported since API 10.
+            // oxk 0.7.1 merges in the API 9 no-context overload's deprecated-since-12 tag.
+            "apis": {
+              "@kit.NotificationKit.notificationManager.requestEnableNotification": 10
+            }
+          }
+        ]
+      }
+    }
+  ]
 }

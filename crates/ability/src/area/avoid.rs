@@ -47,6 +47,7 @@ pub struct AvoidArea {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AvoidAreaInfo {
+    pub window_id: i64,
     pub area_type: AvoidAreaType,
     pub area: AvoidArea,
 }

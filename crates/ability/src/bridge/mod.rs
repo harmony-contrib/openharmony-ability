@@ -29,7 +29,11 @@ use napi_ohos::{
     Env, Error, Result, Status, ValueType,
 };
 const DEFAULT_TIMEOUT_MS: u32 = 15_000;
-const MAX_TIMEOUT_MS: u32 = 60_000;
+/// Upper bound for per-call timeouts (individual calls opt in via
+/// `BridgeCallOptions::with_timeout_ms`). 5 minutes: interactive flows that put
+/// up system UI (e.g. Huawei account login panel with SMS verification) can
+/// legitimately take minutes; the default 15s stays for non-interactive calls.
+const MAX_TIMEOUT_MS: u32 = 300_000;
 
 mod mode {
     pub trait Sealed {}
@@ -817,7 +821,7 @@ impl BridgeClient {
             .await
     }
 
-    async fn call_raw<Request, Response>(
+    pub(crate) async fn call_raw<Request, Response>(
         &self,
         plugin_id: &str,
         action: &str,
@@ -842,6 +846,11 @@ impl BridgeClient {
             Box::new(TypedBridgeResponse::<Response>(PhantomData));
         let (sender, receiver) = oneshot::channel::<BridgeWireResult>();
 
+        // Single trace line per bridge call (issue #87 major-8: this path used to
+        // log 4 info lines per call — before enqueue, inside the TSFN callback,
+        // after enqueue, and after the receiver resolved — which flooded any
+        // Info-level logger such as tauri-plugin-log).
+        crate::debug!("[bridge] call_raw: {}/{}", plugin_id, action);
         let status = self.invoke.call_with_return_value(
             request,
             ThreadsafeFunctionCallMode::NonBlocking,
@@ -1183,6 +1192,10 @@ pub fn attach_bridge_session(
 }
 
 impl BridgeRuntime {
+    pub(crate) fn is_main_thread(&self) -> bool {
+        std::thread::current().id() == self.client.main_thread_id
+    }
+
     pub(crate) fn from_bindings(
         env: &Env,
         bindings: &napi_ohos::bindgen_prelude::ObjectRef,
@@ -1354,8 +1367,9 @@ mod tests {
 
     use super::{
         validate_identifier, validate_wire_call, AsyncBridge, BridgeCallOptions,
-        BridgeContextRequirement, BridgeNapiType, BridgePlugin, BridgePluginRegistry,
-        PluginLifecycleEvent, SyncFromWorkerRequest, MAX_TIMEOUT_MS,
+        BridgeContextReadiness, BridgeContextRequirement, BridgeExecution, BridgeNapiType,
+        BridgePlugin, BridgePluginRegistry, PluginLifecycleEvent, SyncFromWorkerRequest,
+        MAX_TIMEOUT_MS,
     };
 
     struct TestPlugin;
@@ -1726,5 +1740,196 @@ mod tests {
             })
             .is_err());
         assert_eq!(healthy_deliveries.load(Ordering::SeqCst), 1);
+    }
+
+    // ── BridgeExecution::as_str ──────────────────────────────────────────
+
+    #[test]
+    fn bridge_execution_async_str() {
+        assert_eq!(BridgeExecution::Async.as_str(), "async");
+    }
+
+    #[test]
+    fn bridge_execution_main_thread_sync_str() {
+        assert_eq!(BridgeExecution::MainThreadSync.as_str(), "sync-main-thread");
+    }
+
+    // ── BridgeContextRequirement::as_str ─────────────────────────────────
+
+    #[test]
+    fn context_requirement_ability_str() {
+        assert_eq!(BridgeContextRequirement::Ability.as_str(), "ability");
+    }
+
+    #[test]
+    fn context_requirement_window_stage_str() {
+        assert_eq!(
+            BridgeContextRequirement::WindowStage.as_str(),
+            "window-stage"
+        );
+    }
+
+    #[test]
+    fn context_requirement_ui_context_str() {
+        assert_eq!(BridgeContextRequirement::UiContext.as_str(), "ui-context");
+    }
+
+    // ── PluginLifecycleEvent::from_arkts ─────────────────────────────────
+
+    #[test]
+    fn from_arkts_ui_context_ready() {
+        assert_eq!(
+            PluginLifecycleEvent::from_arkts("ui-context-ready").unwrap(),
+            PluginLifecycleEvent::UiContextReady
+        );
+    }
+
+    #[test]
+    fn from_arkts_ui_context_destroy() {
+        assert_eq!(
+            PluginLifecycleEvent::from_arkts("ui-context-destroy").unwrap(),
+            PluginLifecycleEvent::UiContextDestroyed
+        );
+    }
+
+    #[test]
+    fn from_arkts_rejects_empty() {
+        assert!(PluginLifecycleEvent::from_arkts("").is_err());
+    }
+
+    #[test]
+    fn from_arkts_rejects_unknown_event() {
+        assert!(PluginLifecycleEvent::from_arkts("ability-created").is_err());
+        assert!(PluginLifecycleEvent::from_arkts("window-stage-created").is_err());
+    }
+
+    #[test]
+    fn from_arkts_rejects_invalid_chars() {
+        assert!(PluginLifecycleEvent::from_arkts("ui context ready").is_err());
+        assert!(PluginLifecycleEvent::from_arkts("ui/context/ready").is_err());
+    }
+
+    // ── BridgeContextReadiness::supports ─────────────────────────────────
+
+    #[test]
+    fn readiness_supports_empty_requirements() {
+        let readiness = BridgeContextReadiness::default();
+        assert!(readiness.supports(&[]));
+    }
+
+    #[test]
+    fn readiness_supports_ability_after_create() {
+        let mut readiness = BridgeContextReadiness::default();
+        assert!(!readiness.supports(&[BridgeContextRequirement::Ability]));
+        readiness.observe(&PluginLifecycleEvent::AbilityCreated {
+            restored_state: String::new(),
+        });
+        assert!(readiness.supports(&[BridgeContextRequirement::Ability]));
+    }
+
+    #[test]
+    fn readiness_supports_window_stage() {
+        let mut readiness = BridgeContextReadiness::default();
+        assert!(!readiness.supports(&[BridgeContextRequirement::WindowStage]));
+        readiness.observe(&PluginLifecycleEvent::WindowStageCreated);
+        assert!(readiness.supports(&[BridgeContextRequirement::WindowStage]));
+    }
+
+    #[test]
+    fn readiness_supports_ui_context() {
+        let mut readiness = BridgeContextReadiness::default();
+        assert!(!readiness.supports(&[BridgeContextRequirement::UiContext]));
+        readiness.observe(&PluginLifecycleEvent::UiContextReady);
+        assert!(readiness.supports(&[BridgeContextRequirement::UiContext]));
+    }
+
+    #[test]
+    fn readiness_supports_all_requirements() {
+        let mut readiness = BridgeContextReadiness::default();
+        readiness.observe(&PluginLifecycleEvent::AbilityCreated {
+            restored_state: String::new(),
+        });
+        readiness.observe(&PluginLifecycleEvent::WindowStageCreated);
+        readiness.observe(&PluginLifecycleEvent::UiContextReady);
+        assert!(readiness.supports(&[
+            BridgeContextRequirement::Ability,
+            BridgeContextRequirement::WindowStage,
+            BridgeContextRequirement::UiContext,
+        ]));
+    }
+
+    #[test]
+    fn readiness_does_not_support_partial() {
+        let mut readiness = BridgeContextReadiness::default();
+        readiness.observe(&PluginLifecycleEvent::AbilityCreated {
+            restored_state: String::new(),
+        });
+        assert!(!readiness.supports(&[
+            BridgeContextRequirement::Ability,
+            BridgeContextRequirement::UiContext,
+        ]));
+    }
+
+    // ── BridgeContextReadiness::observe ──────────────────────────────────
+
+    #[test]
+    fn observe_ability_destroyed_resets_all() {
+        let mut readiness = BridgeContextReadiness::default();
+        readiness.observe(&PluginLifecycleEvent::AbilityCreated {
+            restored_state: String::new(),
+        });
+        readiness.observe(&PluginLifecycleEvent::WindowStageCreated);
+        readiness.observe(&PluginLifecycleEvent::UiContextReady);
+        assert!(readiness.supports(&[
+            BridgeContextRequirement::Ability,
+            BridgeContextRequirement::WindowStage,
+            BridgeContextRequirement::UiContext,
+        ]));
+        readiness.observe(&PluginLifecycleEvent::AbilityDestroyed);
+        assert!(!readiness.supports(&[BridgeContextRequirement::Ability]));
+        assert!(!readiness.supports(&[BridgeContextRequirement::WindowStage]));
+        assert!(!readiness.supports(&[BridgeContextRequirement::UiContext]));
+    }
+
+    #[test]
+    fn observe_window_stage_destroyed_clears_ui_context() {
+        let mut readiness = BridgeContextReadiness::default();
+        readiness.observe(&PluginLifecycleEvent::WindowStageCreated);
+        readiness.observe(&PluginLifecycleEvent::UiContextReady);
+        assert!(readiness.supports(&[BridgeContextRequirement::UiContext]));
+        readiness.observe(&PluginLifecycleEvent::WindowStageDestroyed);
+        assert!(!readiness.supports(&[BridgeContextRequirement::WindowStage]));
+        assert!(!readiness.supports(&[BridgeContextRequirement::UiContext]));
+    }
+
+    #[test]
+    fn observe_ui_context_destroyed_clears_only_ui_context() {
+        let mut readiness = BridgeContextReadiness::default();
+        readiness.observe(&PluginLifecycleEvent::AbilityCreated {
+            restored_state: String::new(),
+        });
+        readiness.observe(&PluginLifecycleEvent::WindowStageCreated);
+        readiness.observe(&PluginLifecycleEvent::UiContextReady);
+        readiness.observe(&PluginLifecycleEvent::UiContextDestroyed);
+        assert!(readiness.supports(&[BridgeContextRequirement::Ability]));
+        assert!(readiness.supports(&[BridgeContextRequirement::WindowStage]));
+        assert!(!readiness.supports(&[BridgeContextRequirement::UiContext]));
+    }
+
+    #[test]
+    fn observe_noop_events_preserve_state() {
+        let mut readiness = BridgeContextReadiness::default();
+        readiness.observe(&PluginLifecycleEvent::AbilityCreated {
+            restored_state: String::new(),
+        });
+        readiness.observe(&PluginLifecycleEvent::WindowStageCreated);
+        readiness.observe(&PluginLifecycleEvent::UiContextReady);
+        let snapshot = readiness;
+        readiness.observe(&PluginLifecycleEvent::ConfigurationUpdated);
+        readiness.observe(&PluginLifecycleEvent::MemoryLevel { level: 5 });
+        readiness.observe(&PluginLifecycleEvent::WindowStageEvent { event_type: 1 });
+        assert_eq!(readiness.ability, snapshot.ability);
+        assert_eq!(readiness.window_stage, snapshot.window_stage);
+        assert_eq!(readiness.ui_context, snapshot.ui_context);
     }
 }

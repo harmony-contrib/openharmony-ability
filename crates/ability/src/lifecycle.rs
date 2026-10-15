@@ -28,7 +28,10 @@ pub struct WindowStageEventCallback<'a> {
     pub on_window_stage_event: Function<'a, i32, ()>,
     pub on_window_size_change: Function<'a, Object<'a>, ()>,
     pub on_window_rect_change: Function<'a, Object<'a>, ()>,
+    pub on_window_focus_change: Function<'a, Object<'a>, ()>,
     pub on_avoid_area_change: Function<'a, Object<'a>, ()>,
+    pub on_new_want: Function<'a, Object<'a>, ()>,
+    pub on_ability_create_with_want: Function<'a, Object<'a>, ()>,
 }
 
 #[napi(object)]
@@ -74,7 +77,10 @@ pub fn create_lifecycle_handle<'a>(
 
     let tsfn = waker
         .build_threadsafe_function()
-        .callee_handled::<true>()
+        // false matches every other TSFN in this crate (issue #87 minor-1);
+        // the closure always returns Ok(()) so the callee-handled error-first
+        // argument was never observed.
+        .callee_handled::<false>()
         .build()?;
 
     {
@@ -163,33 +169,64 @@ pub fn create_lifecycle_handle<'a>(
             Ok(())
         })?;
 
-    // TODO: we may can remove it
+    // Phase 3 (design.md D6 / task 3.5): ArkTS wraps onWindowSizeChange options as
+    // { windowId, width, height }. We read windowId here so tao's run_loop can route
+    // WindowResize to the originating window instead of always the main window.
+    // windowId is read with a fallback to 0 (main window): a registration path that
+    // does not yet wrap the options degrades to the old main-window behavior rather
+    // than failing the callback (same tolerance as window_rect_change above).
     let window_resize_app = app.clone();
     let window_resize = env.create_function_from_closure("window_resize", move |ctx| {
         let size = ctx.first_arg::<Object>()?;
         let width = size.get_named_property::<i32>("width")?;
         let height = size.get_named_property::<i32>("height")?;
+        let window_id = size.get_named_property::<i64>("windowId").unwrap_or(0);
 
         if let Some(ref mut h) = *window_resize_app.event_loop.borrow_mut() {
-            h(Event::WindowResize(Size { width, height }))
+            h(Event::WindowResize {
+                window_id,
+                size: Size { width, height },
+            })
         }
         Ok(())
     })?;
 
     // TODO: we may can remove it
+    // Phase 2 (design.md D2/D4): the ArkTS side wraps windowRectChange options as
+    // { windowId, reason, rect }. We read windowId here and route the rect into the
+    // per-window HashMap (set_window_rect) instead of the old shared single field.
+    // windowId is read with a fallback to 0 (main window): some registration points may
+    // not yet wrap the options (e.g. a path added later) — degrading to the old main-
+    // window behavior is preferable to erroring out the whole callback.
     let window_rect_app = app.clone();
     let window_rect_change =
         env.create_function_from_closure("window_rect_change", move |ctx| {
             let options = ctx.first_arg::<Object>()?;
             let reason = options.get_named_property::<i32>("reason")?;
             let rect = parse_rect(options.get_named_property::<Object>("rect")?)?;
-            window_rect_app.inner.write().unwrap().window_rect = rect;
+            // windowId is optional-with-fallback: missing or wrong type degrades to 0
+            // (main window) rather than failing the callback.
+            let window_id = options.get_named_property::<i64>("windowId").unwrap_or(0);
+            window_rect_app.set_window_rect(window_id, rect);
 
             if let Some(ref mut h) = *window_rect_app.event_loop.borrow_mut() {
                 h(Event::ContentRectChange(ContentRect {
                     reason: reason.into(),
                     rect,
+                    window_id,
                 }))
+            }
+            Ok(())
+        })?;
+
+    let window_focus_app = app.clone();
+    let window_focus_change =
+        env.create_function_from_closure("window_focus_change", move |ctx| {
+            let options = ctx.first_arg::<Object>()?;
+            let window_id = options.get_named_property::<i64>("windowId")?;
+            let focused = options.get_named_property::<bool>("focused")?;
+            if let Some(ref mut handler) = *window_focus_app.event_loop.borrow_mut() {
+                handler(Event::WindowFocusChanged { window_id, focused });
             }
             Ok(())
         })?;
@@ -197,6 +234,7 @@ pub fn create_lifecycle_handle<'a>(
     let avoid_area_change_app = app.clone();
     let avoid_area_change = env.create_function_from_closure("avoid_area_change", move |ctx| {
         let options = ctx.first_arg::<Object>()?;
+        let window_id = options.get_named_property::<i64>("windowId")?;
         let area_type = AvoidAreaType::from(options.get_named_property::<i32>("type")?);
         let area = options.get_named_property::<Object>("area")?;
         let visible = area.get_named_property::<bool>("visible")?;
@@ -210,11 +248,12 @@ pub fn create_lifecycle_handle<'a>(
 
         {
             let mut inner = avoid_area_change_app.inner.write().unwrap();
-            inner.avoid_areas.insert(area_type, avoid_area);
+            inner.avoid_areas.insert((window_id, area_type), avoid_area);
         }
 
         if let Some(ref mut h) = *avoid_area_change_app.event_loop.borrow_mut() {
             h(Event::AvoidAreaChange(AvoidAreaInfo {
+                window_id,
                 area_type,
                 area: avoid_area,
             }))
@@ -304,6 +343,44 @@ pub fn create_lifecycle_handle<'a>(
             Ok(())
         })?;
 
+    let on_new_want_app = app.clone();
+    let on_new_want = env.create_function_from_closure("on_new_want", move |ctx| {
+        let data = ctx.first_arg::<Object>()?;
+        let uri = data.get_named_property::<String>("uri")?;
+        let parameters_json = data.get_named_property::<String>("parametersJson")?;
+        // Session state rides the app instance now (issue #87 major-9).
+        on_new_want_app.store_want_parameters(&parameters_json);
+        // isContinuation is optional-with-fallback: missing or wrong type
+        // (older HAR payload) degrades to false rather than failing the callback.
+        let is_continuation = data
+            .get_named_property::<bool>("isContinuation")
+            .unwrap_or(false);
+        on_new_want_app.store_continuation(is_continuation, &parameters_json);
+        if let Some(ref mut h) = *on_new_want_app.event_loop.borrow_mut() {
+            h(Event::NewWant { uri })
+        }
+        Ok(())
+    })?;
+
+    let on_ability_create_with_want_app = app.clone();
+    let on_ability_create_with_want =
+        env.create_function_from_closure("on_ability_create_with_want", move |ctx| {
+            let data = ctx.first_arg::<Object>()?;
+            let uri = data.get_named_property::<String>("uri")?;
+            on_ability_create_with_want_app.store_initial_want_uri(&uri);
+            // Continuation fields are optional-with-fallback: missing or wrong
+            // type (older HAR payload) degrades to false / empty rather than
+            // failing the callback.
+            let is_continuation = data
+                .get_named_property::<bool>("isContinuation")
+                .unwrap_or(false);
+            let parameters_json = data
+                .get_named_property::<String>("parametersJson")
+                .unwrap_or_default();
+            on_ability_create_with_want_app.store_continuation(is_continuation, &parameters_json);
+            Ok(())
+        })?;
+
     Ok(ApplicationLifecycle {
         bridge_plugins,
         environment_callback: EnvironmentCallback {
@@ -318,9 +395,12 @@ pub fn create_lifecycle_handle<'a>(
             on_ability_save_state,
             on_ability_restore_state,
             on_window_rect_change: window_rect_change,
+            on_window_focus_change: window_focus_change,
             on_window_size_change: window_resize,
             on_avoid_area_change: avoid_area_change,
             on_window_stage_event: window_stage_event,
+            on_new_want,
+            on_ability_create_with_want,
         },
         keyboard_event_callback: KeyboardCallback {
             on_keyboard_height_change: keyboard_event_callback,

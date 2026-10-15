@@ -1,0 +1,12 @@
+[package]
+name = "openharmony-ability-plugin-system-state"
+version = "1.0.0-beta.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Thermal and sleep state bridge plugin for openharmony-ability"
+
+[dependencies]
+openharmony-ability = { workspace = true }
+napi-ohos = { workspace = true }
+napi-derive-ohos = { workspace = true }
+crossbeam-channel = { workspace = true }

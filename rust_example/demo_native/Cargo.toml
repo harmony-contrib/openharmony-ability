@@ -20,10 +20,16 @@ openharmony-ability-plugin-resource = { workspace = true }
 openharmony-ability-plugin-url = { workspace = true }
 openharmony-ability-plugin-webview = { workspace = true }
 openharmony-ability-plugin-window = { workspace = true }
+openharmony-ability-plugin-global-shortcut = { workspace = true }
+openharmony-ability-plugin-deep-link = { workspace = true }
+openharmony-ability-plugin-fault-injection = { workspace = true }
+openharmony-ability-plugin-autostart = { workspace = true }
 ohos-hilog-binding = { workspace = true }
 futures-channel = { workspace = true }
 futures-executor = "0.3"
 http = { workspace = true }
+# Required because the #[ability(...)] macro expands to code that calls log::info!
+log = "0.4"
 
 [build-dependencies]
 napi-build-ohos = { workspace = true }

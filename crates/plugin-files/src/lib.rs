@@ -74,6 +74,8 @@ pub struct FileDialogOptions {
     pub dialog_type: String,
     pub allow_many: bool,
     pub default_location: Option<String>,
+    /// Suggested file name for the save dialog.
+    pub suggested_name: Option<String>,
     pub filters: Vec<FileDialogFilter>,
 }
 
@@ -85,6 +87,7 @@ impl FileDialogOptions {
             dialog_type: dialog_type.into(),
             allow_many: false,
             default_location: None,
+            suggested_name: None,
             filters: Vec::new(),
         }
     }
@@ -96,6 +99,11 @@ impl FileDialogOptions {
 
     pub fn default_location(mut self, default_location: impl Into<String>) -> Self {
         self.default_location = Some(default_location.into());
+        self
+    }
+
+    pub fn suggested_name(mut self, suggested_name: impl Into<String>) -> Self {
+        self.suggested_name = Some(suggested_name.into());
         self
     }
 
@@ -118,6 +126,13 @@ impl FileDialogOptions {
             return Err(Error::from_reason(
                 "open-folder dialog does not support allow_many",
             ));
+        }
+        if let Some(name) = &self.suggested_name {
+            if self.dialog_type != dialog_type::SAVE_FILE || name.trim().is_empty() {
+                return Err(Error::from_reason(
+                    "suggested_name requires a save-file dialog and a non-empty name",
+                ));
+            }
         }
         for filter in &self.filters {
             if let Some(pattern) = filter.pattern.as_ref() {
@@ -166,7 +181,9 @@ impl FilesExt for OpenHarmonyApp {
                 .call_async::<FilesBridgePlugin, FileDialogOptions, FileDialogResponse>(
                     "file-dialog",
                     options,
-                    BridgeCallOptions::default().with_timeout_ms(60_000),
+                    // A system picker waits for user input; browsing files can legitimately
+                    // take several minutes. Use the bridge's interactive-call limit.
+                    BridgeCallOptions::default().with_timeout_ms(300_000),
                 )
                 .await
         })
@@ -208,6 +225,12 @@ mod tests {
 
         let folder_many = FileDialogOptions::new(dialog_type::OPEN_FOLDER).allow_many(true);
         assert!(folder_many.validate().is_err());
+
+        let save = FileDialogOptions::new(dialog_type::SAVE_FILE).suggested_name("report.txt");
+        assert!(save.validate().is_ok());
+        let invalid_name =
+            FileDialogOptions::new(dialog_type::OPEN_FILE).suggested_name("report.txt");
+        assert!(invalid_name.validate().is_err());
     }
 
     #[test]
