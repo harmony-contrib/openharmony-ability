@@ -337,18 +337,28 @@ class WebviewAcceptedResponse {
 }
 
 class WebviewScriptResponse {
-  readonly result: string | null;
+  // Optional: absent when the script produced no return value. The NAPI
+  // bridge cannot decode a JS `null` into Rust `Option<String>` (treated
+  // as `String` → conversion error), so the field must be left unset
+  // rather than set to null.
+  readonly result?: string;
 
   constructor(result: string | null) {
-    this.result = result;
+    if (result !== null && result !== undefined) {
+      this.result = result;
+    }
   }
 }
 
 class WebviewStringResponse {
-  readonly value: string | null;
+  // Optional: absent when there is nothing to report (same NAPI `null`
+  // constraint as `WebviewScriptResponse.result`).
+  readonly value?: string;
 
   constructor(value: string | null) {
-    this.value = value;
+    if (value !== null && value !== undefined) {
+      this.value = value;
+    }
   }
 }
 
@@ -372,26 +382,38 @@ class WebviewDownloadStartRequest {
   readonly id: string;
   readonly nativeTag: string;
   readonly url: string;
-  readonly tempPath: string | null;
+  // Optional: absent when ArkWeb reported no destination. Same NAPI `null`
+  // constraint as `WebviewPrintStateEvent.error` — the field must be left
+  // unset rather than set to null.
+  readonly tempPath?: string;
 
   constructor(id: string, nativeTag: string, url: string, tempPath: string | null) {
     this.id = id;
     this.nativeTag = nativeTag;
     this.url = url;
-    this.tempPath = tempPath;
+    if (tempPath !== null && tempPath !== undefined) {
+      this.tempPath = tempPath;
+    }
   }
 }
 
 interface WebviewDownloadStartResponse {
   allow: boolean;
-  tempPath: string | null;
+  // Optional: the Rust side's `Option<String>` encodes `None` as an absent
+  // property (the NAPI bridge cannot round-trip an explicit JS `null`), so
+  // the field arrives as `undefined` when no replacement destination is
+  // set.
+  tempPath?: string;
 }
 
 class WebviewDownloadEndEvent {
   readonly id: string;
   readonly nativeTag: string;
   readonly url: string;
-  readonly tempPath: string | null;
+  // Optional: absent when the download failed before a destination was
+  // settled (same NAPI `null` constraint as
+  // `WebviewPrintStateEvent.error`).
+  readonly tempPath?: string;
   readonly success: boolean;
 
   constructor(
@@ -404,7 +426,9 @@ class WebviewDownloadEndEvent {
     this.id = id;
     this.nativeTag = nativeTag;
     this.url = url;
-    this.tempPath = tempPath;
+    if (tempPath !== null && tempPath !== undefined) {
+      this.tempPath = tempPath;
+    }
     this.success = success;
   }
 }
@@ -954,7 +978,9 @@ function downloadStartDecision(
       response === null ||
       typeof response !== "object" ||
       typeof response.allow !== "boolean" ||
-      (response.tempPath !== null && typeof response.tempPath !== "string")
+      // `undefined` is the wire form of the Rust side's `Option::None`
+      // (an omitted property), so it is a valid "no override" answer.
+      (response.tempPath !== undefined && typeof response.tempPath !== "string")
     ) {
       throw new Error("Invalid WebView download-start response");
     }
@@ -963,7 +989,7 @@ function downloadStartDecision(
     console.error("WebView download decision failed: " + String(error));
     // A download callback explicitly requested a synchronous admission decision. Failing closed
     // avoids writing to an unintended path when native state is no longer available.
-    return { allow: false, tempPath: null };
+    return { allow: false };
   }
 }
 

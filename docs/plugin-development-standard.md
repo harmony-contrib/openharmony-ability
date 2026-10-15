@@ -418,12 +418,16 @@ context.appendChild(
   `mount_into_root` 整体挂载——旧的"webview 模式 vs 自定义节点模式"二分法被归一化为同一操作。
 - WebView 插件：`CreateRequest` 不带 `parentHandle` 时全屏挂根（默认行为）；带
   `parentHandle`（`ohos.node` 容器句柄）时挂到调用方树上。
-- 业务层级 = 页面 `Stack` 声明顺序。业务内容放在 `DefaultXComponent` 前/后即得到下/上层级：
+- 业务层级 = 页面 `Stack` 声明顺序。业务内容放在 `DefaultXComponent` 前/后即得到下/上层级。
+  `DefaultXComponent` 必须传入 `bridgeSessionId`（缺失时组件拒绝挂载）：MainPage 路由内经
+  per-instance LocalStorage 用 `@LocalStorageProp('bridgeSessionId')` 取；独立页面用
+  `@StorageProp("bridgeSessionId")` 取（NativeAbility 创建会话后发布到 AppStorage，
+  demo 页面即此写法）：
 
 ```ts
 Stack() {
   this.BusinessUnderlay()                    // 插件树之下
-  DefaultXComponent({ moduleName: "demo_native" })
+  DefaultXComponent({ moduleName: "demo_native", bridgeSessionId: this.bridgeSessionId })
   this.BusinessOverlay()                     // 插件树之上
 }
 ```

@@ -2239,7 +2239,9 @@ export class WindowManager {
   // Apply per-webview clipboard / zoom-hotkey intercept flags for a window.
   // Called from WebviewPlugin.create (sub-window path) using payload.clipboard /
   // payload.zoomHotkeys. Undefined leaves the default (true = ArkWeb native).
-  // Clearing happens in removeWindow; do not clear per-webview (siblings share a window).
+  // Clearing happens in clearWindowState — the single cleanup sink reused by
+  // both removeWindow and unregisterUIAbilityStage (review finding F4 folded
+  // the list there) — do not clear per-webview (siblings share a window).
   // Cross-platform note: on OHOS `clipboard=false` blocks keyboard Ctrl+C/X/V (onKeyPreIme
   // swallows them), whereas on Windows (webview2) the `clipboard` property only gates JS
   // execCommand clipboard access, not keyboard. Sub-windows needing Ctrl+C must call

@@ -100,7 +100,10 @@ interface UnregisterRequestPayload {
 interface UnregisterAllRequestPayload {
   // Raises the global generation floor: any in-flight register dispatched
   // before this sweep (smaller generation) is rejected on arrival instead
-  // of resurrecting a hotkey the Rust side no longer tracks.
+  // of resurrecting a hotkey the Rust side no longer tracks. The sweep
+  // also physically unregisters every live hotkey whose newest served
+  // generation predates it; ids (re-)registered after the sweep (larger
+  // per-id watermark) keep their physical registration.
   generation: number;
 }
 
@@ -146,7 +149,11 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
   // generation served — globally (`generationFloor`) and per id
   // (`idGenerations`) — and reject any request carrying an older one. The
   // rejection flows back as a normal registration error, whose Rust-side
-  // cleanup is a no-op against the already-updated store.
+  // cleanup is a no-op against the already-updated store. The
+  // unregister-all sweep applies the same logic in reverse: it skips ids
+  // whose per-id watermark postdates the sweep, so a re-registration
+  // dispatched after the sweep keeps its physical registration (the
+  // Rust-side local removal is conditional on the same stamps).
 
   // Highest unregister-all generation served; registers carrying a smaller
   // generation predate that sweep and are rejected on arrival.
@@ -349,15 +356,37 @@ export class GlobalShortcutPlugin extends AsyncPluginBase {
   private unregisterAllHotkeys(generation: number): boolean {
     // Raise the global generation floor: register requests carrying a
     // smaller generation predate this sweep and are rejected on arrival —
-    // the ArkTS-side half of the ghost-hotkey race fix. Every recorded
+    // the ArkTS-side half of the ghost-hotkey race fix. Every pre-sweep
     // per-id watermark is smaller than this sweep's generation (the Rust
     // counter is monotonic), so the floor subsumes them.
     if (generation > this.generationFloor) {
       this.generationFloor = generation;
     }
-    this.idGenerations.clear();
+    // Prune only the watermarks the raised floor subsumes (≤ this sweep's
+    // generation); keep newer ones. Clearing the map wholesale would also
+    // drop watermarks set by registers that were dispatched after this
+    // sweep and already landed here — the loop below would then physically
+    // unregister those live re-registrations while the Rust store keeps
+    // them: a silent dead hotkey (the reverse direction of the ghost race).
+    for (const id of Array.from(this.idGenerations.keys())) {
+      const served = this.idGenerations.get(id);
+      if (served !== undefined && served <= generation) {
+        this.idGenerations.delete(id);
+      }
+    }
     const ids = Array.from(this.registeredHotkeys.keys());
     for (const id of ids) {
+      // An id whose newest served generation postdates this sweep was
+      // (re-)registered after it — that registration is live on the Rust
+      // side too (its local removal is conditional on the same stamps),
+      // so keep its physical registration.
+      const served = this.idGenerations.get(id);
+      if (served !== undefined && served > generation) {
+        hilog.info(DOMAIN, "GlobalShortcut",
+          "unregister-all keeps hotkey id=%{public}d: served=%{public}d > sweep generation=%{public}d (registered after the sweep)",
+          id, served, generation);
+        continue;
+      }
       this.unregisterHotkeyById(id);
     }
     return true;
