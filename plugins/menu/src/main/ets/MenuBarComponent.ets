@@ -150,21 +150,7 @@ export struct MenuBarComponent {
         `[Menubar] onMenubarJsonChange: items=${items.length}, ` +
           `submenuItems=${this.menubarItems.length}, details=${submenuDetails.join("; ")}`,
       );
-      // If dropdown is open, close and reopen to force re-render with updated data
-      // 诊断埋点#3：close-reopen 分支。判读：若点击后先看到此日志再看到 onWillDisappear → 根因B
-      // (set-menubar 二次到达触发 close-reopen，reopen 因 activeDropdownId 已被清空而失败)。
-      if (this.activeDropdownShown && this.activeDropdownId) {
-        hilog.info(
-          0x1999,
-          "MenuBar",
-          "onMenubarJsonChange close-reopen: activeId=%{public}s",
-          this.activeDropdownId,
-        );
-        this.activeDropdownShown = false;
-        setTimeout(() => {
-          this.activeDropdownShown = true;
-        }, 0);
-      }
+      // State updates rebuild menu contents without dismissing the focused popup.
     } catch (e) {
       this.menubarIconIds.clear();
       this.cleanupStaleIcons();
@@ -313,6 +299,7 @@ export struct MenuBarComponent {
               } else {
                 MenuItem({
                   content: item.text ?? item.predefinedType ?? "",
+                  labelInfo: item.accelerator,
                   symbolStartIcon: item.nativeIcon
                     ? this.nativeIconSymbol(item.nativeIcon)
                     : undefined,
@@ -346,7 +333,10 @@ export struct MenuBarComponent {
     const groups: MenuItemData[][] = [];
     let current: MenuItemData[] = [];
     for (const item of items) {
-      if (item.type === "predefined" && item.predefinedType === "separator") {
+      if (
+        item.type === "separator" ||
+        (item.type === "predefined" && item.predefinedType === "separator")
+      ) {
         if (current.length > 0) {
           groups.push(current);
           current = [];
@@ -437,8 +427,10 @@ export struct MenuBarComponent {
                   "onWillDisappear activeId=%{public}s",
                   this.activeDropdownId,
                 );
-                this.activeDropdownShown = false;
-                this.activeDropdownId = "";
+                if (this.activeDropdownId === item.id) {
+                  this.activeDropdownShown = false;
+                  this.activeDropdownId = "";
+                }
               },
             },
           );
