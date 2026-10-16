@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Match native styling for sub-window title bars, with system theme colors, focus feedback
+  and decoration-button availability.
+- Fix the Float-window restore button for apps targeting API 12/13.
+
 ## 1.0.0-beta.3
 
 All 24 Rust crates and 21 ArkTS HAR packages now share `1.0.0-beta.3`.

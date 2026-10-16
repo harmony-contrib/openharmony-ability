@@ -1,0 +1,8 @@
+{
+  "string": [
+    { "name": "window_minimize", "value": "最小化" },
+    { "name": "window_maximize", "value": "最大化" },
+    { "name": "window_restore", "value": "还原" },
+    { "name": "window_close", "value": "关闭" }
+  ]
+}
