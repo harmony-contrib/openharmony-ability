@@ -1,3 +1,13 @@
+# 1.0.0-beta.3
+
+- Align the inbound-only `ohos.resource` package with the unified workspace release; no new
+  outbound actions or named N-API contract changes.
+- Keep resource-manager injection Ability-scoped during plugin installation.
+- Align the package version to `1.0.0-beta.3` and resolve internal HAR dependencies
+  through `workspace:*`.
+
+---
+
 # 1.0.0-beta.1
 
 - **Breaking**: replace the shared `EagerPlugin` wrapper with a session-scoped `LazyPlugin`

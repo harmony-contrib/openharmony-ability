@@ -1,3 +1,17 @@
+# 1.0.0-beta.3
+
+- Expand window creation/control for desktop and mobile, including display selection,
+  decoration/transparency, geometry/limits, fullscreen, focus, visibility and window state.
+- Add title/topmost/attention, IME placement, draggable/keep-screen-on, cursor and platform
+  window-ID operations with runtime guards for newer APIs.
+- Add cancellable prompts positioned in window-content vp coordinates, display-filtered
+  stacking queries, RGBA custom cursors and window icons.
+- Await platform mutations and bind operations/listeners to the component's actual window.
+- Align the package version to `1.0.0-beta.3` and resolve internal HAR dependencies
+  through `workspace:*`.
+
+---
+
 # 1.0.0-beta.1
 
 - **Breaking**: all window actions now use the async bridge so Promise-based platform window

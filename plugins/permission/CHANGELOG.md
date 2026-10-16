@@ -1,3 +1,12 @@
+# 1.0.0-beta.3
+
+- Align the existing `ohos.permission` package with the unified workspace release; no action
+  or named N-API contract changes in this version.
+- Align the package version to `1.0.0-beta.3` and resolve internal HAR dependencies
+  through `workspace:*`.
+
+---
+
 # 1.0.0-beta.1
 
 - **Breaking**: remove the numeric plugin version and module selection from the ArkTS contract;

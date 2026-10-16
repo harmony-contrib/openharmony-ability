@@ -1,30 +1,31 @@
 # openharmony-ability-plugin-resource
 
-`openharmony-ability-plugin-resource` 是 HarmonyOS `resourceManager` 能力的 Rust facade。它与
-ArkTS HAR `@ohos-rs/ability-plugin-resource` 成对使用：ArkTS wrapper 在 Ability-scoped `onInstall`
-经入站事件推送平台对象，Rust 在同一 N-API callback 内把它转成 native 指针，存入匹配 bridge
-registry 注册的 `ResourceBridgePlugin` instance；之后所有
-读取（raw file、media、drawable 等）通过 `ohos-resource-manager-binding` 直连 OpenHarmony C API，
-不经过 ArkTS。
+English | [简体中文](README.zh-CN.md)
 
-## 契约
+`openharmony-ability-plugin-resource` exposes HarmonyOS resource access to Rust, paired with
+`@ohos-rs/ability-plugin-resource`. The ArkTS wrapper pushes the platform object in its
+Ability-scoped `onInstall`; Rust converts it to a native pointer within that N-API callback and
+stores it on the matching registry's `ResourceBridgePlugin` instance. Subsequent raw-file,
+media and drawable reads use `ohos-resource-manager-binding` and the OpenHarmony C API directly.
 
-| 项目 | 值 |
+## Contract
+
+| Field | Value |
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-resource` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-resource` |
-| 插件 ID | `ohos.resource` |
-| 执行模式 | 异步（`AsyncBridge` / `invokeAsync`，无出站 action） |
-| 前置 context | `ability` |
-| 入站事件 | `resource-manager-ready`：`ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` |
+| Plugin ID | `ohos.resource` |
+| Execution | `AsyncBridge` / `invokeAsync` (no outbound actions) |
+| Required context | `ability` |
+| Inbound event | `resource-manager-ready`: `ohos.resource.ResourceManagerRef` (the platform object) → `ohos.resource.ResourceManagerReadyResponse { accepted }` |
 
-`ResourceManagerRef` 是 inbound-only 类型：解码时立即调用
-`OH_ResourceManager_InitNativeResourceManager` 转成 `NonNull<NativeResourceManager>`，绝不保留
-ArkTS 对象引用跨线程。
+`ResourceManagerRef` is inbound-only. Decoding immediately invokes
+`OH_ResourceManager_InitNativeResourceManager` to obtain `NonNull<NativeResourceManager>`;
+no ArkTS object reference is retained across threads.
 
-## 接入
+## Integration
 
-1. 在 native Rust 模块中添加该 crate，并在 `#[ability]` 初始化器内注册 Rust facade：
+1. Add the crate and register it in the `#[ability]` initializer:
 
    ```rust
    use openharmony_ability::OpenHarmonyApp;
@@ -38,8 +39,8 @@ ArkTS 对象引用跨线程。
    }
    ```
 
-2. ArkTS 侧为每个 Host/session 创建独立 wrapper；native pointer 由匹配的 Rust plugin registry
-   instance 持有：
+2. Create a separate ArkTS wrapper for each host/session; the matching Rust registry instance
+   owns the native pointer:
 
    ```ts
    import { LazyPlugin } from "@ohos-rs/ability";
@@ -51,7 +52,7 @@ ArkTS 对象引用跨线程。
    ];
    ```
 
-3. 业务侧读取：
+3. Read resources from application code:
 
    ```rust
    use openharmony_ability_plugin_resource::ResourceExt;
@@ -62,15 +63,19 @@ ArkTS 对象引用跨线程。
    }
    ```
 
-## 时序说明
+## Timing
 
-推送发生在 `onInstall`：入站事件 sink 已 attach，Rust registry 也已经收到 `AbilityCreated`，但不
-依赖 WindowStage 或 DefaultXComponent。因此只依赖 `ability` 的插件可以在渲染前收到入站事件；
-需要 `ui-context` 的插件
-（如 webview）仍按其自身 requires 等到对应上下文就绪。
+The push occurs in `onInstall`, after the inbound event sink is attached and Rust receives
+`AbilityCreated`. It needs neither WindowStage nor DefaultXComponent. Ability-only plugins
+can receive events before rendering; UI plugins such as WebView still wait for their contexts.
 
-## 线程安全
+## Thread safety
 
-`NativeResourceManager` 的读取方法本身**非线程安全**（`ohos-resource-manager-binding` 文档
-明确说明）。`ResourceManager` 可跨线程 Clone，但并发读取需要调用方自行串行化（例如
-`Mutex<ResourceManager>`）。Ability 重建时 plugin 会先清空旧 manager，再接收新 wrapper 的 handle。
+Native resource-manager reads are not thread-safe, as documented by
+`ohos-resource-manager-binding`. A `ResourceManager` can be cloned across threads, but callers
+must serialize concurrent reads (for example with `Mutex<ResourceManager>`).
+Ability reconstruction clears the old manager before accepting the new wrapper's handle.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

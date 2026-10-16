@@ -1,5 +1,7 @@
 # @ohos-rs/ability
 
+English | [简体中文](README.zh-CN.md)
+
 `@ohos-rs/ability` provides the ArkTS-side runtime for loading native modules, forwarding
 OpenHarmony lifecycle events, and hosting generic bridge plugins. Concrete capabilities live in
 separate HAR packages; the core package does not contain permission, window, exit, or WebView
@@ -19,12 +21,14 @@ ohpm install @ohos-rs/ability
 
 ```ts
 import { NativeAbility } from "@ohos-rs/ability";
+import Want from "@ohos.app.ability.Want";
+import { AbilityConstant } from "@kit.AbilityKit";
 
 export default class EntryAbility extends NativeAbility {
   public moduleName: string = "demo_native";
 
-  onCreate() {
-    super.onCreate();
+  onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    super.onCreate(want, launchParam);
   }
 }
 ```
@@ -163,3 +167,7 @@ OpenHarmony does not await `onCreate` or `onWindowStageCreate`. Override the fra
 for custom page loading; it runs inside the serialized, generation-checked WindowStage transaction.
 Declaring the platform callback itself `async` is not an ordering barrier and can render
 `DefaultXComponent` before its bridge session exists.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

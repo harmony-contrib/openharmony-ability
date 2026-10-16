@@ -1,5 +1,15 @@
 # Clipboard plugin
 
+English | [简体中文](README.zh-CN.md)
+
+## Install
+
+```bash
+ohpm install @ohos-rs/ability-plugin-clipboard
+```
+
+## Assembly
+
 Each factory must configure its text metadata MIME through the constructor options object:
 
 ```ts
@@ -19,3 +29,7 @@ The framework provides no default MIME. Reads also accept
 `application/x-gpui-ohos-text-metadata-v1` and the original
 unversioned `application/x-gpui-ohos-text-metadata` so existing clipboard contents remain readable.
 Platform text, HTML, URI and image records use the SDK's standard content types.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

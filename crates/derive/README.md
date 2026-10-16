@@ -1,5 +1,7 @@
 # openharmony-ability-derive
 
+English | [简体中文](README.zh-CN.md)
+
 `#[ability]` generates the N-API exports for one OpenHarmony native Ability module: lifecycle
 initialization, XComponent render entry, back-press callback, and the generic bridge event ports.
 
@@ -43,3 +45,7 @@ The `context` argument forwards ArkTS init data into native code. Read it throug
 `openharmony_ability_plugin_resource::ResourceBridgePlugin::new()` in the `#[ability]` initializer and
 read it via the `ResourceExt` trait (`app.resource_manager()`); the ArkTS side must install
 `@ohos-rs/ability-plugin-resource` as a session-scoped `new LazyPlugin(() => new ResourcePlugin())`.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

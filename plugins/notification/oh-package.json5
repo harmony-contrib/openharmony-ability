@@ -1,10 +1,24 @@
 {
+  "author": {
+    "name": "richerfu",
+    "email": "southorange0929@foxmail.com",
+  },
   "dependencies": {
     "@ohos-rs/ability": "workspace:*",
   },
   "description": "System notification capability plugin for @ohos-rs/ability",
+  "keywords": [
+    "ohos-rs",
+    "NAPI",
+    "Rust",
+    "node-addon",
+    "openharmony",
+    "harmonynext",
+    "notification",
+  ],
   "license": "MIT OR Apache-2.0",
   "main": "index.ets",
   "name": "@ohos-rs/ability-plugin-notification",
+  "repository": "https://github.com/harmony-contrib/openharmony-ability.git",
   "version": "1.0.0-beta.3",
 }

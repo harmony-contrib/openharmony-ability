@@ -1,7 +1,9 @@
 # @ohos-rs/ability-plugin-resource
 
-`@ohos-rs/ability-plugin-resource` 是 HarmonyOS `resourceManager` 的 ArkTS wrapper 插件，与 Rust crate
-`openharmony-ability-plugin-resource` 成对使用。
+English | [简体中文](README.zh-CN.md)
+
+`@ohos-rs/ability-plugin-resource` is the ArkTS resource-manager wrapper paired with
+`openharmony-ability-plugin-resource`.
 
 ## Install
 
@@ -9,15 +11,15 @@
 ohpm install @ohos-rs/ability-plugin-resource
 ```
 
-## 职责
+## Responsibilities
 
-- 持有 `abilityContext.resourceManager` 平台对象；
-- 在 Ability-scoped `onInstall` 经 `context.invokeNativeSync("resource-manager-ready", ...)` 把对象
-  推送给 Rust facade；
-- 不执行任何资源读取逻辑 —— 所有读取由 Rust 侧通过 `ohos-resource-manager-binding` 直连
-  OpenHarmony C API 完成。
+- Own `abilityContext.resourceManager`.
+- Push it to Rust during Ability-scoped `onInstall` through
+  `context.invokeNativeSync("resource-manager-ready", ...)`.
+- Leave all reads to Rust, which calls the OpenHarmony C API through
+  `ohos-resource-manager-binding`.
 
-## 接入
+## Integration
 
 ```ts
 import { LazyPlugin } from "@ohos-rs/ability";
@@ -29,20 +31,24 @@ public bridgePlugins = [
 ];
 ```
 
-ArkTS wrapper 必须是 Host/session 级实例；`attachContext` 会拒绝跨 Host/session 复用。
-native resource manager 由匹配的 Rust `ResourceBridgePlugin` registry instance 持有，不共享 ArkTS
-plugin instance，也不使用进程级全局 pointer。
+Use a separate wrapper instance for each host/session. `attachContext` rejects reuse across
+hosts/sessions. The matching Rust `ResourceBridgePlugin` registry instance owns the native
+manager; do not share ArkTS instances or use a process-global pointer.
 
-## 契约
+## Contract
 
-| 项目 | 值 |
+| Field | Value |
 | --- | --- |
-| 插件 ID | `ohos.resource` |
-| 执行模式 | `async`（无出站 action，`invokeAsync` 一律抛错） |
-| requires | `["ability"]`（与 Rust `REQUIRED_CONTEXTS` 一致） |
-| 入站事件 | `resource-manager-ready`：request type `ohos.resource.ResourceManagerRef`，response type `ohos.resource.ResourceManagerReadyResponse` |
+| Plugin ID | `ohos.resource` |
+| Execution | `async` (no outbound actions; `invokeAsync` always throws) |
+| requires | `["ability"]`, matching Rust `REQUIRED_CONTEXTS` |
+| Inbound event | `resource-manager-ready`: `ohos.resource.ResourceManagerRef` → `ohos.resource.ResourceManagerReadyResponse` |
 
-## 时序
+## Timing
 
-推送点在 `onInstall`。此时入站事件 sink 和 Rust `AbilityCreated` 都已就绪，但不需要 WindowStage、
-UIContext 或 DefaultXComponent。
+The push occurs in `onInstall`, after the inbound event sink and Rust `AbilityCreated` are ready.
+It does not require WindowStage, UIContext or DefaultXComponent.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

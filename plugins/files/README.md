@@ -1,8 +1,8 @@
 # @ohos-rs/ability-plugin-files
 
-这是文件选择对话框能力的 ArkTS HAR，对应 Rust crate `openharmony-ability-plugin-files`。它在
-Ability context 上调用系统文件选择器（open / save / folder），通过结构化 `DialogOptions` 传参；
-filter 字符串语法只在 ArkTS 插件内部转换。
+English | [简体中文](README.zh-CN.md)
+
+This file-dialog HAR pairs with `openharmony-ability-plugin-files`. It invokes the system open/save/folder picker using the Ability context. `DialogOptions` stays structured; filter-string conversion happens only inside ArkTS.
 
 ## Install
 
@@ -10,13 +10,15 @@ filter 字符串语法只在 ArkTS 插件内部转换。
 ohpm install @ohos-rs/ability-plugin-files
 ```
 
-## 装配
+## Assembly
+
+Add the HAR to the application's `oh-package.json5`:
 
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "1.0.0-beta.2",
-    "@ohos-rs/ability-plugin-files": "1.0.0-beta.1"
+    "@ohos-rs/ability": "1.0.0-beta.3",
+    "@ohos-rs/ability-plugin-files": "1.0.0-beta.3"
   }
 }
 ```
@@ -30,29 +32,30 @@ export default class EntryAbility extends NativeAbility {
 }
 ```
 
-Rust 侧还需注册 `FilesBridgePlugin`，并通过 `FilesExt::show_file_dialog` 发起调用。使用示例见
-[Rust facade README](../../crates/plugin-files/README.md)。
+Register `FilesBridgePlugin` in Rust and call `FilesExt::show_file_dialog`. See the [Rust facade README](../../crates/plugin-files/README.md).
 
-## Plugin 契约
+## Plugin contract
 
-| 字段 | 值 |
+| Field | Value |
 | --- | --- |
 | `id` | `ohos.files` |
 | `execution` | `async` |
 | `requires` | `["ability"]` |
-| 支持 action | `file-dialog` |
+| Actions | `file-dialog` |
 | request → response | `ohos.files.DialogOptions` → `ohos.files.DialogResponse` |
 
-`DialogOptions` 支持 `dialogType`（open / save / folder）、`allowMany`、`defaultLocation` 与
-`filters`（`FileDialogFilter` 的 name/pattern 列表）。`DialogResponse` 返回
-`{ files: string[] }`；用户取消时为空数组。
+`DialogOptions` includes `dialogType` (open/save/folder), `allowMany`, `defaultLocation` and `filters` (name/pattern pairs). `DialogResponse` returns `{ files: string[] }`, empty on cancellation.
 
-## 行为
+## Behavior
 
-- `dialogType` 必须是合法的 open / save / folder 枚举值；请求 typeName 或字段不合法直接抛错。
-- folder 选择由系统 `DocumentViewPicker.select(FOLDER)` 判断是否支持，不按设备名称拦截，支持具备能力的 tablet / 2in1。系统拒绝时保留错误码、设备类型和 API 版本。
-- 系统对话框关闭后检查 `context.isActive()`；Ability 已销毁时 Promise 以错误结束。
-- request/response 是具名 N-API object，禁止 JSON transport。
+- `dialogType` must identify a supported open/save/folder mode. Invalid type names or fields throw.
+- The system `DocumentViewPicker.select(FOLDER)` determines folder support, without filtering device names. Capable tablets/2-in-1 devices can select folders. Errors retain device type, API version and platform error code.
+- After the picker closes, ArkTS checks `context.isActive()`; a destroyed Ability rejects the Promise.
+- Requests/responses are named N-API objects, without JSON transport.
 
-完整线程、生命周期与契约变更规则见
-[插件开发规范](../../docs/plugin-development-standard.md)。
+See the [plugin development standard](../../docs/plugin-development-standard.md) for threading,
+lifecycle and contract acceptance rules.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

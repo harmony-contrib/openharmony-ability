@@ -1,3 +1,19 @@
+# 1.0.0-beta.3
+
+- Add desktop/mobile window management, native Float-window pages, window attachments and
+  per-window focus, close, resize, input and redraw routing.
+- Add a shared process initializer for Rust and compatible C/SDL native modules; forward SDK
+  and distribution API versions, display information and window creation callbacks.
+- Add menu-bar hosting, decoration/layout updates and throttled window-rectangle delivery.
+- Add launch URI/Want delivery, continuation save/restore handling and warm-stage restore guards.
+- Add generic `registerDispatchHook` interception for optional plugins without importing plugin
+  packages into the core HAR.
+- Extend `DefaultXComponent` input/key handling and window render exports while preserving
+  session ownership and deterministic lifecycle cleanup.
+- Align the core HAR version to the workspace's unified `1.0.0-beta.3` release.
+
+---
+
 # 1.0.0-beta.2
 
 - **Breaking**: remove `EagerPlugin`; every ArkTS plugin instance is now scoped to one

@@ -1,23 +1,26 @@
 # openharmony-ability-plugin-app-control
 
-`openharmony-ability-plugin-app-control` 提供应用进程控制的 Rust facade。目前公开能力为以指定退出码
-结束进程。它与 ArkTS HAR `@ohos-rs/ability-plugin-app-control` 成对使用，并且是严格的主线程同步插件。
+English | [简体中文](README.zh-CN.md)
 
-## 契约
+`openharmony-ability-plugin-app-control` provides application control through a Rust facade.
+Its `terminate` operation exits with a supplied code. Use it with the
+`@ohos-rs/ability-plugin-app-control` HAR; it is a strictly synchronous main-thread plugin.
 
-| 项目 | 值 |
+## Contract
+
+| Field | Value |
 | --- | --- |
 | Rust crate | `openharmony-ability-plugin-app-control` |
 | ArkTS HAR | `@ohos-rs/ability-plugin-app-control` |
-| 插件 ID | `ohos.app-control` |
-| 执行模式 | 主线程同步：`MainThreadSyncBridge` / `invokeSync` |
-| 前置 context | `ability` |
+| Plugin ID | `ohos.app-control` |
+| Execution | `MainThreadSyncBridge` / `invokeSync` |
+| Required context | `ability` |
 | action | `terminate` |
 | request → response | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` |
 
-## 接入
+## Integration
 
-Rust facade 和 ArkTS factory 都必须在应用启动期装配：
+Register the Rust facade and ArkTS factory during application startup:
 
 ```rust
 use openharmony_ability::OpenHarmonyApp;
@@ -40,13 +43,13 @@ export default class EntryAbility extends NativeAbility {
 }
 ```
 
-同时在应用 `oh-package.json5` 添加 `@ohos-rs/ability-plugin-app-control`。HAR 的具体依赖和 plugin 说明见
-[ArkTS README](../../plugins/app-control/README.md)。
+Add `@ohos-rs/ability-plugin-app-control` to the application's `oh-package.json5`.
+See the [ArkTS README](../../plugins/app-control/README.md) for HAR dependencies and setup.
 
-## Rust 使用方式
+## Rust usage
 
-`AppControlExt::terminate` 只能在导出的 N-API callback 中调用，并且必须传入该 callback 当前持有的
-`Env`：
+Call `AppControlExt::terminate` only from an exported N-API callback, passing the callback's
+current `Env`:
 
 ```rust
 use napi_ohos::{Env, Result};
@@ -58,22 +61,28 @@ pub fn terminate_application(env: Env, code: i32) -> Result<()> {
 }
 ```
 
-`current_app()` 代表应用在 `#[ability]` 初始化时保存并按需读取的 `OpenHarmonyApp`。示例重点是 `Env`
-只能来自当前 N-API callback，不能缓存、clone 或跨线程转移。
+`current_app()` represents the application's saved `OpenHarmonyApp` from `#[ability]`
+initialization. Obtain `Env` from the current N-API callback; do not cache, clone or move it
+between threads.
 
-## 线程与生命周期限制
+## Threading and lifecycle constraints
 
-- 该插件不是 async API：禁止在 Rust worker、`async` future、`spawn` 任务或 `block_on` 中调用。
-- `BridgeMainThread` 会校验活跃 N-API environment；bridge transport 在 native module session 初始化时
-  建立，不依赖 `DefaultXComponent`。若 Ability context 未就绪、session 已关闭或 `Env` 不匹配，调用会
-  立即报错。
-- ArkTS 调用 `process.ProcessManager.exit(code)`。一旦系统实际结束进程，后续业务逻辑不应依赖继续执行。
-- `accepted = false` 会被 Rust facade 转换为错误，不能静默忽略。
+- This is a sync API. Do not call it from a Rust worker, async future, spawned task or `block_on`.
+- `BridgeMainThread` validates the active N-API environment. Session initialization opens the
+  transport independently of `DefaultXComponent`. An unavailable Ability, closed session or
+  mismatched `Env` fails immediately.
+- ArkTS calls `process.ProcessManager.exit(code)`. Do not rely on code continuing after the
+  system exits the process.
+- The Rust facade converts `accepted = false` into an error.
 
-## 开发约束
+## Development constraints
 
-`terminate` 的 request/response 都是具名 N-API object，不允许 JSON 或 Promise 包装。若未来新增控制能力，
-必须仍使用 `MainThreadSyncBridge`（仅当平台要求立即决定）或单独定义异步插件 action；不能把同步 API
-伪装成异步后再阻塞等待。
+The `terminate` request/response are named N-API objects, without JSON or Promise wrappers.
+Keep immediately deciding operations in `MainThreadSyncBridge`; define separate async actions
+for async capabilities rather than blocking on them.
 
-完整规范见 [插件开发规范](../../docs/plugin-development-standard.md)。
+See the [plugin development standard](../../docs/plugin-development-standard.md).
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

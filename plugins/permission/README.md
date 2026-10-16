@@ -1,8 +1,8 @@
 # @ohos-rs/ability-plugin-permission
 
-这是 `openharmony-ability-plugin-permission` 的 ArkTS 实现包。它在 `NativeAbility` 所属的
-Ability context 中调用 `abilityAccessCtrl.requestPermissionsFromUser`；业务 Rust 代码通过配对的
-Rust facade 发起请求，不直接调用本 HAR 的内部 action。
+English | [简体中文](README.zh-CN.md)
+
+This is the ArkTS implementation of `openharmony-ability-plugin-permission`. It invokes `abilityAccessCtrl.requestPermissionsFromUser` on the owning Ability context. Application code uses the Rust facade rather than calling internal HAR actions.
 
 ## Install
 
@@ -10,20 +10,18 @@ Rust facade 发起请求，不直接调用本 HAR 的内部 action。
 ohpm install @ohos-rs/ability-plugin-permission
 ```
 
-## 装配
+## Assembly
 
-在应用 `oh-package.json5` 中添加该 HAR：
+Add the HAR to the application's `oh-package.json5`:
 
 ```json5
 {
   "dependencies": {
-    "@ohos-rs/ability": "1.0.0-beta.2",
-    "@ohos-rs/ability-plugin-permission": "1.0.0-beta.1"
+    "@ohos-rs/ability": "1.0.0-beta.3",
+    "@ohos-rs/ability-plugin-permission": "1.0.0-beta.3"
   }
 }
 ```
-
-在入口 Ability 通过 `LazyPlugin` 显式注册新 plugin 实例，并继续调用 `NativeAbility` 的生命周期实现：
 
 ```ts
 import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
@@ -34,32 +32,36 @@ export default class EntryAbility extends NativeAbility {
 }
 ```
 
-Rust 侧也必须在 `#[ability]` 初始化器注册 `PermissionBridgePlugin`。两端装配方式见
-[Rust facade README](../../crates/plugin-permission/README.md)。
+Register `PermissionBridgePlugin` in the Rust `#[ability]` initializer. Explicitly install a fresh ArkTS instance and preserve the `NativeAbility` lifecycle call chain. See the [Rust facade README](../../crates/plugin-permission/README.md).
 
-## Plugin 契约
+## Plugin contract
 
-| 字段 | 值 |
+| Field | Value |
 | --- | --- |
 | `id` | `ohos.permission` |
 | `execution` | `async` |
 | `requires` | `["ability"]` |
-| 支持 action | `request` |
+| Actions | `request` |
 | request → response | `ohos.permission.PermissionRequest` → `ohos.permission.PermissionResponse` |
 
-`PermissionPlugin` 只在 Ability context 可用后激活。它校验 `payload.typeName`、非空权限数组和每个
-权限名称，再调用系统授权 API；不接受 JSON payload 或未声明的 action。
+`PermissionPlugin` activates only once its Ability context is available. It validates `payload.typeName`, a non-empty permission array and individual names before invoking the platform; undeclared actions and JSON payloads are rejected.
 
-## 行为
+## Behavior
 
-- `permissions` 以输入顺序传入，`codes` 以相同顺序返回。
-- 系统调用失败、缺失结果或未授权的回退码为 `-1`；这让 Rust facade 能保持每项权限一一对应。
-- 请求完成后会检查 `context.isActive()`。若 Ability 已销毁，Promise 以错误结束而不是返回过期结果。
-- 调用方仍必须在应用 manifest 中声明权限；运行时插件不能替代该配置。
+- `permissions` and returned `codes` preserve the same input order.
+- Failed system calls, missing results and fallback unauthorized entries use `-1`, preserving one result per permission.
+- After completion, `context.isActive()` rejects calls for a destroyed Ability instead of returning stale results.
+- Declare permissions in the application manifest; runtime requests do not replace this configuration.
 
-## 维护要求
+## Maintenance
 
-修改 action、字段或 typeName 时，必须同步修改 Rust crate、ArkTS 实现、测试和 demo；不兼容契约
-使用新的 action/typeName。请求/响应使用真实 N-API object，不得引入 `JSON.stringify` / `JSON.parse`。
+Update the Rust crate, ArkTS implementation, tests and demo together when changing actions,
+fields or type names. Use new actions/type names for incompatible contracts.
+Requests/responses use real N-API objects; do not introduce `JSON.stringify` or `JSON.parse`.
 
-完整线程、生命周期与验收规则见 [插件开发规范](../../docs/plugin-development-standard.md)。
+See the [plugin development standard](../../docs/plugin-development-standard.md) for threading,
+lifecycle and contract acceptance rules.
+
+## License
+
+Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
