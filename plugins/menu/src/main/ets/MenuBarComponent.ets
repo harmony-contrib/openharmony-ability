@@ -2,7 +2,7 @@ import { MenuItemData } from "./menu_types";
 import { AcceleratorMatcher, unregisterAcceleratorMatcher } from "./accelerator_matcher";
 import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
-import { SymbolGlyphModifier } from "@kit.ArkUI";
+import { FrameNode, SymbolGlyphModifier } from "@kit.ArkUI";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 
 // --- Per-window click handler registry (MW-1) ---
@@ -123,6 +123,8 @@ export struct MenuBarComponent {
   private iconPixelMaps: Map<string, image.PixelMap> = new Map();
   private popupIconIds: Set<string> = new Set();
   private menubarIconIds: Set<string> = new Set();
+  private menubarItemAreas: Map<string, Area> = new Map();
+  private dropdownMouseNodes: Map<string, FrameNode> = new Map();
 
   // --- Watch handlers ---
 
@@ -420,10 +422,10 @@ export struct MenuBarComponent {
                 ? "#EBEBEB"
                 : "#F5F5F5",
           )
+          .onAreaChange((_oldArea: Area, area: Area) => {
+            this.menubarItemAreas.set(itemId, area);
+          })
           .onClick(() => {
-            // 诊断埋点#1：menubar Row 点击。判读：
-            //  - 若点击后立即看到 onWillDisappear 且无第二次 onClick → 根因A（bindMenu 竞争/子窗口失焦）
-            //  - 若 onWillDisappear 在无 onClick 的情况下触发 → 根因C（子窗口 attach/focus 时序）
             hilog.info(
               0x1999,
               "MenuBar",
@@ -432,20 +434,32 @@ export struct MenuBarComponent {
               this.activeDropdownShown,
               this.activeDropdownId,
             );
+            if (this.activeDropdownShown && this.activeDropdownId === itemId) {
+              this.activeDropdownShown = false;
+              this.activeDropdownId = "";
+              return;
+            }
             menuWillOpenHandler?.(this.windowId);
             this.activeDropdownId = itemId;
             this.activeDropdownShown = true;
           })
           .onHover((isHover: boolean) => {
             this.hoveredItemId = isHover ? itemId : "";
+            if (isHover) {
+              this.switchMenubarOnHover(itemId);
+            }
           })
           .bindMenu(
             this.activeDropdownShown && this.activeDropdownId === itemId,
             this.MenubarDropdownContent(itemId),
             {
-              showInSubWindow: true,
-              onWillDisappear: () => {
-                // 诊断埋点#2：dropdown 消失。判读：配合埋点#1 的时序判断根因 A/B/C
+              // Keep menubar dropdowns in their owning window so opening them
+              // does not blur the native content or race with focus restoration.
+              showInSubWindow: false,
+              aboutToAppear: () => this.observeDropdownMouse(itemId),
+              onAppear: () => this.observeDropdownMouse(itemId),
+              aboutToDisappear: () => {
+                this.releaseDropdownMouse(itemId);
                 hilog.info(
                   0x1999,
                   "MenuBar",
@@ -469,6 +483,72 @@ export struct MenuBarComponent {
     .alignItems(VerticalAlign.Center);
   }
 
+  private switchMenubarOnHover(itemId: string): void {
+    const item = this.getMenubarItem(itemId);
+    if (
+      this.activeDropdownShown &&
+      this.activeDropdownId !== itemId &&
+      item &&
+      item.enabled !== false
+    ) {
+      menuWillOpenHandler?.(this.windowId);
+      this.activeDropdownId = itemId;
+    }
+  }
+
+  private observeDropdownMouse(itemId: string): void {
+    if (
+      !this.activeDropdownShown ||
+      this.activeDropdownId !== itemId ||
+      this.dropdownMouseNodes.has(itemId)
+    ) {
+      return;
+    }
+    // The in-window menu wrapper covers the titles and intercepts their hover
+    // events. Listen on this dropdown's own wrapper using the public node API;
+    // its normal outside-click and keyboard dismissal remain in control.
+    let node = this.getUIContext().getFrameNodeById(this.dropdownNodeId(itemId));
+    while (node && node.getNodeType() !== "MenuWrapper") {
+      node = node.getParent();
+    }
+    if (node) {
+      node.commonEvent.setOnMouse((event: MouseEvent) => this.handleDropdownMouse(event));
+      this.dropdownMouseNodes.set(itemId, node);
+    }
+  }
+
+  private releaseDropdownMouse(itemId: string): void {
+    try {
+      this.dropdownMouseNodes.get(itemId)?.commonEvent.setOnMouse(undefined);
+    } catch (error) {
+      hilog.warn(0x1999, "MenuBar", "release dropdown mouse failed: %{public}s", String(error));
+    }
+    this.dropdownMouseNodes.delete(itemId);
+  }
+
+  private dropdownNodeId(itemId: string): string {
+    return `ability-menubar-${this.windowId}-${itemId}`;
+  }
+
+  private handleDropdownMouse(event: MouseEvent): void {
+    if (event.action !== MouseAction.Move) {
+      return;
+    }
+    for (const item of this.menubarItems) {
+      const area = this.menubarItemAreas.get(item.id);
+      if (
+        area &&
+        event.windowX >= Number(area.globalPosition.x) &&
+        event.windowX < Number(area.globalPosition.x) + Number(area.width) &&
+        event.windowY >= Number(area.globalPosition.y) &&
+        event.windowY < Number(area.globalPosition.y) + Number(area.height)
+      ) {
+        this.switchMenubarOnHover(item.id);
+        return;
+      }
+    }
+  }
+
   @Builder
   MenubarDropdownContent(itemId: string) {
     Menu() {
@@ -477,7 +557,7 @@ export struct MenuBarComponent {
         items: this.getMenubarItem(itemId)?.submenuItems ?? [],
         revision: this.menubarRevision,
       })
-    };
+    }.id(this.dropdownNodeId(itemId));
   }
 
   private getMenubarItem(itemId: string): MenuItemData | null {
@@ -529,6 +609,10 @@ export struct MenuBarComponent {
   }
 
   aboutToDisappear(): void {
+    for (const itemId of this.dropdownMouseNodes.keys()) {
+      this.releaseDropdownMouse(itemId);
+    }
+    this.menubarItemAreas.clear();
     // Unregister callback and handlers for this window
     const windowKey = windowKeyForId(this.windowId);
     unregisterMenuDataCallback(windowKey);
