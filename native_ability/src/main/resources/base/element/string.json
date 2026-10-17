@@ -1,0 +1,8 @@
+{
+  "string": [
+    { "name": "window_minimize", "value": "Minimize" },
+    { "name": "window_maximize", "value": "Maximize" },
+    { "name": "window_restore", "value": "Restore" },
+    { "name": "window_close", "value": "Close" }
+  ]
+}

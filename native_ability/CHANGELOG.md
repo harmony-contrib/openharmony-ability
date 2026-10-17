@@ -1,3 +1,13 @@
+# Unreleased
+
+- Align Float-window title bars with native window dimensions, control icons and system theme
+  colors, including focus, hover, pressed and disabled states. Hide the title with decorations
+  disabled and disable custom resize handles while maximized.
+- Keep the Float-window restore icon and action in sync when apps targeting API 12/13 receive
+  `FULL_SCREEN` for maximized windows.
+
+---
+
 # 1.0.0-beta.3
 
 - Add desktop/mobile window management, native Float-window pages, window attachments and
