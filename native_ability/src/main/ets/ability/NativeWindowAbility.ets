@@ -38,10 +38,15 @@ export class NativeWindowAbility extends UIAbility {
   protected async restoreApplication(want: Want): Promise<void> {
     try {
       await this.context.startAbility({
-        ...want,
         bundleName: this.context.abilityInfo.bundleName,
         moduleName: this.context.abilityInfo.moduleName,
         abilityName: this.context.currentHapModuleInfo.mainElementName,
+        uri: want.uri,
+        type: want.type,
+        flags: want.flags,
+        action: want.action,
+        parameters: want.parameters,
+        entities: want.entities,
       });
     } finally {
       await this.context.terminateSelf();

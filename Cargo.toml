@@ -46,7 +46,7 @@ ohos-arkui-binding = { version = "=0.4.2" }
 ohos-xcomponent-sys = { version = "0.1.5" }
 ohos-xcomponent-binding = { version = "=0.5.2", features = ["multi_mode", "accessibility", "api-15"] }
 ohos-udmf-binding = { version = "=0.0.7", features = ["api-13"] }
-ohos-ime-binding = { version = "0.3.1", git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "7fc3a33232c16652a84a4cefbb7d5e009d3ec6e2" }
+ohos-ime-binding = { version = "0.3.1", git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "d47a3d9f0661dbe73720240174c1f37eb8fc7858" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
 ohos-resource-manager-binding = { version = "0.3" }
