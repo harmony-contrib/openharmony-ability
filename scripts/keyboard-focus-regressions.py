@@ -117,7 +117,7 @@ impl Scheduler {
 }
 
 mod focus {
-    include!(__KEYBOARD_FOCUS_SOURCE__);
+__KEYBOARD_FOCUS_SOURCE__
 
     #[cfg(test)]
     mod tests {
@@ -487,7 +487,7 @@ def run():
         "record_window_focus", "window_has_focus",
     ])
     source = HOST_TEMPLATE.replace("__APPLICATION_METHODS__", methods).replace(
-        "__KEYBOARD_FOCUS_SOURCE__", json.dumps(str(keyboard_source), ensure_ascii=False))
+        "__KEYBOARD_FOCUS_SOURCE__", keyboard_source.read_text())
     (output / "keyboard_focus.rs").write_text(source)
     (output / "Cargo.toml").write_text(
         '[package]\nname="keyboard-focus-regressions"\nversion="0.1.0"\nedition="2021"\n'
