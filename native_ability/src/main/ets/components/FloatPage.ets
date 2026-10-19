@@ -12,11 +12,6 @@ import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
 
 export const RouteName = "FloatWindow";
 
-interface Position {
-  x: number;
-  y: number;
-}
-
 @Entry({ routeName: RouteName, storage: LocalStorage.getShared() })
 @Component
 struct FloatPage {
@@ -38,7 +33,6 @@ struct FloatPage {
 
   // Window control
   private windowClass: arkWindow.Window | null = null;
-  @State @Watch("moveAndSetWindow") windowPosition: Position = { x: 100, y: 100 };
   @State dpiScale: number = 1;
   private cursorController: CursorController | null = null;
 
@@ -132,10 +126,6 @@ struct FloatPage {
     }
   }
 
-  moveAndSetWindow() {
-    this.windowClass?.moveWindowTo(this.windowPosition.x, this.windowPosition.y);
-  }
-
   private startMoveFromTitle(event: TouchEvent): void {
     if (event.type !== TouchType.Down || this.isMaximized || deviceInfo.sdkApiVersion < 14) {
       return;
@@ -171,7 +161,6 @@ struct FloatPage {
         if (this.windowClass) {
           try {
             const rect = this.windowClass.getGlobalRect();
-            this.windowPosition = { x: rect.left, y: rect.top };
             if (rect.width > 0) this.currentWidth = rect.width;
             if (rect.height > 0) this.currentHeight = rect.height;
             hilog.info(
@@ -289,6 +278,9 @@ struct FloatPage {
       );
       return;
     }
+    if (WindowManager.getInstance().requestWindowClose(this.windowId)) {
+      return;
+    }
     this.closeNotified = true;
     try {
       // Notify Rust event loop before destroying the OHOS window,
@@ -337,8 +329,7 @@ struct FloatPage {
       Column() {
         // The floating window draws its own title controls. Keep them above the
         // menubar, matching the main window's system title bar and menubar order.
-        // decorations=false on desktop retains a transparent drag bar.
-        if (this.windowClass && (this.decorations || this.isDesktop)) {
+        if (this.windowClass && this.decorations) {
           WindowTitleBar({
             title: this.title,
             decorations: this.decorations,

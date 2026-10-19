@@ -39,6 +39,10 @@ export class NativeModuleLoader {
     return resolved;
   }
 
+  static getLoaded(moduleName: string): Module | undefined {
+    return NativeModuleLoader.modules[moduleName.trim()];
+  }
+
   static async load(moduleName: string, mode: "async" | "sync" = "async"): Promise<Module> {
     const resolvedModuleName = NativeModuleLoader.resolveModuleNames(moduleName)[0] ?? "";
     const cached = NativeModuleLoader.modules[resolvedModuleName];

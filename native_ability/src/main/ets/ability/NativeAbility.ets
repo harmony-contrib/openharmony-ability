@@ -46,6 +46,7 @@ export class NativeAbility extends UIAbility {
   public moduleName: string | string[] = "";
   public defaultPage: boolean = true;
   public loadMode: "async" | "sync" = "async";
+  public independentWindowAbility?: string;
   // Subclasses (EntryAbility) override this with the ArkTS BridgePlugin factories
   // matching the Rust-declared plugin ids. BridgeHostRegistry.prepare installs them
   // into every module host for this Ability session.
@@ -172,6 +173,7 @@ export class NativeAbility extends UIAbility {
     // module loading itself is re-done transactionally below via NativeModuleLoader.
     await ProcessInitializer.initialize(context, this.moduleName, this.loadMode, want);
     this.assertInitializationActive(generation);
+    WindowManager.getInstance().setIndependentWindowAbility(this.independentWindowAbility);
 
     const previousSessionId = this.bridgeSessionId;
     if (previousSessionId) {
@@ -849,6 +851,15 @@ export class NativeAbility extends UIAbility {
         payload: new BridgeMemoryLevelLifecyclePayload(level),
       });
     });
+  }
+
+  onPrepareToTerminate(): boolean {
+    if (!this.acceptingLifecycle || !this.windowStageActive) {
+      return false;
+    }
+    // System shortcuts and dock close requests bypass windowWillClose. Defer
+    // termination to the same native close handler so the app can prompt first.
+    return WindowManager.getInstance().requestWindowClose(MAIN_WINDOW_ID);
   }
 
   onDestroy(): Promise<void> {

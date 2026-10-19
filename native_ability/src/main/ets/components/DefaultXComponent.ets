@@ -1,4 +1,5 @@
 import { NodeContent } from "@kit.ArkUI";
+import window from "@ohos.window";
 import { FrameNode, NodeController } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import { hilog } from "@kit.PerformanceAnalysisKit";
@@ -76,12 +77,14 @@ export struct DefaultXComponent {
   @State private blurRadius: number = 0;
   private appearanceGeneration: number = 0;
   private attachment?: ComponentAttachment;
-  private releasePromise: Promise<void> = Promise.resolve();
+  private releasePromise?: Promise<void>;
   private releaseSurfaceBlur?: () => void;
 
   async aboutToAppear(): Promise<void> {
     const generation = ++this.appearanceGeneration;
-    await this.releasePromise;
+    if (this.releasePromise !== undefined) {
+      await this.releasePromise;
+    }
     if (generation !== this.appearanceGeneration) {
       return;
     }
@@ -110,7 +113,11 @@ export struct DefaultXComponent {
     }
 
     if (moduleName && this.windowId > 0) {
-      const nativeModule = await NativeModuleLoader.load(moduleName, this.loadMode);
+      // Populate the page's ContentSlot before yielding when the module is ready.
+      // First-time loading and pending teardown still need to finish first.
+      const nativeModule =
+        NativeModuleLoader.getLoaded(moduleName) ??
+        (await NativeModuleLoader.load(moduleName, this.loadMode));
       if (generation !== this.appearanceGeneration) {
         return;
       }
@@ -118,7 +125,10 @@ export struct DefaultXComponent {
         throw new Error(`Native module '${moduleName}' does not support sub-window rendering`);
       }
       const renderOwner = `${this.bridgeSessionId}:${moduleName}:${nextRenderOwnerId++}`;
-      nativeModule.renderWindow(this.rootSlot, renderOwner, this.windowId);
+      const nativeWindowId = window
+        .findWindow(this.getUIContext().getWindowName())
+        .getWindowProperties().id;
+      nativeModule.renderWindow(this.rootSlot, renderOwner, this.windowId, nativeWindowId);
       if (generation !== this.appearanceGeneration) {
         nativeModule.disposeRender(renderOwner);
         return;
@@ -138,7 +148,9 @@ export struct DefaultXComponent {
       throw new Error("DefaultXComponent.moduleName is required");
     }
 
-    const nativeModule = await NativeModuleLoader.load(moduleName, this.loadMode);
+    const nativeModule =
+      NativeModuleLoader.getLoaded(moduleName) ??
+      (await NativeModuleLoader.load(moduleName, this.loadMode));
     if (generation !== this.appearanceGeneration) {
       return;
     }
@@ -165,7 +177,10 @@ export struct DefaultXComponent {
     // NativeAbility owns the module/session sinks from ability-create onward. The component only
     // supplies the render surface and UI root; ability-only plugins never depend on appearance.
     const renderOwner = `${sessionId}:${moduleName}:${nextRenderOwnerId++}`;
-    nativeModule.render(this.rootSlot, renderOwner);
+    const nativeWindowId = window
+      .findWindow(this.getUIContext().getWindowName())
+      .getWindowProperties().id;
+    nativeModule.render(this.rootSlot, renderOwner, nativeWindowId);
 
     if (generation !== this.appearanceGeneration) {
       nativeModule.disposeRender(renderOwner);
@@ -224,7 +239,7 @@ export struct DefaultXComponent {
 
   private releaseAttachment(expected?: ComponentAttachment): Promise<void> {
     if (expected !== undefined && this.attachment !== expected) {
-      return this.releasePromise;
+      return this.releasePromise ?? Promise.resolve();
     }
     this.releaseSurfaceBlur?.();
     this.releaseSurfaceBlur = undefined;
@@ -269,6 +284,23 @@ export struct DefaultXComponent {
     );
   }
 
+  private dispatchTouch(event: TouchEvent): void {
+    const attachment = this.attachment;
+    if (attachment === undefined) {
+      return;
+    }
+    try {
+      const componentWindow = window.findWindow(this.getUIContext().getWindowName());
+      BridgeHostRegistry.dispatchComponentTouch(attachment.sessionId, attachment.moduleName, {
+        windowId: this.windowId,
+        window: componentWindow,
+        touch: event,
+      });
+    } catch (error) {
+      hilog.error(0xa01999, "DefaultXComponent", "Input hook failed: %{public}s", String(error));
+    }
+  }
+
   build() {
     Stack() {
       // Blur the pixels behind this window before the transparent GPUI surface is composed.
@@ -295,7 +327,9 @@ export struct DefaultXComponent {
       .height("100%")
       .hitTestBehavior(HitTestMode.None)
       .backgroundColor(Color.Transparent)
-    }.backgroundColor(Color.Transparent);
+    }
+    .backgroundColor(Color.Transparent)
+    .onTouch((event: TouchEvent) => this.dispatchTouch(event));
   }
 }
 

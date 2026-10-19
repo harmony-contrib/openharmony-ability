@@ -10,9 +10,9 @@ default = ["log", "window"]
 log = ["dep:log"]
 window = ["dep:ohos-window-manager-binding"]
 # ArkUI keyboard snapshots and consumption are opt-in; raw XComponent keys remain available.
-keyboard = ["ohos-arkui-binding/api-14"]
+keyboard = ["ohos-arkui-binding/api-14", "dep:libloading"]
 # API-18 mouse cancellation is opt-in; basic XComponent mouse input remains available.
-mouse = ["ohos-xcomponent-binding/api-18"]
+mouse = ["ohos-xcomponent-binding/api-18", "ohos-arkui-binding/api-15"]
 stylus = ["ohos-arkui-binding/api-17"]
 # Native file drag/drop is opt-in; ordinary keyboard/pointer input needs no UDMF or preview images.
 drag = ["dep:ohos-udmf-binding", "ohos-arkui-binding/udmf", "ohos-arkui-binding/image"]
@@ -27,6 +27,7 @@ tokio = { workspace = true }
 png = { workspace = true }
 
 log = { version = "0.4", optional = true }
+libloading = { version = "0.8", optional = true }
 
 # for napi binding
 napi-ohos = { workspace = true, features = ["napi8"] }
@@ -35,6 +36,7 @@ napi-derive-ohos = { workspace = true }
 # for xcomponent native render
 ohos-arkui-binding = { workspace = true, features = ["napi"] }
 ohos-xcomponent-binding = { workspace = true }
+ohos-xcomponent-sys = { workspace = true }
 ohos-udmf-binding = { workspace = true, optional = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }

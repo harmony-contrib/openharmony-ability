@@ -1,278 +1,406 @@
-use napi_derive_ohos::napi;
-use napi_ohos::{
-    bindgen_prelude::Function, threadsafe_function::ThreadsafeFunction, Env, Result, Status,
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Mutex},
 };
-use ohos_ime_binding::KeyboardStatus;
 
+use napi_ohos::{
+    bindgen_prelude::Function,
+    threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode::NonBlocking},
+    Env, Result, Status,
+};
+
+#[cfg(feature = "keyboard")]
+use crate::KeyboardInputDelivery;
 use crate::{Event, OpenHarmonyApp};
+use ohos_ime_binding::{AttachOptions, IME};
 
-use super::{ImeEvent, InputEvent, TextInputEventData};
+use super::{ImeEvent, InputEvent};
 
-type ImeCallback = (
-    ThreadsafeFunction<String, (), String, Status, false>,
-    ThreadsafeFunction<u32, (), u32, Status, false>,
-    ThreadsafeFunction<i32, (), i32, Status, false>,
-    ThreadsafeFunction<i32, (), i32, Status, false>,
-    ThreadsafeFunction<PreviewTextEventData, (), PreviewTextEventData, Status, false>,
-    ThreadsafeFunction<bool, (), bool, Status, false>,
-    ThreadsafeFunction<i32, (), i32, Status, false>,
-    ThreadsafeFunction<i32, (), i32, Status, false>,
-    ThreadsafeFunction<SelectionEventData, (), SelectionEventData, Status, false>,
-    ThreadsafeFunction<i32, (), i32, Status, false>,
-);
-
-#[napi(object)]
-pub struct SelectionEventData {
-    pub start: i32,
-    pub end: i32,
+#[derive(Default)]
+pub(crate) struct ImeInputQueue {
+    state: Mutex<ImeInputState>,
 }
 
-#[napi(object)]
-#[derive(Clone)]
-pub struct PreviewTextEventData {
-    pub text: String,
-    pub start: i32,
-    pub end: i32,
+#[derive(Default)]
+struct ImeInputState {
+    events: VecDeque<(String, ImeEvent)>,
+    surfaces: HashMap<String, Arc<()>>,
 }
 
-fn dispatch_ime_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
-    if let Some(ref mut handler) = *app.event_loop.borrow_mut() {
-        match app.render_window_id(owner) {
-            Some(0) => handler(Event::Input(event)),
-            Some(window_id) => handler(Event::SubWindowInput { window_id, event }),
-            None => {}
+impl ImeInputQueue {
+    fn activate(&self, owner: &str) -> Option<Arc<()>> {
+        match self.state.lock() {
+            Ok(mut state) => {
+                let surface = Arc::new(());
+                state.events.retain(|(event_owner, _)| event_owner != owner);
+                state.surfaces.insert(owner.to_owned(), surface.clone());
+                Some(surface)
+            }
+            Err(error) => {
+                crate::warn!("Cannot activate native IME input: {error}");
+                None
+            }
+        }
+    }
+
+    fn push(&self, owner: &str, surface: &Arc<()>, event: ImeEvent) -> bool {
+        match self.state.lock() {
+            Ok(mut state) => {
+                if !state
+                    .surfaces
+                    .get(owner)
+                    .is_some_and(|active| Arc::ptr_eq(active, surface))
+                {
+                    return false;
+                }
+                state.events.push_back((owner.to_owned(), event));
+                true
+            }
+            Err(error) => {
+                crate::warn!("Cannot queue native IME input: {error}");
+                false
+            }
+        }
+    }
+
+    fn pop(&self) -> Option<(String, ImeEvent)> {
+        match self.state.lock() {
+            Ok(mut state) => state.events.pop_front(),
+            Err(error) => {
+                crate::warn!("Cannot drain native IME input: {error}");
+                None
+            }
+        }
+    }
+
+    pub(crate) fn discard(&self, owner: &str) {
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.surfaces.remove(owner);
+                state.events.retain(|(event_owner, _)| event_owner != owner);
+            }
+            Err(error) => crate::warn!("Cannot discard native IME input: {error}"),
         }
     }
 }
 
-fn numeric_ime_callback(
-    env: &Env,
-    app: OpenHarmonyApp,
+#[derive(Clone)]
+pub(crate) struct ImeCallbackSource {
+    queue: Arc<ImeInputQueue>,
     owner: String,
-    name: &str,
-    event: fn(i32) -> ImeEvent,
-) -> Result<ThreadsafeFunction<i32, (), i32, Status, false>> {
-    let callback: Function<i32, ()> = env.create_function_from_closure(name, move |ctx| {
-        if app.is_render_surface_active(&owner) {
-            if let Ok(value) = ctx.first_arg::<i32>() {
-                dispatch_ime_input(&app, &owner, InputEvent::Ime(event(value)));
-            }
-        }
-        Ok(())
-    })?;
-    callback
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()
+    native_window_id: i32,
+    consume_key_events: bool,
+    wake: Arc<ThreadsafeFunction<bool, (), bool, Status, false>>,
 }
 
-pub fn ime_ts_fn(env: &Env, app: OpenHarmonyApp, render_owner: String) -> Result<ImeCallback> {
-    let extend_action = numeric_ime_callback(
-        env,
-        app.clone(),
-        render_owner.clone(),
-        "ime_extend_action_callback",
-        |value| ImeEvent::ExtendActionEvent(ohos_ime_binding::Action::from(value as u32)),
-    )?;
-    let selection_app = app.clone();
-    let selection_owner = render_owner.clone();
-    let selection: Function<SelectionEventData, ()> =
-        env.create_function_from_closure("ime_selection_callback", move |ctx| {
-            if selection_app.is_render_surface_active(&selection_owner) {
-                if let Ok(value) = ctx.first_arg::<SelectionEventData>() {
-                    dispatch_ime_input(
-                        &selection_app,
-                        &selection_owner,
-                        InputEvent::Ime(ImeEvent::SelectionEvent {
-                            start: value.start,
-                            end: value.end,
-                        }),
-                    );
+impl ImeCallbackSource {
+    pub(crate) fn create_ime(&self) -> Result<IME> {
+        let ime_callback = self.activate()?;
+
+        // Reconnecting a hardware editor must not reopen a keyboard the user
+        // dismissed. Explicit show requests still call try_show_keyboard().
+        let ime = IME::new_for_window(AttachOptions::new(false), self.native_window_id);
+        if self.consume_key_events {
+            // These clients handle hardware characters and shortcuts themselves;
+            // the IME still owns composition and candidate selection.
+            ime.set_consume_key_events(true);
+        }
+
+        {
+            let ime_callback = ime_callback.clone();
+            ime.insert_text(move |text| {
+                ime_callback.send(ImeEvent::TextInputEvent(crate::TextInputEventData { text }));
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_status_change(move |status| {
+                ime_callback.send(ImeEvent::ImeStatusEvent(status));
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_backspace(move |length| {
+                ime_callback.send(ImeEvent::BackspaceEvent(length));
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_delete_forward(move |length| {
+                ime_callback.send(ImeEvent::DeleteForwardEvent(length));
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_move_cursor(move |direction| {
+                ime_callback.send(ImeEvent::MoveCursorEvent(direction));
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_set_selection(move |selection| {
+                ime_callback.send(ImeEvent::SelectionEvent {
+                    start: selection.start,
+                    end: selection.end,
+                });
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_extend_action(move |action| {
+                ime_callback.send(ImeEvent::ExtendActionEvent(action));
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_enter(move |key| {
+                ime_callback.send(ImeEvent::EnterEvent(u32::from(key) as i32));
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_preview(move |text, start, end| {
+                ime_callback.send(ImeEvent::PreviewTextEvent { text, start, end });
+            });
+        }
+        {
+            let ime_callback = ime_callback.clone();
+            ime.on_finish_preview(move || {
+                ime_callback.send(ImeEvent::FinishPreviewEvent);
+            });
+        }
+
+        Ok(ime)
+    }
+
+    pub(crate) fn activate(&self) -> Result<ImeCallback> {
+        let surface = self
+            .queue
+            .activate(&self.owner)
+            .ok_or_else(|| napi_ohos::Error::from_reason("Cannot activate native IME input"))?;
+        Ok(ImeCallback {
+            source: self.clone(),
+            surface,
+        })
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ImeCallback {
+    source: ImeCallbackSource,
+    surface: Arc<()>,
+}
+
+impl ImeCallback {
+    pub(crate) fn send(&self, event: ImeEvent) {
+        // An IPC callback can already hold its closure when native teardown
+        // unregisters it. A recreated surface or reassigned editor must not receive that late edit.
+        if !self
+            .source
+            .queue
+            .push(&self.source.owner, &self.surface, event)
+        {
+            return;
+        }
+        let status = self.source.wake.call(true, NonBlocking);
+        if status != Status::Ok {
+            crate::warn!("Cannot schedule native IME input: {status:?}");
+        }
+    }
+}
+
+impl OpenHarmonyApp {
+    /// Whether the current render owner has a native editor, including before SurfaceCreate.
+    /// Call only on the N-API/UI thread.
+    pub fn is_text_input_ready_for(&self, window_id: i64) -> bool {
+        let source = self.ime_sources.borrow().get(&window_id).cloned();
+        source.is_some_and(|source| {
+            self.render_window_id(&source.owner) == Some(window_id)
+                && if window_id == 0 {
+                    self.ime.borrow().is_some()
+                } else {
+                    self.sub_ime.borrow().contains_key(&window_id)
+                }
+        })
+    }
+
+    pub(crate) fn is_render_input_ready(&self, owner: &str) -> bool {
+        self.render_window_id(owner).is_some_and(|window_id| {
+            self.ime_sources
+                .borrow()
+                .get(&window_id)
+                .is_some_and(|source| source.owner == owner)
+                && self.is_text_input_ready_for(window_id)
+        })
+    }
+
+    pub(crate) fn initialize_render_input(&self, source: &ImeCallbackSource) -> Result<()> {
+        let window_id = self.render_window_id(&source.owner).ok_or_else(|| {
+            napi_ohos::Error::from_reason("Native input requires a live render owner")
+        })?;
+        if self.is_render_input_ready(&source.owner) {
+            return Ok(());
+        }
+        let ime = source.create_ime()?;
+        if window_id == 0 {
+            *self.ime.borrow_mut() = Some(ime);
+        } else {
+            self.sub_ime.borrow_mut().insert(window_id, ime);
+        }
+        self.ime_sources
+            .borrow_mut()
+            .insert(window_id, source.clone());
+        self.notify_text_input_ready(window_id);
+        Ok(())
+    }
+
+    pub(crate) fn notify_text_input_ready(&self, window_id: i64) {
+        if let Ok(mut handler) = self.event_loop.try_borrow_mut() {
+            if let Some(handler) = handler.as_mut() {
+                let ready = self.is_text_input_ready_for(window_id);
+                handler(Event::TextInputReadyChanged { window_id, ready });
+            }
+        } else {
+            let app = self.clone();
+            self.queue_after_input(move || app.notify_text_input_ready(window_id));
+            self.create_waker().wake();
+        }
+    }
+
+    pub(crate) fn drain_ime_input(&self) {
+        while let Some((owner, event)) = self.ime_input.pop() {
+            if !self.is_render_input_ready(&owner) {
+                continue;
+            }
+            if let Some(ref mut handler) = *self.event_loop.borrow_mut() {
+                match self.render_window_id(&owner) {
+                    Some(0) => handler(Event::Input(InputEvent::Ime(event))),
+                    Some(window_id) => handler(Event::SubWindowInput {
+                        window_id,
+                        event: InputEvent::Ime(event),
+                    }),
+                    None => {}
                 }
             }
+            self.drain_after_input();
+        }
+    }
+}
+
+pub(crate) fn ime_ts_fn(
+    env: &Env,
+    app: OpenHarmonyApp,
+    render_owner: String,
+    native_window_id: i32,
+) -> Result<ImeCallbackSource> {
+    let queue = app.ime_input.clone();
+    #[cfg(feature = "keyboard")]
+    let consume_key_events =
+        app.keyboard_input_delivery() == KeyboardInputDelivery::ArkUiWithTextInput;
+    #[cfg(not(feature = "keyboard"))]
+    let consume_key_events = false;
+    // Separate TSFNs can reorder deletion, composition and insertion. Keep the
+    // owned events in one FIFO that native input callbacks can also drain before
+    // dispatching a later shortcut or changing the focused editor.
+    let callback: Function<bool, ()> =
+        env.create_function_from_closure("ime_input_callback", move |_ctx| {
+            app.drain_ime_input();
             Ok(())
         })?;
-    let selection = selection
+    let wake = callback
         .build_threadsafe_function()
         .callee_handled::<false>()
         .build()?;
-    let delete_forward = numeric_ime_callback(
-        env,
-        app.clone(),
-        render_owner.clone(),
-        "ime_delete_forward_callback",
-        ImeEvent::DeleteForwardEvent,
-    )?;
-    let move_cursor = numeric_ime_callback(
-        env,
-        app.clone(),
-        render_owner.clone(),
-        "ime_move_cursor_callback",
-        |value| ImeEvent::MoveCursorEvent(ohos_ime_binding::Direction::from(value as u32)),
-    )?;
-    let on_preview_app = app.clone();
-    let on_preview_owner = render_owner.clone();
-    let preview_callback: Function<PreviewTextEventData, ()> =
-        env.create_function_from_closure("ime_preview_callback", move |ctx| {
-            if !on_preview_app.is_render_surface_active(&on_preview_owner) {
-                return Ok(());
+    Ok(ImeCallbackSource {
+        queue,
+        owner: render_owner,
+        native_window_id,
+        consume_key_events,
+        wake: Arc::new(wake),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn destroyed_surface_rejects_late_input_after_recreation() {
+        let queue = ImeInputQueue::default();
+        let old_surface = queue.activate("main").expect("active surface");
+        assert!(queue.push("main", &old_surface, ImeEvent::BackspaceEvent(1)));
+        queue.discard("main");
+        let replacement = queue.activate("main").expect("replacement surface");
+        assert!(!queue.push("main", &old_surface, ImeEvent::BackspaceEvent(2)));
+        assert!(queue.push("main", &replacement, ImeEvent::BackspaceEvent(3)));
+        assert!(matches!(
+            queue.pop(),
+            Some((_, ImeEvent::BackspaceEvent(3)))
+        ));
+        assert!(queue.pop().is_none());
+    }
+
+    #[test]
+    fn replacement_invalidates_pending_input_without_affecting_other_windows() {
+        let queue = ImeInputQueue::default();
+        let main = queue.activate("main").expect("main surface");
+        let child = queue.activate("child").expect("child surface");
+        assert!(queue.push("main", &main, ImeEvent::BackspaceEvent(1)));
+        assert!(queue.push("child", &child, ImeEvent::BackspaceEvent(2)));
+        let replacement = queue.activate("main").expect("replacement surface");
+        assert!(!queue.push("main", &main, ImeEvent::BackspaceEvent(3)));
+        assert!(queue.push("main", &replacement, ImeEvent::BackspaceEvent(4)));
+        assert!(
+            matches!(queue.pop(), Some((owner, ImeEvent::BackspaceEvent(2))) if owner == "child")
+        );
+        assert!(
+            matches!(queue.pop(), Some((owner, ImeEvent::BackspaceEvent(4))) if owner == "main")
+        );
+        assert!(queue.pop().is_none());
+    }
+
+    #[test]
+    fn live_input_keeps_cross_window_fifo_order_after_another_surface_is_discarded() {
+        let queue = ImeInputQueue::default();
+        let main = queue.activate("main").expect("main surface");
+        let child = queue.activate("child").expect("child surface");
+        assert!(queue.push("main", &main, ImeEvent::BackspaceEvent(1)));
+        assert!(queue.push("child", &child, ImeEvent::BackspaceEvent(2)));
+        assert!(queue.push("main", &main, ImeEvent::DeleteForwardEvent(3)));
+        queue.discard("child");
+        assert!(!queue.push("child", &child, ImeEvent::BackspaceEvent(4)));
+        assert!(matches!(
+            queue.pop(),
+            Some((_, ImeEvent::BackspaceEvent(1)))
+        ));
+        assert!(matches!(
+            queue.pop(),
+            Some((_, ImeEvent::DeleteForwardEvent(3)))
+        ));
+        assert!(queue.pop().is_none());
+    }
+
+    #[test]
+    fn callback_already_running_at_teardown_cannot_queue_into_new_surface() {
+        let queue = Arc::new(ImeInputQueue::default());
+        let surface = queue.activate("main").expect("main surface");
+        let (resume, resume_callback) = std::sync::mpsc::channel();
+        let callback = std::thread::spawn({
+            let queue = queue.clone();
+            move || {
+                resume_callback.recv().expect("resume callback");
+                queue.push("main", &surface, ImeEvent::BackspaceEvent(9))
             }
-            let Some(data) = ctx.first_arg::<PreviewTextEventData>().ok() else {
-                crate::warn!("ime_preview_callback: invalid preview, dropping event");
-                return Ok(());
-            };
-            dispatch_ime_input(
-                &on_preview_app,
-                &on_preview_owner,
-                InputEvent::Ime(ImeEvent::PreviewTextEvent {
-                    text: data.text,
-                    start: data.start,
-                    end: data.end,
-                }),
-            );
-            Ok(())
-        })?;
-    let preview_callback_tsfn = preview_callback
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()?;
-
-    let on_finish_app = app.clone();
-    let on_finish_owner = render_owner.clone();
-    let finish_callback: Function<bool, ()> =
-        env.create_function_from_closure("ime_finish_preview_callback", move |_ctx| {
-            if on_finish_app.is_render_surface_active(&on_finish_owner) {
-                dispatch_ime_input(
-                    &on_finish_app,
-                    &on_finish_owner,
-                    InputEvent::Ime(ImeEvent::FinishPreviewEvent),
-                );
-            }
-            Ok(())
-        })?;
-    let finish_callback_tsfn = finish_callback
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()?;
-
-    // insert event
-    let on_insert_text_app = app.clone();
-    let on_insert_text_owner = render_owner.clone();
-    let insert_text_callback: Function<String, ()> =
-        env.create_function_from_closure("ime_insert_callback", move |ctx| {
-            if !on_insert_text_app.is_render_surface_active(&on_insert_text_owner) {
-                return Ok(());
-            }
-            // TSFN callback (callee_handled=false): a panic here aborts the
-            // process, and returning Err triggers napi_fatal_exception — equally
-            // fatal. A malformed callback simply carries no event (issue #87 minor-2).
-            let Some(s) = ctx.first_arg::<String>().ok() else {
-                crate::warn!("ime_insert_callback: first_arg missing/invalid, dropping event");
-                return Ok(());
-            };
-            dispatch_ime_input(
-                &on_insert_text_app,
-                &on_insert_text_owner,
-                InputEvent::Ime(ImeEvent::TextInputEvent(TextInputEventData { text: s })),
-            );
-            Ok(())
-        })?;
-
-    let insert_text_callback_tsfn = insert_text_callback
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()?;
-
-    // keyboard status event
-    let on_ime_hide_app = app.clone();
-    let on_ime_hide_owner = render_owner.clone();
-    let on_ime_hide_callback: Function<u32, ()> =
-        env.create_function_from_closure("ime_hide_callback", move |ctx| {
-            if !on_ime_hide_app.is_render_surface_active(&on_ime_hide_owner) {
-                return Ok(());
-            }
-            // See ime_insert_callback: never panic/fatal across the TSFN boundary;
-            // a missing arg carries no status event (defaulting to 0 would be
-            // ambiguous under KeyboardStatus::from).
-            let Some(value) = ctx.first_arg::<u32>().ok() else {
-                crate::warn!("ime_hide_callback: first_arg missing/invalid, dropping event");
-                return Ok(());
-            };
-
-            let status = KeyboardStatus::from(value);
-            dispatch_ime_input(
-                &on_ime_hide_app,
-                &on_ime_hide_owner,
-                InputEvent::Ime(ImeEvent::ImeStatusEvent(status)),
-            );
-            Ok(())
-        })?;
-
-    let on_ime_hide_callback_tsfn = on_ime_hide_callback
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()?;
-
-    let on_backspace_app = app.clone();
-    let on_backspace_owner = render_owner.clone();
-    let on_backspace_callback: Function<i32, ()> =
-        env.create_function_from_closure("on_backspace_callback", move |ctx| {
-            if !on_backspace_app.is_render_surface_active(&on_backspace_owner) {
-                return Ok(());
-            }
-            // See ime_insert_callback: never panic/fatal across the TSFN boundary.
-            let Some(value) = ctx.first_arg::<i32>().ok() else {
-                crate::warn!("on_backspace_callback: first_arg missing/invalid, dropping event");
-                return Ok(());
-            };
-            dispatch_ime_input(
-                &on_backspace_app,
-                &on_backspace_owner,
-                InputEvent::Ime(ImeEvent::BackspaceEvent(value)),
-            );
-            Ok(())
-        })?;
-
-    let on_backspace_callback_tsfn = on_backspace_callback
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()?;
-
-    let on_ime_enter_app = app.clone();
-    let on_ime_enter_owner = render_owner;
-    let on_ime_enter_callback: Function<i32, ()> =
-        env.create_function_from_closure("on_ime_enter_callback", move |ctx| {
-            if !on_ime_enter_app.is_render_surface_active(&on_ime_enter_owner) {
-                return Ok(());
-            }
-            // See ime_insert_callback: never panic/fatal across the TSFN boundary.
-            let Some(value) = ctx.first_arg::<i32>().ok() else {
-                crate::warn!("on_ime_enter_callback: first_arg missing/invalid, dropping event");
-                return Ok(());
-            };
-            dispatch_ime_input(
-                &on_ime_enter_app,
-                &on_ime_enter_owner,
-                InputEvent::Ime(ImeEvent::EnterEvent(value)),
-            );
-            Ok(())
-        })?;
-
-    let on_ime_enter_callback_tsfn = on_ime_enter_callback
-        .build_threadsafe_function()
-        .callee_handled::<false>()
-        .build()?;
-
-    Ok((
-        insert_text_callback_tsfn,
-        on_ime_hide_callback_tsfn,
-        on_backspace_callback_tsfn,
-        on_ime_enter_callback_tsfn,
-        preview_callback_tsfn,
-        finish_callback_tsfn,
-        delete_forward,
-        move_cursor,
-        selection,
-        extend_action,
-    ))
+        });
+        queue.discard("main");
+        let replacement = queue.activate("main").expect("replacement surface");
+        resume.send(()).expect("release native callback");
+        assert!(!callback.join().expect("native callback"));
+        assert!(queue.push("main", &replacement, ImeEvent::BackspaceEvent(1)));
+        assert!(matches!(
+            queue.pop(),
+            Some((_, ImeEvent::BackspaceEvent(1)))
+        ));
+        assert!(queue.pop().is_none());
+    }
 }

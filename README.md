@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> Remove this line to confirm you've reviewed this PR before submitting.
+
 # OpenHarmony Ability
 
 English | [简体中文](README.zh-CN.md)
@@ -120,3 +123,30 @@ Register the standalone plugin factories in the Ability's `bridgePlugins` array.
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+
+
+## Desktop editor runtime adaptation
+
+The runtime supports independently managed workspace Abilities, window-owned
+native menus and prompts, per-window IME ownership, synchronous content focus,
+and cancellation when windows or bridge sessions are destroyed. Keyboard input
+readiness is independent of rendering Surface creation. Applications opting into
+these paths must update their native render exports and ArkTS runtime together.
+
+`MenuPlugin({ showMenuBar: false, handleKeyboardShortcuts: false })` retains native
+popups while leaving menu placement and contextual accelerators to the application.
+Interactive prompts and permission requests use `BridgeCallOptions::for_user_interaction()`;
+session teardown still cancels them. The files plugin supports `open-mixed` and an
+optional `parentWindowId`. Explicit clipboard reads can request permission after a
+denied read; background refreshes never open permission UI.
+
+Run SDK-backed runtime checks with Node 22+:
+
+```sh
+OHOS_SDK_HOME=/path/to/openharmony node --test scripts/runtime-regressions.cjs
+python3 scripts/keyboard-focus-regressions.py
+```
+
+These host checks substitute native APIs and do not establish device timing.
+Task-center close/restore and input typed during creation of another window still
+require further work; this adaptation does not claim complete desktop parity.

@@ -68,6 +68,7 @@ pub fn create_lifecycle_handle<'a>(
     let bridge_plugins = app.bridge_plugin_declarations()?;
     let waker_app = app.clone();
     let waker: Function<'_, (), ()> = env.create_function_from_closure("waker", move |_ctx| {
+        waker_app.drain_after_input();
         if let Some(ref mut h) = *waker_app.event_loop.borrow_mut() {
             h(Event::UserEvent)
         }
@@ -225,6 +226,8 @@ pub fn create_lifecycle_handle<'a>(
             let options = ctx.first_arg::<Object>()?;
             let window_id = options.get_named_property::<i64>("windowId")?;
             let focused = options.get_named_property::<bool>("focused")?;
+            #[cfg(feature = "keyboard")]
+            window_focus_app.record_window_focus(window_id, focused);
             if let Some(ref mut handler) = *window_focus_app.event_loop.borrow_mut() {
                 handler(Event::WindowFocusChanged { window_id, focused });
             }

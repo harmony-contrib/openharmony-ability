@@ -11,6 +11,7 @@ import {
 import {
   ApplicationLifecycle,
   BridgeCallContext,
+  BridgeComponentTouchEvent,
   BridgeContextRequirement,
   BridgeEmptyLifecyclePayload,
   BridgeLifecycleEvent,
@@ -28,9 +29,8 @@ import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
 import { CancellableTaskScope, TaskCancellationSignal } from "../runtime/CancellableTaskScope";
 
 // Upper bound for per-call timeouts (callers opt in via bridgeInvoke's timeoutMs).
-// 5 minutes: interactive flows that put up system UI (e.g. Huawei account login
-// panel with SMS verification) can legitimately take minutes; the Rust-side
-// default of 15s stays for non-interactive calls.
+// User-driven dialogs can explicitly use zero to wait for a decision; ordinary calls
+// retain the Rust-side default of 15s and this upper bound for custom deadlines.
 const MAX_TIMEOUT_MS = 300_000;
 const MAX_PAYLOAD_BYTES = 512 * 1024;
 const MAX_LIFECYCLE_HISTORY = 16;
@@ -216,6 +216,10 @@ function isBridgeIdentifier(value: string): boolean {
 }
 
 function clampTimeout(timeoutMs: number): number {
+  // Rust's interactive-call policy uses zero; cancellation still follows the session lifetime.
+  if (timeoutMs === 0) {
+    return 0;
+  }
   if (!Number.isFinite(timeoutMs)) {
     return MAX_TIMEOUT_MS;
   }
@@ -1016,6 +1020,24 @@ class BridgeHost {
     return result.value;
   }
 
+  dispatchComponentTouch(event: BridgeComponentTouchEvent): void {
+    if (!this.abilityReady || this.closing || this.disposed) {
+      return;
+    }
+    for (const entry of this.plugins.values()) {
+      if (!entry.installed || entry.hookError !== undefined || !this.requirementsReady(entry)) {
+        continue;
+      }
+      try {
+        entry.plugin.onComponentTouch?.(event, this.pluginContext(entry.plugin.id));
+      } catch (error) {
+        console.error(
+          `[BridgeHost:${this.moduleName}] plugin '${entry.plugin.id}' input hook failed: ${String(error)}`,
+        );
+      }
+    }
+  }
+
   private invokeNativeSync(
     pluginId: string,
     event: string,
@@ -1811,6 +1833,9 @@ class BridgeHost {
     action: string,
     onTimeout: (reason: Error) => void,
   ): Promise<BridgeTypedValue> {
+    if (timeoutMs === 0) {
+      return await operation;
+    }
     let timer = 0;
     const timeout = new Promise<BridgeTypedValue>((_resolve, reject) => {
       timer = setTimeout(() => {
@@ -1902,6 +1927,14 @@ export class BridgeHostRegistry {
     lifecycle: ApplicationLifecycle,
   ): void {
     BridgeHostRegistry.host(sessionId, moduleName).attachApplicationLifecycle(lifecycle);
+  }
+
+  static dispatchComponentTouch(
+    sessionId: string,
+    moduleName: string,
+    event: BridgeComponentTouchEvent,
+  ): void {
+    BridgeHostRegistry.sessions.get(sessionId)?.get(moduleName)?.dispatchComponentTouch(event);
   }
 
   static async invokeAsync(

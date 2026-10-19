@@ -2,7 +2,6 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use super::pan::PanTracker;
 
-use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
 use napi_ohos::{Env, Error, Result};
 use ohos_arkui_binding::component::attribute::{
     ArkUIAttributeBasic, ArkUICommonAttribute, ArkUIEvent, ArkUIGesture,
@@ -15,7 +14,6 @@ use ohos_arkui_binding::{
     api::node_custom_event::IntOffset, common::node::ArkUINode, types::advanced::LengthMetricUnit,
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
-use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
 
 #[cfg(feature = "keyboard")]
@@ -28,6 +26,67 @@ use crate::{
 
 const PAN_GESTURE_DISTANCE: f64 = 8.0;
 const SWIPE_GESTURE_MIN_SPEED: f64 = 100.0;
+
+#[cfg(feature = "keyboard")]
+type FocusRequest =
+    unsafe extern "C" fn(ohos_arkui_binding::arkui_input_binding::sys::ArkUI_NodeHandle) -> u32;
+
+#[cfg(feature = "keyboard")]
+struct NativeFocusRequest {
+    _library: libloading::Library,
+    request: FocusRequest,
+}
+
+#[cfg(feature = "keyboard")]
+impl NativeFocusRequest {
+    fn get() -> Result<Option<&'static Self>> {
+        static API: std::sync::OnceLock<std::result::Result<Option<NativeFocusRequest>, String>> =
+            std::sync::OnceLock::new();
+        API.get_or_init(Self::load)
+            .as_ref()
+            .map(Option::as_ref)
+            .map_err(|error| Error::from_reason(error.clone()))
+    }
+
+    fn load() -> std::result::Result<Option<Self>, String> {
+        // N-API modules cannot resolve NDK symbols through the process handle.
+        // Retain the NDK library with its optional API-15 entry point.
+        let library = unsafe { libloading::Library::new("libace_ndk.z.so") }
+            .map_err(|error| format!("Cannot load native focus API: {error}"))?;
+        // SAFETY: native_interface_focus.h declares this signature. Older images
+        // without the symbol retain the existing FocusStatus compatibility path.
+        let request = match unsafe { library.get::<FocusRequest>(b"OH_ArkUI_FocusRequest\0") } {
+            Ok(request) => *request,
+            Err(error) => {
+                crate::debug!("Native synchronous focus is unavailable: {error}");
+                return Ok(None);
+            }
+        };
+        Ok(Some(Self {
+            _library: library,
+            request,
+        }))
+    }
+}
+
+#[cfg(feature = "keyboard")]
+pub(crate) fn request_xcomponent_focus(component: &XComponent) -> Result<()> {
+    if let Some(api) = NativeFocusRequest::get()? {
+        // SAFETY: the caller retains this live component and checks its UI-thread
+        // session before invoking the helper.
+        let status = unsafe { (api.request)(component.raw().raw_handle()) };
+        if status != 0 {
+            return Err(Error::from_reason(format!(
+                "Native render surface focus failed with status {status}"
+            )));
+        }
+        Ok(())
+    } else {
+        component
+            .set_focus_status(true)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+}
 
 struct RenderOwnerGuard {
     app: OpenHarmonyApp,
@@ -72,7 +131,18 @@ fn gesture_phase(action: &GestureEventAction) -> Option<GesturePhase> {
 }
 
 fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
-    if !app.is_render_surface_active(owner) {
+    app.drain_ime_input();
+    let requires_surface = match &event {
+        InputEvent::Ime(_) => false,
+        InputEvent::XComponent(XComponentInputEvent::Key(_)) => false,
+        InputEvent::ArkUi(ArkUiInputEvent::FocusChanged(_)) => false,
+        #[cfg(feature = "keyboard")]
+        InputEvent::ArkUi(ArkUiInputEvent::Key(_) | ArkUiInputEvent::KeyPreIme(_)) => false,
+        _ => true,
+    };
+    if !app.is_render_input_ready(owner)
+        || (requires_surface && !app.is_render_surface_active(owner))
+    {
         return;
     }
     if let Some(ref mut handler) = *app.event_loop.borrow_mut() {
@@ -83,6 +153,26 @@ fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
         }
     }
     app.drain_after_input();
+}
+
+fn dispatch_focus(app: &OpenHarmonyApp, owner: &str, focused: bool) {
+    #[cfg(feature = "keyboard")]
+    if focused {
+        if let Some(window_id) = app.render_window_id(owner) {
+            app.record_window_focus(window_id, true);
+        }
+    }
+    let event = InputEvent::ArkUi(ArkUiInputEvent::FocusChanged(focused));
+    // Setting node focus from a window event can invoke this callback synchronously.
+    // Defer that nested notification until the embedding event handler is released.
+    if app.event_loop.try_borrow_mut().is_err() {
+        let deferred_app = app.clone();
+        let owner = owner.to_owned();
+        app.queue_after_input(move || dispatch_input(&deferred_app, &owner, event));
+        app.create_waker().wake();
+    } else {
+        dispatch_input(app, owner, event);
+    }
 }
 
 fn pointer_snapshot(
@@ -250,8 +340,9 @@ pub fn render(
     slot: ArkUIHandle,
     render_owner: String,
     app: OpenHarmonyApp,
+    native_window_id: i32,
 ) -> Result<RootNode> {
-    render_for_window(env, slot, render_owner, app, 0)
+    render_for_window(env, slot, render_owner, app, 0, native_window_id)
 }
 
 pub fn render_for_window(
@@ -260,7 +351,13 @@ pub fn render_for_window(
     render_owner: String,
     app: OpenHarmonyApp,
     window_id: i64,
+    native_window_id: i32,
 ) -> Result<RootNode> {
+    if native_window_id <= 0 {
+        return Err(Error::from_reason(
+            "Rendering requires a positive native OHOS window ID",
+        ));
+    }
     set_main_thread_env(*env);
 
     // All eager `get_helper()` TSFN inits (statusbar tray, vibrancy, clipboard image,
@@ -290,6 +387,11 @@ pub fn render_for_window(
     xcomponent_native
         .set_focusable(true)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
+    // Window activation does not focus a newly mounted native node. Keyboard
+    // shortcuts must reach this surface before the first pointer interaction.
+    xcomponent_native
+        .set_default_focus(true)
+        .map_err(|e| Error::from_reason(e.reason.to_string()))?;
     xcomponent_native
         .set_focus_on_touch(true)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
@@ -308,28 +410,9 @@ pub fn render_for_window(
     let on_surface_created_app = app.clone();
     let on_surface_created_owner = render_owner.clone();
 
-    let (
-        insert_text_callback_tsfn,
-        on_ime_hide_callback_tsfn,
-        on_backspace_callback_tsfn,
-        on_ime_enter_callback_tsfn,
-        preview_callback_tsfn,
-        finish_callback_tsfn,
-        delete_forward_callback_tsfn,
-        move_cursor_callback_tsfn,
-        selection_callback_tsfn,
-        extend_action_callback_tsfn,
-    ) = input::ime_ts_fn(env, app.clone(), render_owner.clone())?;
-    let insert_text_callback_tsfn = Arc::new(insert_text_callback_tsfn);
-    let on_ime_hide_callback_tsfn = Arc::new(on_ime_hide_callback_tsfn);
-    let on_backspace_callback_tsfn = Arc::new(on_backspace_callback_tsfn);
-    let on_ime_enter_callback_tsfn = Arc::new(on_ime_enter_callback_tsfn);
-    let preview_callback_tsfn = Arc::new(preview_callback_tsfn);
-    let finish_callback_tsfn = Arc::new(finish_callback_tsfn);
-    let delete_forward_callback_tsfn = Arc::new(delete_forward_callback_tsfn);
-    let move_cursor_callback_tsfn = Arc::new(move_cursor_callback_tsfn);
-    let selection_callback_tsfn = Arc::new(selection_callback_tsfn);
-    let extend_action_callback_tsfn = Arc::new(extend_action_callback_tsfn);
+    let ime_callback_source =
+        input::ime_ts_fn(env, app.clone(), render_owner.clone(), native_window_id)?;
+    let surface_ime_callback_source = ime_callback_source.clone();
 
     xcomponent.on_surface_created(move |xc_raw, win| {
         // NDK callback boundary: a panic here aborts the process (no unwinding
@@ -362,72 +445,16 @@ pub fn render_for_window(
         }
 
         created_pan_tracker.borrow_mut().reset();
-
-        // We need to create IME instance when app is focused.
-        let ime = IME::new(Default::default());
-
-        {
-            let insert_text_callback_tsfn = insert_text_callback_tsfn.clone();
-            let on_ime_hide_callback_tsfn = on_ime_hide_callback_tsfn.clone();
-            let on_backspace_callback_tsfn = on_backspace_callback_tsfn.clone();
-            let on_ime_enter_callback_tsfn = on_ime_enter_callback_tsfn.clone();
-            let preview_callback_tsfn = preview_callback_tsfn.clone();
-            let finish_callback_tsfn = finish_callback_tsfn.clone();
-            let delete_forward_callback_tsfn = delete_forward_callback_tsfn.clone();
-            let move_cursor_callback_tsfn = move_cursor_callback_tsfn.clone();
-            let selection_callback_tsfn = selection_callback_tsfn.clone();
-            let extend_action_callback_tsfn = extend_action_callback_tsfn.clone();
-
-            // // run in other thread
-            ime.insert_text(move |s| {
-                insert_text_callback_tsfn.call(s, NonBlocking);
-            });
-            ime.on_status_change(move |s| {
-                on_ime_hide_callback_tsfn.call(s.into(), NonBlocking);
-            });
-            ime.on_backspace(move |len| {
-                on_backspace_callback_tsfn.call(len, NonBlocking);
-            });
-            ime.on_delete_forward(move |len| {
-                delete_forward_callback_tsfn.call(len, NonBlocking);
-            });
-            ime.on_move_cursor(move |direction| {
-                move_cursor_callback_tsfn.call(u32::from(direction) as i32, NonBlocking);
-            });
-            ime.on_set_selection(move |selection| {
-                selection_callback_tsfn.call(
-                    input::SelectionEventData {
-                        start: selection.start,
-                        end: selection.end,
-                    },
-                    NonBlocking,
-                );
-            });
-            ime.on_extend_action(move |action| {
-                extend_action_callback_tsfn.call(u32::from(action) as i32, NonBlocking);
-            });
-            ime.on_enter(move |key| {
-                on_ime_enter_callback_tsfn.call(u32::from(key) as i32, NonBlocking);
-            });
-            ime.on_preview(move |text, start, end| {
-                preview_callback_tsfn.call(
-                    input::PreviewTextEventData { text, start, end },
-                    NonBlocking,
-                );
-            });
-            ime.on_finish_preview(move || {
-                finish_callback_tsfn.call(true, NonBlocking);
-            });
+        #[cfg(feature = "keyboard")]
+        if let Err(error) = super::install_keyboard_focus_recovery(
+            &on_surface_created_app,
+            &on_surface_created_owner,
+            window_id,
+            native_window_id,
+        ) {
+            crate::warn!("Cannot install native keyboard focus recovery: {error}");
         }
-
-        if window_id == 0 {
-            *on_surface_created_app.ime.borrow_mut() = Some(ime);
-        } else {
-            on_surface_created_app
-                .sub_ime
-                .borrow_mut()
-                .insert(window_id, ime);
-        }
+        on_surface_created_app.initialize_render_input(&surface_ime_callback_source)?;
 
         {
             if let Some(ref mut h) = *on_surface_created_app.event_loop.borrow_mut() {
@@ -528,29 +555,46 @@ pub fn render_for_window(
         });
     }
 
+    let focus_app = app.clone();
+    let focus_owner = render_owner.clone();
+    xcomponent_native.on_focus(move || {
+        dispatch_focus(&focus_app, &focus_owner, true);
+    });
+    let blur_app = app.clone();
+    let blur_owner = render_owner.clone();
+    xcomponent_native.on_blur(move || {
+        dispatch_focus(&blur_app, &blur_owner, false);
+    });
+
     let on_key_event_app = app.clone();
     let on_key_event_owner = render_owner.clone();
     match app.keyboard_input_delivery() {
         #[cfg(feature = "keyboard")]
-        KeyboardInputDelivery::ArkUi => {
+        KeyboardInputDelivery::ArkUi | KeyboardInputDelivery::ArkUiWithTextInput => {
             let pre_ime_app = app.clone();
             let pre_ime_owner = render_owner.clone();
             xcomponent_native.on_key_pre_ime(move |event| {
-                if let Some(input) = event.key_event() {
-                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
-                        dispatch_input(
-                            &pre_ime_app,
-                            &pre_ime_owner,
-                            InputEvent::ArkUi(ArkUiInputEvent::KeyPreIme(data)),
-                        );
+                if let Some(data) = KeyboardEventData::from_node_callback(event) {
+                    let response = data.response.clone();
+                    dispatch_input(
+                        &pre_ime_app,
+                        &pre_ime_owner,
+                        InputEvent::ArkUi(ArkUiInputEvent::KeyPreIme(data)),
+                    );
+                    if response.is_consumed() {
+                        // Pre-IME keys are native input events. A component return
+                        // value is rejected, so consume the native key itself.
+                        if let Some(input) = event.key_event() {
+                            input.set_consumed(true);
+                            input.stop_propagation(true);
+                        }
                     }
                 }
-                // Keep system shortcuts and IME processing intact.
                 None
             });
             xcomponent_native.on_key_event(move |event| {
                 if let Some(input) = event.key_event() {
-                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
+                    if let Some(data) = KeyboardEventData::from_node_callback(event) {
                         let response = data.response.clone();
                         dispatch_input(
                             &on_key_event_app,
@@ -737,6 +781,9 @@ pub fn render_for_window(
 
     xcomponent.register_callback()?;
 
+    // Node callbacks and the window ID are usable before native surface creation.
+    // Replacing this editor on the first SurfaceCreate would cancel in-flight composition.
+    app.initialize_render_input(&ime_callback_source)?;
     root.mount(xcomponent_native)
         .map_err(|error| Error::from_reason(error.reason.to_string()))?;
     render_guard.disarm();

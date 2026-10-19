@@ -92,6 +92,10 @@ pub struct OpenHarmonyAppInner {
     touch_input_delivery: TouchInputDelivery,
     frame_input_delivery: HashMap<i64, crate::render::FrameDeliveryState>,
     keyboard_input_delivery: KeyboardInputDelivery,
+    #[cfg(feature = "keyboard")]
+    window_keyboard_focus_recovery: bool,
+    #[cfg(feature = "keyboard")]
+    window_focus: HashMap<i64, bool>,
     surface_active: bool,
     sub_surfaces: HashMap<i64, SubRenderSurface>,
 
@@ -205,6 +209,10 @@ impl OpenHarmonyAppInner {
             touch_input_delivery: TouchInputDelivery::default(),
             frame_input_delivery: HashMap::new(),
             keyboard_input_delivery: KeyboardInputDelivery::default(),
+            #[cfg(feature = "keyboard")]
+            window_keyboard_focus_recovery: false,
+            #[cfg(feature = "keyboard")]
+            window_focus: HashMap::new(),
             surface_active: false,
             sub_surfaces: HashMap::new(),
             state: vec![],
@@ -553,6 +561,8 @@ pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: EventLoop,
     post_input: PostInputQueue,
+    pub(crate) ime_input: Arc<crate::input::ImeInputQueue>,
+    pub(crate) ime_sources: Arc<RefCell<HashMap<i64, crate::input::ImeCallbackSource>>>,
     pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
     pub(crate) sub_ime: Arc<RefCell<HashMap<i64, IME>>>,
@@ -608,6 +618,9 @@ impl OpenHarmonyApp {
             // only after the current event-loop handler releases its borrow.
             #[allow(clippy::arc_with_non_send_sync)]
             post_input: Arc::new(RefCell::new(Vec::new())),
+            ime_input: Arc::default(),
+            #[allow(clippy::arc_with_non_send_sync)]
+            ime_sources: Arc::default(),
             #[allow(clippy::arc_with_non_send_sync)]
             back_press_interceptor: Arc::new(RefCell::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
@@ -621,7 +634,7 @@ impl OpenHarmonyApp {
         }
     }
 
-    /// Runs native actions after the current XComponent input callback returns.
+    /// Runs native actions after the current input callback or on the next event-loop wake.
     /// This queue is only accessed on the N-API UI thread.
     pub fn queue_after_input(&self, action: impl FnOnce() + 'static) {
         self.post_input.borrow_mut().push(Box::new(action));
@@ -872,7 +885,11 @@ impl OpenHarmonyApp {
     /// Selects the keyboard stream before any main or child render starts.
     pub fn set_keyboard_input_delivery(&self, delivery: KeyboardInputDelivery) -> Result<()> {
         #[cfg(feature = "keyboard")]
-        if delivery == KeyboardInputDelivery::ArkUi && crate::version::sdk_api_version() < 14 {
+        if matches!(
+            delivery,
+            KeyboardInputDelivery::ArkUi | KeyboardInputDelivery::ArkUiWithTextInput
+        ) && crate::version::sdk_api_version() < 14
+        {
             return Err(Error::from_reason(
                 "ArkUI keyboard delivery requires API 14",
             ));
@@ -895,6 +912,58 @@ impl OpenHarmonyApp {
             .read()
             .map(|inner| inner.keyboard_input_delivery)
             .unwrap_or_default()
+    }
+
+    /// Enables early key focus recovery when one render surface owns each window's keyboard input.
+    /// Must be configured before rendering. Runtimes without filter inspection retain focus callbacks.
+    #[cfg(feature = "keyboard")]
+    pub fn set_window_keyboard_focus_recovery(&self, enabled: bool) -> Result<()> {
+        let mut inner = self.inner.write().map_err(|_| {
+            Error::from_reason("Failed to configure window keyboard focus recovery")
+        })?;
+        if inner.render_owner.is_some() || !inner.sub_surfaces.is_empty() {
+            return Err(Error::from_reason(
+                "Window keyboard focus recovery cannot change during an active render",
+            ));
+        }
+        inner.window_keyboard_focus_recovery = enabled;
+        Ok(())
+    }
+
+    #[cfg(feature = "keyboard")]
+    pub(crate) fn window_keyboard_focus_recovery_enabled(&self) -> bool {
+        match self.inner.read() {
+            Ok(inner) => inner.window_keyboard_focus_recovery,
+            Err(error) => {
+                crate::warn!("Cannot read keyboard focus recovery configuration: {error}");
+                false
+            }
+        }
+    }
+
+    #[cfg(feature = "keyboard")]
+    pub(crate) fn record_window_focus(&self, window_id: i64, focused: bool) {
+        match self.inner.write() {
+            Ok(mut inner) => {
+                if focused {
+                    inner.window_focus.insert(window_id, true);
+                } else {
+                    inner.window_focus.remove(&window_id);
+                }
+            }
+            Err(error) => crate::warn!("Cannot record native window focus: {error}"),
+        }
+    }
+
+    #[cfg(feature = "keyboard")]
+    pub(crate) fn window_has_focus(&self, window_id: i64) -> bool {
+        match self.inner.read() {
+            Ok(inner) => inner.window_focus.get(&window_id).copied().unwrap_or(false),
+            Err(error) => {
+                crate::warn!("Cannot read native window focus: {error}");
+                false
+            }
+        }
     }
 
     pub(crate) fn begin_render(
@@ -1061,6 +1130,9 @@ impl OpenHarmonyApp {
             })
             .unwrap_or(false);
         if deactivated {
+            #[cfg(feature = "keyboard")]
+            crate::render::release_keyboard_focus_recovery(self, owner);
+            self.ime_input.discard(owner);
             if let Some(window_id) = window_id {
                 if let Ok(mut inner) = self.inner.write() {
                     inner
@@ -1069,6 +1141,9 @@ impl OpenHarmonyApp {
                         .or_default()
                         .invalidate();
                 }
+            }
+            if let Some(window_id) = window_id {
+                self.ime_sources.borrow_mut().remove(&window_id);
             }
             match window_id {
                 Some(0) => {
@@ -1079,6 +1154,9 @@ impl OpenHarmonyApp {
                 }
                 None => {}
             }
+            if let Some(window_id) = window_id {
+                self.notify_text_input_ready(window_id);
+            }
         }
         deactivated
     }
@@ -1087,6 +1165,8 @@ impl OpenHarmonyApp {
     /// from an old DefaultXComponent cannot clear a replacement component's native state.
     #[doc(hidden)]
     pub fn release_render(&self, owner: &str) {
+        #[cfg(feature = "keyboard")]
+        crate::render::release_keyboard_focus_recovery(self, owner);
         let released = self.inner.write().ok().and_then(|mut inner| {
             if inner.owns_render(owner) {
                 inner.release_render_owner(owner).map(|active| (0, active))
@@ -1112,11 +1192,16 @@ impl OpenHarmonyApp {
         let Some((window_id, surface_was_active)) = released else {
             return;
         };
+        #[cfg(feature = "keyboard")]
+        self.record_window_focus(window_id, false);
+        self.ime_input.discard(owner);
+        self.ime_sources.borrow_mut().remove(&window_id);
         if window_id == 0 {
             self.ime.borrow_mut().take();
         } else {
             self.sub_ime.borrow_mut().remove(&window_id);
         }
+        self.notify_text_input_ready(window_id);
         if surface_was_active {
             if window_id == 0 {
                 self.dispatch_surface_destroy();
@@ -1281,6 +1366,34 @@ impl OpenHarmonyApp {
         let _ = self.try_show_keyboard_for(window_id);
     }
 
+    /// Report logical editor focus independently of soft-keyboard visibility.
+    /// Call on the N-API main thread, retaining focus across window deactivation.
+    pub fn set_text_input_active_for(&self, window_id: i64, active: bool) -> Result<()> {
+        self.with_xcomponent_for(window_id, |component| {
+            // XComponent's keyboard-demand flag defaults to false. Its generic
+            // onNeedSoftkeyboard callback can veto that flag, but cannot enable
+            // it; without this update ArkUI closes the IME on window activation.
+            let status = unsafe {
+                ohos_xcomponent_sys::OH_NativeXComponent_SetNeedSoftKeyboard(
+                    component.native_xcomponent().raw(),
+                    active,
+                )
+            };
+            if status == 0 {
+                Ok(())
+            } else {
+                Err(Error::from_reason(format!(
+                    "Cannot set native keyboard demand for window {window_id}: {status}"
+                )))
+            }
+        })
+        .ok_or_else(|| {
+            Error::from_reason(format!(
+                "Native input surface is not ready for window {window_id}"
+            ))
+        })?
+    }
+
     /// Attach/show the editor belonging to this window on the N-API main thread.
     pub fn try_show_keyboard_for(&self, window_id: i64) -> Result<()> {
         let _guard = self
@@ -1318,7 +1431,30 @@ impl OpenHarmonyApp {
             .map_err(|error| Error::from_reason(error.to_string()))
     }
 
-    fn with_ime_for<T>(&self, window_id: i64, callback: impl FnOnce(&IME) -> T) -> Result<T> {
+    /// Recreate the editor when a live surface is assigned to a different logical window.
+    /// Main thread only. In-flight callbacks and queued edits from the old editor are invalidated.
+    pub fn reset_ime_for(&self, window_id: i64) -> Result<()> {
+        let source = self
+            .ime_sources
+            .borrow()
+            .get(&window_id)
+            .cloned()
+            .ok_or_else(|| {
+                Error::from_reason(format!("Native IME is not ready for window {window_id}"))
+            })?;
+        let replacement = source.create_ime()?;
+        let previous = if window_id == 0 {
+            self.ime.borrow_mut().replace(replacement)
+        } else {
+            self.sub_ime.borrow_mut().insert(window_id, replacement)
+        };
+        drop(previous);
+        Ok(())
+    }
+
+    /// Access a window's native editor on the N-API main thread. The callback's
+    /// result retains native error codes so callers can recover stale sessions.
+    pub fn with_ime_for<T>(&self, window_id: i64, callback: impl FnOnce(&IME) -> T) -> Result<T> {
         if window_id == 0 {
             self.ime.borrow().as_ref().map(callback)
         } else {
@@ -1494,6 +1630,32 @@ impl OpenHarmonyApp {
 
     pub fn content_rect_for(&self, window_id: i64) -> Rect {
         self.inner.read().unwrap().content_rect_for(window_id)
+    }
+
+    /// Request focus for a mounted render surface on the N-API/UI thread.
+    /// API 15+ applies focus synchronously; older images use FocusStatus.
+    #[cfg(feature = "keyboard")]
+    pub fn request_xcomponent_focus_for(&self, window_id: i64) -> Result<()> {
+        {
+            let session = self
+                .bridge_session
+                .read()
+                .map_err(|_| Error::from_reason("Cannot read the render surface session"))?;
+            if !session
+                .as_ref()
+                .is_some_and(|session| session.runtime.is_main_thread())
+            {
+                return Err(Error::from_reason(
+                    "Render surface focus must be requested on the N-API/UI thread",
+                ));
+            }
+        }
+        // Native focus callbacks can reenter the app. Release the render lock
+        // before applying focus, while retaining the component's ownership.
+        let component = self
+            .with_xcomponent_for(window_id, Clone::clone)
+            .ok_or_else(|| Error::from_reason("The render surface is not mounted"))?;
+        crate::render::request_xcomponent_focus(&component)
     }
 
     /// Runs `callback` while the render XComponent for `window_id` is retained.
