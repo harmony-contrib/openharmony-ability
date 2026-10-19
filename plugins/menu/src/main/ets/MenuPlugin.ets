@@ -40,13 +40,29 @@ import {
   getPredefinedActionExecutor,
   setPredefinedActionExecutor,
 } from "./menu";
-import type { AboutMetadataData, PredefinedType } from "./menu_types";
+import type { AboutMetadataData, MenuItemData, PredefinedType } from "./menu_types";
 
 const SET_MENUBAR_REQUEST_TYPE = "ohos.menu.SetMenubarRequest";
 const POPUP_REQUEST_TYPE = "ohos.menu.PopupRequest";
+const POPUP_MENUBAR_REQUEST_TYPE = "ohos.menu.PopupMenubarRequest";
+const POPUP_COMMANDS_REQUEST_TYPE = "ohos.menu.PopupCommandsRequest";
 const SET_VISIBLE_REQUEST_TYPE = "ohos.menu.SetVisibleRequest";
 const PREDEFINED_REQUEST_TYPE = "ohos.menu.PredefinedRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.menu.Acknowledgement";
+
+interface MenuCommandItem {
+  id: string;
+  text: string;
+  enabled: boolean;
+}
+
+interface PopupCommandsRequest {
+  windowId: string;
+  items: MenuCommandItem[];
+  x: number;
+  y: number;
+  restoreFocusId?: string;
+}
 
 /**
  * Menubar composition slot: renders MenuBarComponent into the core pages
@@ -61,6 +77,15 @@ function menuBarBuilder(props: MenuBarSlotProps) {
   });
 }
 
+@Builder
+function menuPopupBuilder(props: MenuBarSlotProps) {
+  MenuBarComponent({
+    windowId: props.windowId,
+    acceleratorMatcher: getAcceleratorMatcher(props.windowId),
+    showMenuBar: false,
+  });
+}
+
 /**
  * Core → menu notification port. Implements the key handling that used to live
  * inline in MainPage/FloatPage onKeyPreIme, and resolves the fullscreen-driven
@@ -68,7 +93,16 @@ function menuBarBuilder(props: MenuBarSlotProps) {
  * getMenuBarPort() into this package's MenuDataCallback registry.
  */
 class CoreMenuBarPort implements MenuBarPort {
+  private readonly handleKeyboardShortcuts: boolean;
+
+  constructor(handleKeyboardShortcuts: boolean) {
+    this.handleKeyboardShortcuts = handleKeyboardShortcuts;
+  }
+
   onKeyPreIme(event: KeyEvent, windowId: number): boolean {
+    if (!this.handleKeyboardShortcuts) {
+      return false;
+    }
     const matcher = getAcceleratorMatcher(windowId);
     matcher.trackModifiers(event);
     if (event.type !== KeyType.Down) {
@@ -132,6 +166,21 @@ interface SetMenubarRequest {
   windowId: string;
 }
 
+export interface MenuPluginOptions {
+  /** Disable when the native renderer resolves shortcuts using its own focus context. */
+  handleKeyboardShortcuts?: boolean;
+  /** Hide the menu row when the application provides its own native-menu trigger. */
+  showMenuBar?: boolean;
+}
+
+interface PopupMenubarRequest {
+  windowId: string;
+  menuName?: string;
+  x: number;
+  y: number;
+  restoreFocusId?: string;
+}
+
 interface PopupRequest {
   jsonData: string;
   x?: number;
@@ -174,10 +223,20 @@ export class MenuPlugin extends AsyncPluginBase {
   readonly id = "ohos.menu";
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
   private menuManager: MenuManager | null = null;
+  private readonly options: MenuPluginOptions;
+
+  constructor(options: MenuPluginOptions = {}) {
+    super();
+    this.options = options;
+  }
 
   onInstall(_context: BridgePluginHookContext): void {
-    setMenuBarSlotBuilder(wrapBuilder(menuBarBuilder));
-    setMenuBarPort(new CoreMenuBarPort());
+    setMenuBarSlotBuilder(
+      this.options.showMenuBar === false
+        ? wrapBuilder(menuPopupBuilder)
+        : wrapBuilder(menuBarBuilder),
+    );
+    setMenuBarPort(new CoreMenuBarPort(this.options.handleKeyboardShortcuts ?? true));
   }
 
   onDispose(): void {
@@ -359,6 +418,97 @@ export class MenuPlugin extends AsyncPluginBase {
           });
         }
       }
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
+    if (action === "popup-menubar") {
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        POPUP_MENUBAR_REQUEST_TYPE,
+      ) as PopupMenubarRequest;
+      if (
+        typeof request.windowId !== "string" ||
+        request.windowId.length === 0 ||
+        (request.menuName !== undefined && typeof request.menuName !== "string") ||
+        (request.restoreFocusId !== undefined &&
+          (typeof request.restoreFocusId !== "string" ||
+            request.restoreFocusId.trim().length === 0)) ||
+        typeof request.x !== "number" ||
+        !Number.isFinite(request.x) ||
+        typeof request.y !== "number" ||
+        !Number.isFinite(request.y)
+      ) {
+        throw new Error("popup-menubar requires a window, optional menu name and finite position");
+      }
+      const callback = getMenuDataCallback(request.windowId)?.onApplicationMenu;
+      if (!callback) {
+        throw new Error(
+          `popup-menubar: no menu callback registered for window '${request.windowId}'`,
+        );
+      }
+      callback(request.menuName, request.x, request.y, request.restoreFocusId);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
+    if (action === "popup-commands") {
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        POPUP_COMMANDS_REQUEST_TYPE,
+      ) as PopupCommandsRequest;
+      const identifiers: Set<string> = new Set();
+      if (
+        !request ||
+        typeof request.windowId !== "string" ||
+        request.windowId.length === 0 ||
+        (request.restoreFocusId !== undefined &&
+          (typeof request.restoreFocusId !== "string" ||
+            request.restoreFocusId.trim().length === 0)) ||
+        typeof request.x !== "number" ||
+        !Number.isFinite(request.x) ||
+        request.x < 0 ||
+        typeof request.y !== "number" ||
+        !Number.isFinite(request.y) ||
+        request.y < 0 ||
+        !Array.isArray(request.items) ||
+        request.items.length === 0 ||
+        request.items.length > 128 ||
+        request.items.some((item: MenuCommandItem): boolean => {
+          if (
+            !item ||
+            typeof item.id !== "string" ||
+            item.id.trim().length === 0 ||
+            typeof item.text !== "string" ||
+            item.text.trim().length === 0 ||
+            typeof item.enabled !== "boolean" ||
+            identifiers.has(item.id)
+          ) {
+            return true;
+          }
+          identifiers.add(item.id);
+          return false;
+        })
+      ) {
+        throw new Error("Invalid command menu window, items or position");
+      }
+      const callback = getMenuDataCallback(request.windowId)?.onMenuCommands;
+      if (!callback) {
+        throw new Error(
+          `popup-commands: no menu callback registered for window '${request.windowId}'`,
+        );
+      }
+      const items = request.items.map(
+        (item: MenuCommandItem): MenuItemData => ({
+          id: item.id,
+          type: "item",
+          text: item.text,
+          enabled: item.enabled,
+        }),
+      );
+      callback(items, request.x, request.y, request.restoreFocusId);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 

@@ -247,6 +247,23 @@ export { LoginPlugin };
 WebView 的 controller ID 都是既有语义，迁移为插件后不得丢失；WebView 的命名 slot 语义已被
 "一棵树 + `parentHandle` 组合"归一化取代。
 
+
+### 3.4 桌面窗口适配扩展
+
+| 插件 / action | request → response | 生命周期与行为 |
+| --- | --- | --- |
+| `ohos.app-control` / `restart` | `ohos.app_control.RestartRequest` → `ohos.app_control.RestartResponse` | sync / `ability`；重启当前调用 Ability，平台失败向调用者传播 |
+| `ohos.clipboard` / `read-authorized-records` | `ohos.clipboard.ReadAuthorizedRecordsRequest` → `ohos.clipboard.ReadRecordsResponse` | async / `ability`；读取被拒绝时才请求权限，同一次权限请求可共享；会话失效后不得重试 |
+| `ohos.menu` / `popup-menubar` | `ohos.menu.PopupMenubarRequest` → `ohos.menu.Acknowledgement` | async / `ui-context`；保留来源 windowId、内容局部 vp 坐标和可选 restoreFocusId |
+| `ohos.menu` / `popup-commands` | `ohos.menu.PopupCommandsRequest` → `ohos.menu.Acknowledgement` | async / `ui-context`；命令 ID 唯一，点击仍经既有菜单事件分发 |
+| `ohos.window` / 入站 `move-requested` | `ohos.window.MoveRequested` → `ohos.window.MoveResponse` | 在原生 touch 回调栈同步决定是否开始拖窗，不可 await |
+| `ohos.window` / 入站 `close-requested` | `ohos.window.CloseRequested` → `ohos.window.CloseResponse` | 同步返回 preventClose，让应用完成未保存内容确认 |
+
+交互调用可使用 `BridgeCallOptions::for_user_interaction()` 等待用户决定，不设墙钟期限；
+session 销毁仍取消调用。普通平台操作保留默认期限。文件选择支持 `open-mixed` 和可选
+`parentWindowId`；窗口销毁和取消后不得在其他窗口弹出迟到的选择器。
+
+
 ## 4. 执行模式由 trait 限制
 
 `BridgePlugin::Mode` 是封闭 trait 的关联类型，不是可随意切换的配置。它把不正确的线程调用变成

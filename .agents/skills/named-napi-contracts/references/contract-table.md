@@ -56,3 +56,7 @@
 
 下载、导航与标题回调已经使用上述具名 N-API 契约实现。新增 WebView callback 时必须在
 `docs/plugin-development-standard.md` §7.1 记录 request/response 与失败策略，且不得回退到 JSON。
+
+## 桌面窗口扩展
+
+新增 restart、read-authorized-records、popup-menubar、popup-commands，以及 move-requested/close-requested 入站契约，见 `docs/plugin-development-standard.md` §3.4。

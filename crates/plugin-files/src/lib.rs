@@ -29,6 +29,7 @@ pub mod dialog_type {
     pub const OPEN_FILE: &str = "open-file";
     pub const SAVE_FILE: &str = "save-file";
     pub const OPEN_FOLDER: &str = "open-folder";
+    pub const OPEN_MIXED: &str = "open-mixed";
 }
 
 /// One suffix filter group: a display name plus `;`-separated suffixes (e.g. `"md"`).
@@ -77,6 +78,8 @@ pub struct FileDialogOptions {
     /// Suggested file name for the save dialog.
     pub suggested_name: Option<String>,
     pub filters: Vec<FileDialogFilter>,
+    /// Ability window ID that owns the dialog. Omit for the default Ability picker.
+    pub parent_window_id: Option<i64>,
 }
 
 impl_bridge_napi_type!(FileDialogOptions, "ohos.files.DialogOptions");
@@ -89,6 +92,7 @@ impl FileDialogOptions {
             default_location: None,
             suggested_name: None,
             filters: Vec::new(),
+            parent_window_id: None,
         }
     }
 
@@ -112,20 +116,26 @@ impl FileDialogOptions {
         self
     }
 
+    pub fn parent_window_id(mut self, window_id: i64) -> Self {
+        self.parent_window_id = Some(window_id);
+        self
+    }
+
     fn validate(&self) -> Result<()> {
+        if self.parent_window_id.is_some_and(|window_id| window_id < 0) {
+            return Err(Error::from_reason("parent window id must not be negative"));
+        }
         match self.dialog_type.as_str() {
-            dialog_type::OPEN_FILE | dialog_type::SAVE_FILE | dialog_type::OPEN_FOLDER => {}
+            dialog_type::OPEN_FILE
+            | dialog_type::SAVE_FILE
+            | dialog_type::OPEN_FOLDER
+            | dialog_type::OPEN_MIXED => {}
             _ => {
                 return Err(Error::from_reason(format!(
                     "unsupported file dialog type '{}'",
                     self.dialog_type
                 )));
             }
-        }
-        if self.dialog_type == dialog_type::OPEN_FOLDER && self.allow_many {
-            return Err(Error::from_reason(
-                "open-folder dialog does not support allow_many",
-            ));
         }
         if let Some(name) = &self.suggested_name {
             if self.dialog_type != dialog_type::SAVE_FILE || name.trim().is_empty() {
@@ -181,9 +191,7 @@ impl FilesExt for OpenHarmonyApp {
                 .call_async::<FilesBridgePlugin, FileDialogOptions, FileDialogResponse>(
                     "file-dialog",
                     options,
-                    // A system picker waits for user input; browsing files can legitimately
-                    // take several minutes. Use the bridge's interactive-call limit.
-                    BridgeCallOptions::default().with_timeout_ms(300_000),
+                    BridgeCallOptions::for_user_interaction(),
                 )
                 .await
         })
@@ -224,13 +232,25 @@ mod tests {
         assert!(bad_kind.validate().is_err());
 
         let folder_many = FileDialogOptions::new(dialog_type::OPEN_FOLDER).allow_many(true);
-        assert!(folder_many.validate().is_err());
+        assert!(folder_many.validate().is_ok());
+        let mixed = FileDialogOptions::new(dialog_type::OPEN_MIXED).allow_many(true);
+        assert!(mixed.validate().is_ok());
+        assert!(mixed.suggested_name("report.txt").validate().is_err());
 
         let save = FileDialogOptions::new(dialog_type::SAVE_FILE).suggested_name("report.txt");
         assert!(save.validate().is_ok());
         let invalid_name =
             FileDialogOptions::new(dialog_type::OPEN_FILE).suggested_name("report.txt");
         assert!(invalid_name.validate().is_err());
+
+        assert!(FileDialogOptions::new(dialog_type::OPEN_FILE)
+            .parent_window_id(0)
+            .validate()
+            .is_ok());
+        assert!(FileDialogOptions::new(dialog_type::OPEN_FILE)
+            .parent_window_id(-1)
+            .validate()
+            .is_err());
     }
 
     #[test]

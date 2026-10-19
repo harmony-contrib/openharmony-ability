@@ -174,6 +174,89 @@ impl_bridge_napi_type!(MenuPopupRequest, "ohos.menu.PopupRequest");
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+pub struct MenuPopupMenubarRequest {
+    pub window_id: String,
+    pub menu_name: Option<String>,
+    pub x: f64,
+    pub y: f64,
+    /// Inspector ID to restore synchronously when the native popup closes.
+    pub restore_focus_id: Option<String>,
+}
+
+impl_bridge_napi_type!(MenuPopupMenubarRequest, "ohos.menu.PopupMenubarRequest");
+
+impl MenuPopupMenubarRequest {
+    fn validate(&self) -> Result<()> {
+        if self.window_id.is_empty()
+            || !self.x.is_finite()
+            || !self.y.is_finite()
+            || self
+                .restore_focus_id
+                .as_ref()
+                .is_some_and(|identifier| identifier.trim().is_empty())
+        {
+            return Err(Error::from_reason(
+                "Invalid application menu window, position or focus target",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct MenuCommandItem {
+    pub id: String,
+    pub text: String,
+    pub enabled: bool,
+}
+
+impl_bridge_napi_type!(MenuCommandItem, "ohos.menu.CommandItem");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct MenuPopupCommandsRequest {
+    pub window_id: String,
+    pub items: Vec<MenuCommandItem>,
+    /// Content-local logical coordinates in vp.
+    pub x: f64,
+    pub y: f64,
+    /// Inspector ID to restore synchronously when the native popup closes.
+    pub restore_focus_id: Option<String>,
+}
+
+impl_bridge_napi_type!(MenuPopupCommandsRequest, "ohos.menu.PopupCommandsRequest");
+
+impl MenuPopupCommandsRequest {
+    fn validate(&self) -> Result<()> {
+        let mut identifiers = std::collections::HashSet::new();
+        if self.window_id.is_empty()
+            || !self.x.is_finite()
+            || !self.y.is_finite()
+            || self.x < 0.0
+            || self.y < 0.0
+            || self
+                .restore_focus_id
+                .as_ref()
+                .is_some_and(|identifier| identifier.trim().is_empty())
+            || self.items.is_empty()
+            || self.items.len() > 128
+            || self.items.iter().any(|item| {
+                item.id.trim().is_empty()
+                    || item.text.trim().is_empty()
+                    || !identifiers.insert(&item.id)
+            })
+        {
+            return Err(Error::from_reason(
+                "Invalid command menu window, items or position",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
 pub struct MenuSetVisibleRequest {
     pub visible: bool,
     pub window_id: String,
@@ -295,6 +378,22 @@ impl MenuClient {
             .ensure()
     }
 
+    /// Opens native command items; selections use the existing menu-click event.
+    pub async fn popup_commands(&self, request: MenuPopupCommandsRequest) -> Result<()> {
+        request.validate()?;
+        self.call::<MenuPopupCommandsRequest, MenuAcknowledgement>("popup-commands", request)
+            .await?
+            .ensure()
+    }
+
+    /// Opens the published application menu, or one named submenu, at content-local vp coordinates.
+    pub async fn popup_menubar(&self, request: MenuPopupMenubarRequest) -> Result<()> {
+        request.validate()?;
+        self.call::<MenuPopupMenubarRequest, MenuAcknowledgement>("popup-menubar", request)
+            .await?
+            .ensure()
+    }
+
     /// Sets the menu bar visibility for a window.
     pub async fn set_menubar_visible(&self, request: MenuSetVisibleRequest) -> Result<()> {
         let window_id = request.window_id.clone();
@@ -349,6 +448,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn command_menu_contract_and_validation() {
+        assert_eq!(
+            <MenuCommandItem as BridgeNapiType>::TYPE_NAME,
+            "ohos.menu.CommandItem"
+        );
+        assert_eq!(
+            <MenuPopupCommandsRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.menu.PopupCommandsRequest"
+        );
+        let mut request = MenuPopupCommandsRequest {
+            window_id: "7".into(),
+            items: vec![MenuCommandItem {
+                id: "close".into(),
+                text: "Close".into(),
+                enabled: true,
+            }],
+            x: 10.0,
+            y: 20.0,
+            restore_focus_id: None,
+        };
+        assert!(request.validate().is_ok());
+        request.restore_focus_id = Some("render-surface".into());
+        assert!(request.validate().is_ok());
+        request.restore_focus_id = Some(" ".into());
+        assert!(request.validate().is_err());
+        request.restore_focus_id = None;
+        request.items.push(request.items[0].clone());
+        assert!(request.validate().is_err());
+        request.items.pop();
+        request.x = f64::NAN;
+        assert!(request.validate().is_err());
+        request.x = -1.0;
+        assert!(request.validate().is_err());
+        request.x = 0.0;
+        request.items[0].text = " ".into();
+        assert!(request.validate().is_err());
+        request.items.clear();
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn application_menu_validates_optional_focus_target() {
+        let mut request = MenuPopupMenubarRequest {
+            window_id: "main".into(),
+            menu_name: None,
+            x: 10.0,
+            y: 20.0,
+            restore_focus_id: None,
+        };
+        assert!(request.validate().is_ok());
+        request.restore_focus_id = Some("render-surface".into());
+        assert!(request.validate().is_ok());
+        request.restore_focus_id = Some(" ".into());
+        assert!(request.validate().is_err());
+        request.restore_focus_id = None;
+        request.x = f64::NAN;
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
     fn menu_plugin_targets_ui_context() {
         assert_eq!(MenuBridgePlugin::ID, "ohos.menu");
         assert_eq!(
@@ -366,6 +525,10 @@ mod tests {
         assert_eq!(
             <MenuPopupRequest as BridgeNapiType>::TYPE_NAME,
             "ohos.menu.PopupRequest"
+        );
+        assert_eq!(
+            <MenuPopupMenubarRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.menu.PopupMenubarRequest"
         );
         assert_eq!(
             <MenuSetVisibleRequest as BridgeNapiType>::TYPE_NAME,

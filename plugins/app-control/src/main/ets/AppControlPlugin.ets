@@ -12,6 +12,8 @@ import {
 
 const TERMINATE_REQUEST_TYPE = "ohos.app_control.TerminateRequest";
 const TERMINATE_RESPONSE_TYPE = "ohos.app_control.TerminateResponse";
+const RESTART_REQUEST_TYPE = "ohos.app_control.RestartRequest";
+const RESTART_RESPONSE_TYPE = "ohos.app_control.RestartResponse";
 const SET_COLOR_MODE_REQUEST_TYPE = "ohos.app_control.SetColorModeRequest";
 const SET_COLOR_MODE_RESPONSE_TYPE = "ohos.app_control.SetColorModeResponse";
 const HIDE_ABILITY_REQUEST_TYPE = "ohos.app_control.HideAbilityRequest";
@@ -28,6 +30,14 @@ interface SetColorModeRequest {
 }
 
 class TerminateResponse {
+  readonly accepted: boolean;
+
+  constructor(accepted: boolean) {
+    this.accepted = accepted;
+  }
+}
+
+class RestartResponse {
   readonly accepted: boolean;
 
   constructor(accepted: boolean) {
@@ -92,6 +102,29 @@ export class AppControlPlugin extends SyncPluginBase {
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): BridgeTypedValue {
+    if (action === "restart") {
+      if (!context.isActive()) {
+        throw new Error("App-control bridge session is no longer active");
+      }
+      if (
+        payload.typeName !== RESTART_REQUEST_TYPE ||
+        typeof payload.value !== "object" ||
+        payload.value === null
+      ) {
+        throw new Error(`ohos.app-control.restart requires bridge type ${RESTART_REQUEST_TYPE}`);
+      }
+      const ability = context.abilityContext;
+      const want: Want = {
+        bundleName: ability.abilityInfo.bundleName,
+        moduleName: ability.abilityInfo.moduleName,
+        abilityName: ability.abilityInfo.name,
+      };
+      // Recovery restart can only exit when no recoverable Ability is foreground
+      // or it was used within a minute. Explicit restart reports those failures.
+      ability.getApplicationContext().restartApp(want);
+      return { typeName: RESTART_RESPONSE_TYPE, value: new RestartResponse(true) };
+    }
+
     if (action === "terminate") {
       const request = parseTerminateRequest(payload);
       const manager = new process.ProcessManager();

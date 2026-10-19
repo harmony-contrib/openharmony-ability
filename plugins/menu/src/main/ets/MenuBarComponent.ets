@@ -4,6 +4,7 @@ import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
 import { FrameNode, SymbolGlyphModifier } from "@kit.ArkUI";
 import { hilog } from "@kit.PerformanceAnalysisKit";
+import { deviceInfo, systemDateTime } from "@kit.BasicServicesKit";
 
 // --- Per-window click handler registry (MW-1) ---
 const windowMenuClickHandlers: Map<number, (item: MenuItemData) => void> = new Map();
@@ -56,7 +57,14 @@ export interface MenuDataCallback {
   onMenubarJson?: (json: string) => void;
   onMenubarVisible?: (visible: boolean) => void;
   onMenuPopup?: (json: string, x: number, y: number) => void;
+  onMenuCommands?: (items: MenuItemData[], x: number, y: number, restoreFocusId?: string) => void;
   onMenuShown?: (shown: boolean) => void;
+  onApplicationMenu?: (
+    menuName: string | undefined,
+    x: number,
+    y: number,
+    restoreFocusId?: string,
+  ) => void;
 }
 
 const menuDataCallbacks: Map<string, MenuDataCallback> = new Map();
@@ -91,10 +99,12 @@ export function isMenubarVisible(windowId: number): boolean {
 interface MenuRenderData {
   items: MenuItemData[];
   revision: number;
+  menubarId?: string;
 }
 @Component
 export struct MenuBarComponent {
   @Prop windowId: number = 0;
+  @Prop showMenuBar: boolean = true;
   /** Shared AcceleratorMatcher instance — the parent (this package's slot
    *  builder, see MenuPlugin.ets) passes the per-window registry instance from
    *  getAcceleratorMatcher(windowId), and this component rebuilds it in-place
@@ -119,6 +129,15 @@ export struct MenuBarComponent {
   @State private hoveredItemId: string = "";
   @State private popupRevision: number = 0;
   @State private menubarRevision: number = 0;
+  @State private applicationMenu: boolean = false;
+  @State private commandMenu: boolean = false;
+  @State private applicationMenuName: string | undefined = undefined;
+
+  private dismissedDropdownId: string = "";
+  private dismissedDropdownAt: number = 0;
+  private headingPressId: string = "";
+  private headingPressAt: number = 0;
+  private restoreFocusId: string | undefined = undefined;
 
   private iconPixelMaps: Map<string, image.PixelMap> = new Map();
   private popupIconIds: Set<string> = new Set();
@@ -270,85 +289,143 @@ export struct MenuBarComponent {
     ForEach(
       this.splitByDivider(data.items),
       (group: MenuItemData[], index: number) => {
-        MenuItemGroup() {
-          ForEach(
-            group,
-            (item: MenuItemData) => {
-              if (item.type === "submenu") {
-                MenuItem({
-                  content: item.text ?? "",
-                  builder: (): void =>
-                    this.SubmenuContent({
-                      items: item.submenuItems ?? [],
-                      revision: data.revision,
-                    }),
-                  symbolStartIcon: item.nativeIcon
-                    ? this.nativeIconSymbol(item.nativeIcon)
-                    : undefined,
-                }).enabled(item.enabled ?? true);
-              } else if (item.type === "check") {
-                MenuItem({
-                  content: item.text ?? "",
-                  labelInfo: item.accelerator,
-                  symbolStartIcon: item.nativeIcon
-                    ? this.nativeIconSymbol(item.nativeIcon)
-                    : undefined,
-                })
+        if (index > 0) {
+          Divider()
+            // An unconstrained divider measures against the popup window width.
+            .width(256)
+            .color($r("sys.color.ohos_id_color_list_separator"))
+            .margin({ left: 12, right: 12 });
+        }
+        ForEach(
+          group,
+          (item: MenuItemData) => {
+            if (item.type === "submenu") {
+              MenuItem({
+                content: item.text ?? "",
+                builder: (): void =>
+                  this.SubmenuContent({
+                    items: item.submenuItems ?? [],
+                    revision: data.revision,
+                    menubarId: data.menubarId,
+                  }),
+                symbolStartIcon: item.nativeIcon
+                  ? this.nativeIconSymbol(item.nativeIcon)
+                  : undefined,
+              }).enabled(item.enabled ?? true);
+            } else if (item.predefinedType === "paste") {
+              // MenuItem is a focus leaf; a nested button cannot receive keyboard authorization.
+              Row() {
+                PasteButton({ text: PasteDescription.PASTE, buttonType: ButtonType.Normal })
+                  .id(`native-paste-${this.windowId}-${item.id}`)
+                  .width(160)
+                  .height(40)
+                  .align(Alignment.Start)
+                  .fontSize(16)
+                  .fontColor($r("sys.color.ohos_id_color_text_primary"))
+                  // Lower alpha values are forced opaque by the security component.
+                  .backgroundColor(0x1a808080)
+                  .borderRadius(4)
+                  .padding({ left: 12, right: 12, top: 4, bottom: 4 })
                   .enabled(item.enabled ?? true)
-                  .selected(item.checked ?? false)
-                  .selectIcon(true)
-                  .onChange((checked: boolean) => {
-                    item.checked = checked;
+                  .onClick((_event: ClickEvent, result: PasteButtonOnClickResult) => {
+                    if (result !== PasteButtonOnClickResult.SUCCESS) {
+                      hilog.warn(
+                        0x1999,
+                        "MenuBar",
+                        "Native paste authorization failed: %{public}d",
+                        result,
+                      );
+                      try {
+                        this.getUIContext()
+                          .getPromptAction()
+                          .showToast({ message: "Clipboard access was denied" });
+                      } catch (error) {
+                        hilog.warn(
+                          0x1999,
+                          "MenuBar",
+                          "Cannot show paste error: %{public}s",
+                          String(error),
+                        );
+                      }
+                      return;
+                    }
+                    this.menuShown = false;
+                    this.activeDropdownShown = false;
                     const handler = getMenuClickHandler(this.windowId);
                     if (handler) {
                       handler(item);
                     }
-                  });
-              } else if (item.type === "icon" && this.iconPixelMaps.has(item.id)) {
-                MenuItem() {
-                  Row() {
-                    Image(this.iconPixelMaps.get(item.id))
-                      .width(24)
-                      .height(24)
-                      .margin({ right: 8 })
-                    Text(item.text ?? "").fontSize(14)
-                  }
-                }
+                  })
+                Text(item.accelerator ?? "")
+                  .fontSize(16)
+                  .fontColor($r("sys.color.ohos_id_color_text_secondary"))
+                  .textAlign(TextAlign.End)
+              }
+              .width(280)
+              .padding({ left: 0, right: 12 })
+              .justifyContent(FlexAlign.SpaceBetween);
+            } else if (item.type === "check") {
+              MenuItem({
+                content: item.text ?? "",
+                labelInfo: item.accelerator,
+                symbolStartIcon: item.nativeIcon
+                  ? this.nativeIconSymbol(item.nativeIcon)
+                  : undefined,
+              })
                 .enabled(item.enabled ?? true)
-                .onClick(() => {
+                .selected(item.checked ?? false)
+                .selectIcon(true)
+                .onChange((checked: boolean) => {
+                  item.checked = checked;
                   const handler = getMenuClickHandler(this.windowId);
                   if (handler) {
                     handler(item);
                   }
                 });
-              } else {
-                MenuItem({
-                  content: item.text ?? item.predefinedType ?? "",
-                  labelInfo: item.accelerator,
-                  symbolStartIcon: item.nativeIcon
-                    ? this.nativeIconSymbol(item.nativeIcon)
-                    : undefined,
-                })
-                  .enabled(item.enabled ?? true)
-                  .onClick(() => {
-                    const handler = getMenuClickHandler(this.windowId);
-                    hilog.info(
-                      0x1999,
-                      "MenuBar",
-                      "menuItem onClick id=%{public}s windowId=%{public}d handler=%{public}s",
-                      item.id,
-                      this.windowId,
-                      handler ? "found" : "NULL",
-                    );
-                    if (handler) {
-                      handler(item);
-                    }
-                  });
+            } else if (item.type === "icon" && this.iconPixelMaps.has(item.id)) {
+              MenuItem() {
+                Row() {
+                  Image(this.iconPixelMaps.get(item.id))
+                    .width(24)
+                    .height(24)
+                    .margin({ right: 8 })
+                  Text(item.text ?? "").fontSize(14)
+                }
               }
-            },
-            (item: MenuItemData) => item.id,
-          )
-        };
+              .enabled(item.enabled ?? true)
+              .onClick(() => {
+                const handler = getMenuClickHandler(this.windowId);
+                if (handler) {
+                  handler(item);
+                }
+              });
+            } else {
+              MenuItem({
+                content: item.text ?? item.predefinedType ?? "",
+                labelInfo: item.accelerator,
+                symbolStartIcon: item.nativeIcon
+                  ? this.nativeIconSymbol(item.nativeIcon)
+                  : undefined,
+              })
+                .enabled(item.enabled ?? true)
+                .onClick(() => {
+                  const handler = getMenuClickHandler(this.windowId);
+                  hilog.info(
+                    0x1999,
+                    "MenuBar",
+                    "menuItem onClick id=%{public}s windowId=%{public}d handler=%{public}s",
+                    item.id,
+                    this.windowId,
+                    handler ? "found" : "NULL",
+                  );
+                  if (handler) {
+                    handler(item);
+                  }
+                });
+            }
+          },
+          (item: MenuItemData) => item.id,
+        );
       },
       (_group: MenuItemData[], index: number) => `${data.revision}:group_${index}`,
     );
@@ -379,15 +456,28 @@ export struct MenuBarComponent {
   @Builder
   SubmenuContent(data: MenuRenderData) {
     Menu() {
-      this.RenderMenuItems({ items: data.items, revision: data.revision })
-    };
+      this.RenderMenuItems(data)
+    }
+    .onKeyPreIme(() => this.isMenuClosing(data.menubarId));
   }
 
   @Builder
   MenuContent() {
     Menu() {
-      this.RenderMenuItems({ items: this.menuItems, revision: this.popupRevision })
-    };
+      this.RenderMenuItems({
+        items: this.applicationMenu
+          ? this.applicationMenuName === undefined
+            ? this.menubarItems
+            : (this.menubarItems.find(
+                (item: MenuItemData) => item.text === this.applicationMenuName,
+              )?.submenuItems ?? [])
+          : this.menuItems,
+        revision: this.applicationMenu ? this.menubarRevision : this.popupRevision,
+      })
+    }
+    .id(`native-application-menu-${this.windowId}`)
+    .focusable(true)
+    .onKeyPreIme(() => this.isMenuClosing());
   }
 
   @Builder
@@ -410,22 +500,45 @@ export struct MenuBarComponent {
             }
             Text(this.getMenubarItem(itemId)?.text ?? "")
               .fontSize(14)
-              .fontColor((this.getMenubarItem(itemId)?.enabled ?? true) ? "#333333" : "#999999")
+              .fontColor($r("sys.color.font_primary"))
           }
           .padding({ left: 12, right: 12, top: 10, bottom: 10 })
           .enabled(this.getMenubarItem(itemId)?.enabled ?? true)
           .opacity((this.getMenubarItem(itemId)?.enabled ?? true) ? 1.0 : 0.5)
           .backgroundColor(
             this.activeDropdownId === itemId
-              ? "#E0E0E0"
+              ? $r("sys.color.interactive_pressed")
               : this.hoveredItemId === itemId
-                ? "#EBEBEB"
-                : "#F5F5F5",
+                ? $r("sys.color.interactive_hover")
+                : Color.Transparent,
           )
           .onAreaChange((_oldArea: Area, area: Area) => {
             this.menubarItemAreas.set(itemId, area);
           })
-          .onClick(() => {
+          .onTouch((event: TouchEvent) => {
+            if (event.type === TouchType.Down) {
+              this.headingPressId = itemId;
+              this.headingPressAt = event.timestamp;
+            } else if (event.type === TouchType.Cancel) {
+              this.headingPressId = "";
+            }
+          })
+          .onMouse((event: MouseEvent) => {
+            if (event.action === MouseAction.Press) {
+              this.headingPressId = itemId;
+              this.headingPressAt = event.timestamp;
+            }
+          })
+          .onClick((event: ClickEvent) => {
+            // Native dismissal can finish before its triggering press reaches the anchor.
+            // Compare that press with dismissal so a later, separate press can still reopen.
+            const pressedDuringDismissal =
+              this.headingPressId === itemId &&
+              this.headingPressAt > 0 &&
+              this.headingPressAt <= this.dismissedDropdownAt &&
+              (event.source === SourceType.Mouse || event.source === SourceType.TouchScreen);
+            const dismissedByPress = pressedDuringDismissal && this.dismissedDropdownId === itemId;
+            this.headingPressId = "";
             hilog.info(
               0x1999,
               "MenuBar",
@@ -434,12 +547,19 @@ export struct MenuBarComponent {
               this.activeDropdownShown,
               this.activeDropdownId,
             );
-            if (this.activeDropdownShown && this.activeDropdownId === itemId) {
+            if (
+              (this.activeDropdownShown && this.activeDropdownId === itemId) ||
+              dismissedByPress
+            ) {
               this.activeDropdownShown = false;
               this.activeDropdownId = "";
               return;
             }
-            menuWillOpenHandler?.(this.windowId);
+            // Validation covers the whole menubar and requires the application's focus.
+            // Switching an open menu must retain that snapshot while ArkUI owns focus.
+            if (!this.activeDropdownShown && !pressedDuringDismissal) {
+              menuWillOpenHandler?.(this.windowId);
+            }
             this.activeDropdownId = itemId;
             this.activeDropdownShown = true;
           })
@@ -453,13 +573,16 @@ export struct MenuBarComponent {
             this.activeDropdownShown && this.activeDropdownId === itemId,
             this.MenubarDropdownContent(itemId),
             {
-              // Keep menubar dropdowns in their owning window so opening them
-              // does not blur the native content or race with focus restoration.
+              // Keep title dropdowns in their owning window to retain native content focus.
               showInSubWindow: false,
+              transition: TransitionEffect.IDENTITY.animation({ duration: 0 }),
               aboutToAppear: () => this.observeDropdownMouse(itemId),
-              onAppear: () => this.observeDropdownMouse(itemId),
-              aboutToDisappear: () => {
-                this.releaseDropdownMouse(itemId);
+              onDidAppear: () => {
+                this.observeDropdownMouse(itemId);
+                this.focusDropdown(itemId);
+              },
+              aboutToDisappear: () => this.releaseDropdownMouse(itemId),
+              onWillDisappear: () => {
                 hilog.info(
                   0x1999,
                   "MenuBar",
@@ -467,7 +590,16 @@ export struct MenuBarComponent {
                   this.activeDropdownId,
                 );
                 if (this.activeDropdownId === itemId) {
+                  this.dismissedDropdownId = itemId;
+                  this.dismissedDropdownAt = systemDateTime.getUptime(
+                    systemDateTime.TimeType.ACTIVE,
+                    true,
+                  );
                   this.activeDropdownShown = false;
+                }
+              },
+              onDidDisappear: () => {
+                if (!this.activeDropdownShown && this.activeDropdownId === itemId) {
                   this.activeDropdownId = "";
                 }
               },
@@ -479,7 +611,7 @@ export struct MenuBarComponent {
     }
     .width("100%")
     .height(40)
-    .backgroundColor("#F5F5F5")
+    .backgroundColor($r("sys.color.comp_background_primary"))
     .alignItems(VerticalAlign.Center);
   }
 
@@ -491,7 +623,7 @@ export struct MenuBarComponent {
       item &&
       item.enabled !== false
     ) {
-      menuWillOpenHandler?.(this.windowId);
+      // Opening already validated the full menubar before native menu focus took over.
       this.activeDropdownId = itemId;
     }
   }
@@ -556,8 +688,51 @@ export struct MenuBarComponent {
       this.RenderMenuItems({
         items: this.getMenubarItem(itemId)?.submenuItems ?? [],
         revision: this.menubarRevision,
+        menubarId: itemId,
       })
-    }.id(this.dropdownNodeId(itemId));
+    }
+    .id(this.dropdownNodeId(itemId))
+    .focusable(true)
+    .onKeyPreIme(() => this.isMenuClosing(itemId));
+  }
+
+  private isMenuClosing(menubarId?: string): boolean {
+    // ArkUI can deliver queued keys before removing a dismissed popup's focus.
+    // Consume them before MenuItem handles Space/Enter; a click that initiated
+    // dismissal must still reach its normal onClick callback.
+    return menubarId === undefined
+      ? !this.menuShown
+      : !this.activeDropdownShown || this.activeDropdownId !== menubarId;
+  }
+
+  private restorePopupFocus(clearTarget: boolean): void {
+    if (this.menuShown || this.restoreFocusId === undefined) {
+      return;
+    }
+    const restoreFocusId = this.restoreFocusId;
+    if (clearTarget) {
+      this.restoreFocusId = undefined;
+    }
+    // Window activation arrives after queued keys. Restore the content's node
+    // focus in the dismissal callback instead of waiting for that notification.
+    try {
+      this.getUIContext().getFocusController().requestFocus(restoreFocusId);
+    } catch (error) {
+      hilog.warn(0x1999, "MenuBar", "Cannot restore native menu focus: %{public}s", String(error));
+    }
+  }
+
+  private focusDropdown(itemId: string): void {
+    if (!this.activeDropdownShown || this.activeDropdownId !== itemId) {
+      return;
+    }
+    // Wait for the native popup window to become focusable, including when
+    // switching headings while the previous popup is still disappearing.
+    try {
+      this.getUIContext().getFocusController().requestFocus(this.dropdownNodeId(itemId));
+    } catch (error) {
+      hilog.warn(0x1999, "MenuBar", "Cannot focus native menu: %{public}s", String(error));
+    }
   }
 
   private getMenubarItem(itemId: string): MenuItemData | null {
@@ -584,6 +759,9 @@ export struct MenuBarComponent {
         menubarVisibilityTracker.set(this.windowId, visible);
       },
       onMenuPopup: (json: string, x: number, y: number) => {
+        this.restoreFocusId = undefined;
+        this.applicationMenu = false;
+        this.commandMenu = false;
         hilog.info(
           0x1999,
           "MenuBar",
@@ -605,10 +783,45 @@ export struct MenuBarComponent {
       onMenuShown: (shown: boolean) => {
         this.menuShown = shown;
       },
+      onMenuCommands: (items: MenuItemData[], x: number, y: number, restoreFocusId?: string) => {
+        this.restoreFocusId = restoreFocusId;
+        this.applicationMenu = false;
+        this.commandMenu = true;
+        this.popupIconIds.clear();
+        this.cleanupStaleIcons();
+        this.menuItems = items;
+        this.popupRevision++;
+        this.menuX = x;
+        this.menuY = y;
+        this.menuShown = true;
+      },
+      onApplicationMenu: (
+        menuName: string | undefined,
+        x: number,
+        y: number,
+        restoreFocusId?: string,
+      ) => {
+        if (
+          this.menubarItems.length === 0 ||
+          (menuName !== undefined &&
+            !this.menubarItems.some((item: MenuItemData) => item.text === menuName))
+        ) {
+          throw new Error(`Application menu '${menuName ?? "all"}' is not available`);
+        }
+        menuWillOpenHandler?.(this.windowId);
+        this.restoreFocusId = restoreFocusId;
+        this.applicationMenu = true;
+        this.commandMenu = false;
+        this.applicationMenuName = menuName;
+        this.menuX = x;
+        this.menuY = y;
+        this.menuShown = true;
+      },
     });
   }
 
   aboutToDisappear(): void {
+    this.restoreFocusId = undefined;
     for (const itemId of this.dropdownMouseNodes.keys()) {
       this.releaseDropdownMouse(itemId);
     }
@@ -630,31 +843,75 @@ export struct MenuBarComponent {
     this.menubarIconIds.clear();
   }
 
+  private popupOptions(): ContextMenuOptions {
+    return {
+      // offset alone is adjusted by native placement and can snap to the origin after maximizing.
+      anchorPosition: deviceInfo.sdkApiVersion >= 20 ? { x: this.menuX, y: this.menuY } : undefined,
+      offset: deviceInfo.sdkApiVersion >= 20 ? undefined : { x: this.menuX, y: this.menuY },
+      // Otherwise the dismissing press reaches the application's trigger and reopens the menu.
+      modalMode:
+        this.applicationMenu || this.commandMenu ? ModalMode.TARGET_WINDOW : ModalMode.AUTO,
+      transition: TransitionEffect.IDENTITY.animation({ duration: 0 }),
+      onDidAppear: () => {
+        if (!this.menuShown) {
+          return;
+        }
+        try {
+          this.getUIContext()
+            .getFocusController()
+            .requestFocus(`native-application-menu-${this.windowId}`);
+        } catch (error) {
+          hilog.warn(
+            0x1999,
+            "MenuBar",
+            "Cannot focus native application menu: %{public}s",
+            String(error),
+          );
+        }
+      },
+      aboutToDisappear: () => {
+        this.menuShown = false;
+        this.restorePopupFocus(false);
+      },
+      onDidDisappear: () => {
+        this.restorePopupFocus(true);
+      },
+    };
+  }
+
+  private applicationPopupOptions(): MenuOptions {
+    const options: MenuOptions = this.popupOptions();
+    options.showInSubWindow = false;
+    return options;
+  }
+
   // --- Build ---
 
   build() {
     Column() {
       // Menubar row
-      if (this.menubarItems.length > 0 && this.menubarVisible) {
+      if (this.showMenuBar && this.menubarItems.length > 0 && this.menubarVisible) {
         this.MenuBarRow();
       }
 
-      // Popup menu anchor (1x1 invisible). Use bindContextMenu (not bindMenu):
-      // bindMenu + showInSubWindow on an invisible anchor renders visually but
-      // does not deliver pointer events to MenuItem.onClick in the sub-window.
-      // bindContextMenu is the documented sub-window menu API (HarmonyOS 5.0.0/API12+),
-      // and its MenuItem.onClick fires reliably. Position via `offset` (API12);
-      // `anchorPosition` is API20+ and unavailable here.
-      Column()
-        .width(1)
-        .height(1)
-        .position({ x: 0, y: 0 })
-        .bindContextMenu(this.menuShown, this.MenuContent, {
-          offset: { x: this.menuX, y: this.menuY },
-          aboutToDisappear: () => {
-            this.menuShown = false;
-          },
-        })
-    };
+      if (this.applicationMenu || this.commandMenu) {
+        // These menus belong to the content window. A native context-menu
+        // subwindow keeps receiving keys after its closing callback has run.
+        Column()
+          .width(1)
+          .height(1)
+          .position({ x: 0, y: 0 })
+          .bindMenu(this.menuShown, this.MenuContent, this.applicationPopupOptions());
+      } else {
+        // Cross-window context menus need bindContextMenu for reliable item clicks.
+        Column()
+          .width(1)
+          .height(1)
+          .position({ x: 0, y: 0 })
+          .bindContextMenu(this.menuShown, this.MenuContent, this.popupOptions());
+      }
+    }
+    .width("100%")
+    .height(this.showMenuBar && this.menubarVisible && this.menubarItems.length > 0 ? 40 : 0);
   }
 }

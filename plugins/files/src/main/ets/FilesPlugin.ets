@@ -7,6 +7,7 @@ import {
   BridgeTypedValue,
   AsyncPluginBase,
   BridgeContextRequirement,
+  WindowManager,
 } from "@ohos-rs/ability";
 
 const DIALOG_OPTIONS_TYPE = "ohos.files.DialogOptions";
@@ -27,6 +28,11 @@ interface FileDialogOptions {
   defaultLocation?: string | null;
   suggestedName?: string | null;
   filters: FileDialogFilter[];
+  parentWindowId?: number | null;
+}
+
+interface DocumentSelectOptionsWithMultipleFolders {
+  allowsMulFolderSelection?: boolean;
 }
 
 interface DocumentViewPickerWithSelectedIndex {
@@ -49,14 +55,18 @@ function parseDialogOptions(payload: BridgeTypedValue): FileDialogOptions {
   }
   const request = payload.value as FileDialogOptions;
   if (
+    request.parentWindowId != null &&
+    (!Number.isSafeInteger(request.parentWindowId) || request.parentWindowId < 0)
+  ) {
+    throw new Error("file-dialog.parentWindowId must be a non-negative safe integer");
+  }
+  if (
     request.dialogType !== "open-file" &&
     request.dialogType !== "save-file" &&
-    request.dialogType !== "open-folder"
+    request.dialogType !== "open-folder" &&
+    request.dialogType !== "open-mixed"
   ) {
     throw new Error(`file-dialog.dialogType '${request.dialogType}' is unsupported`);
-  }
-  if (request.dialogType === "open-folder" && request.allowMany === true) {
-    throw new Error("open-folder dialog does not support allowMany");
   }
   if (typeof request.filters !== "object") {
     throw new Error("file-dialog.filters must be an array");
@@ -107,10 +117,30 @@ function pickerLocation(location: string | undefined | null): string | undefined
 }
 
 async function showFileDialog(
-  context: common.UIAbilityContext,
+  context: BridgeCallContext,
   options: FileDialogOptions,
 ): Promise<FileDialogResponse> {
-  const documentPicker = new picker.DocumentViewPicker(context);
+  let documentPicker: picker.DocumentViewPicker;
+  if (options.parentWindowId != null) {
+    if (deviceInfo.sdkApiVersion < 13) {
+      throw new Error("Window-owned file dialogs require API 13 or newer");
+    }
+    const manager = WindowManager.getInstance();
+    await manager.waitForWindowCreation(options.parentWindowId);
+    if (!context.isActive() || context.isCancelled()) {
+      throw new Error("File dialog was cancelled before its parent window was ready");
+    }
+    const parent = manager.getWindow(options.parentWindowId);
+    if (parent === undefined) {
+      throw new Error(`File dialog parent window ${options.parentWindowId} no longer exists`);
+    }
+    // An Ability can keep running after its original main workspace closes. Using only its
+    // context would attach this picker to that hidden window instead of the requesting one.
+    const abilityContext = parent.getUIContext().getHostContext() as common.UIAbilityContext;
+    documentPicker = new picker.DocumentViewPicker(abilityContext, parent);
+  } else {
+    documentPicker = new picker.DocumentViewPicker(context.abilityContext);
+  }
   const location = pickerLocation(options.defaultLocation);
   const suffixFilters = pickerSuffixFilters(options.filters || []);
 
@@ -141,8 +171,21 @@ async function showFileDialog(
     // Product-type allowlists reject capable tablets; the selectMode SysCap also
     // changes from FolderSelection to UserFileService in API 26.
     selectOptions.selectMode = picker.DocumentSelectMode.FOLDER;
-    selectOptions.maxSelectNumber = 1;
+    if (deviceInfo.sdkApiVersion < 26) {
+      selectOptions.maxSelectNumber = 1;
+    }
     selectOptions.fileSuffixFilters = undefined;
+  } else if (options.dialogType === "open-mixed") {
+    selectOptions.selectMode = picker.DocumentSelectMode.MIXED;
+  }
+  if (
+    options.dialogType !== "open-file" &&
+    deviceInfo.sdkApiVersion >= 26 &&
+    canIUse("SystemCapability.FileManagement.UserFileService.FolderSelection")
+  ) {
+    // Keep the API-26 property behind a runtime guard for the API-12 package baseline.
+    (selectOptions as DocumentSelectOptionsWithMultipleFolders).allowsMulFolderSelection =
+      options.allowMany;
   }
   return new FileDialogResponse(await documentPicker.select(selectOptions), -1);
 }
@@ -156,7 +199,7 @@ export class FilesPlugin extends AsyncPluginBase {
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
-    if (!context.isActive()) {
+    if (!context.isActive() || context.isCancelled()) {
       throw new Error("File dialog plugin is not active");
     }
     if (action !== "file-dialog") {
@@ -165,7 +208,7 @@ export class FilesPlugin extends AsyncPluginBase {
     const options = parseDialogOptions(payload);
     let response: FileDialogResponse;
     try {
-      response = await showFileDialog(context.abilityContext, options);
+      response = await showFileDialog(context, options);
     } catch (error) {
       const detail = error as BusinessError;
       throw new Error(
@@ -173,8 +216,8 @@ export class FilesPlugin extends AsyncPluginBase {
           `api=${deviceInfo.sdkApiVersion}, code=${detail.code ?? "unknown"}): ${detail.message}`,
       );
     }
-    if (!context.isActive()) {
-      throw new Error("Ability was destroyed while the file dialog was pending");
+    if (!context.isActive() || context.isCancelled()) {
+      throw new Error("File dialog was cancelled or its Ability was destroyed");
     }
     return { typeName: DIALOG_RESPONSE_TYPE, value: response };
   }

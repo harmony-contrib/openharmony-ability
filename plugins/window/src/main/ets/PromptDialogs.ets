@@ -22,16 +22,19 @@ class PromptModel {
   readonly choose: (index: number) => void;
   readonly placement: PromptPlacement;
   readonly measure: (width: number, height: number) => void;
+  readonly focusId: string;
   constructor(
     request: WindowPromptRequest,
     choose: (index: number) => void,
     placement: PromptPlacement,
     measure: (width: number, height: number) => void,
+    focusId: string,
   ) {
     this.request = request;
     this.choose = choose;
     this.placement = placement;
     this.measure = measure;
+    this.focusId = focusId;
   }
 }
 
@@ -64,7 +67,9 @@ function promptBuilder(model: PromptModel) {
       Column({ space: 8 }) {
         ForEach(model.request.buttons, (label: string, index: number) => {
           Button(label)
+            .id(`${model.focusId}-${index}`)
             .width("100%")
+            .defaultFocus(index === 0)
             .onClick(() => model.choose(index));
         })
       }.width("100%")
@@ -83,6 +88,8 @@ function promptBuilder(model: PromptModel) {
 
 /** One dialog lifetime; only ArkTS owns the ComponentContent and UIContext. */
 class PromptSession {
+  private static nextFocusId: number = 0;
+  private readonly focusId: string = `native-window-prompt-${PromptSession.nextFocusId++}`;
   private readonly uiContext: UIContext;
   private readonly targetWindow: window.Window;
   private readonly request: WindowPromptRequest;
@@ -100,6 +107,12 @@ class PromptSession {
   private lastOffset?: PromptOffset;
   private positionUpdates: Promise<void> = Promise.resolve();
   private sizeListener?: (size: window.Size) => void;
+  private previousFocusActive?: boolean;
+  private disappearing: boolean = false;
+  private resolveDisappearance?: () => void;
+  private readonly disappearance: Promise<void> = new Promise((resolve) => {
+    this.resolveDisappearance = resolve;
+  });
 
   constructor(
     targetWindow: window.Window,
@@ -142,6 +155,7 @@ class PromptSession {
         this.measuredHeight = height;
         this.updatePosition();
       },
+      this.focusId,
     );
   }
 
@@ -224,7 +238,25 @@ class PromptSession {
           autoCancel: this.request.cancelIndex !== undefined && this.request.cancelIndex !== null,
           alignment: this.request.anchor ? DialogAlignment.TopStart : DialogAlignment.Center,
           offset: this.offset(),
+          onDidAppear: (): void => {
+            if (this.completed || !this.context.isActive()) {
+              return;
+            }
+            // ComponentContent can mount after the dialog's initial focus pass.
+            try {
+              const controller = this.uiContext.getFocusController();
+              this.previousFocusActive = controller.isActive();
+              controller.activate(true);
+              controller.requestFocus(`${this.focusId}-0`);
+            } catch (error) {
+              console.warn(`[WindowPrompt] default focus failed: ${String(error)}`);
+            }
+          },
+          onWillDisappear: (): void => {
+            this.disappearing = true;
+          },
           onDidDisappear: (): void => {
+            this.resolveDisappearance?.();
             void this.cancel();
           },
           onWillDismiss: (action: DismissDialogAction): void => {
@@ -278,6 +310,7 @@ class PromptSession {
   }
 
   async cancel(): Promise<void> {
+    this.resolveDisappearance?.();
     if (!this.completed) {
       this.completed = true;
       this.reject?.(new Error("Native prompt was cancelled by window/session teardown"));
@@ -300,9 +333,28 @@ class PromptSession {
 
   private async closeOpened(content: ComponentContent<PromptModel>): Promise<void> {
     await this.positionUpdates;
+    let closeRequested = false;
     try {
       await this.uiContext.getPromptAction().closeCustomDialog(content);
-    } catch {}
+      closeRequested = true;
+    } catch (error) {
+      // Auto-dismiss removes the dialog from the SDK registry before its animation ends.
+      if (!this.disappearing) {
+        console.warn(`[WindowPrompt] close failed: ${String(error)}`);
+      }
+    }
+    // The SDK resolves closeCustomDialog before removing its animated focus scope.
+    // Returning a choice sooner can open the next system dialog over that scope.
+    if ((closeRequested || this.disappearing) && this.context.isActive()) {
+      await this.disappearance;
+    }
+    if (this.previousFocusActive !== undefined && this.context.isActive()) {
+      try {
+        this.uiContext.getFocusController().activate(this.previousFocusActive);
+      } catch (error) {
+        console.warn(`[WindowPrompt] focus activation restore failed: ${String(error)}`);
+      }
+    }
   }
 
   disposeContent(): void {

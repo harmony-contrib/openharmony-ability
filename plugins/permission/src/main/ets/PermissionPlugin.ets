@@ -1,10 +1,12 @@
 import abilityAccessCtrl, { Permissions } from "@ohos.abilityAccessCtrl";
+import common from "@ohos.app.ability.common";
 import hilog from "@ohos.hilog";
 import {
   BridgeCallContext,
   BridgeTypedValue,
   AsyncPluginBase,
   BridgeContextRequirement,
+  WindowManager,
 } from "@ohos-rs/ability";
 
 const TAG = "PermissionBridgePlugin";
@@ -51,6 +53,9 @@ export class PermissionPlugin extends AsyncPluginBase {
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
+    if (!context.isActive()) {
+      throw new Error("Ability is no longer active");
+    }
     if (action !== "request") {
       throw new Error(`Unsupported ohos.permission action '${action}'`);
     }
@@ -61,8 +66,14 @@ export class PermissionPlugin extends AsyncPluginBase {
     }
     try {
       const manager = abilityAccessCtrl.createAtManager();
+      // Independent windows share a bridge session but have their own Ability.
+      // Attaching to the original Ability can hide the dialog behind the caller.
+      const focusedWindow = WindowManager.getInstance().getFocusedWindow();
+      const abilityContext = focusedWindow
+        ? (focusedWindow.getUIContext().getHostContext() as common.UIAbilityContext)
+        : context.abilityContext;
       const result = await manager.requestPermissionsFromUser(
-        context.abilityContext,
+        abilityContext,
         permissions as Permissions[],
       );
       const authResults = result.authResults || [];

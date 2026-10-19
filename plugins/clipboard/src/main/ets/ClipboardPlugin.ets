@@ -1,4 +1,6 @@
 import pasteboard from "@ohos.pasteboard";
+import abilityAccessCtrl from "@ohos.abilityAccessCtrl";
+import common from "@ohos.app.ability.common";
 import { image } from "@kit.ImageKit";
 import { util } from "@kit.ArkTS";
 import { BusinessError } from "@kit.BasicServicesKit";
@@ -9,8 +11,10 @@ import {
   BridgeTypedValue,
   BridgeContextRequirement,
   expectBridgeRequestType,
+  WindowManager,
 } from "@ohos-rs/ability";
 
+const READ_AUTHORIZED_RECORDS_REQUEST_TYPE = "ohos.clipboard.ReadAuthorizedRecordsRequest";
 const READ_TEXT_REQUEST_TYPE = "ohos.clipboard.ReadTextRequest";
 const READ_TEXT_RESPONSE_TYPE = "ohos.clipboard.ReadTextResponse";
 const READ_CONTENT_RESPONSE_TYPE = "ohos.clipboard.ReadContentResponse";
@@ -135,6 +139,10 @@ export class ClipboardPlugin extends AsyncPluginBase {
   private readonly metadataMimeType: string;
 
   private updateListener?: () => void;
+  private observedPasteboard?: pasteboard.SystemPasteboard;
+  private initialization?: Promise<void>;
+  private disposed: boolean = false;
+  private readPermissionRequest?: Promise<void>;
 
   constructor(options: ClipboardPluginOptions) {
     super();
@@ -161,8 +169,9 @@ export class ClipboardPlugin extends AsyncPluginBase {
   }
 
   override onInstall(context: BridgePluginHookContext): void {
-    this.updateListener = (): void => {
-      if (!context.isActive()) {
+    this.disposed = false;
+    const updateListener = (): void => {
+      if (!context.isActive() || this.updateListener !== updateListener) {
         return;
       }
       try {
@@ -171,14 +180,104 @@ export class ClipboardPlugin extends AsyncPluginBase {
         console.warn(`[Clipboard] update notification failed: ${String(error)}`);
       }
     };
-    pasteboard.getSystemPasteboard().on("update", this.updateListener);
+    this.updateListener = updateListener;
+    const systemPasteboard = pasteboard.getSystemPasteboard();
+    // on("update") initializes the native singleton through synchronous Binder IPC.
+    // hasData() connects on the SDK's worker first, without reading clipboard contents
+    // or holding up Ability startup while the system service is loading.
+    this.initialization = systemPasteboard.hasData().then((): void => {
+      if (!context.isActive() || this.updateListener !== updateListener) {
+        return;
+      }
+      systemPasteboard.on("update", updateListener);
+      this.observedPasteboard = systemPasteboard;
+    });
+    this.initialization.catch((error: Error): void => {
+      console.warn(`[Clipboard] initialization failed: ${String(error)}`);
+    });
   }
 
   override onDispose(): void {
-    if (this.updateListener) {
-      pasteboard.getSystemPasteboard().off("update", this.updateListener);
-      this.updateListener = undefined;
+    const systemPasteboard = this.observedPasteboard;
+    const updateListener = this.updateListener;
+    this.disposed = true;
+    this.observedPasteboard = undefined;
+    this.updateListener = undefined;
+    this.initialization = undefined;
+    this.readPermissionRequest = undefined;
+    if (systemPasteboard && updateListener) {
+      try {
+        systemPasteboard.off("update", updateListener);
+      } catch (error) {
+        console.warn(`[Clipboard] removing update listener failed: ${String(error)}`);
+      }
     }
+  }
+
+  private async requestReadPermission(context: BridgeCallContext): Promise<void> {
+    if (this.disposed || !context.isActive()) {
+      throw new Error("Clipboard permission request was cancelled");
+    }
+    let request = this.readPermissionRequest;
+    if (!request) {
+      const focusedWindow = WindowManager.getInstance().getFocusedWindow();
+      // Secondary workspaces have a different Ability; its dialog must own the focus.
+      const abilityContext = focusedWindow
+        ? (focusedWindow.getUIContext().getHostContext() as common.UIAbilityContext)
+        : context.abilityContext;
+      request = abilityAccessCtrl
+        .createAtManager()
+        .requestPermissionsFromUser(abilityContext, ["ohos.permission.READ_PASTEBOARD"])
+        .then((result): void => {
+          if (result.authResults?.[0] !== 0) {
+            throw new Error(
+              "Clipboard access was denied. Allow clipboard access for the application in system settings.",
+            );
+          }
+        })
+        .finally((): void => {
+          if (this.readPermissionRequest === request) {
+            this.readPermissionRequest = undefined;
+          }
+        });
+      this.readPermissionRequest = request;
+    }
+    await request;
+    if (this.disposed || !context.isActive()) {
+      throw new Error("Clipboard permission request was cancelled");
+    }
+  }
+
+  private async readRecordsData(
+    context: BridgeCallContext,
+    authorize: boolean,
+  ): Promise<pasteboard.PasteData> {
+    const systemPasteboard = pasteboard.getSystemPasteboard();
+    try {
+      const data = await systemPasteboard.getData();
+      if (data.getRecordCount() > 0 || !(await systemPasteboard.hasData())) {
+        return data;
+      }
+    } catch (error) {
+      if (!authorize || (error as BusinessError).code !== 201) {
+        throw new Error(`Clipboard getData failed: ${String(error)}`);
+      }
+    }
+    if (!authorize) {
+      throw new Error(
+        "Clipboard data is unreadable; check READ_PASTEBOARD signing profile ACL and runtime authorization",
+      );
+    }
+    // A native PasteButton or shortcut may already grant temporary access.
+    // Request persistent access only when that ordinary read could not succeed.
+    await this.requestReadPermission(context);
+    const data = await systemPasteboard.getData();
+    if (data.getRecordCount() === 0 && (await systemPasteboard.hasData())) {
+      throw new Error(
+        "Clipboard data is unreadable after authorization; check READ_PASTEBOARD signing profile ACL",
+      );
+    }
+    return data;
   }
 
   async invokeAsync(
@@ -186,7 +285,8 @@ export class ClipboardPlugin extends AsyncPluginBase {
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
-    if (!context.isActive()) {
+    await this.initialization;
+    if (this.disposed || !context.isActive()) {
       throw new Error("Bridge session is no longer active");
     }
 
@@ -272,15 +372,16 @@ export class ClipboardPlugin extends AsyncPluginBase {
       }
     }
 
-    if (action === "read-records") {
-      expectBridgeRequestType(payload, this.id, action, READ_TEXT_REQUEST_TYPE);
-      const systemPasteboard = pasteboard.getSystemPasteboard();
-      const data = await systemPasteboard.getData().catch((error: Error): never => {
-        throw new Error(`Clipboard getData failed: ${String(error)}`);
-      });
-      if (data.getRecordCount() === 0 && (await systemPasteboard.hasData())) {
-        throw new Error("Clipboard data is unreadable; check READ_PASTEBOARD signing profile ACL");
-      }
+    if (action === "read-records" || action === "read-authorized-records") {
+      expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        action === "read-authorized-records"
+          ? READ_AUTHORIZED_RECORDS_REQUEST_TYPE
+          : READ_TEXT_REQUEST_TYPE,
+      );
+      const data = await this.readRecordsData(context, action === "read-authorized-records");
       const entries: ClipboardRecord[] = [];
       for (let index = 0; index < data.getRecordCount(); index++) {
         const record = data.getRecordAt(index);
