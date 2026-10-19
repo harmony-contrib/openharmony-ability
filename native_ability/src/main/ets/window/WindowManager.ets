@@ -125,18 +125,18 @@ export class WindowManager {
   private independentWindowAbility?: string;
   private pendingAbilityWindows: Map<number, PendingAbilityWindow> = new Map();
   private deferredAbilityWindows: Map<number, DeferredAbilityWindow> = new Map();
-  private closeInterceptors: Map<string, (windowId: number) => boolean> = new Map();
+  private closeInterceptors: Set<(windowId: number) => boolean> = new Set();
   private closeListeners: Map<number, () => Promise<boolean>> = new Map();
 
-  setCloseRequestInterceptor(
-    sessionId: string,
-    handler: ((windowId: number) => boolean) | undefined,
-  ): void {
-    if (handler) {
-      this.closeInterceptors.set(sessionId, handler);
-    } else {
-      this.closeInterceptors.delete(sessionId);
-    }
+  pendingWindowModuleName(windowId: number): string | undefined {
+    return this.pendingAbilityWindows.get(windowId)?.options.nativeModuleName;
+  }
+
+  registerCloseRequestInterceptor(handler: (windowId: number) => boolean): () => void {
+    this.closeInterceptors.add(handler);
+    return (): void => {
+      this.closeInterceptors.delete(handler);
+    };
   }
 
   requestWindowClose(windowId: number): boolean {
@@ -2031,41 +2031,29 @@ export class WindowManager {
         ensureCreationActive();
       }
 
-      hilog.info(
-        DOMAIN,
-        "WindowManager",
-        `Resizing window %{public}d to %{public}dx%{public}d`,
-        windowId,
-        width,
-        height,
-      );
-      await win.resize(width, height);
+      const canPlace =
+        !this.isUIAbilityMainWindow(windowId) ||
+        win.getWindowStatus() === window.WindowStatusType.FLOATING;
+      const position = canPlace
+        ? await this.resolveWindowPosition(win, x, y, displayId)
+        : undefined;
       ensureCreationActive();
-      const position = await this.resolveWindowPosition(win, x, y, displayId);
-      ensureCreationActive();
-      hilog.info(
-        DOMAIN,
-        "WindowManager",
-        `Moving window %{public}d to %{public}d,%{public}d`,
-        windowId,
-        x,
-        y,
-      );
-      if (displayId === undefined) {
-        await win.moveWindowTo(position.x, position.y);
+      if (canPlace) {
+        await win.resize(width, height);
         ensureCreationActive();
-      } else {
-        await win.moveWindowToGlobal(position.x, position.y, { displayId });
-        ensureCreationActive();
-        hilog.info(
-          DOMAIN,
-          "WindowManager",
-          "Sub-window %{public}d requested display %{public}d, reported display %{public}d",
-          windowId,
-          displayId,
-          win.getWindowProperties().displayId ?? -1,
-        );
       }
+      const applyPosition = async (): Promise<void> => {
+        if (!position) {
+          return;
+        }
+        if (displayId === undefined) {
+          await win.moveWindowTo(position.x, position.y);
+        } else {
+          await win.moveWindowToGlobal(position.x, position.y, { displayId });
+        }
+        ensureCreationActive();
+      };
+      await applyPosition();
       if (opts.show !== false) {
         if (deviceInfo.sdkApiVersion >= 20 && opts.modal !== true) {
           await win.showWindow({ focusOnShow: opts.focus ?? true });
@@ -2075,15 +2063,8 @@ export class WindowManager {
           ensureCreationActive();
         }
       }
-      // showWindow() repositions a newly created float window on 2in1.
-      // Replay the same effective position, including phone bounds clamping.
-      if (displayId === undefined) {
-        await win.moveWindowTo(position.x, position.y);
-        ensureCreationActive();
-      } else {
-        await win.moveWindowToGlobal(position.x, position.y, { displayId });
-        ensureCreationActive();
-      }
+      // Showing a floating window can reposition it on 2in1.
+      await applyPosition();
       hilog.info(DOMAIN, "WindowManager", `Window initialized: %{public}d`, windowId);
     } catch (err) {
       hilog.error(

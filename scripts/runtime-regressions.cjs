@@ -1605,15 +1605,15 @@ test("system termination defers to the live main-window close handler", () => {
   const { NativeAbility } = runtime.load("native_ability/src/main/ets/ability/NativeAbility.ets");
   const ability = new NativeAbility();
   const requests = [];
-  manager.setCloseRequestInterceptor("zed", (windowId) => { requests.push(windowId); return true; });
+  const removeClose = manager.registerCloseRequestInterceptor((windowId) => { requests.push(windowId); return true; });
   assert.equal(ability.onPrepareToTerminate(), false, "before an active session there is no app window to close");
   ability.acceptingLifecycle = true;
   ability.windowStageActive = true;
   assert.equal(ability.onPrepareToTerminate(), true, "defer synchronously before the OS destroys the Ability");
   assert.deepEqual(requests, [0]);
-  manager.setCloseRequestInterceptor("zed", undefined);
+  removeClose();
   assert.equal(ability.onPrepareToTerminate(), false, "an app without a close handler retains system behavior");
-  manager.setCloseRequestInterceptor("zed", () => { throw new Error("must not route into an inactive session"); });
+  manager.registerCloseRequestInterceptor(() => { throw new Error("must not route into an inactive session"); });
   ability.windowStageActive = false;
   assert.equal(ability.onPrepareToTerminate(), false);
   ability.windowStageActive = true;
@@ -1622,11 +1622,15 @@ test("system termination defers to the live main-window close handler", () => {
 });
 
 function abilityWindowRuntime({ start, initialized = true, globals = {} } = {}) {
-  const closed = [], started = [], nativeClosed = [];
+  const closed = [], started = [], nativeClosed = [], notifiedModules = [];
   const runtime = loader({
     "@kit.AbilityKit": { UIAbility: class {} },
     "@kit.BasicServicesKit": { deviceInfo: { sdkApiVersion: 26, deviceType: "2in1" } },
     "./ProcessInitializer": { ProcessInitializer: { isInitialized: () => initialized } },
+    "../runtime/NativeModuleLoader": { NativeModuleLoader: { getLoadedModule: (moduleName) => ({
+      notifyNativeWindowClose(id) { nativeClosed.push(id); notifiedModules.push(moduleName); },
+      notifyWindowClose() {},
+    }) } },
     "./type": {},
     "../helper/constants": { DOMAIN: 0, MAIN_WINDOW_ID: 0, NATIVE_MODULE_STORAGE_KEY: "native" },
   }, {
@@ -1653,6 +1657,7 @@ function abilityWindowRuntime({ start, initialized = true, globals = {} } = {}) 
       off(name, listener) { assert.equal(handlers.get(name), listener); handlers.delete(name); },
       async loadContentByName() { if (loading) await loading; if (phase === "load") throw new Error(phase); },
       getUIContext: () => ({}),
+      getWindowStatus: () => windowApi.WindowStatusType.FLOATING,
       async resize() { calls.push("resize"); if (resizing) await resizing; if (phase === "resize") throw new Error(phase); },
       async moveWindowTo() { if (phase === "move") throw new Error(phase); },
       async showWindow(options) { calls.push("show"); assert.equal(options?.focusOnShow, false, "explicit show requests retain the requested focus policy"); if (phase === "show") throw new Error(phase); },
@@ -1668,7 +1673,7 @@ function abilityWindowRuntime({ start, initialized = true, globals = {} } = {}) 
     return { ability, win, handlers, subscriptions, calls };
   }
   const options = (id) => ({ windowId: id, name: `workspace-${id}`, independent: true, nativeModuleName: "zed", show: true, focus: false });
-  return { runtime, manager, NativeWindowAbility, options, attach, started, closed, nativeClosed };
+  return { runtime, manager, NativeWindowAbility, options, attach, started, closed, nativeClosed, notifiedModules };
 }
 
 test("independent workspaces share the process and close only their own Ability", async () => {
@@ -1686,7 +1691,7 @@ test("independent workspaces share the process and close only their own Ability"
     assert.equal(instance.subscriptions.filter((name) => name === "windowEvent").length, 1);
   }
   const closeRequests = [];
-  state.manager.setCloseRequestInterceptor("zed", (id) => { closeRequests.push(id); return true; });
+  state.manager.registerCloseRequestInterceptor((id) => { closeRequests.push(id); return true; });
   assert.equal(window9.ability.onPrepareToTerminate(), true);
   assert.equal(window7.ability.onPrepareToTerminate(), true);
   assert.deepEqual(closeRequests, [9, 7]);
@@ -1790,10 +1795,12 @@ test("a cold workspace launch restores the entry Ability instead of initializing
     currentHapModuleInfo: { mainElementName: "EntryAbility" },
     async terminateSelf() { state.closed.push(7); },
   };
-  ability.onCreate({ parameters: { "openharmony.ability.windowId": 7 } });
+  ability.onCreate({ parameters: { "openharmony.ability.windowId": 7, document: "fixture" }, uri: "test://document" });
   ability.onWindowStageCreate({});
   await flush();
   assert.deepEqual(state.started.map(({ want }) => want.abilityName), ["EntryAbility"]);
+  assert.equal(state.started[0].want.parameters.document, "fixture");
+  assert.equal(state.started[0].want.uri, "test://document");
   assert.deepEqual(state.closed, [7]);
   assert.equal(ability.onPrepareToTerminate(), false);
   assert.equal(state.manager.isUIAbilityMainWindow(0), true);
@@ -2458,4 +2465,79 @@ test("popup dismissal preserves unspecified focus and releases a destroyed targe
   removed.menu.finishDismissal();
   assert.equal(removed.menu.restoreFocusId, undefined);
   assert.equal(removed.warnings.length, 2);
+});
+
+
+test("close registrations from modules sharing a session survive each other's lifecycle", async () => {
+  const { manager, l } = managerFor();
+  const { WindowPlugin } = l.load("plugins/window/src/main/ets/WindowPlugin.ets");
+  const first = new WindowPlugin(), second = new WindowPlugin(), calls = [];
+  const context = (name, veto) => ({ sessionId: "shared", isActive: () => true,
+    invokeNativeSync() { calls.push(name); return { preventClose: veto }; } });
+  const firstContext = context("first", true), secondContext = context("second", false);
+  first.onLifecycle({ kind: "window-stage-create" }, firstContext);
+  second.onLifecycle({ kind: "window-stage-create" }, secondContext);
+  assert.equal(manager.requestWindowClose(0), true);
+  assert.deepEqual(calls, ["first"]);
+  calls.length = 0;
+  second.onLifecycle({ kind: "window-stage-destroy" }, secondContext);
+  assert.equal(manager.requestWindowClose(0), true);
+  assert.deepEqual(calls, ["first"]);
+  await first.onDispose();
+  assert.equal(manager.requestWindowClose(0), false);
+});
+
+test("window zero targets its component host before the process primary", async () => {
+  const { manager, l } = managerFor();
+  const { WindowPlugin } = l.load("plugins/window/src/main/ets/WindowPlugin.ets");
+  const primary = {}, secondary = {};
+  manager.uiAbilityStages.set(0, { getMainWindowSync: () => primary });
+  const plugin = new WindowPlugin();
+  assert.equal(await plugin.requireWindow(0, { isActive: () => true, getWindow: () => secondary }), secondary);
+  assert.equal(await plugin.requireWindow(0, { isActive: () => true, getWindow: () => undefined }), primary);
+});
+
+test("clipboard observation retries after a transient connection failure", async () => {
+  let attempts = 0, writes = 0, listener;
+  const board = { hasData() { return ++attempts === 1 ? Promise.reject(new Error("starting")) : Promise.resolve(false); },
+    on(_event, callback) { listener = callback; }, off() {}, async setData() { writes++; } };
+  const { ClipboardPlugin } = loader({ "@kit.ArkTS": {}, "@ohos.pasteboard": {
+    getSystemPasteboard: () => board, createData: (_mime, text) => ({ text }),
+    MIMETYPE_TEXT_PLAIN: "text/plain" } }).load("plugins/clipboard/src/main/ets/ClipboardPlugin.ets");
+  const plugin = new ClipboardPlugin({ metadataMimeType: "application/x-test" });
+  let changed = 0;
+  const context = { isActive: () => true, invokeNativeSync() { changed++; } };
+  const request = { typeName: "ohos.clipboard.WriteTextRequest", value: { text: "retry" } };
+  plugin.onInstall(context);
+  await assert.rejects(plugin.invokeAsync("write-text", request, context), /starting/);
+  await plugin.invokeAsync("write-text", request, context);
+  listener();
+  assert.equal(attempts, 2);
+  assert.equal(writes, 1);
+  assert.equal(changed, 1);
+  plugin.onDispose();
+});
+
+
+test("an independent window notifies the native module which created it", async () => {
+  const state = abilityWindowRuntime();
+  const options = { ...state.options(7), nativeModuleName: "secondary-module" };
+  const creation = state.manager.createSubWindow(options);
+  const instance = state.attach(7);
+  await creation;
+  await state.manager.destroyWindow(7);
+  instance.ability.onDestroy();
+  assert.deepEqual(state.notifiedModules, ["secondary-module"]);
+});
+
+test("a fullscreen Ability window does not require floating geometry", async () => {
+  const state = abilityWindowRuntime();
+  const creation = state.manager.createSubWindow(state.options(7));
+  const instance = state.attach(7);
+  instance.win.getWindowStatus = () => windowApi.WindowStatusType.FULL_SCREEN;
+  instance.win.resize = async () => { assert.fail("fullscreen cannot resize"); };
+  instance.win.moveWindowTo = async () => { assert.fail("fullscreen cannot move"); };
+  await creation;
+  assert.equal(state.manager.getWindow(7), instance.win);
+  await state.manager.destroyWindow(7);
 });

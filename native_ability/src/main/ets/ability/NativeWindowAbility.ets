@@ -1,13 +1,14 @@
 import { UIAbility, Want } from "@kit.AbilityKit";
 import window from "@ohos.window";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { Module } from "./type";
 import { ProcessInitializer } from "./ProcessInitializer";
+import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { WindowManager, INDEPENDENT_WINDOW_ID_PARAMETER } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
+import { DOMAIN } from "../helper/constants";
 
 export class NativeWindowAbility extends UIAbility {
   private windowId?: number;
+  private moduleName?: string;
 
   onCreate(want: Want): void {
     const windowId = want.parameters?.[INDEPENDENT_WINDOW_ID_PARAMETER];
@@ -19,23 +20,25 @@ export class NativeWindowAbility extends UIAbility {
       WindowManager.getInstance().hasPendingAbilityWindow(windowId)
     ) {
       this.windowId = windowId;
+      this.moduleName = WindowManager.getInstance().pendingWindowModuleName(windowId);
       return;
     }
-    // Recents can relaunch a workspace after its process was killed. Only the
-    // entry Ability may initialize Rust and restore the editor's saved session.
-    this.restorePrimaryAbility().catch((error: Error) => {
+    // Only the entry Ability initializes process-wide modules after process death.
+    // Hosts may override recovery to select their own document or workspace.
+    this.restoreApplication(want).catch((error: Error) => {
       hilog.error(
         DOMAIN,
         "NativeWindowAbility",
-        "Workspace restore failed: %{public}s",
+        "Application restore failed: %{public}s",
         String(error),
       );
     });
   }
 
-  private async restorePrimaryAbility(): Promise<void> {
+  protected async restoreApplication(want: Want): Promise<void> {
     try {
       await this.context.startAbility({
+        ...want,
         bundleName: this.context.abilityInfo.bundleName,
         moduleName: this.context.abilityInfo.moduleName,
         abilityName: this.context.currentHapModuleInfo.mainElementName,
@@ -55,7 +58,7 @@ export class NativeWindowAbility extends UIAbility {
         hilog.error(
           DOMAIN,
           "NativeWindowAbility",
-          "Workspace creation failed: %{public}s",
+          "Window creation failed: %{public}s",
           String(error),
         );
         await this.context.terminateSelf();
@@ -64,7 +67,7 @@ export class NativeWindowAbility extends UIAbility {
         hilog.error(
           DOMAIN,
           "NativeWindowAbility",
-          "Workspace cleanup failed: %{public}s",
+          "Window cleanup failed: %{public}s",
           String(error),
         );
       });
@@ -84,12 +87,15 @@ export class NativeWindowAbility extends UIAbility {
     this.windowId = undefined;
     const manager = WindowManager.getInstance();
     if (manager.isUIAbilityMainWindow(windowId)) {
-      const nativeModule = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+      const nativeModule = this.moduleName
+        ? NativeModuleLoader.getLoadedModule(this.moduleName)
+        : undefined;
       nativeModule?.notifyNativeWindowClose?.(windowId);
       nativeModule?.notifyWindowClose?.(windowId);
       manager.removeWindow(windowId);
     }
     manager.unregisterUIAbilityStage(windowId);
+    this.moduleName = undefined;
   }
 
   onDestroy(): void {

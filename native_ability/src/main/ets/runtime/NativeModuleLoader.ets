@@ -4,6 +4,10 @@ import { Module } from "../ability/type";
 export class NativeModuleLoader {
   private static modules: Record<string, Module> = {};
 
+  static getLoadedModule(moduleName: string): Module | undefined {
+    return NativeModuleLoader.modules[moduleName];
+  }
+
   private static isCurrentModule(value: ESObject): boolean {
     return (
       value !== null &&

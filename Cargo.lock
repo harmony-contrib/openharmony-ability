@@ -508,7 +508,7 @@ dependencies = [
 [[package]]
 name = "ohos-enum-derive"
 version = "0.1.2"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings?rev=3f318983af0c9b3b154e2dd17a43ca813a46a35e#3f318983af0c9b3b154e2dd17a43ca813a46a35e"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings?rev=7fc3a33232c16652a84a4cefbb7d5e009d3ec6e2#7fc3a33232c16652a84a4cefbb7d5e009d3ec6e2"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -584,11 +584,11 @@ dependencies = [
 [[package]]
 name = "ohos-ime-binding"
 version = "0.3.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings?rev=3f318983af0c9b3b154e2dd17a43ca813a46a35e#3f318983af0c9b3b154e2dd17a43ca813a46a35e"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings?rev=7fc3a33232c16652a84a4cefbb7d5e009d3ec6e2#7fc3a33232c16652a84a4cefbb7d5e009d3ec6e2"
 dependencies = [
  "libloading 0.8.9",
  "log",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings?rev=3f318983af0c9b3b154e2dd17a43ca813a46a35e)",
+ "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings?rev=7fc3a33232c16652a84a4cefbb7d5e009d3ec6e2)",
  "ohos-input-method-sys",
  "rustc-hash",
 ]
@@ -596,7 +596,7 @@ dependencies = [
 [[package]]
 name = "ohos-input-method-sys"
 version = "0.2.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings?rev=3f318983af0c9b3b154e2dd17a43ca813a46a35e#3f318983af0c9b3b154e2dd17a43ca813a46a35e"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings?rev=7fc3a33232c16652a84a4cefbb7d5e009d3ec6e2#7fc3a33232c16652a84a4cefbb7d5e009d3ec6e2"
 
 [[package]]
 name = "ohos-multi-modal-input-sys"

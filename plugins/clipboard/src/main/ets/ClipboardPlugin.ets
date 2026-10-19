@@ -181,20 +181,36 @@ export class ClipboardPlugin extends AsyncPluginBase {
       }
     };
     this.updateListener = updateListener;
+    this.observeUpdates((): boolean => context.isActive());
+  }
+
+  private observeUpdates(isActive: () => boolean): Promise<void> {
+    if (this.initialization) {
+      return this.initialization;
+    }
+    const updateListener = this.updateListener;
+    if (!updateListener || this.disposed) {
+      return Promise.resolve();
+    }
     const systemPasteboard = pasteboard.getSystemPasteboard();
     // on("update") initializes the native singleton through synchronous Binder IPC.
     // hasData() connects on the SDK's worker first, without reading clipboard contents
     // or holding up Ability startup while the system service is loading.
-    this.initialization = systemPasteboard.hasData().then((): void => {
-      if (!context.isActive() || this.updateListener !== updateListener) {
+    const initialization = systemPasteboard.hasData().then((): void => {
+      if (!isActive() || this.disposed || this.updateListener !== updateListener) {
         return;
       }
       systemPasteboard.on("update", updateListener);
       this.observedPasteboard = systemPasteboard;
     });
-    this.initialization.catch((error: Error): void => {
+    this.initialization = initialization;
+    initialization.catch((error: Error): void => {
+      if (this.initialization === initialization) {
+        this.initialization = undefined;
+      }
       console.warn(`[Clipboard] initialization failed: ${String(error)}`);
     });
+    return initialization;
   }
 
   override onDispose(): void {
@@ -285,7 +301,7 @@ export class ClipboardPlugin extends AsyncPluginBase {
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
-    await this.initialization;
+    await this.observeUpdates((): boolean => context.isActive());
     if (this.disposed || !context.isActive()) {
       throw new Error("Bridge session is no longer active");
     }

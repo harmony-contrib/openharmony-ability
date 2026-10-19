@@ -125,13 +125,24 @@ Register the standalone plugin factories in the Ability's `bridgePlugins` array.
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
 
 
-## Desktop editor runtime adaptation
+## Desktop runtime adaptation
 
-The runtime supports independently managed workspace Abilities, window-owned
+The runtime supports independently managed window Abilities, window-owned
 native menus and prompts, per-window IME ownership, synchronous content focus,
 and cancellation when windows or bridge sessions are destroyed. Keyboard input
 readiness is independent of rendering Surface creation. Applications opting into
 these paths must update their native render exports and ArkTS runtime together.
+
+Independent window recovery delegates to `NativeWindowAbility.restoreApplication(want)`;
+hosts may override it to restore their own document or workspace. The default
+forwards the launch Want to the application's entry Ability. Window teardown
+notifies its creating native module, and close interceptors have independent
+registrations even when modules share an Ability session.
+
+Fullscreen and maximized Ability windows retain system-managed geometry.
+`focusOnShow` is only guaranteed for child windows by the SDK; it cannot promise
+non-activating launches of independent UIAbility main windows. These capabilities
+must be verified separately from successful creation or parameter delivery.
 
 `MenuPlugin({ showMenuBar: false, handleKeyboardShortcuts: false })` retains native
 popups while leaving menu placement and contextual accelerators to the application.

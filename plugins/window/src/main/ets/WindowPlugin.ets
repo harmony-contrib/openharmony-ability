@@ -561,6 +561,7 @@ export class WindowPlugin extends AsyncPluginBase {
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
   private readonly prompts: PromptDialogs = new PromptDialogs();
   private readonly windows: Map<number, window.Window> = new Map();
+  private removeCloseInterceptor?: () => void;
 
   onComponentTouch(event: BridgeComponentTouchEvent, context: BridgePluginContext): void {
     if (
@@ -588,8 +589,8 @@ export class WindowPlugin extends AsyncPluginBase {
 
   override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
     if (event.kind === "window-stage-create") {
-      WindowManager.getInstance().setCloseRequestInterceptor(
-        context.sessionId,
+      this.removeCloseInterceptor?.();
+      this.removeCloseInterceptor = WindowManager.getInstance().registerCloseRequestInterceptor(
         (windowId: number): boolean => {
           if (!context.isActive()) {
             return false;
@@ -612,7 +613,8 @@ export class WindowPlugin extends AsyncPluginBase {
         },
       );
     } else if (event.kind === "window-stage-destroy") {
-      WindowManager.getInstance().setCloseRequestInterceptor(context.sessionId, undefined);
+      this.removeCloseInterceptor?.();
+      this.removeCloseInterceptor = undefined;
     }
   }
 
@@ -1342,6 +1344,13 @@ export class WindowPlugin extends AsyncPluginBase {
     windowId: number,
     context: BridgeCallContext,
   ): Promise<window.Window> {
+    this.assertCallActive(context);
+    if (windowId === 0) {
+      const hostWindow = context.getWindow?.();
+      if (hostWindow !== undefined) {
+        return hostWindow;
+      }
+    }
     const manager = WindowManager.getInstance();
     // Rust can enqueue operations while createSubWindow is awaiting ArkUI content loading.
     await manager.waitForWindowCreation(windowId);
@@ -1363,8 +1372,9 @@ export class WindowPlugin extends AsyncPluginBase {
     return `#${(color >>> 0).toString(16).padStart(8, "0")}`;
   }
 
-  override async onDispose(context: BridgePluginHookContext): Promise<void> {
-    WindowManager.getInstance().setCloseRequestInterceptor(context.sessionId, undefined);
+  override async onDispose(): Promise<void> {
+    this.removeCloseInterceptor?.();
+    this.removeCloseInterceptor = undefined;
     await this.prompts.dispose();
     const windows = Array.from(this.windows.values());
     this.windows.clear();
