@@ -221,6 +221,8 @@ export { LoginPlugin };
 | `ohos.clipboard` / 入站 `changed` | `ohos.clipboard.ChangedEvent {}` → `std.bool` | 系统 pasteboard update 使 Rust revision 递增；监听随插件生命周期释放 |
 | `ohos.window` / `show-prompt` | `ohos.window.PromptRequest { windowId, message, detail?, level, buttons, cancelIndex?, anchor?: PromptAnchor }` → `ohos.window.PromptResponse { index }` | async / `ui-context`；`PromptAnchor { x, y }` 为目标窗口内容局部逻辑坐标，单位 vp，不是物理 px 或屏幕全局坐标；弹窗按实际尺寸限制在窗口可用区域内；原生弹窗取消、调用取消和销毁均释放组件 |
 | `ohos.window` / `get-window-stack` | `ohos.window.StackRequest { displayId, windowIds }` → `ohos.window.StackResponse { windowIds }` | async / `ui-context`；从 SDK 可见窗口顺序中筛选请求的本应用窗口，顶部在前 |
+| `ohos.window` / `get-cursor-icon` | `ohos.window.WindowIdRequest` → `ohos.window.CursorIconResponse { style }` | async / `ui-context`；真实窗口 ID，保留负数自定义样式与原生错误 |
+| `ohos.window` / `set-custom-cursor-follow-size` | `ohos.window.CustomCursorRequest` → `ohos.window.Acknowledgement` | async / `ui-context`；API 15+，系统指针大小跟随；释放 PixelMap 后完成 |
 | `ohos.window` / `set-custom-cursor` | `ohos.window.CustomCursorRequest { windowId, rgba, width, height, hotspotX, hotspotY }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；RGBA8888，尺寸 1–256 px，热点必须位于图像内；PixelMap 在成功、失败和取消后释放 |
 | `ohos.window` / `set-window-icon` | `ohos.window.WindowIconRequest { windowId, rgba, size }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；API 22+ PC/2in1 主窗口，正方形 RGBA8888，最大 1024 px；size=0 且 rgba 为空时恢复应用资源图标 |
 | `ohos.notification` / `show` | `ohos.notification.ShowRequest { tag, title, body, actions }` → `ohos.notification.Acknowledgement { accepted }` | async / `ability`；最多 3 个 action；响应 URI scheme 由 ArkTS 工厂的 `NotificationPlugin({ scheme })` 配置 |

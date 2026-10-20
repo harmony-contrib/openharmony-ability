@@ -38,6 +38,30 @@ impl WindowClient {
             .await?
             .ensure()
     }
+
+    /// Read the SDK style for the resolved native window, including custom IDs.
+    pub async fn get_cursor_icon(&self, window_id: i64) -> Result<i32> {
+        validate_window_id(window_id)?;
+        Ok(self
+            .call::<WindowIdRequest, CursorIconResponse>(
+                "get-cursor-icon",
+                WindowIdRequest { window_id },
+            )
+            .await?
+            .style)
+    }
+
+    /// Set an RGBA cursor whose size follows system pointer settings (API 15+).
+    /// The original fixed-size method and request structure remain unchanged.
+    pub async fn set_custom_cursor_follow_size(&self, request: CustomCursorRequest) -> Result<()> {
+        request.validate()?;
+        self.call::<CustomCursorRequest, WindowAcknowledgement>(
+            "set-custom-cursor-follow-size",
+            request,
+        )
+        .await?
+        .ensure()
+    }
 }
 
 #[cfg(test)]
@@ -117,3 +141,10 @@ impl WindowClient {
             .ensure()
     }
 }
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct CursorIconResponse {
+    pub style: i32,
+}
+impl_bridge_napi_type!(CursorIconResponse, "ohos.window.CursorIconResponse");

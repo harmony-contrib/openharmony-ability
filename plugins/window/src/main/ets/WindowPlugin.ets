@@ -1,6 +1,4 @@
 import window from "@ohos.window";
-import { image } from "@kit.ImageKit";
-import pointer from "@ohos.multimodalInput.pointer";
 import { setWindowIcon } from "./WindowIcon";
 import { parseCustomCursor } from "./CustomCursor";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
@@ -25,6 +23,14 @@ import {
 } from "@ohos-rs/ability";
 
 import { PromptDialogs, WindowPromptRequest } from "./PromptDialogs";
+import { WindowPointer } from "./WindowPointer";
+
+class CursorIconResponse {
+  readonly style: number;
+  constructor(style: number) {
+    this.style = style;
+  }
+}
 
 const TAG: string = "WindowPlugin";
 const MOVE_REQUESTED_TYPE = "ohos.window.MoveRequested";
@@ -1156,40 +1162,31 @@ export class WindowPlugin extends AsyncPluginBase {
       await setWindowIcon(payload, context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
-    if (action === "set-custom-cursor") {
+    if (action === "set-custom-cursor" || action === "set-custom-cursor-follow-size") {
       const request = parseCustomCursor(payload);
       const win = await this.requireWindow(request.windowId, context);
-      const bytes = new Uint8Array(request.rgba);
-      const pixelMap = await image.createPixelMap(bytes.buffer, {
-        size: { width: request.width, height: request.height },
-        pixelFormat: image.PixelMapFormat.RGBA_8888,
-        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
-        alphaType: image.AlphaType.UNPREMUL,
-        editable: false,
-      });
-      try {
-        this.assertCallActive(context);
-        await pointer.setCustomCursor(
-          win.getWindowProperties().id,
-          pixelMap,
-          request.hotspotX,
-          request.hotspotY,
-        );
-        this.assertCallActive(context);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
-      } finally {
-        await pixelMap.release();
-      }
+      await WindowPointer.setCustom(
+        win,
+        request,
+        action === "set-custom-cursor-follow-size",
+        (): void => this.assertCallActive(context),
+      );
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
+    if (action === "get-cursor-icon") {
+      const request = parseWindowIdRequest(payload);
+      const win = await this.requireWindow(request.windowId, context);
+      const style = WindowPointer.getStyle(win);
+      this.assertCallActive(context);
+      return { typeName: "ohos.window.CursorIconResponse", value: new CursorIconResponse(style) };
     }
 
     if (action === "set-cursor-icon") {
-      // Delegates to WindowManager.setPointerStyle, which resolves the real OHOS
-      // window id internally (pointer.setPointerStyleSync). Fire-and-forget on
-      // the ArkTS side: per-window failures are logged there, the ack only
-      // confirms the request was dispatched (tao's set_cursor_icon is a void
-      // setter).
       const request = parseCursorIconRequest(payload);
-      WindowManager.getInstance().setPointerStyle(request.windowId, request.style);
+      const win = await this.requireWindow(request.windowId, context);
+      WindowPointer.setStyle(win, request.style);
+      this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
