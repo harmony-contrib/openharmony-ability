@@ -61,6 +61,12 @@ pub struct MenuItemData {
     pub enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accelerator: Option<String>,
+    /// Show the chord while the native renderer owns key dispatch and context.
+    /// Missing/false retains ordinary native menu accelerator handling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "acceleratorDisplayOnly")]
+    #[napi(js_name = "acceleratorDisplayOnly")]
+    pub accelerator_display_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "predefinedType")]
     pub predefined_type: Option<String>,
@@ -570,6 +576,7 @@ mod tests {
             text: Some("Open".to_string()),
             enabled: Some(true),
             accelerator: Some("Ctrl+O".to_string()),
+            accelerator_display_only: Some(true),
             predefined_type: None,
             checked: None,
             icon: None,
@@ -583,6 +590,8 @@ mod tests {
         assert_eq!(parsed.item_type, data.item_type);
         assert_eq!(parsed.text, data.text);
         assert_eq!(parsed.accelerator, data.accelerator);
+        assert_eq!(parsed.accelerator_display_only, Some(true));
+        assert!(json.contains("\"acceleratorDisplayOnly\":true"));
     }
 
     #[test]
@@ -593,6 +602,7 @@ mod tests {
             text: Some("Click".to_string()),
             enabled: Some(true),
             accelerator: None,
+            accelerator_display_only: None,
             predefined_type: None,
             checked: None,
             icon: None,
@@ -602,6 +612,9 @@ mod tests {
         };
         let json = serde_json::to_string(&data).unwrap();
         assert!(!json.contains("\"accelerator\""));
+        assert!(!json.contains("\"acceleratorDisplayOnly\""));
+        let legacy: MenuItemData = serde_json::from_str(&json).unwrap();
+        assert_eq!(legacy.accelerator_display_only, None);
         assert!(!json.contains("\"predefinedType\""));
         assert!(!json.contains("\"checked\""));
         assert!(!json.contains("\"icon\""));
