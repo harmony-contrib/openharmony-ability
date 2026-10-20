@@ -1309,13 +1309,11 @@ function setupDownloadDelegate(data: ManagedWebview): void {
 
 /** Shared declaration-time attributes; the controller callback starts the first navigation. */
 @Extend(Web)
-// eslint-disable-next-line no-unused-vars -- ArkUI resolves @Extend calls on Web attribute chains.
 function managedWebviewAttributes(data: ManagedWebview, interceptContext: string) {
   // Always "100%": natural ArkUI layout so the Web follows its parent container on
   // window resize. set_bounds (BuilderNode.update) re-runs this builder but only
   // .position() below consumes style.{x,y} — sizing via fixed px here would pin the
   // Web component and break ArkWeb viewport tracking on resize (bottom cutoff).
-  // eslint-disable-next-line no-unused-expressions -- ArkUI compiles this @Extend attribute chain.
   .width("100%")
   .height("100%")
   .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
@@ -1362,9 +1360,7 @@ function managedWebviewAttributes(data: ManagedWebview, interceptContext: string
 
 /** Direct-mode drag callbacks; overlay mode binds these on its transparent Stack. */
 @Extend(Web)
-// eslint-disable-next-line no-unused-vars -- ArkUI resolves @Extend calls on Web attribute chains.
 function managedWebviewDragEvents(data: ManagedWebview) {
-  // eslint-disable-next-line no-unused-expressions -- ArkUI compiles this @Extend attribute chain.
   .onDragEnter((dragEvent: DragEvent) => {
     dispatchWebviewDragEnter(data, dragEvent);
   })
