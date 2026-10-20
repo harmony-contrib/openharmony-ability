@@ -24,6 +24,14 @@
 
 每个插件必须满足以下边界：
 
+- 原生能力必须通过 Cargo feature 选择或开启，禁止使用 `libloading`、`dlopen`、`dlsym`
+  等运行时符号探测方式，包括宿主测试。整个 workspace 禁止直接依赖 `*-sys`（含重命名依赖
+  和 `napi-sys-ohos`）；core、插件和示例只能调用 binding 的公开封装，不得本地声明 FFI
+  或通过重导出的原始函数绕过封装。缺少接口时先补充对应的 `ohos-native-bindings`。
+  具名 N-API transport 可以使用 `napi-ohos` 重导出的不透明类型，但不得调用原始 N-API 函数。
+- feature 必须标明最低运行时 API；关闭后不得引用对应原生符号。运行时版本判断不能解决
+  新符号在旧系统上的加载问题。合入前执行 `python3 scripts/check-native-boundary.py`，
+  feature 的具体要求见 [原生能力配置](native-capabilities.md)。
 - Rust crate 位于 `crates/plugin-<name>`，依赖 `openharmony-ability`；需要复用其他插件类型时依赖
   对应的 `plugin-*` crate（如 `plugin-statusbar` 复用 `plugin-menu` 的类型），但不能依赖 ArkTS
   实现或应用页面；对外通过扩展 trait/client 暴露能力。

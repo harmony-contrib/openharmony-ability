@@ -11,6 +11,8 @@ English | [简体中文](README.zh-CN.md)
 
 See the [changelog](CHANGELOG.md) for release notes and per-package changes.
 
+Optional native APIs are selected through [Cargo features and minimum API requirements](docs/native-capabilities.md).
+
 ## Architecture
 
 OpenHarmony applications are driven by callbacks, so there are two important constraints:

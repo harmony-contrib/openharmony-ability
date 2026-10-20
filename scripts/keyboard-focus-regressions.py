@@ -5,13 +5,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import platform
 import shlex
 import subprocess
 
 HOST_TEMPLATE = r'''#![allow(dead_code)]
 
 extern crate self as napi_ohos;
+#[cfg(feature = "keyboard-focus-recovery")]
+extern crate self as ohos_window_manager_binding;
+__BINDING_SUBSTITUTE__
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, RwLock},
@@ -61,6 +63,7 @@ impl OpenHarmonyApp {
             effects: Arc::default(),
             queue: Arc::default(),
         };
+        #[cfg(feature = "keyboard-focus-recovery")]
         app.set_window_keyboard_focus_recovery(true)
             .expect("enable");
         app.effects
@@ -116,6 +119,16 @@ impl Scheduler {
     }
 }
 
+#[cfg(all(test, not(feature = "keyboard-focus-recovery")))]
+#[test]
+fn disabled_feature_rejects_enable_without_native_sdk() {
+    let app = OpenHarmonyApp::new("main", 0);
+    assert!(app.set_window_keyboard_focus_recovery(true).is_err());
+    app.set_window_keyboard_focus_recovery(false).expect("disable");
+    assert!(!app.window_keyboard_focus_recovery_enabled());
+}
+
+#[cfg(feature = "keyboard-focus-recovery")]
 mod focus {
 __KEYBOARD_FOCUS_SOURCE__
 
@@ -124,60 +137,38 @@ __KEYBOARD_FOCUS_SOURCE__
         use super::*;
         use std::sync::atomic::{AtomicUsize, Ordering};
         static FOREIGN_CALLS: AtomicUsize = AtomicUsize::new(0);
-        unsafe extern "C" fn foreign(_: *mut c_void) -> bool {
+        unsafe extern "C" fn foreign(_: *mut Input_KeyEvent) -> bool {
             FOREIGN_CALLS.fetch_add(1, Ordering::SeqCst);
             true
         }
-        struct Sdk(libloading::Library);
+        struct Sdk;
         impl Sdk {
             fn new() -> Self {
-                let sdk = Self(
-                    unsafe { libloading::Library::new("libnative_window_manager.so") }
-                        .expect("mock SDK"),
-                );
-                unsafe {
-                    sdk.0
-                        .get::<unsafe extern "C" fn()>(b"mock_reset\0")
-                        .expect("reset")();
-                }
-                sdk
+                unsafe { crate::native::mock_reset() };
+                Self
             }
             fn set(&self, name: &[u8], value: i32) {
                 unsafe {
-                    self.0
-                        .get::<unsafe extern "C" fn(i32)>(name)
-                        .expect("SDK setter")(value);
+                    match name {
+                        b"mock_fail_register\0" => crate::native::mock_fail_register(value),
+                        b"mock_fail_get\0" => crate::native::mock_fail_get(value),
+                        b"mock_fail_unregister\0" => crate::native::mock_fail_unregister(value),
+                        b"mock_destroyed\0" => crate::native::mock_destroyed(value),
+                        _ => panic!("unknown SDK setter"),
+                    }
                 }
             }
             fn foreign(&self, window: i32) {
-                unsafe {
-                    self.0
-                        .get::<unsafe extern "C" fn(i32, Option<KeyEventFilter>)>(
-                            b"mock_set_filter\0",
-                        )
-                        .expect("set filter")(window, Some(foreign));
-                }
+                unsafe { crate::native::mock_set_filter(window, Some(foreign)) };
             }
             fn invoke(&self, window: i32, target: i32) -> bool {
-                unsafe {
-                    self.0
-                        .get::<unsafe extern "C" fn(i32, i32) -> bool>(b"mock_invoke\0")
-                        .expect("invoke")(window, target)
-                }
+                unsafe { crate::native::mock_invoke(window, target) }
             }
             fn has(&self, window: i32) -> bool {
-                unsafe {
-                    self.0
-                        .get::<unsafe extern "C" fn(i32) -> bool>(b"mock_has_filter\0")
-                        .expect("has filter")(window)
-                }
+                unsafe { crate::native::mock_has_filter(window) }
             }
             fn inline_unregister(&self) -> i32 {
-                unsafe {
-                    self.0
-                        .get::<unsafe extern "C" fn() -> i32>(b"mock_inline_unregister\0")
-                        .expect("inline unregister")()
-                }
+                unsafe { crate::native::mock_inline_unregister() }
             }
         }
         fn mount(app: &OpenHarmonyApp, owner: &str, logical: i64, native: i32) {
@@ -253,10 +244,7 @@ __KEYBOARD_FOCUS_SOURCE__
             let app = OpenHarmonyApp::new("main", 0);
             mount(&app, "main", 0, 75);
             std::thread::spawn(|| {
-                let sdk = Sdk(
-                    unsafe { libloading::Library::new("libnative_window_manager.so") }
-                        .expect("mock SDK"),
-                );
+                let sdk = Sdk;
                 assert!(!sdk.invoke(75, 75));
             })
             .join()
@@ -416,15 +404,72 @@ __KEYBOARD_FOCUS_SOURCE__
             release_keyboard_focus_recovery(&app, "main");
             assert!(!sdk.has(75));
         }
-        #[test]
-        #[ignore]
-        fn older_sdk_without_filter_inspection_keeps_focus_callbacks() {
-            let sdk = Sdk::new();
-            assert!(NativeKeyFilterApi::get().expect("optional API").is_none());
-            let app = OpenHarmonyApp::new("main", 0);
-            mount(&app, "main", 0, 75);
-            assert!(!sdk.has(75));
+    }
+}
+'''
+
+
+BINDING_SUBSTITUTE = r'''#[cfg(feature = "keyboard-focus-recovery")]
+mod binding {
+    use std::{ffi::c_void, marker::PhantomData, ptr::NonNull};
+    pub type Input_KeyEvent = c_void;
+    pub type KeyEventFilter = unsafe extern "C" fn(*mut Input_KeyEvent) -> bool;
+    #[derive(Debug)]
+    pub struct NativeError(i32);
+    impl NativeError {
+        pub fn code(&self) -> Option<i32> { Some(self.0) }
+    }
+    impl std::fmt::Display for NativeError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) }
+    }
+    fn check(status: i32) -> std::result::Result<(), NativeError> {
+        if status == 0 { Ok(()) } else { Err(NativeError(status)) }
+    }
+    pub struct Window(i32);
+    impl Window {
+        pub fn from_id(id: i32) -> Self { Self(id) }
+        pub fn key_event_filter(&self) -> std::result::Result<Option<KeyEventFilter>, NativeError> {
+            let mut filter = None;
+            check(unsafe { crate::native::OH_NativeWindowManager_GetKeyEventFilter(self.0, &mut filter) })?;
+            Ok(filter)
         }
+        pub fn register_key_event_filter(&self, filter: KeyEventFilter) -> std::result::Result<(), NativeError> {
+            check(unsafe { crate::native::OH_NativeWindowManager_RegisterKeyEventFilter(self.0, Some(filter)) })
+        }
+        pub fn unregister_key_event_filter(&self) -> std::result::Result<(), NativeError> {
+            check(unsafe { crate::native::OH_NativeWindowManager_UnregisterKeyEventFilter(self.0) })
+        }
+    }
+    pub struct KeyEventRef<'a>(NonNull<Input_KeyEvent>, PhantomData<&'a Input_KeyEvent>);
+    impl<'a> KeyEventRef<'a> {
+        pub unsafe fn from_raw(raw: *mut Input_KeyEvent) -> Option<Self> {
+            NonNull::new(raw).map(|raw| Self(raw, PhantomData))
+        }
+        pub fn window_id(&self) -> i32 {
+            unsafe { crate::native::OH_Input_GetKeyEventWindowId(self.0.as_ptr()) }
+        }
+    }
+}
+#[cfg(feature = "keyboard-focus-recovery")]
+pub use binding::{Input_KeyEvent, KeyEventFilter, KeyEventRef, Window};
+#[cfg(feature = "keyboard-focus-recovery")]
+mod native {
+    use super::{Input_KeyEvent, KeyEventFilter};
+    #[link(name = "focus_mock", kind = "static")]
+    unsafe extern "C" {
+        pub fn OH_NativeWindowManager_RegisterKeyEventFilter(window: i32, filter: Option<KeyEventFilter>) -> i32;
+        pub fn OH_NativeWindowManager_UnregisterKeyEventFilter(window: i32) -> i32;
+        pub fn OH_NativeWindowManager_GetKeyEventFilter(window: i32, filter: *mut Option<KeyEventFilter>) -> i32;
+        pub fn OH_Input_GetKeyEventWindowId(event: *const Input_KeyEvent) -> i32;
+        pub fn mock_reset();
+        pub fn mock_fail_register(value: i32);
+        pub fn mock_fail_get(value: i32);
+        pub fn mock_fail_unregister(value: i32);
+        pub fn mock_destroyed(value: i32);
+        pub fn mock_set_filter(window: i32, filter: Option<KeyEventFilter>);
+        pub fn mock_has_filter(window: i32) -> bool;
+        pub fn mock_invoke(window: i32, target: i32) -> bool;
+        pub fn mock_inline_unregister() -> i32;
     }
 }
 '''
@@ -445,9 +490,7 @@ void mock_destroyed(int value) { destroyed=value; }
 int mock_inline_unregister(void) { return inline_unregister; }
 int OH_NativeWindowManager_RegisterKeyEventFilter(int32_t window, Filter filter) { if(failed_register) return failed_register; filters[window]=filter; return 0; }
 int OH_NativeWindowManager_UnregisterKeyEventFilter(int32_t window) { if(inside) {inline_unregister++;return 2999;} if(failed_unregister) return failed_unregister;filters[window]=0;return 0; }
-#ifndef NO_INSPECTION
 int OH_NativeWindowManager_GetKeyEventFilter(int32_t window, Filter *filter) { if(destroyed) return 1000; if(failed_get) return failed_get; *filter=filters[window]; return 0; }
-#endif
 void mock_set_filter(int window, Filter filter) { filters[window]=filter; }
 bool mock_has_filter(int window) { return filters[window]!=0; }
 bool mock_invoke(int window, int target) { pthread_mutex_lock(&mutex); inside=1; bool result=filters[window] ? filters[window](&target) : false;inside=0;pthread_mutex_unlock(&mutex);return result; }
@@ -479,7 +522,7 @@ def run():
     arguments = parser.parse_args()
     output = arguments.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    (output / "README.md").write_text("> [!IMPORTANT]\n> Remove this line to confirm you've reviewed this PR before submitting.\n\nGenerated host regression harness.\n")
+    (output / "README.md").write_text("Generated host regression harness with a static SDK substitute.\n")
     keyboard_source = repository / "crates/ability/src/render/keyboard_focus.rs"
     app_source = repository / "crates/ability/src/app.rs"
     methods = "\n".join(extract_method(app_source.read_text(), name) for name in [
@@ -487,36 +530,37 @@ def run():
         "record_window_focus", "window_has_focus",
     ])
     source = HOST_TEMPLATE.replace("__APPLICATION_METHODS__", methods).replace(
-        "__KEYBOARD_FOCUS_SOURCE__", keyboard_source.read_text())
+        "__KEYBOARD_FOCUS_SOURCE__", keyboard_source.read_text()).replace(
+        "__BINDING_SUBSTITUTE__", BINDING_SUBSTITUTE)
     (output / "keyboard_focus.rs").write_text(source)
     (output / "Cargo.toml").write_text(
         '[package]\nname="keyboard-focus-regressions"\nversion="0.1.0"\nedition="2021"\n'
-        '[lib]\npath="keyboard_focus.rs"\n[workspace]\n[features]\ndefault=["keyboard"]\nkeyboard=[]\n'
-        '[dependencies]\nlibloading="0.8"\n')
+        '[lib]\npath="keyboard_focus.rs"\n[workspace]\n[features]\n'
+        'default=["keyboard-focus-recovery"]\nkeyboard=[]\nkeyboard-focus-recovery=["keyboard"]\n')
     compiler = shlex.split(os.environ.get("CC", "cc"))
-    flags = ["-dynamiclib"] if platform.system() == "Darwin" else ["-shared", "-fPIC"]
-    for directory, defines in [("sdk", []), ("old-sdk", ["-DNO_INSPECTION"])]:
-        sdk = output / directory
-        sdk.mkdir(exist_ok=True)
-        (sdk / "filter.c").write_text(WINDOW_SDK)
-        (sdk / "input.c").write_text(INPUT_SDK)
-        for source_name, library, options in [
-            ("filter.c", "libnative_window_manager.so", defines),
-            ("input.c", "libohinput.so", []),
-        ]:
-            subprocess.run(compiler + flags + options + ["-o", str(sdk / library), str(sdk / source_name)], check=True)
+    sdk = output / "sdk"
+    sdk.mkdir(exist_ok=True)
+    (sdk / "filter.c").write_text(WINDOW_SDK)
+    (sdk / "input.c").write_text(INPUT_SDK)
+    objects = []
+    for name in ["filter", "input"]:
+        obj = sdk / (name + ".o")
+        subprocess.run(compiler + ["-c", "-o", str(obj), str(sdk / (name + ".c"))], check=True)
+        objects.append(str(obj))
+    subprocess.run(["ar", "rcs", str(sdk / "libfocus_mock.a"), *objects], check=True)
     command = ["cargo", "test", "--manifest-path", str(output / "Cargo.toml"), "--lib"]
     records = []
-    for directory, log_name, suffix in [
-        ("sdk", "host-tests.log", ["--", "--test-threads=1", "--nocapture"]),
-        ("old-sdk", "old-sdk-tests.log", ["older_sdk_without_filter_inspection", "--", "--ignored", "--nocapture"]),
+    for feature, log_name, arguments in [
+        ("enabled", "host-tests.log", []),
+        ("disabled", "disabled-feature-tests.log", ["--no-default-features", "--features", "keyboard"]),
     ]:
         environment = dict(os.environ)
-        variable = "DYLD_FALLBACK_LIBRARY_PATH" if platform.system() == "Darwin" else "LD_LIBRARY_PATH"
-        environment[variable] = str(output / directory) + os.pathsep + environment.get(variable, "")
+        # The feature-disabled executable must link without any native substitute.
+        environment["RUSTFLAGS"] = "-Lnative=" + str(sdk) if feature == "enabled" else ""
         with (output / log_name).open("w") as log:
-            result = subprocess.run(command + suffix, env=environment, stdout=log, stderr=subprocess.STDOUT)
-        records.append({"sdk": directory, "returncode": result.returncode, "log": str(output / log_name)})
+            result = subprocess.run(command + arguments + ["--", "--test-threads=1", "--nocapture"],
+                                    env=environment, stdout=log, stderr=subprocess.STDOUT)
+        records.append({"feature": feature, "returncode": result.returncode, "log": str(output / log_name)})
         print((output / log_name).read_text()[-2600:])
         if result.returncode:
             raise SystemExit(result.returncode)

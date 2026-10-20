@@ -29,6 +29,11 @@ API 12–19 menu dismissal uses the existing `aboutToDisappear`/`onDisappear` ca
 
 ## Remaining architectural boundaries
 
+Native input and Web engine capabilities are selected through
+[Cargo features](native-capabilities.md). Window focus recovery requires API 26
+and its feature plus the application opt-in. Older deployments must leave that
+feature disabled; there is no runtime symbol probe or missing-symbol fallback.
+
 This change does not make all older window registries session-aware. Positive logical window IDs in `WindowManager`, legacy primary-module notification paths, and primary-Ability startup/restore bookkeeping still follow the existing shared-runtime contract. Treat these as framework boundaries when introducing multiple independent runtimes; they are not evidence of platform-wide limitations.
 
 The pre-existing WebView `NewWindowDialog` helper also stores one active popup globally. Opening another popup closes the prior one, including across hosts. This is an implementation limitation, not an ArkUI restriction or a requirement of browser popup behavior; it needs a separate dialog-ownership change.

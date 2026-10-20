@@ -104,6 +104,14 @@ Follow the local spec `docs/plugin-development-standard.md` (§1 creation order,
 
 ## Key Dependencies
 
-- **N-API bridge**: `napi-ohos`, `napi-derive-ohos`, `napi-build-ohos`, `napi-sys-ohos` (1.2, napi8)
+- **N-API bridge**: `napi-ohos`, `napi-derive-ohos`, `napi-build-ohos` (1.2, napi8)
 - **OHOS bindings**: `ohos-arkui-binding`, `ohos-xcomponent-binding`, `ohos-web-binding`, `ohos-ime-binding`, `ohos-display-binding`, `ohos-hilog-binding`, `ohos-resource-manager-binding`
 - **Tooling**: pnpm@10.22.0; `@ohos-rs/oxk` (oxk format/lint for ets/js/ts/json5); `@j178/prek` hooks; `ohrs` for native module builds
+
+## Native Capability Constraints
+
+- Select optional native capabilities with Cargo features. `libloading`, `dlopen`, `dlsym` and equivalent runtime symbol probes are forbidden, including in host regression harnesses.
+- No workspace member or workspace dependency may directly depend on a `*-sys` package (including renamed dependencies and `napi-sys-ohos`). Core, plugins and examples consume binding APIs. Do not bypass bindings with local FFI imports or calls through re-exported raw functions.
+- Missing native APIs must be implemented in the owning `ohos-native-bindings` crate; only its `sys/*` packages declare FFI. Bindings own pointer validation, native error conversion and lifetime safety. N-API transport may use opaque types re-exported by `napi-ohos`, without calling raw N-API functions.
+- A feature that links a newer API must document its minimum runtime API. Runtime version checks do not make linked symbols loadable on older systems. Disabled features must omit those symbols and report unavailable capability explicitly.
+- Run `python3 scripts/check-native-boundary.py` before committing. See [native feature requirements](docs/native-capabilities.md).

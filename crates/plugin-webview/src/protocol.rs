@@ -468,12 +468,15 @@ fn install_declaration(native_tag: &str, declaration: ProtocolDeclaration) -> Re
 
         if let Some(body) = request.http_body_stream() {
             let callback = Arc::clone(&callback);
-            let mut request_handle = Some(request_handle);
-            body.read(body.size() as usize, move |body| {
-                let Some(request_handle) = request_handle.take() else {
-                    return;
-                };
+            body.read_to_end(move |body| {
                 let responder = responder_for(request_handle);
+                let body = match body {
+                    Ok(body) => body,
+                    Err(_) => {
+                        responder.respond(invalid_request_response());
+                        return;
+                    }
+                };
                 match build_request(&method, &url, headers.iter(), body) {
                     Ok(native_request) => callback(&url, native_request, is_main_frame, responder),
                     Err(_) => responder.respond(invalid_request_response()),

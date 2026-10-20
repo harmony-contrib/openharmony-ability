@@ -51,3 +51,15 @@ jobs:
 
       - name: Rust clippy
         run: npm run lint:rs
+
+      - name: Native feature boundaries
+        run: |
+          cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features -- -D warnings
+          for feature in keyboard keyboard-focus keyboard-lock-state keyboard-text-input keyboard-focus-recovery; do
+            cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --features "$feature" -- -D warnings
+          done
+          cargo clippy -p openharmony-ability-plugin-webview --all-targets --target aarch64-unknown-linux-ohos --no-default-features -- -D warnings
+          for feature in engine-version engine-evergreen; do
+            cargo clippy -p openharmony-ability-plugin-webview --all-targets --target aarch64-unknown-linux-ohos --no-default-features --features "$feature" -- -D warnings
+          done
+          python3 scripts/keyboard-focus-regressions.py
