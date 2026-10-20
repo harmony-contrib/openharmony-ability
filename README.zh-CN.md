@@ -1,7 +1,5 @@
 # OpenHarmony Ability
 
-可选原生能力通过 [Cargo feature 选择，并遵守对应的最低 API 要求](docs/native-capabilities.md)。
-
 [English](README.md) | 简体中文
 
 > 本项目仍在开发中，API 尚未稳定。

@@ -522,7 +522,6 @@ def run():
     arguments = parser.parse_args()
     output = arguments.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    (output / "README.md").write_text("Generated host regression harness with a static SDK substitute.\n")
     keyboard_source = repository / "crates/ability/src/render/keyboard_focus.rs"
     app_source = repository / "crates/ability/src/app.rs"
     methods = "\n".join(extract_method(app_source.read_text(), name) for name in [

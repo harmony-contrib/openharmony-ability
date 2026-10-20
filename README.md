@@ -1,6 +1,3 @@
-> [!IMPORTANT]
-> Remove this line to confirm you've reviewed this PR before submitting.
-
 # OpenHarmony Ability
 
 English | [简体中文](README.zh-CN.md)
@@ -10,8 +7,6 @@ English | [简体中文](README.zh-CN.md)
 `openharmony-ability` provides native integration helpers for OpenHarmony applications: Rust-side lifecycle management plus ArkTS-side entry helpers that can be shared by Rust and C/SDL native modules.
 
 See the [changelog](CHANGELOG.md) for release notes and per-package changes.
-
-Optional native APIs are selected through [Cargo features and minimum API requirements](docs/native-capabilities.md).
 
 ## Architecture
 
