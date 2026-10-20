@@ -148,6 +148,7 @@ function loader(overrides = {}, globals = {}) {
       Uint8Array,
       ArrayBuffer,
       DialogAlignment: { TopStart: 0, Center: 1 },
+      DismissReason: { PRESS_BACK: 0, TOUCH_OUTSIDE: 1 },
       wrapBuilder: (builder) => builder,
       promptBuilder() {},
       LocalStorage: class {
@@ -1251,7 +1252,7 @@ test("anchored prompts use target-window density, measured height and new window
 
 function keyboardPrompt(
   initialActive,
-  { deferredOpen = false, deferredClose = false, rejectFocus = false, rejectClose = false } = {},
+  { deferredOpen = false, deferredClose = false, rejectFocus = false, rejectClose = false, anchor } = {},
 ) {
   let content,
     options,
@@ -1313,7 +1314,7 @@ function keyboardPrompt(
   );
   const result = new PromptDialogs().show(
     targetWindow,
-    { message: "Save?", level: 1, buttons: ["Save", "Cancel"], cancelIndex: 1 },
+    { message: "Save?", level: 1, buttons: ["Save", "Cancel"], cancelIndex: 1, anchor },
     {
       isActive: () => active,
       onCancel(callback) {
@@ -1335,8 +1336,36 @@ function keyboardPrompt(
       cancel();
     },
     finishOpen: () => finishOpen(),
+    dismiss: (reason) => options.onWillDismiss({
+      reason,
+      dismiss: () => events.push(["dismiss"]),
+    }),
   };
 }
+
+test("confirmation prompts ignore outside clicks but preserve Escape cancellation", async () => {
+  const fixture = keyboardPrompt(false);
+  let resolved = false;
+  fixture.result.then(() => { resolved = true; });
+  await flush();
+  fixture.appear();
+  fixture.dismiss(1);
+  await flush();
+  assert.equal(resolved, false);
+  assert.equal(fixture.events.some(([event]) => event === "dismiss" || event === "close"), false);
+  fixture.dismiss(0);
+  assert.equal(await fixture.result, 1);
+  assert.equal(fixture.events.filter(([event]) => event === "dismiss").length, 1);
+  assert.equal(fixture.events.filter(([event]) => event === "dispose").length, 1);
+});
+
+test("anchored command prompts retain outside-click cancellation", async () => {
+  const fixture = keyboardPrompt(false, { anchor: { x: 100, y: 100 } });
+  await flush();
+  fixture.appear();
+  fixture.dismiss(1);
+  assert.equal(await fixture.result, 1);
+});
 
 test("native prompts activate the default button only after appearance and restore prior keyboard focus", async () => {
   for (const initialActive of [false, true]) {

@@ -1,4 +1,4 @@
-import { ComponentContent, UIContext, window } from "@kit.ArkUI";
+import { ColorMetrics, ComponentContent, LengthMetrics, UIContext, window } from "@kit.ArkUI";
 import { BridgeCallContext } from "@ohos-rs/ability";
 import { PromptPlacement, PromptOffset } from "./PromptPlacement";
 
@@ -23,6 +23,8 @@ class PromptModel {
   readonly placement: PromptPlacement;
   readonly measure: (width: number, height: number) => void;
   readonly focusId: string;
+  readonly stackButtons: boolean;
+  readonly buttonIndices: number[];
   constructor(
     request: WindowPromptRequest,
     choose: (index: number) => void,
@@ -35,44 +37,85 @@ class PromptModel {
     this.placement = placement;
     this.measure = measure;
     this.focusId = focusId;
+    this.stackButtons = placement.width < 360;
+    this.buttonIndices = request.buttons.map((_label: string, index: number): number => index);
+    if (!this.stackButtons) {
+      // Visual ordering must not change the result indices owned by the caller.
+      this.buttonIndices = this.buttonIndices.filter(
+        (index: number): boolean => index !== 0 && index !== request.cancelIndex,
+      );
+      if (
+        request.cancelIndex !== undefined &&
+        request.cancelIndex !== null &&
+        request.cancelIndex !== 0
+      ) {
+        this.buttonIndices.unshift(request.cancelIndex);
+      }
+      this.buttonIndices.push(0);
+    }
   }
 }
 
 @Builder
 function promptBuilder(model: PromptModel) {
   Scroll() {
-    Column({ space: 12 }) {
-      Row({ space: 8 }) {
-        Text(model.request.level === 0 ? "ℹ" : model.request.level === 1 ? "⚠" : "⛔")
-          .fontSize(24)
-          .fontColor(
-            model.request.level === 0
-              ? Color.Blue
-              : model.request.level === 1
-                ? Color.Orange
-                : Color.Red,
-          )
-        Text(model.request.message)
-          .fontSize(20)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r("sys.color.font_primary"))
-          .layoutWeight(1)
-      }.width("100%")
-      if (model.request.detail) {
-        Text(model.request.detail)
-          .fontSize(14)
-          .fontColor($r("sys.color.font_secondary"))
-          .width("100%");
-      }
+    Column({ space: 16 }) {
       Column({ space: 8 }) {
-        ForEach(model.request.buttons, (label: string, index: number) => {
-          Button(label)
-            .id(`${model.focusId}-${index}`)
-            .width("100%")
-            .defaultFocus(index === 0)
-            .onClick(() => model.choose(index));
+        Text(model.request.message)
+          .fontSize(18)
+          .fontWeight(600)
+          .fontColor($r("sys.color.font_primary"))
+          .width("100%")
+        if (model.request.detail) {
+          Text(model.request.detail)
+            .fontSize(14)
+            .lineHeight(20)
+            .fontColor($r("sys.color.font_secondary"))
+            .width("100%");
+        }
+      }
+      .width("100%")
+      .alignItems(HorizontalAlign.Start)
+      .accessibilityGroup(true)
+      Flex({
+        direction: model.stackButtons ? FlexDirection.Column : FlexDirection.Row,
+        wrap: FlexWrap.Wrap,
+        justifyContent: FlexAlign.End,
+        space: { main: LengthMetrics.vp(8), cross: LengthMetrics.vp(8) },
+      }) {
+        ForEach(model.buttonIndices, (index: number) => {
+          Button({ type: ButtonType.Normal }) {
+            Text(model.request.buttons[index])
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(
+                index === 0 && index !== model.request.cancelIndex
+                  ? $r("sys.color.comp_background_primary")
+                  : $r("sys.color.font_primary"),
+              )
+          }
+          .id(`${model.focusId}-${index}`)
+          .width(model.stackButtons ? "100%" : undefined)
+          .constraintSize({ minHeight: 36, minWidth: 80, maxWidth: model.placement.width - 48 })
+          .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+          .borderRadius(6)
+          .backgroundColor(
+            index === 0 && index !== model.request.cancelIndex
+              ? $r("sys.color.font_primary")
+              : $r("sys.color.comp_background_primary"),
+          )
+          .border({ width: 1, color: $r("sys.color.ohos_id_color_list_separator") })
+          .focusBox({
+            strokeColor: ColorMetrics.resourceColor($r("sys.color.font_secondary")),
+            strokeWidth: LengthMetrics.vp(2),
+            margin: LengthMetrics.vp(3),
+          })
+          .defaultFocus(index === 0)
+          .onClick(() => model.choose(index));
         })
-      }.width("100%")
+      }
+      .width("100%")
+      .margin({ top: 8 })
     }
     .padding(24)
     .width("100%")
@@ -80,7 +123,9 @@ function promptBuilder(model: PromptModel) {
   .width(model.placement.width)
   .constraintSize({ maxHeight: model.placement.maxHeight })
   .backgroundColor($r("sys.color.comp_background_primary"))
-  .borderRadius(16)
+  .borderRadius(8)
+  .border({ width: 1, color: $r("sys.color.ohos_id_color_list_separator") })
+  .shadow({ radius: 16, color: "#1A000000", offsetY: 4 })
   .onAreaChange((_oldArea: Area, newArea: Area): void => {
     model.measure(Number(newArea.width), Number(newArea.height));
   });
@@ -235,6 +280,7 @@ class PromptSession {
       } else {
         await this.uiContext.getPromptAction().openCustomDialog(content, {
           isModal: true,
+          maskColor: "#80000000",
           autoCancel: this.request.cancelIndex !== undefined && this.request.cancelIndex !== null,
           alignment: this.request.anchor ? DialogAlignment.TopStart : DialogAlignment.Center,
           offset: this.offset(),
@@ -262,6 +308,9 @@ class PromptSession {
           onWillDismiss: (action: DismissDialogAction): void => {
             if (this.completed) {
               action.dismiss();
+            } else if (action.reason === DismissReason.TOUCH_OUTSIDE && !this.request.anchor) {
+              // Confirmation dialogs require an explicit choice; Escape still cancels.
+              return;
             } else if (
               this.request.cancelIndex !== undefined &&
               this.request.cancelIndex !== null
