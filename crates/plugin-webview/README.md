@@ -199,12 +199,23 @@ reverse events, threading, mounting and acceptance rules.
 
 ## Document-start scripts
 
-Document-start scripts use `runJavaScriptOnDocumentStart` on API 15 and newer.
-Each array entry remains a separate script and runs in array order, so an exception
-in one entry does not prevent the following entries from running. On API 12–14,
-the existing `javaScriptOnDocumentStart` component API is retained; it does not
-guarantee execution order. Both direct and drag-overlay WebViews retain the
-scripts supplied by `keySynthesisScripts`, including the main-window keyboard shim.
+Document-start scripts use the declarative `Web.runJavaScriptOnDocumentStart`
+attribute on API 15 and newer. The builder selects the API using the device's
+`sdkApiVersion`; it does not depend on `AttributeModifier` support for Web-specific
+methods. Compile with an SDK that includes API 15 or newer; the minimum supported
+runtime remains API 12.
+
+Each array entry remains a separate script with its own URL rules and runs in
+array order, so an exception in one entry does not prevent the following entries
+from running. On API 12–14, the original declarative `javaScriptOnDocumentStart`
+attribute is retained and scripts still execute in lexicographic order. Ordered
+execution is only guaranteed on API 15 and newer.
+
+Both direct and drag-overlay WebViews configure the scripts before registering
+the controller-attached callback that starts the first navigation. Both retain
+the scripts supplied by `keySynthesisScripts`, including the main-window keyboard
+shim; drag callbacks remain on the Web node in direct mode and on the separate
+Stack in overlay mode.
 
 ## License
 

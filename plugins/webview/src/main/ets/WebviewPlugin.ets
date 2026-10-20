@@ -5,7 +5,7 @@ import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
 import { fileIo, fileUri } from "@kit.CoreFileKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { BusinessError, print } from "@kit.BasicServicesKit";
+import { BusinessError, deviceInfo, print } from "@kit.BasicServicesKit";
 import { abilityAccessCtrl, common } from "@kit.AbilityKit";
 import { unifiedDataChannel, uniformTypeDescriptor, uniformDataStruct } from "@kit.ArkData";
 import { openNewWindowDialog } from "./NewWindowDialog";
@@ -92,24 +92,6 @@ function setWebDebuggingAccessIfAvailable(enabled: boolean): void {
 
 function enableWebDebuggingIfAvailable(): void {
   setWebDebuggingAccessIfAvailable(true);
-}
-
-/** Resolve the API-15 Web attribute dynamically to retain the API-12 baseline. */
-interface OrderedDocumentStartAttribute {
-  runJavaScriptOnDocumentStart?: (scripts: ScriptItem[]) => void;
-}
-
-class DocumentStartScriptsModifier implements AttributeModifier<WebAttribute> {
-  constructor(private scripts: ScriptItem[]) {}
-
-  applyNormalAttribute(instance: WebAttribute): void {
-    const ordered = instance as ESObject as OrderedDocumentStartAttribute;
-    if (typeof ordered.runJavaScriptOnDocumentStart === "function") {
-      ordered.runJavaScriptOnDocumentStart(this.scripts);
-    } else {
-      instance.javaScriptOnDocumentStart(this.scripts);
-    }
-  }
 }
 
 interface WebviewStyle {
@@ -1325,54 +1307,132 @@ function setupDownloadDelegate(data: ManagedWebview): void {
   }
 }
 
+/** Shared declaration-time attributes; the controller callback starts the first navigation. */
+@Extend(Web)
+// eslint-disable-next-line no-unused-vars -- ArkUI resolves @Extend calls on Web attribute chains.
+function managedWebviewAttributes(data: ManagedWebview, interceptContext: string) {
+  // Always "100%": natural ArkUI layout so the Web follows its parent container on
+  // window resize. set_bounds (BuilderNode.update) re-runs this builder but only
+  // .position() below consumes style.{x,y} — sizing via fixed px here would pin the
+  // Web component and break ArkWeb viewport tracking on resize (bottom cutoff).
+  // eslint-disable-next-line no-unused-expressions -- ArkUI compiles this @Extend attribute chain.
+  .width("100%")
+  .height("100%")
+  .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
+  .hitTestBehavior(HitTestMode.Block)
+  // Transparent windows: force Web background to transparent so vibrancy/blur
+  // effects are visible through the Web component. Without this, the Web renders
+  // with its default opaque background, hiding any blur effect.
+  .backgroundColor(
+    data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined),
+  )
+  .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
+  // Vibrancy/frosted glass: backdropBlur blurs in-surface pixels of the Web component.
+  // Works on opaque containers (Float sub-windows where setWindowContainerColor returns 1300004).
+  // The blur radius is read from WindowManager.getPendingBlur() at webview creation time.
+  .backdropBlur(data.style.blurRadius ?? 0)
+  // Debounce resize JS dispatch (handleWebviewAreaChange — shared with the
+  // overlay branch, issue #87 major-6).
+  .onAreaChange((oldArea: Area, newArea: Area) => {
+    handleWebviewAreaChange(data, oldArea, newArea);
+  })
+  .javaScriptAccess(data.javascriptEnabled ?? true)
+  .domStorageAccess(data.domStorageAccess ?? true)
+  .mediaPlayGestureAccess(data.autoplay === true ? false : true)
+  .multiWindowAccess(data.eventOptions.newWindow === true)
+  .allowWindowOpenMethod(data.eventOptions.newWindow === true)
+  .onControllerAttached(() => {
+    handleControllerAttached(data);
+  })
+  .onLoadIntercept((event) => handleLoadIntercept(data, event.data.getRequestUrl()))
+  .onInterceptRequest((event) => {
+    return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, interceptContext);
+  })
+  .onTitleReceive((event) => data.onTitleChange(event.title))
+  .onPageBegin((e) => {
+    handleWebviewPageBegin(data, e.url);
+  })
+  .onPageEnd((e) => {
+    handleWebviewPageEnd(data, e.url);
+  })
+  .onWindowNew((e) => {
+    handleWebviewWindowNew(data, e);
+  });
+}
+
+/** Direct-mode drag callbacks; overlay mode binds these on its transparent Stack. */
+@Extend(Web)
+// eslint-disable-next-line no-unused-vars -- ArkUI resolves @Extend calls on Web attribute chains.
+function managedWebviewDragEvents(data: ManagedWebview) {
+  // eslint-disable-next-line no-unused-expressions -- ArkUI compiles this @Extend attribute chain.
+  .onDragEnter((dragEvent: DragEvent) => {
+    dispatchWebviewDragEnter(data, dragEvent);
+  })
+  .onDragMove((dragEvent: DragEvent) => {
+    dispatchWebviewDragMove(data, dragEvent);
+  })
+  .onDrop((dragEvent: DragEvent) => {
+    dispatchWebviewDragDrop(data, dragEvent);
+  })
+  .onDragLeave((dragEvent: DragEvent) => {
+    dispatchWebviewDragLeave(data, dragEvent);
+  });
+}
+
+// AttributeModifier receives ArkWebComponent, whose Web-specific methods may be
+// missing or unimplemented even when the corresponding declarative API exists.
+// Keep API selection in the builder so both paths call the real Web attributes,
+// before managedWebviewAttributes installs onControllerAttached / first navigation.
+@Builder
+function BuildOverlayWebview(data: ManagedWebview) {
+  if (deviceInfo.sdkApiVersion >= 15) {
+    Web({
+      src: "",
+      controller: data.controller as webview.WebviewController,
+      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+    })
+      .runJavaScriptOnDocumentStart(keySynthesisScripts(data))
+      .managedWebviewAttributes(data, "");
+  } else {
+    Web({
+      src: "",
+      controller: data.controller as webview.WebviewController,
+      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+    })
+      .javaScriptOnDocumentStart(keySynthesisScripts(data))
+      .managedWebviewAttributes(data, "");
+  }
+}
+
+@Builder
+function BuildDirectWebview(data: ManagedWebview) {
+  if (deviceInfo.sdkApiVersion >= 15) {
+    Web({
+      src: "",
+      controller: data.controller as webview.WebviewController,
+      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+    })
+      .runJavaScriptOnDocumentStart(keySynthesisScripts(data))
+      .managedWebviewAttributes(data, "(embedded)")
+      .managedWebviewDragEvents(data);
+  } else {
+    Web({
+      src: "",
+      controller: data.controller as webview.WebviewController,
+      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+    })
+      .javaScriptOnDocumentStart(keySynthesisScripts(data))
+      .managedWebviewAttributes(data, "(embedded)")
+      .managedWebviewDragEvents(data);
+  }
+}
+
 @Builder
 function BuildWebview(data: ManagedWebview) {
   if (data.eventOptions.dragDrop === true && data.dragDropOverlay === true) {
     // Overlay mode: Web does not receive drag events; transparent Stack above it does.
     Stack() {
-      Web({
-        src: "",
-        controller: data.controller as webview.WebviewController,
-        renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
-      })
-        .width("100%")
-        .height("100%")
-        .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
-        .hitTestBehavior(HitTestMode.Block)
-        .backgroundColor(
-          data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined),
-        )
-        .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
-        // Vibrancy: backdropBlur for opaque sub-windows (see Direct mode comment)
-        .backdropBlur(data.style.blurRadius ?? 0)
-        // Debounce resize JS dispatch to avoid flooding ArkWeb during drag-resize
-        // (handleWebviewAreaChange — shared with the direct branch, issue #87 major-6).
-        .onAreaChange((oldArea: Area, newArea: Area) => {
-          handleWebviewAreaChange(data, oldArea, newArea);
-        })
-        .javaScriptAccess(data.javascriptEnabled ?? true)
-        .domStorageAccess(data.domStorageAccess ?? true)
-        .mediaPlayGestureAccess(data.autoplay === true ? false : true)
-        .attributeModifier(new DocumentStartScriptsModifier(keySynthesisScripts(data)))
-        .multiWindowAccess(data.eventOptions.newWindow === true)
-        .allowWindowOpenMethod(data.eventOptions.newWindow === true)
-        .onControllerAttached(() => {
-          handleControllerAttached(data);
-        })
-        .onLoadIntercept((event) => handleLoadIntercept(data, event.data.getRequestUrl()))
-        .onInterceptRequest((event) => {
-          return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, "");
-        })
-        .onTitleReceive((event) => data.onTitleChange(event.title))
-        .onPageBegin((e) => {
-          handleWebviewPageBegin(data, e.url);
-        })
-        .onPageEnd((e) => {
-          handleWebviewPageEnd(data, e.url);
-        })
-        .onWindowNew((e) => {
-          handleWebviewWindowNew(data, e);
-        })
+      BuildOverlayWebview(data)
       Stack()
         .width("100%")
         .height("100%")
@@ -1394,71 +1454,7 @@ function BuildWebview(data: ManagedWebview) {
     .width("100%")
     .height("100%");
   } else {
-    // Direct mode: drag events bound directly on the Web component.
-    Web({
-      src: "",
-      controller: data.controller as webview.WebviewController,
-      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
-    })
-      // Always "100%": natural ArkUI layout so the Web follows its parent container on
-      // window resize. set_bounds (BuilderNode.update) re-runs this builder but only
-      // .position() below consumes style.{x,y} — sizing via fixed px here would pin the
-      // Web component and break ArkWeb viewport tracking on resize (bottom cutoff).
-      .width("100%")
-      .height("100%")
-      .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
-      .hitTestBehavior(HitTestMode.Block)
-      // Transparent windows: force Web background to transparent so vibrancy/blur
-      // effects are visible through the Web component. Without this, the Web renders
-      // with its default opaque background, hiding any blur effect.
-      .backgroundColor(
-        data.transparent === true ? Color.Transparent : (data.style.backgroundColor ?? undefined),
-      )
-      .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
-      // Vibrancy/frosted glass: backdropBlur blurs in-surface pixels of the Web component.
-      // Works on opaque containers (Float sub-windows where setWindowContainerColor returns 1300004).
-      // The blur radius is read from WindowManager.getPendingBlur() at webview creation time.
-      .backdropBlur(data.style.blurRadius ?? 0)
-      // Debounce resize JS dispatch (handleWebviewAreaChange — shared with the
-      // overlay branch, issue #87 major-6).
-      .onAreaChange((oldArea: Area, newArea: Area) => {
-        handleWebviewAreaChange(data, oldArea, newArea);
-      })
-      .javaScriptAccess(data.javascriptEnabled ?? true)
-      .domStorageAccess(data.domStorageAccess ?? true)
-      .mediaPlayGestureAccess(data.autoplay === true ? false : true)
-      .attributeModifier(new DocumentStartScriptsModifier(keySynthesisScripts(data)))
-      .multiWindowAccess(data.eventOptions.newWindow === true)
-      .allowWindowOpenMethod(data.eventOptions.newWindow === true)
-      .onControllerAttached(() => {
-        handleControllerAttached(data);
-      })
-      .onLoadIntercept((event) => handleLoadIntercept(data, event.data.getRequestUrl()))
-      .onInterceptRequest((event) => {
-        return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, "(embedded)");
-      })
-      .onTitleReceive((event) => data.onTitleChange(event.title))
-      .onPageBegin((e) => {
-        handleWebviewPageBegin(data, e.url);
-      })
-      .onPageEnd((e) => {
-        handleWebviewPageEnd(data, e.url);
-      })
-      .onDragEnter((dragEvent: DragEvent) => {
-        dispatchWebviewDragEnter(data, dragEvent);
-      })
-      .onDragMove((dragEvent: DragEvent) => {
-        dispatchWebviewDragMove(data, dragEvent);
-      })
-      .onDrop((dragEvent: DragEvent) => {
-        dispatchWebviewDragDrop(data, dragEvent);
-      })
-      .onDragLeave((dragEvent: DragEvent) => {
-        dispatchWebviewDragLeave(data, dragEvent);
-      })
-      .onWindowNew((e) => {
-        handleWebviewWindowNew(data, e);
-      });
+    BuildDirectWebview(data);
   }
 }
 
