@@ -61,6 +61,39 @@ pub struct ClipboardRecord {
 }
 impl_bridge_napi_type!(ClipboardRecord, "ohos.clipboard.Record");
 
+/// An exact, binary-safe representation, rather than a lossy projection into
+/// plain text, a decoded PixelMap, or a file URI.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ClipboardMimeContent {
+    pub mime: String,
+    pub data: Vec<u8>,
+}
+impl_bridge_napi_type!(ClipboardMimeContent, "ohos.clipboard.MimeContent");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ClipboardWriteMimeRequest {
+    pub contents: Vec<ClipboardMimeContent>,
+}
+impl_bridge_napi_type!(ClipboardWriteMimeRequest, "ohos.clipboard.WriteMimeRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ClipboardReadMimeRequest {
+    pub mimes: Vec<String>,
+    pub list: bool,
+}
+impl_bridge_napi_type!(ClipboardReadMimeRequest, "ohos.clipboard.ReadMimeRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ClipboardReadMimeResponse {
+    pub contents: Vec<ClipboardMimeContent>,
+    pub available: Vec<String>,
+}
+impl_bridge_napi_type!(ClipboardReadMimeResponse, "ohos.clipboard.ReadMimeResponse");
+
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardWriteRecordsRequest {
@@ -307,6 +340,28 @@ impl ClipboardClient {
             .records)
     }
 
+    pub async fn read_mime(
+        &self,
+        mimes: Vec<String>,
+        list: bool,
+    ) -> Result<ClipboardReadMimeResponse> {
+        validate_mimes(mimes.iter().map(String::as_str))?;
+        self.call("read-mime", ClipboardReadMimeRequest { mimes, list })
+            .await
+    }
+
+    pub async fn write_mime(&self, contents: Vec<ClipboardMimeContent>) -> Result<()> {
+        validate_mimes(contents.iter().map(|content| content.mime.as_str()))?;
+        let response: ClipboardWriteTextResponse = self
+            .call("write-mime", ClipboardWriteMimeRequest { contents })
+            .await?;
+        if response.accepted {
+            Ok(())
+        } else {
+            Err(Error::from_reason("Clipboard plugin rejected MIME write"))
+        }
+    }
+
     pub async fn write_records(&self, records: Vec<ClipboardRecord>) -> Result<()> {
         validate_records(&records)?;
         let response = self
@@ -478,9 +533,46 @@ fn validate_image_dimensions(rgba: &[u8], width: u32, height: u32) -> Result<()>
     Ok(())
 }
 
+fn validate_mimes<'a>(mimes: impl ExactSizeIterator<Item = &'a str>) -> Result<()> {
+    if mimes.len() > 512
+        || mimes
+            .into_iter()
+            .any(|mime| mime.is_empty() || mime.len() > 1024 || mime.contains('\0'))
+    {
+        return Err(Error::from_reason("invalid clipboard MIME representations"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mime_actions_keep_binary_data_empty_values_and_named_contracts() {
+        assert_eq!(
+            ClipboardMimeContent::TYPE_NAME,
+            "ohos.clipboard.MimeContent"
+        );
+        assert_eq!(
+            ClipboardWriteMimeRequest::TYPE_NAME,
+            "ohos.clipboard.WriteMimeRequest"
+        );
+        assert_eq!(
+            ClipboardReadMimeRequest::TYPE_NAME,
+            "ohos.clipboard.ReadMimeRequest"
+        );
+        assert_eq!(
+            ClipboardReadMimeResponse::TYPE_NAME,
+            "ohos.clipboard.ReadMimeResponse"
+        );
+        assert!(validate_mimes(["application/octet-stream", "text/plain"].into_iter()).is_ok());
+        assert!(validate_mimes([""].into_iter()).is_err());
+        assert!(validate_mimes(["bad\0mime"].into_iter()).is_err());
+        assert!(validate_mimes(["application/é"].into_iter()).is_ok());
+        assert!(validate_mimes(std::iter::repeat_n("text/plain", 513)).is_err());
+        assert!(validate_mimes(std::iter::empty()).is_ok());
+    }
 
     #[test]
     fn record_contract_and_validation() {

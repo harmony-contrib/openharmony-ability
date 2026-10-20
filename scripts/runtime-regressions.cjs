@@ -499,8 +499,10 @@ test("URI and record clipboard APIs both round-trip in caller order", async () =
     MIMETYPE_TEXT_URI: "uri",
     MIMETYPE_TEXT_PLAIN: "text",
     MIMETYPE_PIXELMAP: "image",
-    createData: (type, value) => new PasteData({ mimeType: type, uri: value }),
-    createRecord: (type, value) => ({ mimeType: type, uri: value }),
+    createData: (type, value) => new PasteData({ mimeType: type, uri: value,
+      getValidTypes: (types) => types.filter((candidate) => candidate === type), getData: async () => value }),
+    createRecord: (type, value) => ({ mimeType: type, uri: value,
+      getValidTypes: (types) => types.filter((candidate) => candidate === type), getData: async () => value }),
     getSystemPasteboard: () => ({
       setData: async (data) => {
         stored = data;
@@ -554,7 +556,8 @@ function authorizedClipboardFor({ empty = false, temporary = false, failure, per
   const owner = {};
   const data = (text) => ({
     getRecordCount: () => text ? 1 : 0,
-    getRecordAt: () => ({ mimeType: "text", plainText: text, getValidTypes: () => [] }),
+    getRecordAt: () => ({ mimeType: "text", plainText: text,
+      getValidTypes: (types) => types.filter((type) => type === "text"), getData: async () => text }),
   });
   const { ClipboardPlugin } = loader({
     "@ohos.pasteboard": { MIMETYPE_TEXT_PLAIN: "text", getSystemPasteboard: () => ({
@@ -2540,4 +2543,134 @@ test("a fullscreen Ability window does not require floating geometry", async () 
   await creation;
   assert.equal(state.manager.getWindow(7), instance.win);
   await state.manager.destroyWindow(7);
+});
+
+test("MIME clipboard preserves binary and empty representations and serializes system writes", async () => {
+  let stored;
+  let releaseWrite;
+  let writes = 0;
+  class Record {
+    entries = new Map();
+    constructor(mime, value) {
+      this.addEntry(mime, value);
+    }
+    addEntry(mime, value) {
+      this.entries.set(mime, value);
+    }
+    getValidTypes(types) {
+      return types.filter((type) => this.entries.has(type));
+    }
+    async getData(type) {
+      return this.entries.get(type);
+    }
+  }
+  class Data {
+    constructor(mime, value) {
+      this.record = new Record(mime, value);
+    }
+    replaceRecord(_index, record) {
+      this.record = record;
+    }
+    getRecordCount() {
+      return this.record ? 1 : 0;
+    }
+    getRecordAt() {
+      return this.record;
+    }
+    getMimeTypes() {
+      return Array.from(this.record?.entries.keys() || []);
+    }
+  }
+  const board = {
+    hasData: async () => !!stored,
+    getData: async () => stored,
+    setData: async (data) => {
+      writes++;
+      if (writes === 1)
+        await new Promise((resolve) => {
+          releaseWrite = resolve;
+        });
+      stored = data;
+    },
+    clearData: async () => {
+      stored = undefined;
+    },
+  };
+  const pasteboard = {
+    MIMETYPE_TEXT_PLAIN: "text/plain",
+    MIMETYPE_TEXT_HTML: "text/html",
+    MIMETYPE_TEXT_URI: "text/uri-list",
+    MIMETYPE_PIXELMAP: "pixelmap",
+    MIMETYPE_TEXT_WANT: "want",
+    getSystemPasteboard: () => board,
+    createRecord: (mime, value) => new Record(mime, value),
+    createData: (mime, value) => new Data(mime, value),
+  };
+  const { ClipboardPlugin } = loader({
+    "@ohos.pasteboard": pasteboard,
+    "@kit.ArkTS": {
+      util: {
+        TextEncoder: class {
+          encodeInto(text) {
+            return text ? new TextEncoder().encode(text) : undefined;
+          }
+        },
+        TextDecoder: class {
+          decodeToString(bytes) {
+            return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+          }
+        },
+      },
+    },
+  }).load("plugins/clipboard/src/main/ets/ClipboardPlugin.ets");
+  const plugin = new ClipboardPlugin({ metadataMimeType: "application/x-test-metadata-v1" });
+  const context = { isActive: () => true };
+  const write = (contents) =>
+    plugin.invokeAsync(
+      "write-mime",
+      {
+        typeName: "ohos.clipboard.WriteMimeRequest",
+        value: { contents },
+      },
+      context,
+    );
+  const read = (mimes, list = true) =>
+    plugin.invokeAsync(
+      "read-mime",
+      {
+        typeName: "ohos.clipboard.ReadMimeRequest",
+        value: { mimes, list },
+      },
+      context,
+    );
+  const first = write([{ mime: "text/plain", data: [65] }]);
+  await flush();
+  const second = write([
+    { mime: "application/octet-stream", data: [0, 255, 128] },
+    { mime: "text/plain", data: [] },
+  ]);
+  let readFinished = false;
+  const reading = read(["text/plain", "application/octet-stream"]).then((value) => {
+    readFinished = true;
+    return value;
+  });
+  await flush();
+  assert.equal(writes, 1);
+  assert.equal(readFinished, false);
+  releaseWrite();
+  await Promise.all([first, second]);
+  const result = await reading;
+  assert.equal(result.typeName, "ohos.clipboard.ReadMimeResponse");
+  assert.deepEqual(
+    Array.from(result.value.contents, (entry) => [entry.mime, Array.from(entry.data)]),
+    [
+      ["text/plain", []],
+      ["application/octet-stream", [0, 255, 128]],
+    ],
+  );
+  assert.deepEqual(Array.from(result.value.available), ["application/octet-stream", "text/plain"]);
+  await assert.rejects(write([{ mime: "", data: [] }]), /MIME/);
+  assert.equal(writes, 2);
+  await write([]);
+  assert.deepEqual(Array.from((await read([])).value.available), []);
 });

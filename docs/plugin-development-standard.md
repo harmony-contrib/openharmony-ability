@@ -214,6 +214,8 @@ export { LoginPlugin };
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
 | `ohos.clipboard` / `write-records` | `ohos.clipboard.WriteRecordsRequest { records: Record[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；1..512 个文本（可带 metadata）、图片或文件 URI 记录，保持顺序 |
 | `ohos.clipboard` / `read-records` | `ohos.clipboard.ReadTextRequest {}` → `ohos.clipboard.ReadRecordsResponse { records: Record[] }` | async / `ability`；`Record { text?, metadata?, encodedImage?, uri? }` 每条仅一种主内容；需要 READ_PASTEBOARD 的 ACL 和运行时授权 |
+| `ohos.clipboard` / `write-mime` | `ohos.clipboard.WriteMimeRequest { contents: MimeContent[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；同一记录的二进制多表示，空数组清空，系统提交后完成 |
+| `ohos.clipboard` / `read-mime` | `ohos.clipboard.ReadMimeRequest { mimes, list }` → `ohos.clipboard.ReadMimeResponse { contents, available }` | async / `ability`；按请求顺序读回，空 mimes 只列元数据，读取等待先前写入 |
 | `ohos.clipboard` / 入站 `changed` | `ohos.clipboard.ChangedEvent {}` → `std.bool` | 系统 pasteboard update 使 Rust revision 递增；监听随插件生命周期释放 |
 | `ohos.window` / `show-prompt` | `ohos.window.PromptRequest { windowId, message, detail?, level, buttons, cancelIndex?, anchor?: PromptAnchor }` → `ohos.window.PromptResponse { index }` | async / `ui-context`；`PromptAnchor { x, y }` 为目标窗口内容局部逻辑坐标，单位 vp，不是物理 px 或屏幕全局坐标；弹窗按实际尺寸限制在窗口可用区域内；原生弹窗取消、调用取消和销毁均释放组件 |
 | `ohos.window` / `get-window-stack` | `ohos.window.StackRequest { displayId, windowIds }` → `ohos.window.StackResponse { windowIds }` | async / `ui-context`；从 SDK 可见窗口顺序中筛选请求的本应用窗口，顶部在前 |
