@@ -214,6 +214,8 @@ export { LoginPlugin };
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
 | `ohos.clipboard` / `write-records` | `ohos.clipboard.WriteRecordsRequest { records: Record[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；1..512 个文本（可带 metadata）、图片或文件 URI 记录，保持顺序 |
 | `ohos.clipboard` / `read-records` | `ohos.clipboard.ReadTextRequest {}` → `ohos.clipboard.ReadRecordsResponse { records: Record[] }` | async / `ability`；`Record { text?, metadata?, encodedImage?, uri? }` 每条仅一种主内容；需要 READ_PASTEBOARD 的 ACL 和运行时授权 |
+| `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `ohos.audio.UpdateResponse { accepted }` | async / `ability`；借用文件至 CLOEXEC 复制完成，按 player 复用和等待释放 |
+| `ohos.audio` / 入站 `duplicate`、`playback` | `ohos.audio.DuplicateRequest { fd }` → `std.i32` / `ohos.audio.PlaybackEvent` → `std.bool` | 主线程同步；仅传具名数据，不保留 N-API 对象 |
 | `ohos.clipboard` / `write-mime` | `ohos.clipboard.WriteMimeRequest { contents: MimeContent[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；同一记录的二进制多表示，空数组清空，系统提交后完成 |
 | `ohos.clipboard` / `read-mime` | `ohos.clipboard.ReadMimeRequest { mimes, list }` → `ohos.clipboard.ReadMimeResponse { contents, available }` | async / `ability`；按请求顺序读回，空 mimes 只列元数据，读取等待先前写入 |
 | `ohos.clipboard` / 入站 `changed` | `ohos.clipboard.ChangedEvent {}` → `std.bool` | 系统 pasteboard update 使 Rust revision 递增；监听随插件生命周期释放 |

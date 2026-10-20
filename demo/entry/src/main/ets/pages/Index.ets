@@ -3,6 +3,7 @@ import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/Entry
 import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
   createBottomDemoWebview,
+  playAudioDemo,
   createComposedDemoWebview,
   createDemoWebview,
   demoRequestPermissionFromMainThread,
@@ -574,6 +575,11 @@ struct Index {
           statusColor: this.statusColorOf("url", this.urlResult),
           busy: this.busyKey === "url",
           buttons: [
+            new DemoButton("play demo tone", (): void => {
+              playAudioDemo().catch((error: Error): void => {
+                console.error(String(error));
+              });
+            }),
             new DemoButton("open external URL", (): void => {
               this.handleOpenUrl();
             }),

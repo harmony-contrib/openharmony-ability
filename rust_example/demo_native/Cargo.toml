@@ -13,6 +13,7 @@ napi-ohos = { workspace = true, features = ["tokio_rt"] }
 napi-derive-ohos = { workspace = true }
 
 openharmony-ability = { workspace = true }
+openharmony-ability-plugin-audio = { workspace = true }
 openharmony-ability-derive = { workspace = true }
 openharmony-ability-plugin-app-control = { workspace = true }
 openharmony-ability-plugin-files = { workspace = true }
