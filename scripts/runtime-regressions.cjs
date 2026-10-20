@@ -132,7 +132,7 @@ function loader(overrides = {}, globals = {}) {
     // ComponentContent layout is covered by platform compilation. Keep its model,
     // session and cancellation code unchanged while omitting declarative UI syntax.
     const statements = ast.statements.filter(
-      (s) => !(ts.isFunctionDeclaration(s) && s.name?.text === "promptBuilder"),
+      (s) => !(ts.isFunctionDeclaration(s) && s.name?.text === "promptBuilder") && s.kind !== ts.SyntaxKind.StructDeclaration,
     );
     const printed = ts.createPrinter().printFile(ts.factory.updateSourceFile(ast, statements));
     const { outputText } = ts.transpileModule(printed, {
@@ -816,7 +816,7 @@ test("restore inspects queued state, waits for the OS and propagates failure wit
   const first = manager.serializeOp(0, async () => {
     await preceding.promise;
     state = windowApi.WindowStatusType.MINIMIZE;
-  });
+  }, win);
   const result = manager.restoreWindow(0, { window: win, onlyIfMinimized: true });
   const failure = new Error("OS restore failure");
   const rejected = assert.rejects(result, (error) => error === failure);
@@ -831,7 +831,7 @@ test("restore inspects queued state, waits for the OS and propagates failure wit
   let nextRan = false;
   await manager.serializeOp(0, async () => {
     nextRan = true;
-  });
+  }, win);
   assert.equal(nextRan, true);
 });
 
@@ -1468,7 +1468,7 @@ test("custom cursors release PixelMaps after success, OS failure and canceled ca
       } },
     });
     const { manager } = managerFor(l);
-    const win = { on() {}, getWindowProperties: () => ({ id: 42 }) };
+    const win = { on() {}, getWindowProperties: () => ({ id: 42 }), getUIContext: () => ({ getHostContext: () => ({}) }) };
     manager.registerUIAbilityStage(0, { getMainWindowSync: () => win }, {});
     const { WindowPlugin } = l.load("plugins/window/src/main/ets/WindowPlugin.ets");
     const result = new WindowPlugin().invokeAsync("set-custom-cursor", {
@@ -1651,8 +1651,9 @@ function abilityWindowRuntime({ start, initialized = true, globals = {} } = {}) 
   manager.setIndependentWindowAbility("WorkspaceAbility");
   function attach(id, phase, loading, resizing) {
     const handlers = new Map(), subscriptions = [];
-    const calls = [];
+    const calls = [], geometry = [];
     const win = {
+      async setWindowBackgroundColor(color) { geometry.push(["background", color]); },
       on(name, listener) { handlers.set(name, listener); subscriptions.push(name); },
       off(name, listener) { assert.equal(handlers.get(name), listener); handlers.delete(name); },
       async loadContentByName() { if (loading) await loading; if (phase === "load") throw new Error(phase); },
@@ -1670,7 +1671,7 @@ function abilityWindowRuntime({ start, initialized = true, globals = {} } = {}) 
     };
     ability.onCreate({ parameters: { "openharmony.ability.windowId": id } });
     ability.onWindowStageCreate({ getMainWindowSync: () => win });
-    return { ability, win, handlers, subscriptions, calls };
+    return { ability, win, handlers, subscriptions, calls, geometry };
   }
   const options = (id) => ({ windowId: id, name: `workspace-${id}`, independent: true, nativeModuleName: "zed", show: true, focus: false });
   return { runtime, manager, NativeWindowAbility, options, attach, started, closed, nativeClosed, notifiedModules };
@@ -1902,7 +1903,7 @@ test("closing a never-shown workspace releases its waiters without launching an 
   const { WindowPlugin } = state.runtime.load("plugins/window/src/main/ets/WindowPlugin.ets");
   const plugin = new WindowPlugin();
   const payload = { typeName: "ohos.window.WindowIdRequest", value: { windowId: 7 } };
-  const waiting = assert.rejects(plugin.invokeAsync("is-maximized", payload, { isActive: () => true }), /Unknown OS window/);
+  const waiting = assert.rejects(plugin.invokeAsync("is-maximized", payload, { isActive: () => true }), /not ready/);
   const closing = plugin.invokeAsync("destroy-window", payload, { isActive: () => true });
   await Promise.all([creation, waiting, closing]);
   await plugin.invokeAsync("destroy-window", payload, { isActive: () => true });
@@ -2013,68 +2014,77 @@ test("permission failure and session teardown do not grant microphone access", a
 });
 
 
-test("native applications can retain contextual keyboard shortcuts with rendered menus", () => {
-  for (const enabled of [undefined, true, false]) {
-    let port;
-    let dispatched = 0;
-    const item = { id: "close-window", accelerator: "Ctrl+w" };
-    const matcher = {
-      trackModifiers() {},
-      matches: () => true,
-      getMatchedItem: () => item,
+function menuRuntime() {
+  const stored = new Map(), windows = new Map(), events = [];
+  const globals = { KeyType: { Down: 0, Up: 1 }, AppStorage: {
+    get: key => stored.get(key), setOrCreate: (key, value) => stored.set(key, value),
+  } };
+  const l = loader({ "@kit.InputKit": { KeyCode: { KEYCODE_ESCAPE: 2070 } },
+    "@ohos.web.webview": {}, "@ohos.app.ability.common": {},
+  }, globals);
+  const slots = l.load("native_ability/src/main/ets/components/MenuBarSlot.ets");
+  const registry = l.load("plugins/menu/src/main/ets/MenuWindowRegistry.ets");
+  const matchers = l.load("plugins/menu/src/main/ets/accelerator_matcher.ets");
+  Object.assign(l.imports["@ohos-rs/ability"], slots, {
+    MAIN_WINDOW_ID: 0,
+    hasWebviewKeyboardPolicy: () => false,
+    setPrimaryWebviewControllerCallback: () => () => {},
+    WindowManager: { getInstance: () => ({
+      getWindow: id => windows.get(id), getUserInteractedWindow: () => null,
+      getFocusedWindow: () => null, getWebviewController: () => undefined,
+    }) },
+  });
+  l.imports["./MenuBarComponent"] = registry;
+  const { MenuPlugin } = l.load("plugins/menu/src/main/ets/MenuPlugin.ets");
+  function host(id, options = {}) {
+    const win = windows.get(id) ?? { getWindowProperties: () => ({ id }), getUIContext: () => ({ getHostContext: () => ({}) }) };
+    windows.set(id, win);
+    const cancellations = new Set();
+    let active = true;
+    const context = { abilityContext: {}, getWindow: () => win,
+      isActive: () => active, isCancelled: () => !active,
+      onCancel(fn) { cancellations.add(fn); return () => cancellations.delete(fn); },
+      invokeNativeSync: (...args) => events.push([id, ...args]),
+      invokeNativeSyncProcessWide() { assert.fail("window menu events must not broadcast"); },
     };
-    const { MenuPlugin } = loader({
-      "@kit.InputKit": { KeyCode: { KEYCODE_ESCAPE: 2070 } },
-      "@ohos.web.webview": {},
-      "@ohos-rs/ability": {
-        ...base,
-        setMenuBarSlotBuilder() {},
-        setMenuBarPort(value) { port = value; },
-        hasWebviewKeyboardPolicy: () => false,
-      },
-      "./MenuBarComponent": {
-        getMenuClickHandler: () => () => { dispatched++; },
-        isMenubarVisible: () => true,
-      },
-      "./accelerator_matcher": { getAcceleratorMatcher: () => matcher },
-      "./menu": {},
-    }, { KeyType: { Down: 0, Up: 1 } }).load("plugins/menu/src/main/ets/MenuPlugin.ets");
-    const plugin = new MenuPlugin({ handleKeyboardShortcuts: enabled });
-    plugin.onInstall({});
+    const plugin = new MenuPlugin(options);
+    plugin.onInstall(context);
+    return { plugin, context, win, key: `native:${id}`,
+      cancel() { active = false; for (const fn of cancellations) fn(); },
+      invoke(action, value, type) { return plugin.invokeAsync(action, { typeName: `ohos.menu.${type}`, value }, context); },
+    };
+  }
+  return { slots, registry, matchers, host, windows, events, l };
+}
+
+test("native applications can retain contextual keyboard shortcuts with rendered menus", () => {
+  const runtime = menuRuntime();
+  for (const [id, enabled] of [[1, undefined], [2, true], [3, false]]) {
+    const host = runtime.host(id, { handleKeyboardShortcuts: enabled });
+    const matcher = runtime.matchers.getAcceleratorMatcher(host.key);
+    matcher.matches = () => true;
+    matcher.getMatchedItem = () => ({ id: "close-window", type: "item" });
+    const port = runtime.slots.getMenuBarPort(host.win);
+    const before = runtime.events.length;
     assert.equal(port.onKeyPreIme({ type: 0, keyCode: 2039 }, 0), enabled !== false);
-    assert.equal(dispatched, enabled === false ? 0 : 1);
+    assert.equal(runtime.events.length - before, enabled === false ? 0 : 1);
     assert.equal(port.onKeyPreIme({ type: 1, keyCode: 2039 }, 0), false);
   }
 });
 
 test("native application menu popups retain window routing without a separate menu row", async () => {
-  let slot;
-  const calls = [];
-  const { MenuPlugin } = loader({
-    "@kit.InputKit": {},
-    "@ohos.web.webview": {},
-    "@ohos-rs/ability": {
-      ...base,
-      setMenuBarSlotBuilder(value) { slot = value; },
-      setMenuBarPort() {},
-    },
-    "./MenuBarComponent": {
-      getMenuDataCallback: (windowId) => windowId === "42" ? {
-        onApplicationMenu: (...args) => calls.push([windowId, ...args]),
-      } : undefined,
-    },
-    "./accelerator_matcher": {},
-    "./menu": {},
-  }).load("plugins/menu/src/main/ets/MenuPlugin.ets");
-  const plugin = new MenuPlugin({ showMenuBar: false, handleKeyboardShortcuts: false });
-  plugin.onInstall({});
-  assert.equal(slot.name, "menuPopupBuilder");
-  const invoke = (value, context = { isActive: () => true }) => plugin.invokeAsync(
-    "popup-menubar", { typeName: "ohos.menu.PopupMenubarRequest", value }, context,
-  );
+  const runtime = menuRuntime(), calls = [];
+  const host = runtime.host(1, { showMenuBar: false, handleKeyboardShortcuts: false });
+  runtime.windows.set(42, { getWindowProperties: () => ({ id: 42 }), getUIContext: () => ({ getHostContext: () => ({}) }) });
+  runtime.registry.registerMenuDataCallback("native:42", {
+    onApplicationMenu: (...args) => calls.push(["42", ...args]),
+  });
+  assert.equal(runtime.slots.getMenuBarSlotBuilder(host.win).name, "menuPopupBuilder");
+  const invoke = value => host.invoke("popup-menubar", value, "PopupMenubarRequest");
   const result = await invoke({ windowId: "42", menuName: "File", x: 16, y: 30 });
   assert.equal(result.typeName, "ohos.menu.Acknowledgement");
   assert.equal(result.value.accepted, true);
+  assert.equal(runtime.slots.getMenuBarSlotBuilder(runtime.windows.get(42)).name, "menuPopupBuilder");
   await invoke({ windowId: "42", x: 17, y: 31 });
   await invoke({ windowId: "42", x: 18, y: 32, restoreFocusId: "editor-42" });
   assert.deepEqual(calls, [["42", "File", 16, 30, undefined], ["42", undefined, 17, 31, undefined],
@@ -2082,14 +2092,14 @@ test("native application menu popups retain window routing without a separate me
   for (const restoreFocusId of ["", " ", 42]) {
     await assert.rejects(invoke({ windowId: "42", x: 0, y: 0, restoreFocusId }));
   }
-  await assert.rejects(invoke({ windowId: "missing", x: 0, y: 0 }), /no menu callback/);
+  await assert.rejects(invoke({ windowId: "missing", x: 0, y: 0 }), /No menu window/);
   await assert.rejects(invoke({ windowId: "42", x: NaN, y: 0 }), /finite position/);
   await assert.rejects(invoke({ windowId: "42", menuName: 1, x: 0, y: 0 }), /optional menu name/);
-  await assert.rejects(invoke({ windowId: "42", x: 0, y: 0 }, { isActive: () => false }));
+  host.cancel();
+  await assert.rejects(invoke({ windowId: "42", x: 0, y: 0 }));
   assert.equal(calls.length, 3);
-  const defaults = new MenuPlugin();
-  defaults.onInstall({});
-  assert.equal(slot.name, "menuBarBuilder");
+  const defaults = runtime.host(2);
+  assert.equal(runtime.slots.getMenuBarSlotBuilder(defaults.win).name, "menuBarBuilder");
 });
 
 test("native paste semantics preserve application dispatch and originating window", () => {
@@ -2178,25 +2188,18 @@ test("component touch hooks are session isolated and stop before teardown", asyn
 
 
 test("typed command popups preserve window routing and reject invalid or stale requests", async () => {
-  const calls = [];
-  let mounted = true;
-  const { MenuPlugin } = loader({
-    "@kit.InputKit": {},
-    "@ohos.web.webview": {},
-    "./MenuBarComponent": {
-      getMenuDataCallback: (windowId) => mounted && windowId === "42" ? {
-        onMenuCommands: (...args) => calls.push([windowId, ...args]),
-      } : undefined,
-    },
-    "./accelerator_matcher": {},
-    "./menu": {},
-  }).load("plugins/menu/src/main/ets/MenuPlugin.ets");
-  const plugin = new MenuPlugin({ showMenuBar: false });
+  const calls = [], runtime = menuRuntime();
+  const host = runtime.host(1, { showMenuBar: false });
+  runtime.windows.set(42, { getWindowProperties: () => ({ id: 42 }), getUIContext: () => ({ getHostContext: () => ({}) }) });
+  runtime.registry.registerMenuDataCallback("native:42", {
+    onMenuCommands: (...args) => calls.push(["42", ...args]),
+  });
+  const plugin = host.plugin;
   const request = { windowId: "42", items: [
     { id: "window-42:gpui-window-close", text: "Close", enabled: true },
     { id: "disabled", text: "Disabled", enabled: false },
   ], x: 16, y: 30 };
-  const invoke = (value, context = { isActive: () => true }, typeName = "ohos.menu.PopupCommandsRequest") =>
+  const invoke = (value, context = host.context, typeName = "ohos.menu.PopupCommandsRequest") =>
     plugin.invokeAsync("popup-commands", { typeName, value }, context);
   const response = await invoke(request);
   assert.equal(response.typeName, "ohos.menu.Acknowledgement");
@@ -2216,8 +2219,10 @@ test("typed command popups preserve window routing and reject invalid or stale r
   await assert.rejects(invoke(null), /Invalid command menu/);
   await assert.rejects(invoke(request, { isActive: () => false }));
   await assert.rejects(invoke(request, { isActive: () => true }, "std.string"));
-  mounted = false;
-  await assert.rejects(invoke(request), /no menu callback/);
+  runtime.registry.unregisterMenuDataCallback("native:42");
+  const pending = assert.rejects(invoke(request), /cancelled/);
+  host.cancel();
+  await pending;
   assert.equal(calls.length, 2);
 });
 
@@ -2306,11 +2311,11 @@ function menubarHoverRuntime() {
   vm.runInContext(outputText, vm.createContext({
     exports, hilog: quietConsole, MouseAction: { Move: 1, Press: 2 },
     SourceType: { Mouse: 1, TouchScreen: 2 },
-    menuWillOpenHandler: windowId => calls.push(["validate", windowId]),
+    notifyMenuWillOpen: windowId => calls.push(["validate", windowId]),
   }), { filename });
   const menu = new exports.MenuLogic();
   Object.assign(menu, {
-    windowId: 42, activeDropdownShown: false, activeDropdownId: "",
+    windowId: 42, registryKey: () => "native:42", activeDropdownShown: false, activeDropdownId: "",
     headingPressId: "", headingPressAt: 0, dismissedDropdownAt: 0, dismissedDropdownId: "",
     menubarItems: [{ id: "file" }, { id: "edit" }, { id: "disabled", enabled: false }],
     menubarItemAreas: new Map(), dropdownMouseNodes: new Map(),
@@ -2404,12 +2409,12 @@ function popupFocusRuntime({ requestError } = {}) {
   }
   visit(component);
   assert.ok(callbacks.has("aboutToDisappear"));
-  assert.ok(callbacks.has("onDidDisappear"));
+  assert.ok(callbacks.has("onDisappear"));
   const printed = ts.createPrinter().printNode(ts.EmitHint.Unspecified, method, ast);
   const { outputText } = ts.transpileModule(`class PopupFocus {
     ${printed}
     beginDismissal() { return (${callbacks.get("aboutToDisappear")})(); }
-    finishDismissal() { return (${callbacks.get("onDidDisappear")})(); }
+    finishDismissal() { return (${callbacks.get("onDisappear")})(); }
   }; exports.PopupFocus = PopupFocus;`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   });
@@ -2540,4 +2545,281 @@ test("a fullscreen Ability window does not require floating geometry", async () 
   await creation;
   assert.equal(state.manager.getWindow(7), instance.win);
   await state.manager.destroyWindow(7);
+});
+
+// Multi-host regressions: logical main/zero is local to each component.
+test("menu configuration, content, events and disposal remain window-owned", async () => {
+  const runtime = menuRuntime(), calls = [];
+  const a = runtime.host(11, { showMenuBar: false, handleKeyboardShortcuts: false });
+  const b = runtime.host(22);
+  for (const host of [a, b]) {
+    runtime.registry.registerMenuDataCallback(host.key, {
+      onMenubarJson: json => calls.push([host.key, json]),
+      onMenubarVisible: visible => calls.push([host.key, visible]),
+    });
+    runtime.matchers.getAcceleratorMatcher(host.key).matches = () => true;
+    runtime.matchers.getAcceleratorMatcher(host.key).getMatchedItem = () => ({ id: "shared-id", type: "item" });
+    await host.invoke("set-menubar", { windowId: "main", jsonData: host.key }, "SetMenubarRequest");
+    runtime.registry.notifyMenuWillOpen(0, host.key);
+  }
+  assert.deepEqual(calls, [[a.key, a.key], [b.key, b.key]]);
+  assert.equal(runtime.slots.getMenuBarSlotBuilder(a.win).name, "menuPopupBuilder");
+  assert.equal(runtime.slots.getMenuBarSlotBuilder(b.win).name, "menuBarBuilder");
+  const event = { type: 0, keyCode: 2019 };
+  assert.equal(runtime.slots.getMenuBarPort(a.win).onKeyPreIme(event, 0), false);
+  assert.equal(runtime.slots.getMenuBarPort(b.win).onKeyPreIme(event, 0), true);
+  runtime.slots.getMenuBarPort(a.win).onMenubarVisibility(0, false);
+  assert.deepEqual(calls.at(-1), [a.key, false]);
+  assert.deepEqual(runtime.events.map(([id, name]) => [id, name]), [[11, "menu-open"], [22, "menu-open"], [22, "menu-click"]]);
+  a.plugin.onDispose();
+  a.plugin.onDispose();
+  assert.equal(runtime.slots.getMenuBarPort(a.win), null);
+  assert.equal(runtime.registry.getMenuClickHandler(a.key), null);
+  assert.equal(runtime.slots.getMenuBarPort(b.win).onKeyPreIme(event, 0), true);
+  assert.equal(runtime.events.at(-1)[0], 22);
+  // Replacing a window's explicit registration cannot be undone by an older owner.
+  const newer = runtime.host(22, { showMenuBar: false });
+  b.plugin.onDispose();
+  assert.equal(runtime.slots.getMenuBarSlotBuilder(newer.win).name, "menuPopupBuilder");
+  assert.notEqual(runtime.registry.getMenuClickHandler(newer.key), null);
+});
+
+test("menu attachment follows actual mount and cancellation, including child-window teardown", async () => {
+  const runtime = menuRuntime(), calls = [];
+  const host = runtime.host(1);
+  const child = { getWindowProperties: () => ({ id: 42 }), getUIContext: () => ({ getHostContext: () => ({}) }) };
+  runtime.windows.set(42, child);
+  const pending = host.invoke("popup-commands", {
+    windowId: "42", items: [{ id: "close", text: "Close", enabled: true }], x: 1, y: 2,
+  }, "PopupCommandsRequest");
+  await flush();
+  assert.notEqual(runtime.slots.getMenuBarSlotBuilder(child), null);
+  runtime.registry.registerMenuDataCallback("native:42", { onMenuCommands: items => calls.push(items[0].id) });
+  await pending;
+  assert.deepEqual(calls, ["close"]);
+  runtime.registry.unregisterMenuDataCallback("native:42");
+  const cancelled = assert.rejects(host.invoke("set-menubar", { windowId: "42", jsonData: "[]" }, "SetMenubarRequest"), /cancelled/);
+  runtime.slots.getMenuBarPort(child).onHostDisappear();
+  await cancelled;
+  assert.equal(runtime.slots.getMenuBarPort(child), null);
+  assert.notEqual(runtime.slots.getMenuBarPort(host.win), null);
+});
+
+test("old menu APIs build popup options without referring to ModalMode", () => {
+  const filename = path.join(root, "plugins/menu/src/main/ets/MenuBarComponent.ets");
+  const ast = ts.createSourceFile(filename, fs.readFileSync(filename, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.ETS);
+  const component = ast.statements.find(s => s.name?.text === "MenuBarComponent");
+  const method = component.members.find(member => member.name?.text === "popupOptions");
+  const { outputText } = ts.transpileModule(`class MenuProbe { ${method.getText(ast)} }; globalThis.MenuProbe = MenuProbe;`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  });
+  for (const api of [12, 14, 19, 20]) {
+    const sandbox = { deviceInfo: { sdkApiVersion: api }, TransitionEffect: { IDENTITY: { animation: () => ({}) } } };
+    if (api >= 20) sandbox.ModalMode = { AUTO: 0, TARGET_WINDOW: 1 };
+    vm.runInNewContext(outputText, sandbox);
+    for (const applicationMenu of [false, true]) {
+      const probe = new sandbox.MenuProbe();
+      Object.assign(probe, { menuX: 1, menuY: 2, applicationMenu, commandMenu: false });
+      const options = probe.popupOptions();
+      assert.equal(options.modalMode, api < 20 ? undefined : Number(applicationMenu));
+      assert.equal(typeof options.aboutToDisappear, "function");
+      assert.equal(typeof options.onDisappear, "function");
+    }
+  }
+});
+
+test("two component-local zero aliases restore their own fullscreen bounds and queues", async () => {
+  const { manager } = managerFor(), restoredA = [], restoredB = [];
+  function nativeWindow(bounds, events) {
+    return {
+      getWindowProperties: () => ({ windowRect: bounds }),
+      getWindowStatus: () => windowApi.WindowStatusType.FLOATING,
+      async maximize() {}, async recover() {}, async setTitleAndDockHoverShown() {},
+      async resize(width, height) { events.push(["resize", width, height]); },
+      async moveWindowTo(x, y) { events.push(["move", x, y]); },
+    };
+  }
+  const a = nativeWindow({ left: 10, top: 20, width: 700, height: 500 }, restoredA);
+  const b = nativeWindow({ left: 200, top: 300, width: 950, height: 800 }, restoredB);
+  await manager.setFullscreenAsync(0, true, { window: a });
+  await manager.setFullscreenAsync(0, true, { window: b });
+  const gate = deferred();
+  const blocked = manager.serializeOp(0, () => gate.promise, a);
+  // B must not wait for A even though both callers use zero.
+  await manager.setFullscreenAsync(0, false, { window: b });
+  assert.deepEqual(restoredB, [["resize", 950, 800], ["move", 200, 300]]);
+  gate.resolve();
+  await blocked;
+  // A different logical alias of A still reaches A's original snapshot.
+  await manager.setFullscreenAsync(99, false, { window: a });
+  assert.deepEqual(restoredA, [["resize", 700, 500], ["move", 10, 20]]);
+});
+
+test("file picker zero resolves the requesting component's actual window", async () => {
+  const primary = {}, componentContext = { name: "secondary" };
+  const componentWindow = { getUIContext: () => ({ getHostContext: () => componentContext }) };
+  const files = filesFor({ windows: new Map([[0, primary]]) });
+  files.context.getWindow = () => componentWindow;
+  await files.invoke({ parentWindowId: 0 });
+  assert.equal(files.constructions[0].parent, componentWindow);
+  assert.equal(files.constructions[0].context, componentContext);
+  files.context.getWindow = () => { throw new Error("component detached"); };
+  await assert.rejects(files.invoke({ parentWindowId: 0 }), /component detached/);
+  assert.equal(files.constructions.length, 1);
+});
+
+test("hidden independent windows accept configuration before show and reject premature native queries", async () => {
+  const state = abilityWindowRuntime();
+  const creation = state.manager.createSubWindow({ ...state.options(7), show: false });
+  const { WindowPlugin } = state.runtime.load("plugins/window/src/main/ets/WindowPlugin.ets");
+  const plugin = new WindowPlugin();
+  const invoke = (action, type, value, active = true) => plugin.invokeAsync(action, {
+    typeName: `ohos.window.${type}`, value: { windowId: 7, ...value },
+  }, { isActive: () => active });
+  await invoke("resize", "ResizeRequest", { width: 960, height: 720 });
+  await invoke("move-to", "MoveRequest", { x: 30, y: 40 });
+  await invoke("set-background-color", "ColorRequest", { color: 0xff123456 });
+  await assert.rejects(invoke("resize", "ResizeRequest", { width: -1, height: 400 }));
+  await assert.rejects(invoke("resize", "ResizeRequest", { width: 1, height: 1 }, false), /no longer active/);
+  await assert.rejects(invoke("is-maximized", "WindowIdRequest", {}), /not ready/);
+  assert.equal(state.started.length, 0);
+  const showing = invoke("show", "WindowIdRequest", {});
+  await flush();
+  assert.equal(state.started.length, 1);
+  const options = state.started[0].options;
+  assert.deepEqual([options.windowLeft, options.windowTop, options.windowWidth, options.windowHeight], [30, 40, 960, 720]);
+  const instance = state.attach(7);
+  await Promise.all([creation, showing]);
+  assert.deepEqual(instance.geometry, [["background", "#ff123456"]]);
+});
+
+test("WebView keyboard policy distinguishes native windows from another host's logical zero", () => {
+  const flags = loader().load("native_ability/src/main/ets/helper/window_flags.ets");
+  const a = {}, b = {};
+  flags.setClipboardEnabled(0, false, a);
+  flags.setZoomHotkeysEnabled(0, false, a);
+  assert.equal(flags.hasWebviewKeyboardPolicy(0, b), false);
+  assert.equal(flags.isClipboardEnabled(0, b), true);
+  flags.setClipboardEnabled(0, true, b);
+  flags.clearClipboardEnabled(0, a);
+  flags.clearZoomHotkeysEnabled(0, a);
+  assert.equal(flags.hasWebviewKeyboardPolicy(0, a), false);
+  assert.equal(flags.hasWebviewKeyboardPolicy(0, b), true);
+});
+
+test("predefined window actions target their own component even when another host installs last", async () => {
+  const runtime = menuRuntime(), calls = [];
+  const a = runtime.host(11), b = runtime.host(22);
+  a.win.minimize = async () => calls.push("a");
+  b.win.minimize = async () => calls.push("b");
+  await a.invoke("execute-predefined", { action: "minimize", windowId: "main" }, "PredefinedRequest");
+  await b.invoke("execute-predefined", { action: "minimize", windowId: "main" }, "PredefinedRequest");
+  assert.deepEqual(calls, ["a", "b"]);
+});
+
+test("a pending menu request cannot write through a later owner's window registration", async () => {
+  const runtime = menuRuntime();
+  const a = runtime.host(11);
+  const rejected = assert.rejects(a.invoke("set-menubar", {
+    windowId: "main", jsonData: "stale",
+  }, "SetMenubarRequest"), /ownership changed/);
+  await flush();
+  const b = runtime.host(11);
+  const calls = [];
+  runtime.registry.registerMenuDataCallback(b.key, { onMenubarJson: json => calls.push(json) });
+  await rejected;
+  assert.deepEqual(calls, []);
+  await b.invoke("set-menubar", { windowId: "main", jsonData: "current" }, "SetMenubarRequest");
+  assert.deepEqual(calls, ["current"]);
+});
+
+test("primary WebView controller attachment and stale unsubscribe remain window-scoped", () => {
+  const filename = path.join(root, "native_ability/src/main/ets/components/DefaultXComponent.ets");
+  const ast = ts.createSourceFile(filename, fs.readFileSync(filename, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.ETS);
+  const functions = new Set(["setPrimaryWebviewControllerCallback", "clearPrimaryWebviewControllerCallback", "notifyPrimaryWebviewController"]);
+  const variables = new Set(["primaryWebviewControllerCallback", "windowControllerCallbacks"]);
+  const statements = ast.statements.filter(node => ts.isFunctionDeclaration(node) && functions.has(node.name?.text) ||
+    ts.isVariableStatement(node) && node.declarationList.declarations.some(d => variables.has(d.name.getText(ast))));
+  const { outputText } = ts.transpileModule(ts.createPrinter().printFile(ts.factory.updateSourceFile(ast, statements)), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  });
+  const exports = {}, calls = [];
+  vm.runInNewContext(outputText, { exports });
+  const a = { getWindowProperties: () => ({ id: 11 }) }, b = { getWindowProperties: () => ({ id: 22 }) };
+  const old = exports.setPrimaryWebviewControllerCallback(value => calls.push(["old", value]), a);
+  exports.setPrimaryWebviewControllerCallback(value => calls.push(["a", value]), a);
+  exports.setPrimaryWebviewControllerCallback(value => calls.push(["b", value]), b);
+  old();
+  exports.notifyPrimaryWebviewController("controller-b", b);
+  exports.notifyPrimaryWebviewController("controller-a", a);
+  exports.notifyPrimaryWebviewController("duplicate", a);
+  assert.deepEqual(calls, [["b", "controller-b"], ["a", "controller-a"]]);
+});
+
+test("legacy menu ports route child IDs while explicit ports distinguish local zero aliases", async () => {
+  const runtime = menuRuntime(), calls = [];
+  const a = runtime.host(11), b = runtime.host(22);
+  const child = { getWindowProperties: () => ({ id: 42 }), getUIContext: () => ({ getHostContext: () => ({}) }) };
+  runtime.windows.set(42, child);
+  for (const key of [a.key, b.key, "native:42"]) {
+    runtime.registry.registerMenuDataCallback(key, {
+      onMenubarJson() {},
+      onMenubarVisible: visible => calls.push([key, visible]),
+    });
+  }
+  await a.invoke("set-menubar", { windowId: "42", jsonData: "[]" }, "SetMenubarRequest");
+  const legacy = runtime.slots.getMenuBarPort();
+  legacy.onMenubarVisibility(42, false);
+  legacy.onMenubarVisibility(0, false);
+  runtime.slots.getMenuBarPort(b.win).onMenubarVisibility(0, true);
+  assert.deepEqual(calls, [["native:42", false], [a.key, false], [b.key, true]]);
+  assert.equal(runtime.slots.getMenuBarSlotBuilder(), runtime.slots.getMenuBarSlotBuilder(a.win));
+  a.plugin.onDispose();
+  legacy.onMenubarVisibility(42, true);
+  assert.equal(calls.length, 3);
+  legacy.onMenubarVisibility(0, false);
+  assert.deepEqual(calls.at(-1), [b.key, false]);
+});
+
+test("direct menu components derive their host identity and stale teardown preserves a replacement", async () => {
+  const runtime = menuRuntime();
+  const filename = path.join(root, "plugins/menu/src/main/ets/MenuBarComponent.ets");
+  const ast = ts.createSourceFile(filename, fs.readFileSync(filename, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.ETS);
+  const component = ast.statements.find(node => node.name?.text === "MenuBarComponent");
+  const methods = ["registryKey", "aboutToAppear", "aboutToDisappear"].map(name =>
+    component.members.find(member => member.name?.text === name).getText(ast)).join("\n");
+  const { outputText } = ts.transpileModule(`class MenuMount { ${methods} }; exports.MenuMount = MenuMount;`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  });
+  const exports = {};
+  vm.runInNewContext(outputText, { exports, ...runtime.registry, ...runtime.matchers,
+    menuKeyForWindow: runtime.slots.menuKeyForWindow,
+    window: { findWindow: name => runtime.windows.get(Number(name)) },
+  });
+  function mount(id) {
+    const menu = new exports.MenuMount();
+    Object.assign(menu, {
+      windowId: 0, menuKey: "", hostMenuKey: "", menubarVisible: true,
+      dropdownMouseNodes: new Map(), menubarItemAreas: new Map(), iconPixelMaps: new Map(),
+      popupIconIds: new Set(), menubarIconIds: new Set(),
+      getUIContext: () => ({ getWindowName: () => String(id) }),
+    });
+    menu.aboutToAppear();
+    return menu;
+  }
+  const a = runtime.host(11), b = runtime.host(22);
+  const menuA = mount(11), menuB = mount(22);
+  await a.invoke("set-menubar", { windowId: "main", jsonData: "a" }, "SetMenubarRequest");
+  await b.invoke("set-menubar", { windowId: "main", jsonData: "b" }, "SetMenubarRequest");
+  assert.equal(menuA.menubarJson, "a");
+  assert.equal(menuB.menubarJson, "b");
+  assert.equal(menuA.acceleratorMatcher, runtime.matchers.getAcceleratorMatcher(a.key));
+  const replacement = mount(11);
+  menuA.aboutToDisappear();
+  menuA.aboutToDisappear();
+  await a.invoke("set-menubar", { windowId: "main", jsonData: "replacement" }, "SetMenubarRequest");
+  assert.equal(replacement.menubarJson, "replacement");
+  assert.equal(menuB.menubarJson, "b");
+  replacement.aboutToDisappear();
+  assert.equal(runtime.registry.getMenuDataCallback(a.key), undefined);
 });

@@ -12,23 +12,23 @@ import { KeyCode } from "@kit.InputKit";
 // looks the same instance up by windowId — this preserves the per-window
 // accelerator scoping the core pages used to own as private fields. MenuBarComponent
 // unregisters its entry in aboutToDisappear, mirroring its other registries.
-const windowMatchers: Map<number, AcceleratorMatcher> = new Map();
+const windowMatchers: Map<string, AcceleratorMatcher> = new Map();
 
-export function getAcceleratorMatcher(windowId: number): AcceleratorMatcher {
-  let matcher = windowMatchers.get(windowId);
+export function getAcceleratorMatcher(windowId: number | string): AcceleratorMatcher {
+  let matcher = windowMatchers.get(windowId === 0 ? "main" : String(windowId));
   if (!matcher) {
     matcher = new AcceleratorMatcher();
-    windowMatchers.set(windowId, matcher);
+    windowMatchers.set(windowId === 0 ? "main" : String(windowId), matcher);
   }
   return matcher;
 }
 
-export function unregisterAcceleratorMatcher(windowId: number): void {
-  windowMatchers.delete(windowId);
+export function unregisterAcceleratorMatcher(windowId: number | string): void {
+  windowMatchers.delete(windowId === 0 ? "main" : String(windowId));
 }
 
-export function resetAcceleratorModifiers(windowId: number): void {
-  windowMatchers.get(windowId)?.resetModifiers();
+export function resetAcceleratorModifiers(windowId: number | string): void {
+  windowMatchers.get(windowId === 0 ? "main" : String(windowId))?.resetModifiers();
 }
 
 const SPECIAL_KEY_MAP: Map<string, string> = new Map([

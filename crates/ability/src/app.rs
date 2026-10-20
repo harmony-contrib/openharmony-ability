@@ -1770,14 +1770,16 @@ pub fn is_desktop_device() -> bool {
     cfg!(desktop)
 }
 
-// ─── Process-level globals (NAPI-entry-point state) ─────────────────────────────
-// PROCESS-LEVEL SINGLE-SESSION ASSUMPTION (issue #87 major-9): every static in
+// ─── Native-module globals (NAPI-entry-point state) ────────────────────────────
+// SINGLE-SESSION PER NATIVE MODULE (issue #87 major-9): every static in
 // this section is written by a `#[napi]` free function — an entry point with no
 // receiver, so the state must live at module scope. The NAPI writer receives no
 // app handle from ArkTS, which is why these CANNOT migrate into
-// `OpenHarmonyAppInner` like the want/continuation session state did. They are
-// correct under a single UIAbility instance per process; under multiple
-// concurrent UIAbility instances the events interleave in one shared queue.
+// `OpenHarmonyAppInner` like the want/continuation session state did without
+// extending the ABI. Each loaded native module owns its queue and app instance.
+// Multiple windows of that app share the queue and route by logical window ID;
+// independent sessions cannot share the same module concurrently. This is a
+// framework ownership constraint, not a one-UIAbility-per-process platform limit.
 // Do not add new statics here without an equivalent NAPI constraint.
 
 /// Global queue for pending window close requests from ArkTS.

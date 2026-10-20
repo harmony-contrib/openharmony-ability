@@ -1,4 +1,4 @@
-import { WebHeader } from "@kit.ArkUI";
+import { WebHeader, window } from "@kit.ArkUI";
 import { BuilderNode } from "@ohos.arkui.node";
 import webview from "@ohos.web.webview";
 import { image } from "@kit.ImageKit";
@@ -178,6 +178,7 @@ interface ScriptPayload {
 }
 
 interface ManagedWebview extends WebviewCreatePayload {
+  getHostWindow: () => window.Window;
   controller: WebviewController;
   /** Process-unique ArkWeb controller tag; distinct from the module-local public ID. */
   nativeTag: string;
@@ -1498,7 +1499,7 @@ function handleControllerAttached(data: ManagedWebview): void {
     // into handleControllerAttached). Without this, Tray right-click predefined
     // actions (Copy/Cut/Paste/SelectAll/Undo/Redo) no-op because the executor's
     // controller stays null.
-    notifyPrimaryWebviewController(data.controller as ESObject);
+    notifyPrimaryWebviewController(data.controller as ESObject, data.getHostWindow());
 
     // === §14 fix: register sub-window controller for menu.getTargetController ===
     // Sub-windows only (windowId > 0): main window keeps the one-shot path above.
@@ -1753,6 +1754,9 @@ class WebviewSurface {
       windowId,
       payload.clipboard ?? undefined,
       payload.zoomHotkeys ?? undefined,
+      windowId > 0
+        ? WindowManager.getInstance().getWindow(windowId)
+        : this.pluginContext.getWindow(),
     );
     hilog.info(
       0x1999,
@@ -1860,6 +1864,14 @@ class WebviewSurface {
       didInitialLoad: false,
       beginControllerAttach: (): boolean => false,
       notifyNativeControllerAttached: (): void => {},
+      getHostWindow: (): window.Window => {
+        const host =
+          windowId > 0
+            ? WindowManager.getInstance().getWindow(windowId)
+            : this.pluginContext.getWindow();
+        if (!host) throw new Error(`WebView window ${windowId} is unavailable`);
+        return host;
+      },
       markControllerReady: (): void => {},
       failControllerAttach: (_reason: string): void => {},
       onNavigationRequest: (url: string): boolean => {
