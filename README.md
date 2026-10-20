@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> Remove this line to confirm you've reviewed this PR before submitting.
+
 # OpenHarmony Ability
 
 English | [简体中文](README.zh-CN.md)

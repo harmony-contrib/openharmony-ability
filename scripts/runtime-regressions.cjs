@@ -90,6 +90,25 @@ test("application restart preserves platform failure instead of reporting succes
   }, context), (error) => error === failure);
 });
 
+const promptSystemColors = {
+  "sys.color.comp_background_primary": 0xffffffff,
+  "sys.color.font_primary": 0xe6000000,
+  "sys.color.font_secondary": 0x99000000,
+  "sys.color.ohos_id_color_list_separator": 0x33000000,
+};
+const promptColorMetrics = {
+  resourceColor(resource) {
+    const value = promptSystemColors[resource];
+    assert.notEqual(value, undefined, `unmocked color: ${resource}`);
+    return {
+      red: (value >>> 16) & 255,
+      green: (value >>> 8) & 255,
+      blue: value & 255,
+      alpha: (value >>> 24) / 255,
+    };
+  },
+};
+
 function loader(overrides = {}, globals = {}) {
   const imports = {
     "@kit.ArkUI": { window: windowApi },
@@ -115,6 +134,7 @@ function loader(overrides = {}, globals = {}) {
     "../helper/window_flags": { clearClipboardEnabled() {}, clearZoomHotkeysEnabled() {} },
     ...overrides,
   };
+  imports["@kit.ArkUI"].ColorMetrics ??= promptColorMetrics;
   const cache = new Map();
   const load = (relative) => {
     const filename = path.resolve(root, relative);
@@ -151,6 +171,7 @@ function loader(overrides = {}, globals = {}) {
       DismissReason: { PRESS_BACK: 0, TOUCH_OUTSIDE: 1 },
       wrapBuilder: (builder) => builder,
       promptBuilder() {},
+      $r: (resource) => resource,
       LocalStorage: class {
         values = new Map();
         setOrCreate(key, value) {
@@ -1202,7 +1223,7 @@ test("anchored prompts use target-window density, measured height and new window
       options.onDidDisappear();
     },
   };
-  const ui = { px2vp: (px) => px / 3, getPromptAction: () => prompt };
+  const ui = { px2vp: (px) => px / 3, getPromptAction: () => prompt, runScopedTask: (task) => task() };
   const rect = { width: 1200, height: 1800 };
   const win = {
     getUIContext: () => ui,
@@ -1252,7 +1273,7 @@ test("anchored prompts use target-window density, measured height and new window
 
 function keyboardPrompt(
   initialActive,
-  { deferredOpen = false, deferredClose = false, rejectFocus = false, rejectClose = false, anchor } = {},
+  { deferredOpen = false, deferredClose = false, rejectFocus = false, rejectClose = false, anchor, appearance } = {},
 ) {
   let content,
     options,
@@ -1293,6 +1314,7 @@ function keyboardPrompt(
     },
   };
   const uiContext = {
+    runScopedTask: (task) => task(),
     px2vp: (value) => value,
     getPromptAction: () => prompt,
     getFocusController: () => controller,
@@ -1314,7 +1336,7 @@ function keyboardPrompt(
   );
   const result = new PromptDialogs().show(
     targetWindow,
-    { message: "Save?", level: 1, buttons: ["Save", "Cancel"], cancelIndex: 1, anchor },
+    { message: "Save?", level: 1, buttons: ["Save", "Cancel"], cancelIndex: 1, anchor, appearance },
     {
       isActive: () => active,
       onCancel(callback) {
@@ -1327,6 +1349,7 @@ function keyboardPrompt(
   return {
     events,
     result,
+    palette: () => content.model.palette,
     appear: () => options.onDidAppear(),
     willDisappear: () => options.onWillDisappear(),
     disappear: () => options.onDidDisappear(),
@@ -1342,6 +1365,115 @@ function keyboardPrompt(
     }),
   };
 }
+
+test("native prompt colors preserve light, dark and colored application themes", async () => {
+  for (const appearance of [
+    {
+      background: 0xffffffff,
+      foreground: 0xff171717,
+      mutedForeground: 0xff525252,
+      primary: 0xff171717,
+      primaryForeground: 0xffffffff,
+      border: 0xffe5e5e5,
+      focus: 0xff171717,
+    },
+    {
+      background: 0xff18181b,
+      foreground: 0xfffafafa,
+      mutedForeground: 0xffa1a1aa,
+      primary: 0xfffafafa,
+      primaryForeground: 0xff18181b,
+      border: 0xff3f3f46,
+      focus: 0xfffafafa,
+    },
+    {
+      background: 0xff282828,
+      foreground: 0xffebdbb2,
+      mutedForeground: 0xffbdae93,
+      primary: 0xfffabd2f,
+      primaryForeground: 0xff282828,
+      border: 0xff504945,
+      focus: 0xfffabd2f,
+    },
+  ]) {
+    const fixture = keyboardPrompt(false, { appearance });
+    await flush();
+    for (const [name, value] of Object.entries(appearance))
+      assert.equal(fixture.palette()[name], value, name);
+    fixture.choose(0);
+    assert.equal(await fixture.result, 0);
+  }
+});
+
+test("native prompts flatten alpha and repair unreadable custom colors", async () => {
+  const fixture = keyboardPrompt(false, {
+    appearance: {
+      background: 0x80000000,
+      foreground: 0x00808080,
+      mutedForeground: 0xff7f7f7f,
+      primary: 0x80ffffff,
+      primaryForeground: 0xffffffff,
+      border: 0x20000000,
+      focus: 0xff7f7f7f,
+    },
+  });
+  await flush();
+  const palette = fixture.palette();
+  assert.equal(palette.background, 0xff7f7f7f);
+  assert.equal(palette.foreground, 0xff000000);
+  assert.equal(palette.mutedForeground, 0xff000000);
+  assert.equal(palette.primary, 0xffbfbfbf);
+  assert.equal(palette.primaryForeground, 0xff000000);
+  assert.equal(palette.focus, 0xff000000);
+  for (const value of Object.values(palette)) assert.equal(value >>> 24, 255);
+  fixture.choose(1);
+  assert.equal(await fixture.result, 1);
+});
+
+test("native prompts resolve system colors again for every new dialog", async () => {
+  const light = keyboardPrompt(false);
+  await flush();
+  assert.equal(light.palette().background, 0xffffffff);
+  assert.equal(light.palette().primary, 0xff191919);
+  light.choose(0);
+  await light.result;
+  const previous = { ...promptSystemColors };
+  try {
+    Object.assign(promptSystemColors, {
+      "sys.color.comp_background_primary": 0xff18181b,
+      "sys.color.font_primary": 0xffffffff,
+      "sys.color.font_secondary": 0xb3ffffff,
+      "sys.color.ohos_id_color_list_separator": 0x33ffffff,
+    });
+    const dark = keyboardPrompt(false);
+    await flush();
+    assert.equal(dark.palette().background, 0xff18181b);
+    assert.equal(dark.palette().primary, 0xffffffff);
+    assert.equal(dark.palette().primaryForeground, 0xff18181b);
+    dark.choose(1);
+    await dark.result;
+  } finally {
+    Object.assign(promptSystemColors, previous);
+  }
+});
+
+test("native prompts reject malformed colors before opening native UI", async () => {
+  for (const value of [NaN, -1, 0x100000000, 0.5, "#FFFFFF", undefined]) {
+    const fixture = keyboardPrompt(false, {
+      appearance: {
+        background: value,
+        foreground: 0xff000000,
+        mutedForeground: 0xff000000,
+        primary: 0xff000000,
+        primaryForeground: 0xffffffff,
+        border: 0xff000000,
+        focus: 0xff000000,
+      },
+    });
+    await assert.rejects(fixture.result, /Invalid native prompt appearance/);
+    assert.equal(fixture.events.length, 0);
+  }
+});
 
 test("confirmation prompts ignore outside clicks but preserve Escape cancellation", async () => {
   const fixture = keyboardPrompt(false);

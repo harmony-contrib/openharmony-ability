@@ -43,3 +43,7 @@ The hidden-window creation promise continues to represent native readiness. The 
 ## Validation
 
 SDK-backed runtime tests cover two hosts both using logical zero, distinct menu policies and event routes, stale-owner disposal, mount cancellation, window-owned controller callbacks, fullscreen geometry/ordering, file-dialog parenting, and hidden-window configuration before launch. The demo HAP is also compiled against the installed SDK. These checks substitute native effects in host tests; they do not establish emulator or device acceptance.
+
+## Native prompt appearance
+
+`show-prompt` accepts an optional named `PromptAppearance` with seven ARGB semantic colors. Omitted colors use the target window's system theme; supplied colors are snapshotted when the dialog opens. Theme selection belongs to the application, not the window plugin. Translucent surfaces and controls are composited to opaque colors, and unreadable text/focus colors are replaced with a contrasting neutral. Message, action indices, cancellation and default focus retain the caller's semantics.

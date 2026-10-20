@@ -10,7 +10,97 @@ export interface WindowPromptRequest {
   buttons: string[];
   cancelIndex?: number;
   anchor?: WindowPromptAnchor;
+  appearance?: WindowPromptAppearance;
 }
+/** ARGB semantic colors; omitted appearance follows the target window's system theme. */
+export interface WindowPromptAppearance {
+  background: number;
+  foreground: number;
+  mutedForeground: number;
+  primary: number;
+  primaryForeground: number;
+  border: number;
+  focus: number;
+}
+
+class PromptPalette implements WindowPromptAppearance {
+  readonly background: number;
+  readonly foreground: number;
+  readonly mutedForeground: number;
+  readonly primary: number;
+  readonly primaryForeground: number;
+  readonly border: number;
+  readonly focus: number;
+
+  constructor(appearance?: WindowPromptAppearance) {
+    const systemBackground = PromptPalette.resource($r("sys.color.comp_background_primary"));
+    const background = PromptPalette.blend(0xffffffff, systemBackground);
+    this.background = appearance
+      ? PromptPalette.blend(background, appearance.background)
+      : background;
+    this.foreground = PromptPalette.readable(
+      appearance?.foreground ?? PromptPalette.resource($r("sys.color.font_primary")),
+      this.background,
+      4.5,
+    );
+    this.mutedForeground = PromptPalette.readable(
+      appearance?.mutedForeground ?? PromptPalette.resource($r("sys.color.font_secondary")),
+      this.background,
+      4.5,
+    );
+    this.primary = PromptPalette.blend(this.background, appearance?.primary ?? this.foreground);
+    this.primaryForeground = PromptPalette.readable(
+      appearance?.primaryForeground ?? this.background,
+      this.primary,
+      4.5,
+    );
+    this.border = PromptPalette.blend(
+      this.background,
+      appearance?.border ?? PromptPalette.resource($r("sys.color.ohos_id_color_list_separator")),
+    );
+    this.focus = PromptPalette.readable(appearance?.focus ?? this.foreground, this.background, 3);
+  }
+
+  private static resource(resource: Resource): number {
+    const color = ColorMetrics.resourceColor(resource);
+    return (
+      ((Math.round(color.alpha * 255) << 24) |
+        (color.red << 16) |
+        (color.green << 8) |
+        color.blue) >>>
+      0
+    );
+  }
+
+  private static blend(background: number, foreground: number): number {
+    const alpha = (foreground >>> 24) / 255;
+    const channel = (shift: number): number =>
+      Math.round(
+        ((background >>> shift) & 255) * (1 - alpha) + ((foreground >>> shift) & 255) * alpha,
+      );
+    return (0xff000000 | (channel(16) << 16) | (channel(8) << 8) | channel(0)) >>> 0;
+  }
+
+  private static luminance(color: number): number {
+    const linear = (shift: number): number => {
+      const value = ((color >>> shift) & 255) / 255;
+      return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0);
+  }
+
+  private static readable(foreground: number, background: number, minimum: number): number {
+    const color = PromptPalette.blend(background, foreground);
+    const luminance = PromptPalette.luminance(background);
+    const other = PromptPalette.luminance(color);
+    if ((Math.max(luminance, other) + 0.05) / (Math.min(luminance, other) + 0.05) >= minimum) {
+      return color;
+    }
+    // Custom themes can supply translucent or equal foreground/background colors.
+    return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? 0xff000000 : 0xffffffff;
+  }
+}
+
 export interface WindowPromptAnchor {
   /** Window content-local logical coordinates in vp, not screen coordinates or px. */
   x: number;
@@ -19,6 +109,7 @@ export interface WindowPromptAnchor {
 
 class PromptModel {
   readonly request: WindowPromptRequest;
+  readonly palette: PromptPalette;
   readonly choose: (index: number) => void;
   readonly placement: PromptPlacement;
   readonly measure: (width: number, height: number) => void;
@@ -31,8 +122,10 @@ class PromptModel {
     placement: PromptPlacement,
     measure: (width: number, height: number) => void,
     focusId: string,
+    palette: PromptPalette,
   ) {
     this.request = request;
+    this.palette = palette;
     this.choose = choose;
     this.placement = placement;
     this.measure = measure;
@@ -64,13 +157,13 @@ function promptBuilder(model: PromptModel) {
         Text(model.request.message)
           .fontSize(18)
           .fontWeight(600)
-          .fontColor($r("sys.color.font_primary"))
+          .fontColor(model.palette.foreground)
           .width("100%")
         if (model.request.detail) {
           Text(model.request.detail)
             .fontSize(14)
             .lineHeight(20)
-            .fontColor($r("sys.color.font_secondary"))
+            .fontColor(model.palette.mutedForeground)
             .width("100%");
         }
       }
@@ -90,8 +183,8 @@ function promptBuilder(model: PromptModel) {
               .fontWeight(FontWeight.Medium)
               .fontColor(
                 index === 0 && index !== model.request.cancelIndex
-                  ? $r("sys.color.comp_background_primary")
-                  : $r("sys.color.font_primary"),
+                  ? model.palette.primaryForeground
+                  : model.palette.foreground,
               )
           }
           .id(`${model.focusId}-${index}`)
@@ -101,12 +194,12 @@ function promptBuilder(model: PromptModel) {
           .borderRadius(6)
           .backgroundColor(
             index === 0 && index !== model.request.cancelIndex
-              ? $r("sys.color.font_primary")
-              : $r("sys.color.comp_background_primary"),
+              ? model.palette.primary
+              : model.palette.background,
           )
-          .border({ width: 1, color: $r("sys.color.ohos_id_color_list_separator") })
+          .border({ width: 1, color: model.palette.border })
           .focusBox({
-            strokeColor: ColorMetrics.resourceColor($r("sys.color.font_secondary")),
+            strokeColor: ColorMetrics.numeric(model.palette.focus),
             strokeWidth: LengthMetrics.vp(2),
             margin: LengthMetrics.vp(3),
           })
@@ -122,9 +215,9 @@ function promptBuilder(model: PromptModel) {
   }
   .width(model.placement.width)
   .constraintSize({ maxHeight: model.placement.maxHeight })
-  .backgroundColor($r("sys.color.comp_background_primary"))
+  .backgroundColor(model.palette.background)
   .borderRadius(8)
-  .border({ width: 1, color: $r("sys.color.ohos_id_color_list_separator") })
+  .border({ width: 1, color: model.palette.border })
   .shadow({ radius: 16, color: "#1A000000", offsetY: 4 })
   .onAreaChange((_oldArea: Area, newArea: Area): void => {
     model.measure(Number(newArea.width), Number(newArea.height));
@@ -186,6 +279,13 @@ class PromptSession {
   }
 
   private model(): PromptModel {
+    let palette: PromptPalette | undefined;
+    this.uiContext.runScopedTask((): void => {
+      palette = new PromptPalette(this.request.appearance);
+    });
+    if (!palette) {
+      throw new Error("Native prompt theme resolution failed");
+    }
     return new PromptModel(
       this.request,
       (index: number): void => {
@@ -201,6 +301,7 @@ class PromptSession {
         this.updatePosition();
       },
       this.focusId,
+      palette,
     );
   }
 
@@ -443,6 +544,23 @@ export class PromptDialogs {
           request.cancelIndex >= request.buttons.length))
     ) {
       throw new Error("Invalid native prompt request");
+    }
+    const appearance = request.appearance;
+    if (
+      appearance &&
+      [
+        appearance.background,
+        appearance.foreground,
+        appearance.mutedForeground,
+        appearance.primary,
+        appearance.primaryForeground,
+        appearance.border,
+        appearance.focus,
+      ].some(
+        (color: number): boolean => !Number.isInteger(color) || color < 0 || color > 0xffffffff,
+      )
+    ) {
+      throw new Error("Invalid native prompt appearance: expected ARGB colors");
     }
     const session = new PromptSession(targetWindow, request, context);
     this.sessions.add(session);
