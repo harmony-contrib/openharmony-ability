@@ -191,13 +191,12 @@ function promptBuilder(model: PromptModel) {
           .width(model.stackButtons ? "100%" : undefined)
           .constraintSize({ minHeight: 36, minWidth: 80, maxWidth: model.placement.width - 48 })
           .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-          .borderRadius(6)
           .backgroundColor(
             index === 0 && index !== model.request.cancelIndex
               ? model.palette.primary
               : model.palette.background,
           )
-          .border({ width: 1, color: model.palette.border })
+          .border({ width: 1, color: model.palette.border, radius: 6 })
           .focusBox({
             strokeColor: ColorMetrics.numeric(model.palette.focus),
             strokeWidth: LengthMetrics.vp(2),
@@ -216,8 +215,7 @@ function promptBuilder(model: PromptModel) {
   .width(model.placement.width)
   .constraintSize({ maxHeight: model.placement.maxHeight })
   .backgroundColor(model.palette.background)
-  .borderRadius(8)
-  .border({ width: 1, color: model.palette.border })
+  .border({ width: 1, color: model.palette.border, radius: 8 })
   .shadow({ radius: 16, color: "#1A000000", offsetY: 4 })
   .onAreaChange((_oldArea: Area, newArea: Area): void => {
     model.measure(Number(newArea.width), Number(newArea.height));
