@@ -207,6 +207,8 @@ pub struct AxisEventData {
     pub pointer: PointerInputData,
     pub delta_x: f64,
     pub delta_y: f64,
+    /// Native wheel step. Zero means unavailable or not a discrete wheel.
+    pub scroll_step: i32,
 }
 
 /// System-recognized gestures emitted according to [`TouchInputDelivery`].
