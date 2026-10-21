@@ -67,6 +67,10 @@
       "srcPath": "../plugins/resource",
     },
     {
+      "name": "plugin_arkui",
+      "srcPath": "../plugins/arkui",
+    },
+    {
       "name": "plugin_webview",
       "srcPath": "../plugins/webview",
     },

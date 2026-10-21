@@ -1,0 +1,3 @@
+{
+  "module": { "name": "plugin_arkui", "type": "har", "deviceTypes": ["default", "tablet", "2in1"] },
+}

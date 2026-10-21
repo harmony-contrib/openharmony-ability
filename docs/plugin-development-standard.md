@@ -209,6 +209,8 @@ export { LoginPlugin };
 
 | 插件 / action | request → response | 模式 / context |
 | --- | --- | --- |
+| `ohos.arkui` / `apply-editors` | `ohos.arkui.EditorBatch { updates, commands, remove }` → `ohos.node.Acknowledgement` | sync / `ui-context`; API 20 |
+| `ohos.arkui` / `editor-event` | `ohos.arkui.EditorEvent { id, targetId, ... }` → `ohos.node.Acknowledgement` | synchronous owned snapshot; plugin owner and native generation isolate delivery |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |

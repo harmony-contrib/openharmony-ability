@@ -1,7 +1,10 @@
+import { NodeContent } from "@ohos.arkui.node";
 import { DefaultXComponent, invokeNativeBackPressInterceptor } from "@ohos-rs/ability";
 import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/EntryAbility";
 import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
+  demoNativeEditor,
+  demoDisposeNativeEditor,
   createBottomDemoWebview,
   createComposedDemoWebview,
   createDemoWebview,
@@ -31,6 +34,7 @@ const MODULE_NAME = "demo_native";
 @Component
 struct Index {
   @State currentDemo: number = 0;
+  @State nativeEditorContent: NodeContent = new NodeContent();
   @State busyKey: string = "";
   @State interceptEnabled: boolean = true;
   @State webviewVisible: boolean = true;
@@ -670,6 +674,22 @@ struct Index {
     Column({ space: 12 }) {
       this.Header()
       this.TabBar()
+      Row({ space: 8 }) {
+        Button("Native editor (API 20)")
+          .onClick((): void => {
+            this.nativeEditorContent = demoNativeEditor();
+          })
+        Button("Release editor")
+          .onClick((): void => {
+            demoDisposeNativeEditor();
+            this.nativeEditorContent = new NodeContent();
+          })
+      }
+      Stack() {
+        ContentSlot(this.nativeEditorContent)
+      }
+      .width(320)
+      .height(48)
       if (this.currentDemo === 0) {
         this.XComponentDemo();
       }

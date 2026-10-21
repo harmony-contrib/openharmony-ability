@@ -1,4 +1,5 @@
 import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
+import { ArkuiPlugin } from "@ohos-rs/ability-plugin-arkui";
 import window from "@ohos.window";
 import { AppControlPlugin } from "@ohos-rs/ability-plugin-app-control";
 import { ClipboardPlugin } from "@ohos-rs/ability-plugin-clipboard";
@@ -37,6 +38,7 @@ export default class EntryAbility extends NativeAbility {
   public moduleName: string[] = NATIVE_MODULES;
   public defaultPage: boolean = false;
   public bridgePlugins = [
+    new LazyPlugin(() => new ArkuiPlugin()),
     new LazyPlugin(() => new PermissionPlugin()),
     new LazyPlugin(() => new AppControlPlugin()),
     new LazyPlugin(() => new FilesPlugin()),

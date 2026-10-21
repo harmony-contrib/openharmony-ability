@@ -2,6 +2,7 @@
 
 mod login_bridge;
 mod main_thread_bridge;
+mod native_embedding;
 mod raw_bridge;
 mod tsfn_sync_bridge;
 
@@ -453,6 +454,8 @@ fn openharmony_app(app: OpenHarmonyApp) {
     if let Err(error) = app.register_plugin(raw_bridge::DemoTypedPlugin) {
         hilog_info!(format!("failed to register demo.raw facade: {error}").as_str());
     }
+    app.register_plugin(openharmony_ability_plugin_arkui::ArkuiBridgePlugin::new())
+        .expect("demo ArkUI facade must be registered");
     app.register_plugin(PermissionBridgePlugin)
         .expect("demo permission facade must be registered");
     app.register_plugin(AppControlBridgePlugin)
