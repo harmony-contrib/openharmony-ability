@@ -9,3 +9,4 @@ syn = { workspace = true, features = ["visit"] }
 quote = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = "0.8"
