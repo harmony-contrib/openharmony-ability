@@ -4,6 +4,8 @@
   `WindowClient::set_status_bar`, separate from desktop tray APIs.
 - Run the status-bar bridge regression suite in PR CI, including cancellation and
   native-operation failure coverage.
+- Add a real Rust-to-platform status-bar demo with native color and navigation-preservation
+  assertions, plus device acceptance instructions.
 
 # 1.0.0-beta.3
 

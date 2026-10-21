@@ -4,6 +4,8 @@
   and awaiting native completion before acknowledgement.
 - Run status-bar targeting, validation, completion, cancellation and platform-failure
   regression tests in PR CI.
+- Add demo controls for light/dark content, omitted background and transparency with
+  native status/navigation color checks.
 
 # 1.0.0-beta.3
 

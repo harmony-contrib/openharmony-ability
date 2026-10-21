@@ -90,6 +90,26 @@ routes to the component's actual window; an explicit ID uses the existing window
 resolver. Navigation-bar state is preserved. The SDK applies these settings to
 supported fullscreen or maximized main windows.
 
+### Status-bar acceptance
+
+Run `node --experimental-vm-modules --test scripts/window-status-bar.test.mjs`
+for the actual ArkTS implementation with mocked platform calls. PR CI runs the same
+command. It covers window routing, named-value validation, omitted backgrounds,
+status-only arguments, awaited completion, cancellation and native-operation failures.
+
+For on-device acceptance, build the demo's native libraries and HAP, launch the demo
+and open the **XComponent** tab's **Status bar (API 12)** card. Its buttons call Rust
+`WindowClient::set_status_bar` through the real named N-API bridge. Each completed call
+checks native status-bar colors and confirms that all navigation-bar properties are
+unchanged. Try light content on a dark background, dark content on a light background,
+hide (with background omitted), and transparent background. Confirm visibility visually
+as well: the native color getter does not report visibility. Results are displayed in
+the card and logged with `[status-bar-acceptance]`; errors are not reported as success.
+Exit the app after testing; no process-global settings are changed.
+
+Record the device model/API, scenarios actually executed and any build, signing or
+deployment blocker. A successful host test or HAR build alone is not device acceptance.
+
 See the [plugin development standard](../../docs/plugin-development-standard.md).
 
 ## License
