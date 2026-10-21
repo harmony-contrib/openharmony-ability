@@ -3,6 +3,7 @@ use quote::ToTokens;
 use std::{collections::BTreeSet, fmt::Write, fs, path::Path};
 use syn::{
     parse::{Parse, ParseStream},
+    visit::{self, Visit},
     Expr, ImplItem, Item, Lit, LitStr, Token, Type,
 };
 
@@ -19,6 +20,51 @@ struct Inventory {
     named: Vec<NamedType>,
     objects: Vec<(String, String, String)>,
     plugins: Vec<(String, String, String, String)>,
+    object_reads: Vec<(String, String, String, String, String)>,
+}
+
+#[derive(Default)]
+struct ObjectProperties(Vec<String>);
+
+impl<'ast> Visit<'ast> for ObjectProperties {
+    fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+        if call.method == "get" {
+            if let Some(Expr::Lit(literal)) = call.args.first() {
+                if let Lit::Str(name) = &literal.lit {
+                    self.0.push(name.value());
+                }
+            }
+        }
+        visit::visit_expr_method_call(self, call);
+    }
+}
+
+#[derive(Default)]
+struct ObjectReads(Vec<(String, String)>);
+
+impl<'ast> Visit<'ast> for ObjectReads {
+    fn visit_local(&mut self, local: &'ast syn::Local) {
+        if let (syn::Pat::Type(pattern), Some(initializer)) = (&local.pat, &local.init) {
+            if let Type::Path(path) = pattern.ty.as_ref() {
+                if path
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "Object")
+                {
+                    let mut properties = ObjectProperties::default();
+                    properties.visit_expr(&initializer.expr);
+                    self.0.extend(
+                        properties
+                            .0
+                            .into_iter()
+                            .map(|name| (name, tokens(pattern.ty.as_ref()))),
+                    );
+                }
+            }
+        }
+        visit::visit_local(self, local);
+    }
 }
 
 struct TypeDeclaration(Type, LitStr);
@@ -117,6 +163,23 @@ impl Inventory {
                     });
                 }
                 Item::Impl(item) => {
+                    for member in &item.items {
+                        if let ImplItem::Fn(method) = member {
+                            let mut reads = ObjectReads::default();
+                            reads.visit_block(&method.block);
+                            self.object_reads.extend(reads.0.into_iter().map(
+                                |(name, rust_type)| {
+                                    (
+                                        tokens(&item.self_ty),
+                                        method.sig.ident.to_string(),
+                                        name,
+                                        rust_type,
+                                        source.into(),
+                                    )
+                                },
+                            ));
+                        }
+                    }
                     let Some((_, path, _)) = &item.trait_ else {
                         continue;
                     };
@@ -222,6 +285,13 @@ impl Inventory {
         self.named.sort_by(|left, right| left.name.cmp(&right.name));
         self.objects.sort();
         self.plugins.sort();
+        self.object_reads.sort();
+        self.object_reads.dedup();
+        let marker_types: BTreeSet<_> = self
+            .named
+            .iter()
+            .map(|contract| contract.rust_type.clone())
+            .collect();
         let mut names = BTreeSet::new();
         for contract in &self.named {
             if !names.insert(&contract.name) {
@@ -272,8 +342,10 @@ impl Inventory {
             "\n## N-API object layouts\n\n\
              Includes nested objects without an independent bridge name. Fields and types are\n\
              Rust declarations; N-API maps snake_case to camelCase unless an explicit JS name is\n\
-             shown. Handwritten native-object conversions (for example `ResourceManagerRef`)\n\
-             are defined by their linked source, not by an invented object layout.\n\n\
+             shown. A marker layout is not the entire callback payload when its methods read\n\
+             additional borrowed platform objects; see the explicit object reads below.\n\
+             Handwritten native-object conversions (for example `ResourceManagerRef`) are\n\
+             defined by their linked source, not by an invented object layout.\n\n\
              | Rust object | Fields | Source |\n\
              | --- | --- | --- |\n",
         );
@@ -282,6 +354,21 @@ impl Inventory {
                 output,
                 "| `{rust_type}` | `{fields}` | [source](../{source}) |"
             )?;
+        }
+        output.push_str(
+            "\n## Explicit object reads in named-type methods\n\n\
+             These fields are read into callback-local N-API `Object` values by the linked\n\
+             Rust methods, in addition to any owned marker fields above. This is an inventory\n\
+             of literal `.get(...)` reads, not inferred action routing or a complete wire schema.\n\
+             FrameNode/NodeContent ownership and lifetimes remain defined by the decoder and\n\
+             the plugin standard; these objects must not be moved onto workers.\n\n\
+             | Named Rust type | Method | Object field | Local Rust type | Source |\n\
+             | --- | --- | --- | --- | --- |\n",
+        );
+        for (rust_type, method, field, local_type, source) in self.object_reads {
+            if marker_types.contains(&rust_type) {
+                writeln!(output, "| `{rust_type}` | `{method}` | `{field}` | `{local_type}` | [source](../{source}) |")?;
+            }
         }
         Ok(output)
     }
@@ -446,5 +533,32 @@ mod tests {
         "#;
         assert!(render(source).unwrap().contains("`test.plugin`"));
         assert!(render(&source.replace("\"test.plugin\"", "PLUGIN_ID")).is_err());
+    }
+
+    #[test]
+    fn distinguishes_owned_native_markers_from_explicit_callback_object_reads() {
+        let source = r#"
+            #[napi(object)]
+            struct NativeReady { target_id: u32 }
+            impl_bridge_napi_type!(NativeReady, "test.NativeReady");
+            impl NativeReady {
+                fn attach(event: Event) {
+                    // object.get("not-a-field")
+                    let content: Object<'_> = object.get("content")?.ok_or_else(error)?;
+                    let slot: napi_ohos::Object<'_> = object.get("slot")?.ok_or_else(error)?;
+                    let unrelated: String = object.get("not-an-object")?;
+                }
+            }
+        "#;
+        let table = render(source).unwrap();
+        assert!(table.contains("{ target_id: u32 }"));
+        assert!(table.contains("| `NativeReady` | `attach` | `content` | `Object<'_>`"));
+        assert!(table.contains("| `NativeReady` | `attach` | `slot`"));
+        assert!(!table.contains("not-a-field"));
+        assert!(!table.contains("not-an-object"));
+        assert_ne!(
+            table,
+            render(&source.replace("\"slot\"", "\"newSlot\"")).unwrap()
+        );
     }
 }

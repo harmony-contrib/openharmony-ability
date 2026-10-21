@@ -128,6 +128,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "equivalent"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -247,6 +253,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -254,6 +266,16 @@ checksum = "918d3568bebf352712bc2ef3d46a8bcf1a75b373be6539de198e9105cbbf9ce0"
 dependencies = [
  "bytes",
  "itoa",
+]
+
+[[package]]
+name = "indexmap"
+version = "2.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
+dependencies = [
+ "equivalent",
+ "hashbrown",
 ]
 
 [[package]]
@@ -418,8 +440,8 @@ dependencies = [
  "ohos-drawing-binding",
  "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
  "ohos-image-binding",
- "ohos-image-native-binding",
- "ohos-udmf-binding",
+ "ohos-image-native-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-udmf-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
  "ohos-xcomponent-binding",
  "ohos-xcomponent-sys",
 ]
@@ -445,9 +467,9 @@ source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105
 dependencies = [
  "napi-sys-ohos",
  "ohos-arkui-input-sys",
- "ohos-image-native-sys",
+ "ohos-image-native-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
  "ohos-native-drawing-sys",
- "ohos-udmf-sys",
+ "ohos-udmf-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
 ]
 
 [[package]]
@@ -487,7 +509,7 @@ dependencies = [
 [[package]]
 name = "ohos-enum-derive"
 version = "0.1.2"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=c7a41783c87ed22bb363491a77b9f3db3a6baa8f#c7a41783c87ed22bb363491a77b9f3db3a6baa8f"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -518,7 +540,7 @@ dependencies = [
  "napi-sys-ohos",
  "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
  "ohos-image-sys",
- "ohos-resource-manager-sys",
+ "ohos-resource-manager-sys 0.3.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
 ]
 
 [[package]]
@@ -529,10 +551,24 @@ dependencies = [
  "libc",
  "napi-sys-ohos",
  "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
- "ohos-image-native-sys",
- "ohos-native-buffer-binding",
- "ohos-native-buffer-sys",
- "ohos-resource-manager-sys",
+ "ohos-image-native-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-native-buffer-binding 0.2.6 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-native-buffer-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-resource-manager-sys 0.3.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+]
+
+[[package]]
+name = "ohos-image-native-binding"
+version = "0.0.7"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "libc",
+ "napi-sys-ohos",
+ "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-image-native-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-native-buffer-binding 0.2.6 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-native-buffer-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-resource-manager-sys 0.3.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
 ]
 
 [[package]]
@@ -541,8 +577,18 @@ version = "0.0.5"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
  "napi-sys-ohos",
- "ohos-native-buffer-sys",
- "ohos-resource-manager-sys",
+ "ohos-native-buffer-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-resource-manager-sys 0.3.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+]
+
+[[package]]
+name = "ohos-image-native-sys"
+version = "0.0.5"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "napi-sys-ohos",
+ "ohos-native-buffer-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-resource-manager-sys 0.3.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
 ]
 
 [[package]]
@@ -551,16 +597,16 @@ version = "0.0.5"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
  "napi-sys-ohos",
- "ohos-resource-manager-sys",
+ "ohos-resource-manager-sys 0.3.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
 ]
 
 [[package]]
 name = "ohos-ime-binding"
 version = "0.3.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=c7a41783c87ed22bb363491a77b9f3db3a6baa8f#c7a41783c87ed22bb363491a77b9f3db3a6baa8f"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
 dependencies = [
  "log",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=c7a41783c87ed22bb363491a77b9f3db3a6baa8f)",
+ "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
  "ohos-input-method-sys",
  "rustc-hash",
 ]
@@ -568,14 +614,14 @@ dependencies = [
 [[package]]
 name = "ohos-input-method-sys"
 version = "0.2.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=c7a41783c87ed22bb363491a77b9f3db3a6baa8f#c7a41783c87ed22bb363491a77b9f3db3a6baa8f"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
 
 [[package]]
 name = "ohos-multi-modal-input-sys"
 version = "0.1.2"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
- "ohos-image-native-sys",
+ "ohos-image-native-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
 ]
 
 [[package]]
@@ -583,8 +629,17 @@ name = "ohos-native-buffer-binding"
 version = "0.2.6"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
- "ohos-native-buffer-sys",
- "ohos-native-window-sys",
+ "ohos-native-buffer-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-native-window-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+]
+
+[[package]]
+name = "ohos-native-buffer-binding"
+version = "0.2.6"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "ohos-native-buffer-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-native-window-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
 ]
 
 [[package]]
@@ -593,12 +648,25 @@ version = "0.1.4"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 
 [[package]]
+name = "ohos-native-buffer-sys"
+version = "0.1.4"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+
+[[package]]
 name = "ohos-native-drawing-sys"
 version = "0.2.4"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
- "ohos-image-native-sys",
+ "ohos-image-native-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
  "ohos-image-sys",
+]
+
+[[package]]
+name = "ohos-native-pasteboard-sys"
+version = "0.1.4"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "ohos-udmf-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
 ]
 
 [[package]]
@@ -614,7 +682,24 @@ name = "ohos-native-window-sys"
 version = "0.1.4"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
- "ohos-native-buffer-sys",
+ "ohos-native-buffer-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+]
+
+[[package]]
+name = "ohos-native-window-sys"
+version = "0.1.4"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "ohos-native-buffer-sys 0.1.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+]
+
+[[package]]
+name = "ohos-pasteboard-binding"
+version = "0.0.7"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "ohos-native-pasteboard-sys",
+ "ohos-udmf-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
 ]
 
 [[package]]
@@ -623,7 +708,7 @@ version = "0.3.4"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
  "napi-ohos",
- "ohos-resource-manager-sys",
+ "ohos-resource-manager-sys 0.3.4 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
 ]
 
 [[package]]
@@ -635,13 +720,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohos-resource-manager-sys"
+version = "0.3.4"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "napi-sys-ohos",
+]
+
+[[package]]
 name = "ohos-udmf-binding"
 version = "0.0.7"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
  "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
- "ohos-image-native-binding",
- "ohos-udmf-sys",
+ "ohos-image-native-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-udmf-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+]
+
+[[package]]
+name = "ohos-udmf-binding"
+version = "0.0.7"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-image-native-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-udmf-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
 ]
 
 [[package]]
@@ -649,7 +752,15 @@ name = "ohos-udmf-sys"
 version = "0.0.5"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
- "ohos-image-native-sys",
+ "ohos-image-native-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+]
+
+[[package]]
+name = "ohos-udmf-sys"
+version = "0.0.5"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5#a5542e29d45041175942ab4044531929842359b5"
+dependencies = [
+ "ohos-image-native-sys 0.0.5 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
 ]
 
 [[package]]
@@ -673,7 +784,7 @@ version = "0.1.1"
 source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
 dependencies = [
  "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
- "ohos-image-native-binding",
+ "ohos-image-native-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
  "ohos-multi-modal-input-sys",
  "ohos-native-window-manager-sys",
 ]
@@ -722,7 +833,7 @@ dependencies = [
  "ohos-display-binding",
  "ohos-ime-binding",
  "ohos-resource-manager-binding",
- "ohos-udmf-binding",
+ "ohos-udmf-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
  "ohos-window-manager-binding",
  "ohos-xcomponent-binding",
  "png",
@@ -787,7 +898,10 @@ version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
+ "ohos-pasteboard-binding",
+ "ohos-udmf-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
  "openharmony-ability",
+ "png",
 ]
 
 [[package]]
@@ -1069,6 +1183,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1110,6 +1233,47 @@ checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
 dependencies = [
  "pin-project-lite",
 ]
+
+[[package]]
+name = "toml"
+version = "0.8.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.22.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_write",
+ "winnow",
+]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "unicode-ident"
@@ -1186,6 +1350,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
+name = "winnow"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "xtask"
 version = "0.0.0"
 dependencies = [
@@ -1193,6 +1366,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.119",
+ "toml",
 ]
 
 [[package]]
