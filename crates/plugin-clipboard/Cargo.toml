@@ -3,9 +3,17 @@ name = "openharmony-ability-plugin-clipboard"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Clipboard bridge plugin facade for openharmony-ability"
+description = "Native clipboard facade for openharmony-ability"
+
+[features]
+default = []
+api-14 = ["ohos-pasteboard-binding/api-14"]
+api-18 = ["api-14", "ohos-pasteboard-binding/api-18"]
 
 [dependencies]
 openharmony-ability = { workspace = true }
 napi-ohos = { workspace = true }
 napi-derive-ohos = { workspace = true }
+ohos-pasteboard-binding = { workspace = true, features = ["api-13"] }
+ohos-udmf-binding = { workspace = true, features = ["api-13"] }
+png = { workspace = true }
