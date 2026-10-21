@@ -225,8 +225,10 @@ platform failure policies remain in the [plugin standard](plugin-development-sta
 
 Includes nested objects without an independent bridge name. Fields and types are
 Rust declarations; N-API maps snake_case to camelCase unless an explicit JS name is
-shown. Handwritten native-object conversions (for example `ResourceManagerRef`)
-are defined by their linked source, not by an invented object layout.
+shown. A marker layout is not the entire callback payload when its methods read
+additional borrowed platform objects; see the explicit object reads below.
+Handwritten native-object conversions (for example `ResourceManagerRef`) are
+defined by their linked source, not by an invented object layout.
 
 | Rust object | Fields | Source |
 | --- | --- | --- |
@@ -422,3 +424,14 @@ are defined by their linked source, not by an invented object layout.
 | `openharmony_ability_plugin_window::prompt::WindowPromptResponse` | `{ index: u32 }` | [source](../crates/plugin-window/src/prompt.rs) |
 | `openharmony_ability_plugin_window::stack::WindowStackRequest` | `{ display_id: i64, window_ids: Vec<i64> }` | [source](../crates/plugin-window/src/stack.rs) |
 | `openharmony_ability_plugin_window::stack::WindowStackResponse` | `{ window_ids: Vec<i64> }` | [source](../crates/plugin-window/src/stack.rs) |
+
+## Explicit object reads in named-type methods
+
+These fields are read into callback-local N-API `Object` values by the linked
+Rust methods, in addition to any owned marker fields above. This is an inventory
+of literal `.get(...)` reads, not inferred action routing or a complete wire schema.
+FrameNode/NodeContent ownership and lifetimes remain defined by the decoder and
+the plugin standard; these objects must not be moved onto workers.
+
+| Named Rust type | Method | Object field | Local Rust type | Source |
+| --- | --- | --- | --- | --- |
