@@ -383,7 +383,7 @@ export declare function onBridgeSyncEvent(
 export declare function render(
   slot: NodeContent,
   renderOwner: string,
-  platformWindowId: number,
+  platformWindowId?: number,
 ): void;
 
 /** Queries the window that owns this module's DefaultXComponent, not the Ability main window. */
@@ -393,5 +393,5 @@ export declare function renderWindow(
   slot: NodeContent,
   renderOwner: string,
   windowId: number,
-  platformWindowId: number,
+  platformWindowId?: number,
 ): void;

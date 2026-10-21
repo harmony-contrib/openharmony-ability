@@ -63,11 +63,15 @@ async function runtime() {
             ? ["FrameNode"]
             : specifier.endsWith(".UIContext")
               ? ["UIContext"]
-              : ["default"];
+              : specifier === "@kit.PerformanceAnalysisKit"
+                ? ["hilog"]
+                : ["default"];
       return new vm.SyntheticModule(
         names,
         function () {
-          for (const key of names) this.setExport(key, class {});
+          for (const key of names) {
+            this.setExport(key, key === "hilog" ? { warn() {} } : class {});
+          }
         },
         { context },
       );

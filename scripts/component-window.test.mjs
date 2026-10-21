@@ -22,7 +22,7 @@ const prefix = `const window = { findWindow: name => globalThis.testWindows.get(
 const NativeModuleLoader = { load: async () => globalThis.nativeModule };
 const WindowManager = { getInstance: () => ({ applyTransparentBackground() {} }) };
 const BridgeHostRegistry = { attachComponent: async () => {} };
-const hilog = { debug() {}, info() {} }; let nextRenderOwnerId = 1;`;
+const hilog = { debug() {}, info() {}, warn() {} }; let nextRenderOwnerId = 1;`;
 const { Component } = await import(
   `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(prefix + importsRemoved + "\nexport class Component {" + method + "}")).toString("base64")}`
 );
@@ -66,7 +66,41 @@ test("invalid platform Window identity fails before native render", async () => 
     render: () => assert.fail("render called with invalid ID"),
     disposeRender: () => {},
   };
-  for (const id of [0, -1, 0x80000000, 1.5]) {
+  for (const id of [-1, 0x80000000, 1.5, NaN]) {
     await assert.rejects(appearance(0, id).aboutToAppear(), /invalid platform Window ID/);
   }
+});
+test("zero explicitly selects the main platform Window", async () => {
+  const calls = [];
+  globalThis.nativeModule = { render: (...args) => calls.push(args), disposeRender() {} };
+  await appearance(0, 0).aboutToAppear();
+  assert.equal(calls[0][2], 0);
+});
+test("unavailable main Window lookup does not prevent rendering", async () => {
+  for (const context of [
+    { getWindowName: () => "" },
+    { getWindowName: () => "not-ready" },
+    {
+      getWindowName: () => {
+        throw new Error("UIContext not ready");
+      },
+    },
+  ]) {
+    const calls = [];
+    globalThis.nativeModule = { render: (...args) => calls.push(args), disposeRender() {} };
+    const owner = appearance(0, 201);
+    owner.getUIContext = () => context;
+    await owner.aboutToAppear();
+    assert.equal(calls[0][2], 0);
+  }
+});
+test("a subwindow never silently targets the main Window", async () => {
+  globalThis.nativeModule = {
+    renderWindow: () => assert.fail("render called without a subwindow identity"),
+    disposeRender() {},
+  };
+  const owner = appearance(77, 0);
+  await assert.rejects(owner.aboutToAppear(), /invalid platform Window ID/);
+  owner.getUIContext = () => ({ getWindowName: () => "" });
+  await assert.rejects(owner.aboutToAppear(), /Cannot resolve sub-window/);
 });

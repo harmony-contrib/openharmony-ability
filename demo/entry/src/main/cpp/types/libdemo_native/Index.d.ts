@@ -364,7 +364,7 @@ export declare function onBridgeSyncEvent(
 export declare function render(
   slot: NodeContent,
   renderOwner: string,
-  platformWindowId: number,
+  platformWindowId?: number,
 ): void;
 
 export declare function setBackgroundColor(color: string): Promise<void>;
@@ -539,5 +539,5 @@ export declare function renderWindow(
   slot: NodeContent,
   renderOwner: string,
   windowId: number,
-  platformWindowId: number,
+  platformWindowId?: number,
 ): void;

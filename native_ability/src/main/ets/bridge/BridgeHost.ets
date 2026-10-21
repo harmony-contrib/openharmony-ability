@@ -571,7 +571,15 @@ class BridgeHost {
     if (this.applicationLifecycle === undefined) {
       return;
     }
-    const componentWindow = this.requireComponentWindow(state);
+    let componentWindow: window.Window;
+    try {
+      componentWindow = this.requireComponentWindow(state);
+    } catch (error) {
+      console.warn(
+        `Component Window is not available for '${this.moduleName}'; Window listeners are not attached: ${String(error)}`,
+      );
+      return;
+    }
     const onSizeChange = (size: window.Size): void => {
       if (this.component !== state || this.closing || this.disposed) {
         return;

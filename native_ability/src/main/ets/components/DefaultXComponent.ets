@@ -123,7 +123,7 @@ export struct DefaultXComponent {
         this.rootSlot,
         renderOwner,
         this.windowId,
-        componentPlatformWindowId(this.getUIContext(), moduleName),
+        componentPlatformWindowId(this.getUIContext(), moduleName, this.windowId),
       );
       if (generation !== this.appearanceGeneration) {
         nativeModule.disposeRender(renderOwner);
