@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     fmt::Debug,
     rc::Rc,
@@ -561,14 +561,14 @@ pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: EventLoop,
     post_input: PostInputQueue,
-    pub(crate) ime_input: Arc<crate::input::ImeInputQueue>,
+    pub(crate) input_queue: Arc<crate::input::queue::InputQueue<crate::InputEvent>>,
     pub(crate) ime_sources: Arc<RefCell<HashMap<i64, crate::input::ImeCallbackSource>>>,
     pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
     pub(crate) sub_ime: Arc<RefCell<HashMap<i64, IME>>>,
     bridge_session: Arc<RwLock<Option<ActiveBridgeSession>>>,
     bridge_plugins: Arc<BridgePluginRegistry>,
-    is_keyboard_show: Arc<Mutex<bool>>,
+    pub(crate) attached_ime: Arc<Cell<Option<i64>>>,
 }
 
 impl Debug for OpenHarmonyApp {
@@ -618,7 +618,7 @@ impl OpenHarmonyApp {
             // only after the current event-loop handler releases its borrow.
             #[allow(clippy::arc_with_non_send_sync)]
             post_input: Arc::new(RefCell::new(Vec::new())),
-            ime_input: Arc::default(),
+            input_queue: Arc::default(),
             #[allow(clippy::arc_with_non_send_sync)]
             ime_sources: Arc::default(),
             #[allow(clippy::arc_with_non_send_sync)]
@@ -630,14 +630,16 @@ impl OpenHarmonyApp {
             sub_ime: Arc::new(RefCell::new(HashMap::new())),
             bridge_session: Arc::new(RwLock::new(None)),
             bridge_plugins: Arc::new(BridgePluginRegistry::default()),
-            is_keyboard_show: Arc::new(Mutex::new(false)),
+            #[allow(clippy::arc_with_non_send_sync)]
+            attached_ime: Arc::new(Cell::new(None)),
         }
     }
 
-    /// Runs native actions after the current input callback or on the next event-loop wake.
+    /// Runs native actions after the current input handler or on the next queued wake.
     /// This queue is only accessed on the N-API UI thread.
     pub fn queue_after_input(&self, action: impl FnOnce() + 'static) {
         self.post_input.borrow_mut().push(Box::new(action));
+        self.create_waker().wake();
     }
 
     pub(crate) fn drain_after_input(&self) {
@@ -884,18 +886,8 @@ impl OpenHarmonyApp {
 
     /// Selects the keyboard stream before any main or child render starts.
     pub fn set_keyboard_input_delivery(&self, delivery: KeyboardInputDelivery) -> Result<()> {
-        #[cfg(all(feature = "keyboard", not(feature = "keyboard-text-input")))]
-        if delivery == KeyboardInputDelivery::ArkUiWithTextInput {
-            return Err(Error::from_reason(
-                "ArkUiWithTextInput requires the keyboard-text-input feature (API 26+)",
-            ));
-        }
         #[cfg(feature = "keyboard")]
-        if matches!(
-            delivery,
-            KeyboardInputDelivery::ArkUi | KeyboardInputDelivery::ArkUiWithTextInput
-        ) && crate::version::sdk_api_version() < 14
-        {
+        if delivery == KeyboardInputDelivery::ArkUi && crate::version::sdk_api_version() < 14 {
             return Err(Error::from_reason(
                 "ArkUI keyboard delivery requires API 14",
             ));
@@ -1144,7 +1136,6 @@ impl OpenHarmonyApp {
         if deactivated {
             #[cfg(feature = "keyboard-focus-recovery")]
             crate::render::release_keyboard_focus_recovery(self, owner);
-            self.ime_input.discard(owner);
             if let Some(window_id) = window_id {
                 if let Ok(mut inner) = self.inner.write() {
                     inner
@@ -1155,19 +1146,7 @@ impl OpenHarmonyApp {
                 }
             }
             if let Some(window_id) = window_id {
-                self.ime_sources.borrow_mut().remove(&window_id);
-            }
-            match window_id {
-                Some(0) => {
-                    self.ime.borrow_mut().take();
-                }
-                Some(id) => {
-                    self.sub_ime.borrow_mut().remove(&id);
-                }
-                None => {}
-            }
-            if let Some(window_id) = window_id {
-                self.notify_text_input_ready(window_id);
+                self.retire_render_input(owner, window_id);
             }
         }
         deactivated
@@ -1206,14 +1185,7 @@ impl OpenHarmonyApp {
         };
         #[cfg(feature = "keyboard")]
         self.record_window_focus(window_id, false);
-        self.ime_input.discard(owner);
-        self.ime_sources.borrow_mut().remove(&window_id);
-        if window_id == 0 {
-            self.ime.borrow_mut().take();
-        } else {
-            self.sub_ime.borrow_mut().remove(&window_id);
-        }
-        self.notify_text_input_ready(window_id);
+        self.retire_render_input(owner, window_id);
         if surface_was_active {
             if window_id == 0 {
                 self.dispatch_surface_destroy();
@@ -1375,33 +1347,62 @@ impl OpenHarmonyApp {
         self.show_keyboard_for(0);
     }
     pub fn show_keyboard_for(&self, window_id: i64) {
-        let _ = self.try_show_keyboard_for(window_id);
-    }
-
-    /// Report logical editor focus independently of soft-keyboard visibility.
-    /// Call on the N-API main thread, retaining focus across window deactivation.
-    pub fn set_text_input_active_for(&self, window_id: i64, active: bool) -> Result<()> {
-        self.with_xcomponent_for(window_id, |component| {
-            // XComponent's keyboard-demand flag defaults to false. Its generic
-            // onNeedSoftkeyboard callback can veto that flag, but cannot enable
-            // it; without this update ArkUI closes the IME on window activation.
-            component.native_xcomponent().set_need_soft_keyboard(active)
-        })
-        .ok_or_else(|| {
-            Error::from_reason(format!(
-                "Native input surface is not ready for window {window_id}"
-            ))
-        })?
+        if let Err(error) = self.try_show_keyboard_for(window_id) {
+            crate::warn!("Cannot show native keyboard for window {window_id}: {error}");
+        }
     }
 
     /// Attach/show the editor belonging to this window on the N-API main thread.
     pub fn try_show_keyboard_for(&self, window_id: i64) -> Result<()> {
-        let _guard = self
-            .is_keyboard_show
-            .lock()
-            .expect("Failed to lock is_keyboard_show");
-        self.with_ime_for(window_id, |ime| ime.try_show_keyboard())?
+        self.try_attach_ime_for(window_id)?;
+        self.with_ime_for(window_id, |ime| ime.show_attached())?
             .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    /// Attach without opening the soft keyboard. Ownership transfer is serialized
+    /// on the UI thread, and a failed detach prevents attachment to another window.
+    pub fn try_attach_ime_for(&self, window_id: i64) -> Result<()> {
+        self.ensure_input_main_thread()?;
+        if let Some(previous) = self.attached_ime.get().filter(|id| *id != window_id) {
+            self.try_detach_ime_for(previous)?;
+        }
+        self.with_ime_for(window_id, |ime| ime.try_attach())?
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        self.attached_ime.set(Some(window_id));
+        Ok(())
+    }
+
+    /// Release native editor focus without destroying its retained configuration.
+    pub fn try_detach_ime_for(&self, window_id: i64) -> Result<()> {
+        self.ensure_input_main_thread()?;
+        if self.attached_ime.get() == Some(window_id) {
+            self.with_ime_for(window_id, |ime| ime.try_detach())?
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            self.attached_ime.set(None);
+        }
+        Ok(())
+    }
+
+    /// Logical editor focus is independent of soft-keyboard visibility.
+    pub fn set_text_input_active_for(&self, window_id: i64, active: bool) -> Result<()> {
+        self.ensure_input_main_thread()?;
+        let component = self
+            .with_xcomponent_for(window_id, Clone::clone)
+            .ok_or_else(|| {
+                Error::from_reason(format!(
+                    "Native input surface is not ready for window {window_id}"
+                ))
+            })?;
+        component.native_xcomponent().set_need_soft_keyboard(active)
+    }
+
+    pub(crate) fn ensure_input_main_thread(&self) -> Result<()> {
+        if !self.bridge()?.is_main_thread() {
+            return Err(Error::from_reason(
+                "Native input requires the N-API/UI thread",
+            ));
+        }
+        Ok(())
     }
 
     /// Retain and apply native editor attributes. Call only on the N-API main thread.
@@ -1431,53 +1432,39 @@ impl OpenHarmonyApp {
             .map_err(|error| Error::from_reason(error.to_string()))
     }
 
-    /// Recreate the editor when a live surface is assigned to a different logical window.
-    /// Main thread only. In-flight callbacks and queued edits from the old editor are invalidated.
-    pub fn reset_ime_for(&self, window_id: i64) -> Result<()> {
-        let source = self
-            .ime_sources
-            .borrow()
-            .get(&window_id)
-            .cloned()
-            .ok_or_else(|| {
-                Error::from_reason(format!("Native IME is not ready for window {window_id}"))
-            })?;
-        let replacement = source.create_ime()?;
-        let previous = if window_id == 0 {
-            self.ime.borrow_mut().replace(replacement)
-        } else {
-            self.sub_ime.borrow_mut().insert(window_id, replacement)
-        };
-        drop(previous);
-        Ok(())
-    }
-
     /// Access a window's native editor on the N-API main thread. The callback's
     /// result retains native error codes so callers can recover stale sessions.
     pub fn with_ime_for<T>(&self, window_id: i64, callback: impl FnOnce(&IME) -> T) -> Result<T> {
-        if window_id == 0 {
-            self.ime.borrow().as_ref().map(callback)
+        self.ensure_input_main_thread()?;
+        let ime = if window_id == 0 {
+            self.ime.borrow().clone()
         } else {
-            self.sub_ime.borrow().get(&window_id).map(callback)
+            self.sub_ime.borrow().get(&window_id).cloned()
         }
         .ok_or_else(|| {
             Error::from_reason(format!("Native IME is not ready for window {window_id}"))
-        })
+        })?;
+        Ok(callback(&ime))
     }
     pub fn hide_keyboard(&self) {
         self.hide_keyboard_for(0);
     }
     pub fn hide_keyboard_for(&self, window_id: i64) {
-        let _guard = self
-            .is_keyboard_show
-            .lock()
-            .expect("Failed to lock is_keyboard_show");
-        if window_id == 0 {
-            if let Some(ime) = self.ime.borrow().as_ref() {
-                ime.hide_keyboard();
+        if let Err(error) = self.ensure_input_main_thread() {
+            crate::warn!("Cannot hide native keyboard for window {window_id}: {error}");
+            return;
+        }
+        if self.attached_ime.get() != Some(window_id) {
+            return;
+        }
+        match self.with_ime_for(window_id, |ime| ime.try_hide_keyboard()) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                crate::warn!("Cannot hide native keyboard for window {window_id}: {error}")
             }
-        } else if let Some(ime) = self.sub_ime.borrow().get(&window_id) {
-            ime.hide_keyboard();
+            Err(error) => {
+                crate::warn!("Cannot hide native keyboard for window {window_id}: {error}")
+            }
         }
     }
     pub fn create_waker(&self) -> OpenHarmonyWaker {
