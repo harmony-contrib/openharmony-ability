@@ -218,6 +218,7 @@ export { LoginPlugin };
 | `ohos.accessibility` / `announce-live` | `LiveAnnouncement { text, assertive }` → `EventAcknowledgement` | async / ability; API 18 |
 | `ohos.accessibility` / `observe-reduce-motion`, `stop-observing-reduce-motion` | `MotionRequest { id }` → `EventAcknowledgement` | async / ability; observation requires API 23 |
 | `ohos.accessibility` / `reduce-motion-changed` | `MotionState { id, enabled }` → `EventAcknowledgement` | scoped main-thread; initial and changed values share one callback |
+| `ohos.accessibility` / `subscriptions-ready` | `ohos.accessibility.SubscriptionsRequest {}` → `ohos.accessibility.Subscriptions { screenReader, motionIds }` | scoped main-thread; ArkTS installation/configuration hooks reconcile the Rust owner's current routes, without threads, blocking futures, or queued replay |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
 | `ohos.clipboard` / `write-records` | `ohos.clipboard.WriteRecordsRequest { records: Record[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；1..512 个文本（可带 metadata）、图片或文件 URI 记录，保持顺序 |
@@ -241,14 +242,21 @@ export { LoginPlugin };
 | `ohos.node`（内置） / `mount-into-root` | `ohos.node.MountIntoRootRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
 | `ohos.node`（内置） / `dispose` | `ohos.node.DisposeRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
 | `ohos.webview` / 控制器 action | `ohos.webview.ControllerRequest` → `ohos.webview.Acknowledgement` / `StringResponse` / `ScriptResponse` | async / `ui-context` |
-| ohos.webview / create-native | NativeCreateRequest { targetId, generation, webview: CreateRequest, settings: NativeSettings } → CreateResponse | async / ui-context |
+| ohos.webview / create-native | NativeCreateRequest { targetId, webview: CreateRequest, settings: NativeSettings } → CreateResponse | async / ui-context; target ID is the non-reused Ability attachment lifetime |
 | ohos.webview / configure-native | NativeSettings { id, scrollEnabled, injectedJavascript?, htmlBaseUrl? } → Acknowledgement | async / ui-context |
 | ohos.webview / go-back, go-forward, stop-loading | ControllerRequest → Acknowledgement | async / ui-context |
-| ohos.webview / native-event | NativeEvent { id, targetId, generation, phase, url, title, loading, canGoBack, canGoForward, message?, code? } → EventAcknowledgement | scoped main-thread; notification failure only logged |
-| ohos.webview / native-controller-attached, native-controller-removed | NativeControllerEvent { id, targetId, generation, nativeTag } → EventAcknowledgement | scoped owner; attach before navigation; remove during synchronous teardown |
-| ohos.webview / update-document-options | DocumentOptionsRequest { id, javascriptEnabled?, userAgent?, initializationScripts? } → Acknowledgement | async / ui-context; retains controller/history |
-| ohos.webview / native-node-ready, native-node-retiring | existing ohos.node native receipt types → NodeAcknowledgement | UI-thread callback; retiring requires no context and uses closing hook permit |
+| ohos.webview / native-event | NativeEvent { id, targetId, phase, url, title, loading, canGoBack, canGoForward, message?, code? } → EventAcknowledgement | scoped main-thread; target-indexed callback under Ability dispatch guard; notification failure only logged |
+| ohos.webview / native-controller-attached, native-controller-removed | NativeControllerEvent { id, targetId, nativeTag } → EventAcknowledgement | Ability target dispatch guard; attach before navigation; remove before synchronous target retirement |
+| ohos.webview / native-node-ready, native-node-retiring | existing ohos.node native receipt types → NodeAcknowledgement | UI-thread callback; decoding is pure, ready explicitly attaches before acknowledgement; retiring requires no context and uses closing hook permit |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` | 入站事件 / `ability` |
+
+Accessibility motion routes are Rust-owned RAII registrations. Drop removes local
+delivery only; `close().await` explicitly unsubscribes through the current session.
+The ArkTS instance shares one system listener across its subscribed routes, prunes
+retired IDs when a named motion acknowledgement returns `accepted = false`, and
+unsubscribes its exact callback when no routes remain or the session disposes.
+Ship the matching Rust/HAR pair for the new ready handshake; old motion request
+fields remain unchanged. Animation behavior and announcement policy belong to consumers.
 
 `resource` 是纯入站插件：ArkTS wrapper 在 `ability-create` 时经 `invokeNativeSync` 推送平台
 对象，Rust 在 `on_main_thread_event` 解码的同一 N-API callback 内把它转成 native 指针；对象
@@ -468,10 +476,27 @@ Stack() {
 
 Native providers may send `ohos.node.NativeNodeReady { targetId, content }` or
 `NativeSubtreeReady { targetId, content, slot }` in a synchronous named callback.
-The API-12 binding converts these borrowed objects inside that callback; Rust
-retains native handles only. Before disposing an ArkTS owner, send
+Decode the named request first, then explicitly call `receipt.attach(&event)`
+inside the plugin's main-thread handler. Decoding has no attachment side effects.
+Ability's `NativeAttachment` retains strong N-API references to the FrameNode
+and, for a subtree, its NodeContent slot until native detachment succeeds.
+Before disposing an ArkTS owner, send
 `NativeNodeRetiring { targetId }` and require `ohos.node.Acknowledgement`.
-A failed detach must retain the owner to prevent a dangling native borrow.
+A failed detach retains all native and N-API owners and closes callback admission
+until retirement is retried. Unknown or retired target IDs are explicit errors.
+
+Create targets using `openharmony_ability::NativeAttachment`; use the
+`openharmony_ability::arkui` (also `ohos_arkui_binding`) re-export for node types.
+Bindings provides only node/NodeContent/retention primitives, never another target
+registry. `ContentRoot` is likewise owned and exported by Ability. Retire these
+UI-thread owners before their N-API environment is unloaded.
+
+Target IDs are monotonically allocated and never reused. They are the only
+callback routing key; do not add owner-pointer keys, generation counters or live
+flags. Route owners remove their entry in `Drop`, and handlers dispatch through
+`NativeAttachment::dispatch(target_id, || ...)`, which holds the UI-thread
+operation guard through the callback. Retirement cannot succeed re-entrantly
+inside a callback, and no new callback can begin after retirement.
 
 `onClosing(context)` is a synchronous plugin hook: retire native edges before
 NativeAbility immediately dispatches Rust's destroy event. It must return no

@@ -107,7 +107,9 @@ type names, threading, lifecycle, node cleanup and acceptance criteria.
 ## Native-tree embedding
 
 See the [Rust native embedding contract](../../crates/plugin-webview/README.md#native-tree-embedding)
-for scoped clients, controller declarations, document options and retirement.
+for target-indexed callbacks, creation-time document options and guarded retirement.
+Existing controller-ID declarations and native-tag checks are unchanged. There is no
+separate native client owner or runtime document-options action.
 
 ## License
 

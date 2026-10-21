@@ -46,9 +46,8 @@ impl BridgePlugin for VideoBridgePlugin {
         match event.name() {
             "native-node-ready" => {
                 let ready = event.decode::<openharmony_ability::NativeNodeReady>()?;
-                event.respond(openharmony_ability::NodeAcknowledgement {
-                    accepted: ready.accepted(),
-                })
+                ready.attach(&event)?;
+                event.respond(openharmony_ability::NodeAcknowledgement { accepted: true })
             }
             "native-node-retiring" => {
                 event
@@ -63,9 +62,11 @@ impl BridgePlugin for VideoBridgePlugin {
                     .lock()
                     .map_err(|_| Error::from_reason("video event lock poisoned"))?
                     .get(&payload.id, payload.target_id);
-                if let Some(callback) = callback {
-                    callback(payload);
-                }
+                openharmony_ability::NativeAttachment::dispatch(payload.target_id, || {
+                    if let Some(callback) = callback {
+                        callback(payload);
+                    }
+                })?;
                 event.respond(VideoAcknowledgement { accepted: true })
             }
             _ => Err(Error::from_reason("Unsupported ohos.video native event")),

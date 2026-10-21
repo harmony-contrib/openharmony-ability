@@ -58,7 +58,7 @@ Call through the Rust facade. The host dispatches named N-API requests/responses
 - Font scale comes from `abilityContext.config.fontSizeScale` and requires no accessibility permission; unavailable configuration produces an error.
 - The screen-reader query uses API 18+ `isScreenReaderOpenSync` and fails on older systems. Permission/capability failures propagate to Rust; a failed query does not mean accessibility is disabled.
 - `subscribe_state_change` runs its handler on the N-API main thread. Keep it lightweight; a new subscription replaces the previous handler. Unsubscribe explicitly when finished.
-- The Rust plugin retains the app to replay subscriptions after an Ability session rebuild. The ArkTS instance removes its platform listener on disposal.
+- During installation and configuration updates, the plugin synchronously queries the Rust owner's live routes through the named `subscriptions-ready` event. Surviving subscriptions are restored without a worker, executor, or queued replay.
 
 See the [plugin source](src/main/ets/AccessibilityPlugin.ets) and the [plugin development standard](../../docs/plugin-development-standard.md).
 
@@ -75,12 +75,24 @@ announcement or nonnegative native accessibility element ID on API 12.
 `AccessibilityMotionObservation`. Initial state and changes use one ordered
 UI-thread callback. The handler must not block or reenter the bridge.
 
-Each registered plugin owns its observations. Drop removes Rust delivery
-immediately and queues platform unsubscribe on one lazy worker shared with
-session replay. An in-progress callback may finish. Cleanup failures are reported;
-ArkTS host disposal remains the final listener cleanup. A failed platform `off`
-retains its callback identity for retry. Observation IDs never reuse a retired
-registration within that owner.
+Each registered Rust plugin owns its observations; the matching ArkTS instance
+uses one system listener for all subscribed motion routes. Rust Drop immediately
+retires delivery without platform work. On the next notification, Rust returns
+`EventAcknowledgement { accepted: false }` for a retired ID; ArkTS removes it and
+unsubscribes the exact system callback when the last route is gone. Configuration
+updates also reconcile routes. Await `observation.close()` for prompt platform
+unsubscribe; disposal removes all remaining session listeners. Failed `off`
+retains callback identity for retry and is reported. No application animation,
+announcement throttling, or observer-budget policy is applied.
+
+**Migration:** ship the Rust crate and HAR together. Installation now requires
+`ohos.accessibility.SubscriptionsRequest {}` ->
+`ohos.accessibility.Subscriptions { screenReader, motionIds }` through the existing
+scoped synchronous bridge event route. Existing announcement/motion action names
+and fields remain stable. Drop no longer queues cleanup; the demo's stop action
+awaits `close()` and returns `Promise<void>`. Screen-reader unsubscribe now uses
+the owner's exact callback rather than removing other instances' listeners.
 
 The repository demo has announcement and reduced-motion observe/stop buttons.
-Host regression tests run with `node --test plugins/accessibility/tests/*.test.mjs`.
+The PR CI runs `node --test plugins/accessibility/tests/*.test.mjs` and
+`bash crates/plugin-accessibility/tests/run-motion-host.sh`.

@@ -54,8 +54,8 @@
 |---|---|---|
 | `seal-engine-schemes` / `before-engine-init` / `engine-initialized` | `ohos.webview.EngineLifecycleEvent` → `ohos.webview.EngineLifecycleResponse` | ArkTS → Rust |
 | `controller-attached` / `controller-removed` | `ohos.webview.ControllerEvent` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
-| `native-controller-attached` / `native-controller-removed` | `ohos.webview.NativeControllerEvent { id, targetId, generation, nativeTag }` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust; scoped owner; synchronous retirement |
-| `update-document-options` | `ohos.webview.DocumentOptionsRequest { id, javascriptEnabled?, userAgent?, initializationScripts? }` → `ohos.webview.Acknowledgement` | Rust → ArkTS; async / UI context |
+| `native-controller-attached` / `native-controller-removed` | `ohos.webview.NativeControllerEvent { id, targetId, nativeTag }` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust; Ability target dispatch guard; removal precedes target retirement |
+| `native-event` | `ohos.webview.NativeEvent { id, targetId, phase, url, title, loading, canGoBack, canGoForward, message?, code? }` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust; target-indexed RAII subscription under Ability dispatch guard |
 | `navigation-request` | `ohos.webview.NavigationRequest` → `ohos.webview.NavigationResponse` | ArkTS → Rust |
 | `download-start` | `ohos.webview.DownloadStartRequest` → `ohos.webview.DownloadStartResponse` | ArkTS → Rust |
 | `download-end` | `ohos.webview.DownloadEndEvent` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |

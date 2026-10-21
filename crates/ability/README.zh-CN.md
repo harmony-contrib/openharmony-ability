@@ -48,11 +48,15 @@ openharmony-ability = { version = "1.0.0-beta.3", features = ["keyboard"] }
 
 `keyboard` 提供 `KeyboardInputDelivery::ArkUi`、`KeyboardEventData`、
 `KeyboardEventResponse` 和 `ArkUiInputEvent::{KeyPreIme, Key}`，转发
-`ohos-arkui-binding/api-14`，不在默认 feature 中。
+`ohos-arkui-binding/api-19`，不在默认 feature 中。
 默认仍投递原始 XComponent 输入；渲染前调用
 `OpenHarmonyApp::set_keyboard_input_delivery(KeyboardInputDelivery::ArkUi)`，
 即可接收 Unicode、按住状态、可选锁定状态，并同步决定按键消费。
-运行时低于 API 14 时选择 ArkUI 投递会返回错误。`drag` 不会自动启用 `keyboard`。
+运行时低于 API 19 时选择 ArkUI 投递会返回错误。`drag` 不会自动启用 `keyboard`。
+
+**Migration:** applications enabling `keyboard` must target API 19 or later.
+Applications supporting older systems can leave it disabled and retain raw
+XComponent key delivery.
 
 原生文件拖放也需显式启用：
 

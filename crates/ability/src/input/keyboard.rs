@@ -14,9 +14,21 @@ pub enum KeyboardInputDelivery {
     /// Raw XComponent key codes, available on older systems.
     #[default]
     RawXComponent,
-    /// ArkUI keys not consumed by the IME, including Unicode and held-key state (API 14+).
+    /// ArkUI keys not consumed by the IME, including Unicode, held keys and lock state (API 19+).
     #[cfg(feature = "keyboard")]
     ArkUi,
+}
+
+#[cfg(feature = "keyboard")]
+impl KeyboardInputDelivery {
+    pub(crate) fn validate_runtime(self, api_version: i32) -> napi_ohos::Result<()> {
+        if self == Self::ArkUi && api_version < 19 {
+            return Err(napi_ohos::Error::from_reason(
+                "ArkUI keyboard delivery requires API 19",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// An owned snapshot. Native input pointers never outlive their callback.
@@ -32,12 +44,41 @@ pub struct KeyboardEventData {
     pub unicode: u32,
     /// `None` means the system query failed, rather than no keys being held.
     pub pressed_keys: Option<Vec<KeyCode>>,
-    /// Lock queries are optional on systems before API 19.
+    /// `None` means the native lock-state query failed.
     pub caps_lock: Option<bool>,
     pub num_lock: Option<bool>,
     /// Consume a post-IME key synchronously before its native callback returns.
     /// Late changes to this owned reply cannot affect a later native key.
     pub response: KeyboardEventResponse,
+}
+
+#[cfg(all(test, feature = "keyboard"))]
+mod tests {
+    use super::KeyboardInputDelivery;
+
+    #[test]
+    fn arkui_keyboard_requires_api_19() {
+        for api_version in [0, 12, 14, 18] {
+            let error = KeyboardInputDelivery::ArkUi
+                .validate_runtime(api_version)
+                .unwrap_err();
+            assert_eq!(error.reason, "ArkUI keyboard delivery requires API 19");
+        }
+        for api_version in [19, 20, 26] {
+            assert!(KeyboardInputDelivery::ArkUi
+                .validate_runtime(api_version)
+                .is_ok());
+        }
+    }
+
+    #[test]
+    fn raw_keyboard_keeps_its_existing_baseline() {
+        for api_version in [0, 12, 14, 18, 19, 26] {
+            assert!(KeyboardInputDelivery::RawXComponent
+                .validate_runtime(api_version)
+                .is_ok());
+        }
+    }
 }
 
 #[cfg(feature = "keyboard")]

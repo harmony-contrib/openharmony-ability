@@ -1,0 +1,25 @@
+name: Native WebView tests
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  native-webview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Native WebView production tests
+        run: node --experimental-vm-modules --test plugins/webview/tests/native-embedding.test.mjs
+      - name: Native WebView target routes
+        run: |
+          mkdir -p target
+          rustc --edition=2021 --test crates/plugin-webview/src/native_routes.rs -o target/webview-native-routes-tests
+          target/webview-native-routes-tests

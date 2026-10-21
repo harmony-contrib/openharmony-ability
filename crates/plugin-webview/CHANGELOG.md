@@ -14,4 +14,10 @@
 
 ## Unreleased
 
-- Add generation-owned native-tree WebView embedding and synchronous edge retirement.
+- Add native-tree WebView embedding with Ability-owned attachment targets and guarded
+  synchronous retirement. Native subscription routes use target IDs and RAII cleanup.
+- **Breaking:** register `WebviewBridgePlugin::new()` instead of the former unit value;
+  it stores native subscriptions only. Existing controller/protocol/proxy APIs are unchanged.
+- Remove the unreleased per-instance declaration owner, separate controller generation,
+  unused document-options action, and mocked declaration-host tests (AB6/AB7/AB11).
+- Run production native-embedding and target-route regression tests in pull-request CI.

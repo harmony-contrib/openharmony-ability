@@ -5,6 +5,8 @@ import {
   BridgeCallContext,
   BridgeTypedValue,
   BridgeContextRequirement,
+  BridgeLifecycleEvent,
+  BridgePluginHookContext,
   expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
@@ -23,6 +25,17 @@ const UNSUBSCRIBE_RESPONSE_TYPE = "ohos.accessibility.UnsubscribeResponse";
 // (invokeNativeSync, same transport as WebviewPlugin's notifyNative).
 const STATE_CHANGED_EVENT_TYPE = "ohos.accessibility.StateChangedEvent";
 const EVENT_ACKNOWLEDGEMENT_TYPE = "ohos.accessibility.EventAcknowledgement";
+const MOTION_REQUEST_TYPE = "ohos.accessibility.MotionRequest";
+const MOTION_STATE_TYPE = "ohos.accessibility.MotionState";
+const SUBSCRIPTIONS_REQUEST_TYPE = "ohos.accessibility.SubscriptionsRequest";
+const SUBSCRIPTIONS_TYPE = "ohos.accessibility.Subscriptions";
+const SEND_EVENT_REQUEST_TYPE = "ohos.accessibility.SendEventRequest";
+const LIVE_ANNOUNCEMENT_TYPE = "ohos.accessibility.LiveAnnouncement";
+
+interface AccessibilitySubscriptions {
+  screenReader: boolean;
+  motionIds: string[];
+}
 
 interface GetFontScaleRequest {}
 
@@ -115,18 +128,29 @@ export class AccessibilityPlugin extends AsyncPluginBase {
   private motionHandler: ((enabled: boolean) => void) | null = null;
   private motionIds: Set<string> = new Set();
   private motionRevision: number = 0;
+  private disposed = false;
+
+  onInstall(_context: BridgePluginHookContext): void {
+    this.syncSubscriptions();
+  }
+
+  onLifecycle(event: BridgeLifecycleEvent, _context: BridgePluginHookContext): void {
+    if (event.kind === "configuration-updated") {
+      this.syncSubscriptions();
+    }
+  }
 
   async invokeAsync(
     action: string,
     payload: BridgeTypedValue,
     context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
-    if (!context.isActive()) {
+    if (!context.isActive() || this.disposed) {
       throw new Error("Bridge session is no longer active");
     }
 
     if (action === "observe-reduce-motion" || action === "stop-observing-reduce-motion") {
-      expectBridgeRequestType(payload, this.id, action, "ohos.accessibility.MotionRequest");
+      expectBridgeRequestType(payload, this.id, action, MOTION_REQUEST_TYPE);
       const request = payload.value as MotionRequest;
       if (!request || typeof request.id !== "string" || !/^[0-9]{1,20}$/.test(request.id)) {
         throw new Error("Invalid motion observation identity");
@@ -137,38 +161,8 @@ export class AccessibilityPlugin extends AsyncPluginBase {
           this.removeMotionHandler();
         }
       } else {
-        if (deviceInfo.sdkApiVersion < 23) {
-          throw new Error("Reduced-motion observation requires API 23");
-        }
-        if (this.motionHandler === null) {
-          const handler = (enabled: boolean): void => {
-            this.motionRevision++;
-            Array.from(this.motionIds).forEach((id: string) => {
-              try {
-                this.notifyMotion(id, enabled);
-              } catch (error) {
-                console.warn(`[Accessibility] motion observation: ${String(error)}`);
-              }
-            });
-          };
-          accessibility.onAnimationReduceStateChange(handler);
-          this.motionHandler = handler;
-        }
-        this.motionIds.add(request.id);
-        try {
-          const revision = this.motionRevision;
-          const initial = accessibility.isAnimationReduceEnabledSync();
-          // A synchronous platform change during the query has already delivered
-          // a newer value. Do not overwrite it with the earlier query snapshot.
-          if (revision === this.motionRevision) {
-            this.notifyMotion(request.id, initial);
-          }
-        } catch (error) {
-          this.motionIds.delete(request.id);
-          if (this.motionIds.size === 0) {
-            this.removeMotionHandler();
-          }
-          throw new Error(`Reduced-motion initial observation failed: ${String(error)}`);
+        if (!this.motionIds.has(request.id)) {
+          this.subscribeMotion([request.id]);
         }
       }
       return { typeName: EVENT_ACKNOWLEDGEMENT_TYPE, value: { accepted: true } };
@@ -178,7 +172,7 @@ export class AccessibilityPlugin extends AsyncPluginBase {
       if (deviceInfo.sdkApiVersion < 18) {
         throw new Error("Live announcement requires API 18");
       }
-      expectBridgeRequestType(payload, this.id, action, "ohos.accessibility.LiveAnnouncement");
+      expectBridgeRequestType(payload, this.id, action, LIVE_ANNOUNCEMENT_TYPE);
       const request = payload.value as LiveAnnouncement;
       if (!request || typeof request.text !== "string" || typeof request.assertive !== "boolean") {
         throw new Error("Invalid live announcement");
@@ -198,12 +192,10 @@ export class AccessibilityPlugin extends AsyncPluginBase {
     }
 
     if (action === "send-event") {
-      expectBridgeRequestType(
-        payload,
-        "ohos.accessibility",
-        action,
-        "ohos.accessibility.SendEventRequest",
-      );
+      expectBridgeRequestType(payload, "ohos.accessibility", action, SEND_EVENT_REQUEST_TYPE);
+      if (deviceInfo.sdkApiVersion < 12) {
+        throw new Error("Accessibility events require API 12");
+      }
       if (typeof payload.value !== "object" || payload.value === null) {
         throw new Error("Invalid accessibility event");
       }
@@ -299,21 +291,7 @@ export class AccessibilityPlugin extends AsyncPluginBase {
 
     if (action === "subscribe-state-change") {
       expectBridgeRequestType(payload, "ohos.accessibility", action, SUBSCRIBE_REQUEST_TYPE);
-      // Idempotent: re-subscribing without unsubscribe just re-acks.
-      if (this.screenReaderHandler === null) {
-        const handler = (enabled: boolean): void => {
-          this.notifyStateChanged(enabled);
-        };
-        try {
-          accessibility.on("screenReaderStateChange", handler);
-        } catch (e) {
-          const err = e as BusinessError;
-          throw new Error(
-            `on(screenReaderStateChange) failed: code=${err.code} msg=${err.message}`,
-          );
-        }
-        this.screenReaderHandler = handler;
-      }
+      this.subscribeScreenReader();
       return {
         typeName: SUBSCRIBE_RESPONSE_TYPE,
         value: new SubscribeResponse(true),
@@ -333,10 +311,107 @@ export class AccessibilityPlugin extends AsyncPluginBase {
   }
 
   onDispose(): void {
-    // Session teardown: drop the system callback so it never fires into a dead bridge.
-    this.removeScreenReaderHandler();
+    this.disposed = true;
     this.motionIds.clear();
-    this.removeMotionHandler();
+    try {
+      this.removeMotionHandler();
+    } finally {
+      this.removeScreenReaderHandler();
+    }
+  }
+
+  private syncSubscriptions(): void {
+    const context = this.getContext();
+    if (!context.isActive() || this.disposed) {
+      throw new Error("Accessibility subscription context is inactive");
+    }
+    const subscriptions = context.invokeNativeSync(
+      "subscriptions-ready",
+      SUBSCRIPTIONS_REQUEST_TYPE,
+      SUBSCRIPTIONS_TYPE,
+      {} as ESObject,
+    ) as AccessibilitySubscriptions;
+    if (
+      !subscriptions ||
+      typeof subscriptions.screenReader !== "boolean" ||
+      !Array.isArray(subscriptions.motionIds) ||
+      !subscriptions.motionIds.every(
+        (id: string) => typeof id === "string" && /^[0-9]{1,20}$/.test(id),
+      )
+    ) {
+      throw new Error("Invalid accessibility subscription snapshot");
+    }
+    if (subscriptions.screenReader) {
+      this.subscribeScreenReader();
+    } else {
+      this.removeScreenReaderHandler();
+    }
+    this.motionIds.clear();
+    if (subscriptions.motionIds.length === 0) {
+      this.removeMotionHandler();
+    } else {
+      this.subscribeMotion(subscriptions.motionIds);
+    }
+  }
+
+  private subscribeScreenReader(): void {
+    if (this.screenReaderHandler !== null) {
+      return;
+    }
+    const handler = (enabled: boolean): void => {
+      if (!this.disposed && this.screenReaderHandler === handler) {
+        this.notifyStateChanged(enabled);
+      }
+    };
+    try {
+      accessibility.on("screenReaderStateChange", handler);
+    } catch (error) {
+      const err = error as BusinessError;
+      throw new Error(`on(screenReaderStateChange) failed: code=${err.code} msg=${err.message}`);
+    }
+    this.screenReaderHandler = handler;
+  }
+
+  private subscribeMotion(ids: string[]): void {
+    if (deviceInfo.sdkApiVersion < 23) {
+      throw new Error("Reduced-motion observation requires API 23");
+    }
+    ids.forEach((id: string) => this.motionIds.add(id));
+    try {
+      if (this.motionHandler === null) {
+        const handler = (enabled: boolean): void => {
+          if (this.disposed || this.motionHandler !== handler || !this.getContext().isActive()) {
+            return;
+          }
+          this.motionRevision++;
+          Array.from(this.motionIds).forEach((id: string) => {
+            try {
+              this.notifyMotion(id, enabled);
+            } catch (error) {
+              console.warn(`[Accessibility] motion observation: ${String(error)}`);
+            }
+          });
+        };
+        accessibility.onAnimationReduceStateChange(handler);
+        this.motionHandler = handler;
+      }
+      const revision = this.motionRevision;
+      const initial = accessibility.isAnimationReduceEnabledSync();
+      // A platform callback during the query has already delivered a newer value.
+      if (revision === this.motionRevision) {
+        ids.forEach((id: string) => {
+          if (this.motionIds.has(id)) {
+            this.notifyMotion(id, initial);
+          }
+        });
+      }
+    } catch (error) {
+      ids.forEach((id: string) => this.motionIds.delete(id));
+      if (this.motionIds.size === 0) {
+        this.removeMotionHandler();
+      }
+      throw new Error(`Reduced-motion initial observation failed: ${String(error)}`);
+    }
   }
 
   private removeMotionHandler(): void {
@@ -350,26 +425,32 @@ export class AccessibilityPlugin extends AsyncPluginBase {
 
   private notifyMotion(id: string, enabled: boolean): void {
     const context = this.getContext();
-    if (!context.isActive()) {
+    if (!context.isActive() || this.disposed || !this.motionIds.has(id)) {
       return;
     }
     const response = context.invokeNativeSync(
       "reduce-motion-changed",
-      "ohos.accessibility.MotionState",
+      MOTION_STATE_TYPE,
       EVENT_ACKNOWLEDGEMENT_TYPE,
       new MotionState(id, enabled) as ESObject,
     ) as AccessibilityEventAcknowledgement;
-    if (response?.accepted !== true) {
+    if (!response || typeof response.accepted !== "boolean") {
       throw new Error("Invalid reduced-motion acknowledgement");
+    }
+    if (!response.accepted) {
+      this.motionIds.delete(id);
+      if (this.motionIds.size === 0) {
+        this.removeMotionHandler();
+      }
     }
   }
 
   private removeScreenReaderHandler(): void {
     if (this.screenReaderHandler !== null) {
       try {
-        accessibility.off("screenReaderStateChange");
-      } catch {
-        // Best-effort: the system may already have detached the callback.
+        accessibility.off("screenReaderStateChange", this.screenReaderHandler);
+      } catch (error) {
+        throw new Error(`screen-reader unregister failed: ${String(error)}`);
       }
       this.screenReaderHandler = null;
     }
