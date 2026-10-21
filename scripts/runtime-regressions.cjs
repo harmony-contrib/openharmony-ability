@@ -1439,6 +1439,57 @@ test("native prompts wait for an auto-dismiss already removed from the native re
   assert.deepEqual(fixture.events.slice(2), [["close"], ["activate", false], ["dispose"]]);
 });
 
+test("cursor style requests resolve the component window and preserve synchronous SDK failures", async () => {
+  for (const failure of [undefined, new Error("native pointer style rejected")]) {
+    const calls = [];
+    const l = loader({
+      "@ohos.multimodalInput.pointer": {
+        setPointerStyleSync(id, style) {
+          calls.push([id, style]);
+          if (failure) throw failure;
+        },
+      },
+    });
+    const { manager } = managerFor(l);
+    manager.registerUIAbilityStage(0, {
+      getMainWindowSync: () => ({ on() {}, getWindowProperties: () => ({ id: 42 }) }),
+    }, {});
+    const host = { getWindowProperties: () => ({ id: 71 }) };
+    const { WindowPlugin } = l.load("plugins/window/src/main/ets/WindowPlugin.ets");
+    const result = new WindowPlugin().invokeAsync("set-cursor-icon", {
+      typeName: "ohos.window.CursorIconRequest", value: { windowId: 0, style: 5 },
+    }, { isActive: () => true, getWindow: () => host });
+    if (failure) await assert.rejects(result, (error) => error === failure);
+    else {
+      const response = await result;
+      assert.equal(response.typeName, "ohos.window.Acknowledgement");
+      assert.equal(response.value.accepted, true);
+    }
+    assert.deepEqual(calls, [[71, 5]]);
+  }
+});
+
+test("cursor style requests validate the named payload and active window before platform access", async () => {
+  const l = loader({
+    "@ohos.multimodalInput.pointer": {
+      setPointerStyleSync() { assert.fail("invalid cursor calls must not reach the SDK"); },
+    },
+  });
+  managerFor(l);
+  const { WindowPlugin } = l.load("plugins/window/src/main/ets/WindowPlugin.ets");
+  const plugin = new WindowPlugin();
+  const context = { isActive: () => true };
+  for (const payload of [
+    { typeName: "std.i32", value: 5 },
+    { typeName: "ohos.window.CursorIconRequest", value: null },
+    { typeName: "ohos.window.CursorIconRequest", value: { windowId: -1, style: 5 } },
+    { typeName: "ohos.window.CursorIconRequest", value: { windowId: 0, style: 0.5 } },
+  ]) await assert.rejects(plugin.invokeAsync("set-cursor-icon", payload, context), /requires/);
+  const payload = { typeName: "ohos.window.CursorIconRequest", value: { windowId: 0, style: 5 } };
+  await assert.rejects(plugin.invokeAsync("set-cursor-icon", payload, { isActive: () => false }), /no longer active/);
+  await assert.rejects(plugin.invokeAsync("set-cursor-icon", payload, context), /Unknown OS window/);
+});
+
 test("custom cursors validate their named contract before allocating native pixels", async () => {
   const { parseCustomCursor } = loader().load("plugins/window/src/main/ets/CustomCursor.ets");
   const value = { windowId: 0, width: 1, height: 1, hotspotX: 0, hotspotY: 0, rgba: [255, 0, 0, 128] };
@@ -1482,6 +1533,44 @@ test("custom cursors release PixelMaps after success, OS failure and canceled ca
     else await assert.rejects(result, outcome === "failure" ? /OS rejected/ : /no longer active/);
     assert.equal(released, 1, outcome);
     assert.equal(installed, outcome === "cancel" ? 0 : 1, outcome);
+  }
+});
+
+test("custom cursor bridge acknowledgements wait for cleanup and reject disposal during release", async () => {
+  for (const cancel of [false, true]) {
+    const cleanup = deferred();
+    let active = true, settled = false, released = 0;
+    const host = { getWindowProperties: () => ({ id: 71 }) };
+    const l = loader({
+      "@kit.ImageKit": { image: {
+        PixelMapFormat: { RGBA_8888: 3 }, AlphaType: { UNPREMUL: 3 },
+        async createPixelMap() {
+          return { async release() { released++; await cleanup.promise; } };
+        },
+      } },
+      "@ohos.multimodalInput.pointer": {
+        async setCustomCursor(id) { assert.equal(id, 71); },
+      },
+    });
+    managerFor(l);
+    const { WindowPlugin } = l.load("plugins/window/src/main/ets/WindowPlugin.ets");
+    const result = new WindowPlugin().invokeAsync("set-custom-cursor", {
+      typeName: "ohos.window.CustomCursorRequest",
+      value: { windowId: 0, width: 1, height: 1, hotspotX: 0, hotspotY: 0, rgba: [255, 0, 0, 128] },
+    }, { isActive: () => active, getWindow: () => host });
+    result.then(() => { settled = true; }, () => { settled = true; });
+    await flush();
+    assert.equal(released, 1);
+    assert.equal(settled, false);
+    if (cancel) active = false;
+    cleanup.resolve();
+    if (cancel) await assert.rejects(result, /no longer active/);
+    else {
+      const response = await result;
+      assert.equal(response.typeName, "ohos.window.Acknowledgement");
+      assert.equal(response.value.accepted, true);
+    }
+    assert.equal(released, 1);
   }
 });
 

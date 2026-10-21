@@ -25,13 +25,6 @@ import {
 import { PromptDialogs, WindowPromptRequest } from "./PromptDialogs";
 import { WindowPointer } from "./WindowPointer";
 
-class CursorIconResponse {
-  readonly style: number;
-  constructor(style: number) {
-    this.style = style;
-  }
-}
-
 const TAG: string = "WindowPlugin";
 const MOVE_REQUESTED_TYPE = "ohos.window.MoveRequested";
 const MOVE_RESPONSE_TYPE = "ohos.window.MoveResponse";
@@ -1162,24 +1155,11 @@ export class WindowPlugin extends AsyncPluginBase {
       await setWindowIcon(payload, context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
-    if (action === "set-custom-cursor" || action === "set-custom-cursor-follow-size") {
+    if (action === "set-custom-cursor") {
       const request = parseCustomCursor(payload);
       const win = await this.requireWindow(request.windowId, context);
-      await WindowPointer.setCustom(
-        win,
-        request,
-        action === "set-custom-cursor-follow-size",
-        (): void => this.assertCallActive(context),
-      );
+      await WindowPointer.setCustom(win, request, (): void => this.assertCallActive(context));
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
-    }
-
-    if (action === "get-cursor-icon") {
-      const request = parseWindowIdRequest(payload);
-      const win = await this.requireWindow(request.windowId, context);
-      const style = WindowPointer.getStyle(win);
-      this.assertCallActive(context);
-      return { typeName: "ohos.window.CursorIconResponse", value: new CursorIconResponse(style) };
     }
 
     if (action === "set-cursor-icon") {
