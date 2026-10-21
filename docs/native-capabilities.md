@@ -9,7 +9,7 @@ Missing wrappers belong in `ohos-native-bindings`.
 | `openharmony-ability` | `keyboard` | ArkUI keyboard delivery, API 14 | Raw XComponent key delivery remains available |
 | `openharmony-ability` | `keyboard-focus` | Synchronous `OH_ArkUI_FocusRequest`, API 15; enables `keyboard` | Uses the existing node focus-status attribute |
 | `openharmony-ability` | `keyboard-lock-state` | Caps/Num/Scroll lock queries, API 19; enables `keyboard` | Lock states are `None`, not assumed off |
-| `openharmony-ability` | `keyboard-text-input` | IME key consumption configuration, API 26; enables `keyboard` | Selecting `ArkUiWithTextInput` returns an error |
+| `openharmony-ability` | `keyboard-text-input` | Explicit IME key consumption configuration, API 26; enables `keyboard` | Native key-consumption configuration is not linked |
 | `openharmony-ability` | `keyboard-focus-recovery` | Window-filter inspection, API 26; enables `keyboard-focus` | Enabling window keyboard focus recovery returns an error |
 | `openharmony-ability-plugin-webview` | `engine-version` | Active ArkWeb engine version, API 20 | Native engine-version query is absent |
 | `openharmony-ability-plugin-webview` | `engine-evergreen` | Evergreen engine query, API 23; enables `engine-version` | Version query omits the evergreen suffix |
