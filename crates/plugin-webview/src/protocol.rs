@@ -514,18 +514,18 @@ fn install_declaration(
 
         if let Some(body) = request.http_body_stream() {
             let callback = Arc::clone(&callback);
-            let mut request_handle = Some(request_handle);
             let key = key.clone();
             let installed_tag = installed_tag.clone();
-            body.read(body.size() as usize, move |body| {
-                let Some(request_handle) = request_handle.take() else {
-                    return;
-                };
+            body.read_to_end(move |body| {
                 let responder = responder_for(request_handle);
                 if !controller::is_current(&key, &installed_tag).unwrap_or(false) {
                     responder.respond(retired_request_response());
                     return;
                 }
+                let Ok(body) = body else {
+                    responder.respond(invalid_request_response());
+                    return;
+                };
                 match build_request(&method, &url, headers.iter(), body) {
                     Ok(native_request) => callback(&url, native_request, is_main_frame, responder),
                     Err(_) => responder.respond(invalid_request_response()),

@@ -32,6 +32,7 @@ async function runtime() {
     const module = new vm.SourceTextModule(stripTypeScriptTypes(source), { context });
     cache.set(name, module);
     await module.link(async (specifier) => {
+      if (specifier === "./ComponentWindow") return load("bridge/ComponentWindow");
       if (specifier.startsWith("../runtime/"))
         return load(`runtime/${specifier.split("/").at(-1)}`);
       const names = specifier.endsWith("/type")

@@ -143,17 +143,18 @@ impl Method {
         "GET"
     }
 }
-type BodyCallback = Box<dyn FnMut(Vec<u8>) + Send>;
+type BodyCallback = Box<dyn FnOnce(std::result::Result<Vec<u8>, ()>) + Send>;
 static BODY_READS: LazyLock<Mutex<Vec<BodyCallback>>> = LazyLock::new(Default::default);
 pub struct Body;
 impl Body {
-    pub fn size(&self) -> u64 {
-        0
-    }
-    pub fn read(&self, _: usize, callback: impl FnMut(Vec<u8>) + Send + 'static) {
+    pub fn read_to_end(
+        self,
+        callback: impl FnOnce(std::result::Result<Vec<u8>, ()>) + Send + 'static,
+    ) {
         BODY_READS.lock().unwrap().push(Box::new(callback));
     }
 }
+
 #[derive(Default)]
 pub struct ArkWebResponse {
     status: std::cell::Cell<u16>,
@@ -358,7 +359,7 @@ fn dropping_an_uninitialized_plugin_releases_its_final_owner_and_declarations() 
 }
 
 #[test]
-fn retired_controller_cannot_deliver_a_late_request_body_to_user_code() {
+fn body_read_failure_and_retired_controller_never_reach_user_code() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let owner = Arc::new(());
     let key = ControllerKey::new(Some(owner), "late-body");
@@ -376,6 +377,17 @@ fn retired_controller_cannot_deliver_a_late_request_body_to_user_code() {
     .unwrap();
     controller::on_attached(&key, "late-body-tag").unwrap();
     protocol::on_controller_attached(&key, "late-body-tag").unwrap();
+    let failed_response = ResourceHandle::default();
+    PROTOCOLS
+        .lock()
+        .unwrap()
+        .get_mut("late-body-tag:asset")
+        .unwrap()(NativeRequest { body: true }, failed_response.clone());
+    let mut reads = std::mem::take(&mut *BODY_READS.lock().unwrap());
+    assert_eq!(reads.len(), 1);
+    reads.remove(0)(Err(()));
+    assert_eq!(failed_response.0.lock().unwrap().0, 400);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
     let response = ResourceHandle::default();
     PROTOCOLS
         .lock()
@@ -386,7 +398,7 @@ fn retired_controller_cannot_deliver_a_late_request_body_to_user_code() {
     controller::on_removed(&key, "late-body-tag").unwrap();
     let mut callbacks = std::mem::take(&mut *BODY_READS.lock().unwrap());
     assert_eq!(callbacks.len(), 1);
-    callbacks[0](b"late body".to_vec());
+    callbacks.remove(0)(Ok(b"late body".to_vec()));
     assert_eq!(response.0.lock().unwrap().0, 410);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     protocol::remove_declarations(&key).unwrap();

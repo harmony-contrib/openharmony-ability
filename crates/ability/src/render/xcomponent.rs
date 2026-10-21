@@ -247,23 +247,31 @@ fn register_gestures(
     Ok(gestures)
 }
 
-/// create lifecycle object and return to arkts
+/// Creates the main render tree with its actual platform Window ID for native IME.
 pub fn render(
     env: &Env,
     slot: ArkUIHandle,
     render_owner: String,
     app: OpenHarmonyApp,
+    platform_window_id: i32,
 ) -> Result<RootNode> {
-    render_for_window(env, slot, render_owner, app, 0)
+    render_for_window(env, slot, render_owner, app, 0, platform_window_id)
 }
 
+/// Creates a render tree with separate framework routing and platform Window IDs.
 pub fn render_for_window(
     env: &Env,
     slot: ArkUIHandle,
     render_owner: String,
     app: OpenHarmonyApp,
     window_id: i64,
+    platform_window_id: i32,
 ) -> Result<RootNode> {
+    if platform_window_id <= 0 {
+        return Err(Error::from_reason(
+            "Native render requires a positive platform Window ID",
+        ));
+    }
     set_main_thread_env(*env);
 
     // All eager `get_helper()` TSFN inits (statusbar tray, vibrancy, clipboard image,
@@ -367,7 +375,7 @@ pub fn render_for_window(
         created_pan_tracker.borrow_mut().reset();
 
         // We need to create IME instance when app is focused.
-        let ime = IME::new(Default::default());
+        let ime = IME::new_for_window(Default::default(), platform_window_id);
 
         {
             let insert_text_callback_tsfn = insert_text_callback_tsfn.clone();

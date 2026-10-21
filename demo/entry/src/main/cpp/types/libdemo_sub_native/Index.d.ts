@@ -380,7 +380,18 @@ export declare function onBridgeSyncEvent(
   value: unknown,
 ): unknown;
 
-export declare function render(slot: NodeContent, renderOwner: string): void;
+export declare function render(
+  slot: NodeContent,
+  renderOwner: string,
+  platformWindowId: number,
+): void;
 
 /** Queries the window that owns this module's DefaultXComponent, not the Ability main window. */
 export declare function subWindowKeyboardInset(): Promise<number>;
+
+export declare function renderWindow(
+  slot: NodeContent,
+  renderOwner: string,
+  windowId: number,
+  platformWindowId: number,
+): void;

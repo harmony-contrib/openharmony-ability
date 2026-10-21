@@ -361,7 +361,11 @@ export declare function onBridgeSyncEvent(
   value: unknown,
 ): unknown;
 
-export declare function render(slot: NodeContent, renderOwner: string): void;
+export declare function render(
+  slot: NodeContent,
+  renderOwner: string,
+  platformWindowId: number,
+): void;
 
 export declare function setBackgroundColor(color: string): Promise<void>;
 
@@ -531,3 +535,9 @@ export const demoDisposeNativeVideo: () => Promise<void>;
 export const demoAnnounce: (text: string) => Promise<void>;
 export const demoObserveMotion: () => Promise<void>;
 export const demoStopMotion: () => void;
+export declare function renderWindow(
+  slot: NodeContent,
+  renderOwner: string,
+  windowId: number,
+  platformWindowId: number,
+): void;

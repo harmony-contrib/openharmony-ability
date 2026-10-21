@@ -508,6 +508,10 @@ onClosing and invokeSync remain synchronous.
   组件状态；主窗口事件不得广播给 sub-window module，旧窗口的延迟回调也不得命中新 appearance。
 - `ohos.node` action 与 `WebviewCreateRequest` 不携带 `window_key`；要在另一个窗口操作，调用该窗口
   对应 native module 导出的 Rust API。
+- Native render assembly passes `platformWindowId` from the component Window's `getWindowProperties().id`.
+  It is a positive i32 used by IME; framework routing IDs (including main-window routing 0) remain separate.
+  `render(slot, owner, platformWindowId)` and `renderWindow(slot, owner, routingWindowId, platformWindowId)`
+  require this scalar. Both BridgeHost and DefaultXComponent use the same UIContext Window resolver.
 - 一个 module/component 内的 `WebviewSurface.entries` 按 WebView ID 保存多个 controller；不同 ID
   必须并存并使用独立 mount key，同 ID 的重新 create 才替换旧实例。所有 controller 平台回调都要
   携带内部 native tag，并在 Rust 分发前校验当前 generation，禁止旧实例的延迟回调命中替代实例。
