@@ -47,6 +47,7 @@ const KEEP_SCREEN_ON_REQUEST_TYPE = "ohos.window.KeepScreenOnRequest";
 const CURSOR_ICON_REQUEST_TYPE = "ohos.window.CursorIconRequest";
 const CURSOR_VISIBLE_REQUEST_TYPE = "ohos.window.CursorVisibleRequest";
 const DECORATION_FLAGS_REQUEST_TYPE = "ohos.window.DecorationFlagsRequest";
+const STATUS_BAR_REQUEST_TYPE = "ohos.window.StatusBarRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.window.Acknowledgement";
 const STATE_RESPONSE_TYPE = "ohos.window.StateResponse";
 const IME_POSITION_RESPONSE_TYPE = "ohos.window.ImePositionResponse";
@@ -64,6 +65,14 @@ function isSafeInteger(value: number): boolean {
 
 function isWindowId(value: number): boolean {
   return isSafeInteger(value) && value >= 0;
+}
+
+interface WindowStatusBarRequest {
+  windowId: number;
+  enabled: boolean;
+  lightContent: boolean;
+  background?: number | null;
+  animated: boolean;
 }
 
 interface WindowStackRequest {
@@ -298,6 +307,27 @@ function parseCreateRequest(payload: BridgeTypedValue): WindowCreateRequest {
       request.backgroundColor > MAX_ARGB_COLOR)
   ) {
     throw new Error("create-os-window.backgroundColor must be an integer in 0xAARRGGBB format");
+  }
+  return request;
+}
+
+function parseStatusBarRequest(payload: BridgeTypedValue): WindowStatusBarRequest {
+  if (payload.typeName !== STATUS_BAR_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`set-status-bar requires ${STATUS_BAR_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowStatusBarRequest;
+  if (
+    !isWindowId(request?.windowId) ||
+    typeof request.enabled !== "boolean" ||
+    typeof request.lightContent !== "boolean" ||
+    typeof request.animated !== "boolean" ||
+    (request.background !== undefined &&
+      request.background !== null &&
+      (!Number.isInteger(request.background) ||
+        request.background < 0 ||
+        request.background > MAX_ARGB_COLOR))
+  ) {
+    throw new Error("Invalid status-bar settings");
   }
   return request;
 }
@@ -553,6 +583,22 @@ export class WindowPlugin extends AsyncPluginBase {
     context: BridgeCallContext,
   ): Promise<BridgeTypedValue> {
     this.assertCallActive(context);
+    if (action === "set-status-bar") {
+      const request = parseStatusBarRequest(payload);
+      const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
+      const properties: window.SystemBarProperties = {
+        statusBarContentColor: request.lightContent ? "#ffffffff" : "#ff000000",
+      };
+      if (request.background !== undefined && request.background !== null) {
+        properties.statusBarColor = this.colorString(request.background);
+      }
+      await win.setWindowSystemBarProperties(properties);
+      this.assertCallActive(context);
+      await win.setSpecificSystemBarEnabled("status", request.enabled, request.animated);
+      this.assertCallActive(context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
     if (action === "get-window-stack") {
       if (payload.typeName !== "ohos.window.StackRequest" || typeof payload.value !== "object") {
         throw new Error("get-window-stack requires ohos.window.StackRequest");

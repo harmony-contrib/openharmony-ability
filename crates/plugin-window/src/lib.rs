@@ -19,6 +19,9 @@ pub use stack::{WindowStackRequest, WindowStackResponse};
 mod prompt;
 pub use prompt::{WindowPromptAnchor, WindowPromptRequest, WindowPromptResponse};
 
+mod system_bars;
+pub use system_bars::WindowStatusBarRequest;
+
 pub struct WindowBridgePlugin;
 
 impl BridgePlugin for WindowBridgePlugin {

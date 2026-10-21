@@ -230,6 +230,7 @@ export { LoginPlugin };
 | `ohos.notification` / `show` | `ohos.notification.ShowRequest { tag, title, body, actions }` → `ohos.notification.Acknowledgement { accepted }` | async / `ability`；最多 3 个 action；响应 URI scheme 由 ArkTS 工厂的 `NotificationPlugin({ scheme })` 配置 |
 | `ohos.system-state` | `ohos.system-state.*` 具名类型 | async / `ability`；ID 与 typeName 前缀统一；Rust facade 和 ArkTS HAR 必须配套更新，旧 `ohos.system_state.*` 类型名不再使用 |
 | `ohos.menu` / 入站 `menu-open` | `ohos.menu.MenuOpenEvent { windowId }` → `std.bool` | 菜单打开通道传递完整事件和来源窗口 ID（主窗为 `main`），消费者可按窗口处理 |
+| `ohos.window` / `set-status-bar` | `ohos.window.StatusBarRequest { windowId, enabled, lightContent, background?, animated }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；API 12，windowId=0 路由实际组件窗口；仅修改状态栏，保留导航栏状态；遵循平台主窗口全屏/最大化生效规则 |
 | `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | async / `ui-context`；查询当前 component 所在窗口 |
 | `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | async / `ui-context` |
 | `ohos.window` / `set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window` | `ohos.window.*Request { windowId, ... }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context` |
