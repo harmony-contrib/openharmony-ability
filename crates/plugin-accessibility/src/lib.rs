@@ -16,16 +16,29 @@ use openharmony_ability::{
     PluginLifecycleEvent,
 };
 
+mod events;
+pub use events::{AccessibilityLiveAnnouncement, AccessibilitySendEventRequest};
+mod motion;
+mod motion_routes;
+mod motion_stop;
+pub use motion::{
+    AccessibilityMotionObservation, AccessibilityMotionRequest, AccessibilityMotionState,
+};
+
 /// Carries the app handle so [`Self::on_lifecycle`] can re-issue bridge calls
 /// against the **current** session after an Ability rebuild (the previous
 /// session's runtime is released on teardown).
 pub struct AccessibilityBridgePlugin {
     app: OpenHarmonyApp,
+    motion: Arc<motion::Observers>,
 }
 
 impl AccessibilityBridgePlugin {
     pub fn new(app: &OpenHarmonyApp) -> Self {
-        Self { app: app.clone() }
+        Self {
+            app: app.clone(),
+            motion: Arc::default(),
+        }
     }
 
     /// Re-issues the state-change subscription after an Ability session rebuild.
@@ -89,6 +102,11 @@ impl BridgePlugin for AccessibilityBridgePlugin {
         event: BridgeMainThreadEvent<'env>,
     ) -> Result<Unknown<'env>> {
         match event.name() {
+            "reduce-motion-changed" => {
+                let state = event.decode::<AccessibilityMotionState>()?;
+                self.motion.dispatch(&state);
+                event.respond(AccessibilityEventAcknowledgement { accepted: true })
+            }
             "accessibility-state-changed" => {
                 let state = event.decode::<AccessibilityStateChangedEvent>()?;
                 dispatch_state_change(state.enabled);
@@ -104,6 +122,7 @@ impl BridgePlugin for AccessibilityBridgePlugin {
     fn on_lifecycle(&self, event: &PluginLifecycleEvent) -> Result<()> {
         if matches!(event, PluginLifecycleEvent::AbilityCreated { .. }) {
             self.replay_subscription_after_session_rebuild();
+            self.motion.replay(&self.app);
         }
         Ok(())
     }
@@ -335,12 +354,14 @@ fn dispatch_state_change(enabled: bool) {
 #[derive(Clone)]
 pub struct AccessibilityClient {
     bridge: BridgeRuntime,
+    app: OpenHarmonyApp,
 }
 
 impl AccessibilityClient {
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
+            app: app.clone(),
         })
     }
 

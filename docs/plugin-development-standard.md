@@ -214,6 +214,10 @@ export { LoginPlugin };
 | `ohos.arkui` / `apply-native-views` | `ohos.arkui.NativeViewBatch` → `ohos.node.Acknowledgement` | sync / UI context; API 20; optional state descriptions 23 and custom actions 26 |
 | `ohos.arkui` / `view-action` | `ohos.arkui.NativeViewAction { id, targetId, action, kind?, generation? }` → `ohos.node.Acknowledgement` | synchronous owner/generation-scoped snapshot |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
+| `ohos.accessibility` / `send-event` | `SendEventRequest { announcement?, elementId? }` → `EventAcknowledgement` | async / ability; exactly one field, API 12 |
+| `ohos.accessibility` / `announce-live` | `LiveAnnouncement { text, assertive }` → `EventAcknowledgement` | async / ability; API 18 |
+| `ohos.accessibility` / `observe-reduce-motion`, `stop-observing-reduce-motion` | `MotionRequest { id }` → `EventAcknowledgement` | async / ability; observation requires API 23 |
+| `ohos.accessibility` / `reduce-motion-changed` | `MotionState { id, enabled }` → `EventAcknowledgement` | scoped main-thread; initial and changed values share one callback |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
 | `ohos.clipboard` / `write-records` | `ohos.clipboard.WriteRecordsRequest { records: Record[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；1..512 个文本（可带 metadata）、图片或文件 URI 记录，保持顺序 |

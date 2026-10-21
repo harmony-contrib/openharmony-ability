@@ -100,6 +100,7 @@ dependencies = [
  "ohos-hilog-binding 0.2.3",
  "openharmony-ability",
  "openharmony-ability-derive",
+ "openharmony-ability-plugin-accessibility",
  "openharmony-ability-plugin-app-control",
  "openharmony-ability-plugin-arkui",
  "openharmony-ability-plugin-autostart",

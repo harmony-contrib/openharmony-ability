@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod accessibility_demo;
 mod login_bridge;
 mod main_thread_bridge;
 mod native_embedding;
@@ -460,6 +461,10 @@ fn openharmony_app(app: OpenHarmonyApp) {
         .expect("demo ArkUI facade must be registered");
     app.register_plugin(openharmony_ability_plugin_video::VideoBridgePlugin::new())
         .expect("demo Video facade must be registered");
+    app.register_plugin(
+        openharmony_ability_plugin_accessibility::AccessibilityBridgePlugin::new(&app),
+    )
+    .expect("demo Accessibility facade must be registered");
     app.register_plugin(PermissionBridgePlugin)
         .expect("demo permission facade must be registered");
     app.register_plugin(AppControlBridgePlugin)

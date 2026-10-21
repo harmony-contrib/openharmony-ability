@@ -7,6 +7,9 @@ import {
   demoRemoveNativeWebview,
   demoReleaseNativeWebview,
   demoNativeEditor,
+  demoAnnounce,
+  demoObserveMotion,
+  demoStopMotion,
   demoNativeVideo,
   demoLoadNativeVideo,
   demoNativeVideoBytes,
@@ -776,6 +779,28 @@ struct Index {
           this.nativeVideoSource = value;
         })
       Text(this.nativeVideoStatus)
+      Row({ space: 8 }) {
+        Button("Announce")
+          .onClick(async (): Promise<void> => {
+            try {
+              await demoAnnounce("Native accessibility announcement");
+            } catch (error) {
+              this.nativeVideoStatus = String(error);
+            }
+          })
+        Button("Observe reduced motion (API 23)")
+          .onClick(async (): Promise<void> => {
+            try {
+              await demoObserveMotion();
+            } catch (error) {
+              this.nativeVideoStatus = String(error);
+            }
+          })
+        Button("Stop observation")
+          .onClick((): void => {
+            demoStopMotion();
+          })
+      }
       ContentSlot(this.nativeVideoContent)
       if (this.currentDemo === 0) {
         this.XComponentDemo();

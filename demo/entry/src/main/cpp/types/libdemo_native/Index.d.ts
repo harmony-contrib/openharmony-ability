@@ -527,3 +527,7 @@ export const demoNativeVideo: () => NodeContent;
 export const demoLoadNativeVideo: (source: string) => Promise<void>;
 export const demoNativeVideoBytes: (bytes: Uint8Array) => Promise<void>;
 export const demoDisposeNativeVideo: () => Promise<void>;
+
+export const demoAnnounce: (text: string) => Promise<void>;
+export const demoObserveMotion: () => Promise<void>;
+export const demoStopMotion: () => void;

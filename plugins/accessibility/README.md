@@ -65,3 +65,22 @@ See the [plugin source](src/main/ets/AccessibilityPlugin.ets) and the [plugin de
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+
+## Announcements and reduced motion
+
+`AccessibilityClient::send_event(AccessibilitySendEventRequest)` sends exactly one
+announcement or nonnegative native accessibility element ID on API 12.
+`announce_live(text, assertive)` uses API-18 live-announcement interruption policy.
+`observe_reduce_motion(handler)` requires API 23 and returns an
+`AccessibilityMotionObservation`. Initial state and changes use one ordered
+UI-thread callback. The handler must not block or reenter the bridge.
+
+Each registered plugin owns its observations. Drop removes Rust delivery
+immediately and queues platform unsubscribe on one lazy worker shared with
+session replay. An in-progress callback may finish. Cleanup failures are reported;
+ArkTS host disposal remains the final listener cleanup. A failed platform `off`
+retains its callback identity for retry. Observation IDs never reuse a retired
+registration within that owner.
+
+The repository demo has announcement and reduced-motion observe/stop buttons.
+Host regression tests run with `node --test plugins/accessibility/tests/*.test.mjs`.

@@ -34,6 +34,26 @@ interface SubscribeRequest {}
 
 interface UnsubscribeRequest {}
 
+interface SendEventRequest {
+  announcement?: string | null;
+  elementId?: number | null;
+}
+interface LiveAnnouncement {
+  text: string;
+  assertive: boolean;
+}
+interface MotionRequest {
+  id: string;
+}
+class MotionState {
+  readonly id: string;
+  readonly enabled: boolean;
+  constructor(id: string, enabled: boolean) {
+    this.id = id;
+    this.enabled = enabled;
+  }
+}
+
 class GetFontScaleResponse {
   readonly fontScale: number;
 
@@ -92,6 +112,9 @@ export class AccessibilityPlugin extends AsyncPluginBase {
   readonly requires: BridgeContextRequirement[] = ["ability"];
 
   private screenReaderHandler: ((enabled: boolean) => void) | null = null;
+  private motionHandler: ((enabled: boolean) => void) | null = null;
+  private motionIds: Set<string> = new Set();
+  private motionRevision: number = 0;
 
   async invokeAsync(
     action: string,
@@ -100,6 +123,118 @@ export class AccessibilityPlugin extends AsyncPluginBase {
   ): Promise<BridgeTypedValue> {
     if (!context.isActive()) {
       throw new Error("Bridge session is no longer active");
+    }
+
+    if (action === "observe-reduce-motion" || action === "stop-observing-reduce-motion") {
+      expectBridgeRequestType(payload, this.id, action, "ohos.accessibility.MotionRequest");
+      const request = payload.value as MotionRequest;
+      if (!request || typeof request.id !== "string" || !/^[0-9]{1,20}$/.test(request.id)) {
+        throw new Error("Invalid motion observation identity");
+      }
+      if (action === "stop-observing-reduce-motion") {
+        this.motionIds.delete(request.id);
+        if (this.motionIds.size === 0) {
+          this.removeMotionHandler();
+        }
+      } else {
+        if (deviceInfo.sdkApiVersion < 23) {
+          throw new Error("Reduced-motion observation requires API 23");
+        }
+        if (this.motionHandler === null) {
+          const handler = (enabled: boolean): void => {
+            this.motionRevision++;
+            Array.from(this.motionIds).forEach((id: string) => {
+              try {
+                this.notifyMotion(id, enabled);
+              } catch (error) {
+                console.warn(`[Accessibility] motion observation: ${String(error)}`);
+              }
+            });
+          };
+          accessibility.onAnimationReduceStateChange(handler);
+          this.motionHandler = handler;
+        }
+        this.motionIds.add(request.id);
+        try {
+          const revision = this.motionRevision;
+          const initial = accessibility.isAnimationReduceEnabledSync();
+          // A synchronous platform change during the query has already delivered
+          // a newer value. Do not overwrite it with the earlier query snapshot.
+          if (revision === this.motionRevision) {
+            this.notifyMotion(request.id, initial);
+          }
+        } catch (error) {
+          this.motionIds.delete(request.id);
+          if (this.motionIds.size === 0) {
+            this.removeMotionHandler();
+          }
+          throw new Error(`Reduced-motion initial observation failed: ${String(error)}`);
+        }
+      }
+      return { typeName: EVENT_ACKNOWLEDGEMENT_TYPE, value: { accepted: true } };
+    }
+
+    if (action === "announce-live") {
+      if (deviceInfo.sdkApiVersion < 18) {
+        throw new Error("Live announcement requires API 18");
+      }
+      expectBridgeRequestType(payload, this.id, action, "ohos.accessibility.LiveAnnouncement");
+      const request = payload.value as LiveAnnouncement;
+      if (!request || typeof request.text !== "string" || typeof request.assertive !== "boolean") {
+        throw new Error("Invalid live announcement");
+      }
+      await accessibility.sendAccessibilityEvent({
+        type: request.assertive
+          ? "announceForAccessibility"
+          : "announceForAccessibilityNotInterrupt",
+        bundleName: context.abilityContext.abilityInfo.bundleName,
+        triggerAction: "common",
+        textAnnouncedForAccessibility: request.text,
+      });
+      if (!context.isActive()) {
+        throw new Error("Live announcement session was closed");
+      }
+      return { typeName: EVENT_ACKNOWLEDGEMENT_TYPE, value: { accepted: true } };
+    }
+
+    if (action === "send-event") {
+      expectBridgeRequestType(
+        payload,
+        "ohos.accessibility",
+        action,
+        "ohos.accessibility.SendEventRequest",
+      );
+      if (typeof payload.value !== "object" || payload.value === null) {
+        throw new Error("Invalid accessibility event");
+      }
+      const request = payload.value as SendEventRequest;
+      const announces = request.announcement !== undefined && request.announcement !== null;
+      const focuses = request.elementId !== undefined && request.elementId !== null;
+      if (
+        announces === focuses ||
+        (announces && typeof request.announcement !== "string") ||
+        (focuses &&
+          (!Number.isInteger(request.elementId) ||
+            request.elementId! < 0 ||
+            request.elementId! > 0x7fffffff))
+      ) {
+        throw new Error("Provide exactly one announcement or nonnegative element ID");
+      }
+      const event: accessibility.EventInfo = {
+        type: announces ? "announceForAccessibility" : "requestFocusForAccessibility",
+        bundleName: context.abilityContext.abilityInfo.bundleName,
+        triggerAction: "common",
+      };
+      if (announces) {
+        event.textAnnouncedForAccessibility = request.announcement!;
+      } else {
+        event.elementId = request.elementId!;
+      }
+      await accessibility.sendAccessibilityEvent(event);
+      if (!context.isActive()) {
+        throw new Error("Bridge session closed during accessibility event");
+      }
+      return { typeName: EVENT_ACKNOWLEDGEMENT_TYPE, value: { accepted: true } };
     }
 
     if (action === "get-font-scale") {
@@ -200,6 +335,33 @@ export class AccessibilityPlugin extends AsyncPluginBase {
   onDispose(): void {
     // Session teardown: drop the system callback so it never fires into a dead bridge.
     this.removeScreenReaderHandler();
+    this.motionIds.clear();
+    this.removeMotionHandler();
+  }
+
+  private removeMotionHandler(): void {
+    const handler = this.motionHandler;
+    if (handler !== null) {
+      // Keep the exact callback identity available for retry after a failed off.
+      accessibility.offAnimationReduceStateChange(handler);
+      this.motionHandler = null;
+    }
+  }
+
+  private notifyMotion(id: string, enabled: boolean): void {
+    const context = this.getContext();
+    if (!context.isActive()) {
+      return;
+    }
+    const response = context.invokeNativeSync(
+      "reduce-motion-changed",
+      "ohos.accessibility.MotionState",
+      EVENT_ACKNOWLEDGEMENT_TYPE,
+      new MotionState(id, enabled) as ESObject,
+    ) as AccessibilityEventAcknowledgement;
+    if (response?.accepted !== true) {
+      throw new Error("Invalid reduced-motion acknowledgement");
+    }
   }
 
   private removeScreenReaderHandler(): void {
