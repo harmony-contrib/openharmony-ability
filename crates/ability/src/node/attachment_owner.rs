@@ -322,15 +322,6 @@ impl NativeAttachment {
         target(id)?.retire()
     }
 
-    /// Whether native detachment completed successfully.
-    ///
-    /// Closing callback admission after a failed retirement does not count as
-    /// completion. The parent guard is released only after all native edges and
-    /// retained platform content have been removed successfully.
-    pub fn is_retired(&self) -> bool {
-        self.0.state.is_retired() && self.0.parent_retention.borrow().is_none()
-    }
-
     pub fn invalidate(&self) -> Result<()> {
         self.0.retire()
     }
@@ -376,17 +367,11 @@ mod tests {
             retained: RefCell::default(),
         });
         TARGETS.with(|targets| targets.borrow_mut().insert(id, target.clone()));
-        let attachment = NativeAttachment(target.clone());
-        assert!(!attachment.is_retired());
         {
             let _callback = target.begin().unwrap();
             assert!(NativeAttachment::retire(id).is_err());
-            assert!(!attachment.is_retired());
         }
         NativeAttachment::retire(id).unwrap();
-        assert!(attachment.is_retired());
-        attachment.invalidate().unwrap();
-        assert!(attachment.is_retired());
         let mut dispatched = false;
         assert!(NativeAttachment::dispatch(id, || dispatched = true).is_err());
         assert!(!dispatched);

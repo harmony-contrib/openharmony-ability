@@ -37,10 +37,6 @@ pub(crate) struct AttachmentState {
 }
 
 impl AttachmentState {
-    pub(crate) fn is_retired(&self) -> bool {
-        self.retired.get()
-    }
-
     pub(crate) fn begin(&self) -> Result<Active<'_>, AdmissionError> {
         if self.retired.get() {
             return Err(AdmissionError::Retired);
