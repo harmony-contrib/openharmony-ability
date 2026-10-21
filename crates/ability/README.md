@@ -46,12 +46,16 @@ openharmony-ability = { version = "1.0.0-beta.3", features = ["keyboard"] }
 
 `keyboard` enables `KeyboardInputDelivery::ArkUi`, `KeyboardEventData`,
 `KeyboardEventResponse`, and `ArkUiInputEvent::{KeyPreIme, Key}`. It forwards
-`ohos-arkui-binding/api-14` and is not part of the default feature set. The
+`ohos-arkui-binding/api-19` and is not part of the default feature set. The
 default stream remains raw XComponent input; select
 `OpenHarmonyApp::set_keyboard_input_delivery(KeyboardInputDelivery::ArkUi)`
 before rendering to receive Unicode, held-key state, optional lock state, and
-synchronous key consumption. Selecting ArkUI delivery on a runtime below API 14
+synchronous key consumption. Selecting ArkUI delivery on a runtime below API 19
 returns an error. Enabling `drag` does not enable `keyboard`.
+
+**Migration:** applications enabling `keyboard` must target API 19 or later.
+Applications supporting older systems can leave it disabled and retain raw
+XComponent key delivery.
 
 Native file drag/drop is opt-in:
 

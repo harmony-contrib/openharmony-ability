@@ -462,10 +462,27 @@ Stack() {
 
 Native providers may send `ohos.node.NativeNodeReady { targetId, content }` or
 `NativeSubtreeReady { targetId, content, slot }` in a synchronous named callback.
-The API-12 binding converts these borrowed objects inside that callback; Rust
-retains native handles only. Before disposing an ArkTS owner, send
+Decode the named request first, then explicitly call `receipt.attach(&event)`
+inside the plugin's main-thread handler. Decoding has no attachment side effects.
+Ability's `NativeAttachment` retains strong N-API references to the FrameNode
+and, for a subtree, its NodeContent slot until native detachment succeeds.
+Before disposing an ArkTS owner, send
 `NativeNodeRetiring { targetId }` and require `ohos.node.Acknowledgement`.
-A failed detach must retain the owner to prevent a dangling native borrow.
+A failed detach retains all native and N-API owners and closes callback admission
+until retirement is retried. Unknown or retired target IDs are explicit errors.
+
+Create targets using `openharmony_ability::NativeAttachment`; use the
+`openharmony_ability::arkui` (also `ohos_arkui_binding`) re-export for node types.
+Bindings provides only node/NodeContent/retention primitives, never another target
+registry. `ContentRoot` is likewise owned and exported by Ability. Retire these
+UI-thread owners before their N-API environment is unloaded.
+
+Target IDs are monotonically allocated and never reused. They are the only
+callback routing key; do not add owner-pointer keys, generation counters or live
+flags. Route owners remove their entry in `Drop`, and handlers dispatch through
+`NativeAttachment::dispatch(target_id, || ...)`, which holds the UI-thread
+operation guard through the callback. Retirement cannot succeed re-entrantly
+inside a callback, and no new callback can begin after retirement.
 
 `onClosing(context)` is a synchronous plugin hook: retire native edges before
 NativeAbility immediately dispatches Rust's destroy event. It must return no
