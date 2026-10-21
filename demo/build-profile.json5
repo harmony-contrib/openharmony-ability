@@ -67,6 +67,10 @@
       "srcPath": "../plugins/resource",
     },
     {
+      "name": "plugin_video",
+      "srcPath": "../plugins/video",
+    },
+    {
       "name": "plugin_arkui",
       "srcPath": "../plugins/arkui",
     },

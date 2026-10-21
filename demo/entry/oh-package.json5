@@ -6,6 +6,7 @@
   "author": "",
   "license": "",
   "dependencies": {
+    "@ohos-rs/ability-plugin-video": "workspace:*",
     "@ohos-rs/ability-plugin-arkui": "workspace:*",
     "libentry.so": "file:./src/main/cpp/types/libentry",
     "libdemo_native.so": "file:./src/main/cpp/types/libdemo_native",

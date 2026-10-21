@@ -8,6 +8,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+openharmony-ability-plugin-video = { version = "1.0.0-beta.3", path = "crates/plugin-video" }
 openharmony-ability-plugin-arkui = { version = "1.0.0-beta.3", path = "crates/plugin-arkui" }
 openharmony-ability-derive = { version = "1.0.0-beta.3", path = "crates/derive" }
 openharmony-ability = { version = "1.0.0-beta.3", path = "crates/ability" }

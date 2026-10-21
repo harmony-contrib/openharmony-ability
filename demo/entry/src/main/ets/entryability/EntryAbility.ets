@@ -1,3 +1,4 @@
+import { VideoPlugin } from "@ohos-rs/ability-plugin-video";
 import { LazyPlugin, NativeAbility } from "@ohos-rs/ability";
 import { ArkuiPlugin } from "@ohos-rs/ability-plugin-arkui";
 import window from "@ohos.window";
@@ -39,6 +40,7 @@ export default class EntryAbility extends NativeAbility {
   public defaultPage: boolean = false;
   public bridgePlugins = [
     new LazyPlugin(() => new ArkuiPlugin()),
+    new LazyPlugin(() => new VideoPlugin()),
     new LazyPlugin(() => new PermissionPlugin()),
     new LazyPlugin(() => new AppControlPlugin()),
     new LazyPlugin(() => new FilesPlugin()),

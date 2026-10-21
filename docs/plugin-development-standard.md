@@ -604,6 +604,7 @@ WebView 的 callback builder 必须在 `WebviewClient::create` 前按 facade-loc
 | `getWindowAvoidArea` | `plugin-window` / `ohos.window` | async + `ui-context`；查询当前 component 所在窗口并返回完整避让区 |
 | `create_os_window`、多窗口操作及显式销毁 | `plugin-window` / `ohos.window` | async + `ui-context`；窗口句柄属于插件实例，按平台 window id 区分；`onDispose` 兜底销毁未释放窗口 |
 | `createWebview`、嵌入式 WebView、custom protocol、导航/下载/标题回调 | `plugin-webview` / `ohos.webview` | 出站 async + `ui-context`；入站为 scoped 主线程具名 N-API；scheme 在 engine 初始化前声明 |
+| 原生视频、AVPlayer surface、owned bytes 与播放回调 | `plugin-video` / `ohos.video` | async + `ui-context`；API 12，实例/target generation 回调，closing 同步 detach，dispose await 所有 release |
 | `Loadable` | `runtime/NativeModuleLoader` | framework 内部 runtime，不是能力 bridge |
 | `openURL` | `plugin-url` / `ohos.url` | async + `ability`；`context.openLink` |
 | `showFileDialog`（open/save/folder） | `plugin-files` / `ohos.files` | async + `ability`；结构化 `DialogOptions` 传参，filter 字符串语法仅在 ArkTS 插件内部转换 |

@@ -1,0 +1,11 @@
+[package]
+name = "openharmony-ability-plugin-video"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native video playback through the Ability plugin runtime"
+
+[dependencies]
+openharmony-ability.workspace = true
+napi-ohos.workspace = true
+napi-derive-ohos.workspace = true

@@ -3,6 +3,7 @@
 mod login_bridge;
 mod main_thread_bridge;
 mod native_embedding;
+mod native_video;
 mod native_webview;
 mod raw_bridge;
 mod tsfn_sync_bridge;
@@ -457,6 +458,8 @@ fn openharmony_app(app: OpenHarmonyApp) {
     }
     app.register_plugin(openharmony_ability_plugin_arkui::ArkuiBridgePlugin::new())
         .expect("demo ArkUI facade must be registered");
+    app.register_plugin(openharmony_ability_plugin_video::VideoBridgePlugin::new())
+        .expect("demo Video facade must be registered");
     app.register_plugin(PermissionBridgePlugin)
         .expect("demo permission facade must be registered");
     app.register_plugin(AppControlBridgePlugin)

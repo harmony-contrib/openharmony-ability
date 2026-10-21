@@ -110,6 +110,7 @@ dependencies = [
  "openharmony-ability-plugin-permission",
  "openharmony-ability-plugin-resource",
  "openharmony-ability-plugin-url",
+ "openharmony-ability-plugin-video",
  "openharmony-ability-plugin-webview",
  "openharmony-ability-plugin-window",
 ]
@@ -1025,6 +1026,15 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-url"
+version = "1.0.0-beta.3"
+dependencies = [
+ "napi-derive-ohos",
+ "napi-ohos",
+ "openharmony-ability",
+]
+
+[[package]]
+name = "openharmony-ability-plugin-video"
 version = "1.0.0-beta.3"
 dependencies = [
  "napi-derive-ohos",

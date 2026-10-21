@@ -7,6 +7,10 @@ import {
   demoRemoveNativeWebview,
   demoReleaseNativeWebview,
   demoNativeEditor,
+  demoNativeVideo,
+  demoLoadNativeVideo,
+  demoNativeVideoBytes,
+  demoDisposeNativeVideo,
   demoNativeWrapper,
   demoNativeTexture,
   demoDisposeNativeWrapper,
@@ -42,6 +46,9 @@ struct Index {
   @State currentDemo: number = 0;
   @State nativeWebviewContent: NodeContent = new NodeContent();
   @State nativeEditorContent: NodeContent = new NodeContent();
+  @State nativeVideoContent: NodeContent = new NodeContent();
+  @State nativeVideoSource: string = "";
+  @State nativeVideoStatus: string = "";
   @State textureSurface: string = "";
   private textureController: XComponentController = new XComponentController();
   @State busyKey: string = "";
@@ -730,6 +737,46 @@ struct Index {
       }
       .width(320)
       .height(48)
+      Row({ space: 8 }) {
+        Button("Native video")
+          .onClick((): void => {
+            this.nativeVideoContent = demoNativeVideo();
+          })
+        Button("Load URL")
+          .onClick(async (): Promise<void> => {
+            try {
+              await demoLoadNativeVideo(this.nativeVideoSource);
+              this.nativeVideoStatus = "Playing";
+            } catch (error) {
+              this.nativeVideoStatus = String(error);
+            }
+          })
+        Button("Load raw video")
+          .onClick(async (): Promise<void> => {
+            try {
+              const bytes = await getContext(this).resourceManager.getRawFileContent("demo.mp4");
+              await demoNativeVideoBytes(bytes);
+              this.nativeVideoStatus = "Playing raw resource";
+            } catch (error) {
+              this.nativeVideoStatus = String(error);
+            }
+          })
+        Button("Release video")
+          .onClick(async (): Promise<void> => {
+            try {
+              await demoDisposeNativeVideo();
+              this.nativeVideoContent = new NodeContent();
+            } catch (error) {
+              this.nativeVideoStatus = String(error);
+            }
+          })
+      }
+      TextInput({ text: this.nativeVideoSource, placeholder: "Media URL" })
+        .onChange((value: string): void => {
+          this.nativeVideoSource = value;
+        })
+      Text(this.nativeVideoStatus)
+      ContentSlot(this.nativeVideoContent)
       if (this.currentDemo === 0) {
         this.XComponentDemo();
       }

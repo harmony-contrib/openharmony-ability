@@ -1,0 +1,8 @@
+{
+  "name": "@ohos-rs/ability-plugin-video",
+  "version": "1.0.0-beta.3",
+  "description": "API-12 native video playback for Ability applications",
+  "main": "index.ets",
+  "license": "MIT OR Apache-2.0",
+  "dependencies": { "@ohos-rs/ability": "workspace:*" },
+}
