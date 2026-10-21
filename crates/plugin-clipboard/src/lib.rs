@@ -256,17 +256,28 @@ impl ClipboardClient {
 
     pub async fn read_content(&self) -> Result<ClipboardReadContentResponse> {
         let mut content = ClipboardReadContentResponse::default();
-        for record in self.read_records().await? {
-            if content.text.is_none() {
-                content.text = record.text;
-            }
-            if content.png.is_none() {
-                content.png = record
-                    .encoded_image
-                    .filter(|bytes| mime::image_mime(bytes).ok() == Some("image/png"));
-            }
-            if let Some(uri) = record.uri {
-                content.uris.push(uri);
+        let board = native_board()?;
+        if !board.has_data() {
+            return Ok(content);
+        }
+        for entry in read_native(&board, None, false)?
+            .records
+            .into_iter()
+            .flatten()
+        {
+            match entry.format.as_str() {
+                "text/plain" if content.text.is_none() => {
+                    content.text = Some(utf8(entry.bytes, "text/plain")?);
+                }
+                "image/png" if content.png.is_none() => {
+                    content.png = Some(entry.bytes);
+                }
+                "text/uri-list" => {
+                    let uri = utf8(entry.bytes, "text/uri-list")?;
+                    validate_uri(&uri)?;
+                    content.uris.push(uri);
+                }
+                _ => {}
             }
         }
         Ok(content)

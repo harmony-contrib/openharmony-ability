@@ -73,6 +73,11 @@ jobs:
       - name: Format and lint
         run: npm run prek -- --all-files
 
+      - name: Owned input queue behavior
+        run: |
+          rustc --edition=2021 --test crates/ability/src/input/queue.rs -o "$RUNNER_TEMP/ability-input-tests"
+          "$RUNNER_TEMP/ability-input-tests"
+
       - name: Rust clippy
         run: npm run lint:rs
 
