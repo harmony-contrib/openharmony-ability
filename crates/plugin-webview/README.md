@@ -219,22 +219,38 @@ Stack in overlay mode.
 
 ## Native-tree embedding
 
-Register `WebviewBridgePlugin::new()` and select `let client = app.webview()?.native()?`.
-Declare native callbacks with `client.callbacks(id)` and JavaScript proxies with
-`client.javascript_proxy(id, object)`; custom protocols declared on that client use
-its registered plugin owner. Legacy builder signatures retain their existing scope.
+Register `WebviewBridgePlugin::new()` and obtain `let client = app.webview()?`.
+Declare callbacks with `WebviewCallbacksBuilder::new(id)`, JavaScript proxies with
+`WebviewJavascriptProxyBuilder::new(id, object)`, and protocols with
+`client.custom_protocol(id, scheme, callback)`. These retain the existing module-local
+controller-ID routing and process-unique native-tag validation.
 Call `client.create_native(target_id, CreateRequest, NativeWebviewSettings)` to embed
 in a Rust-owned node tree. `CreateRequest` owns the initial JavaScript, user agent
 and document-start scripts; native settings add scrolling, page-end script and
-inline HTML base URL. `handle.update_document_options(WebviewDocumentOptionsRequest)`
-updates the same controller without replacing its navigation history.
+inline HTML base URL. `handle.configure_native(settings)` changes only native settings;
+`go_back`, `go_forward` and `stop_loading` operate on the existing controller/history.
 
 `NativeWebviewEvents::new(&app, id, target_id, callback)` belongs to that registered
-plugin instance and rejects stale controller generations. Attachment installs
+plugin instance and indexes the callback solely by `target_id`. Its guard removes the
+subscription on Drop without removing a newer replacement. Ability's `NativeAttachment`
+owns the UI-thread dispatch guard, target liveness and retained N-API owners. Target IDs
+are never reused; create a fresh attachment when replacing a retired native WebView.
+The native-ready handler decodes the receipt and explicitly attaches it before
+acknowledging success. Attachment installs
 protocol/proxy/callback declarations before first navigation, even without an event
 subscriber. Native creation/removal is serialized per ID. Closing retires native
 edges and controller registrations synchronously; disposal awaits page tasks and
-preserves any owner whose retirement fails.
+preserves any owner whose retirement fails. Controller declarations are removed before
+the native target retires, so removal also executes under the Ability dispatch guard.
+
+The plugin now stores only its native subscription routes; registration uses
+`WebviewBridgePlugin::new()` instead of the old unit value. Existing controller,
+callback, protocol and JavaScript-proxy APIs keep their prior semantics.
+
+Host-native route tests execute the production generic route module without N-API
+substitutes. The Node suite executes the production ArkTS surface with SDK test doubles.
+Both are wired into the pull-request workflow. Device rendering and ArkWeb execution
+still require device/emulator validation.
 
 ## License
 

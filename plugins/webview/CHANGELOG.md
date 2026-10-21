@@ -59,4 +59,8 @@
 
 ## Unreleased
 
-- Add generation-owned native-tree WebView embedding and synchronous edge retirement.
+- Add native-tree WebView embedding with Ability-owned, non-reused target IDs.
+- Remove native controller declarations before guarded target retirement; retain ArkTS
+  owners when retirement fails and await outstanding page tasks before disposal.
+- Remove the unreleased native generation and unused document-options action (AB6/AB7/AB11).
+- Wire production native-embedding regression tests into pull-request CI.

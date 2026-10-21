@@ -1,217 +1,118 @@
-//! Instance-owned native controller generations and callback declarations.
-use crate::NativeWebviewEvent;
+//! Target-indexed subscriptions. Ability owns target validity and dispatch guards.
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
 
-type Callback = Arc<dyn Fn(NativeWebviewEvent) + Send + Sync>;
-pub(crate) struct Registration {
-    target_id: u32,
-    callback: Callback,
+pub(crate) struct Registration<E> {
+    callback: Arc<dyn Fn(E) + Send + Sync>,
 }
-#[derive(Default)]
-pub(crate) struct NativeEvents {
-    owner: Arc<()>,
-    state: Mutex<State>,
+
+pub(crate) struct NativeEvents<E> {
+    entries: Mutex<BTreeMap<u32, Arc<Registration<E>>>>,
 }
-#[derive(Default)]
-struct State {
-    entries: BTreeMap<String, Arc<Registration>>,
-    controllers: BTreeMap<String, Controller>,
-    next_generation: u32,
-}
-struct Controller {
-    target_id: u32,
-    generation: u32,
-    native_tag: Option<String>,
-}
-pub(crate) struct Prepared {
-    pub(crate) generation: u32,
-    pub(crate) previous_tag: Option<String>,
-}
-#[derive(Debug, PartialEq)]
-pub(crate) enum GenerationError {
-    WrongTarget,
-    Exhausted,
-}
-impl NativeEvents {
-    pub(crate) fn owner(&self) -> Arc<()> {
-        self.owner.clone()
+
+impl<E> Default for NativeEvents<E> {
+    fn default() -> Self {
+        Self {
+            entries: Mutex::new(BTreeMap::new()),
+        }
     }
+}
+
+impl<E> NativeEvents<E> {
     pub(crate) fn register(
         &self,
-        id: String,
         target_id: u32,
-        callback: Callback,
-    ) -> Arc<Registration> {
+        callback: impl Fn(E) + Send + Sync + 'static,
+    ) -> Arc<Registration<E>> {
         let entry = Arc::new(Registration {
-            target_id,
-            callback,
+            callback: Arc::new(callback),
         });
         let previous = self
-            .state
+            .entries
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .entries
-            .insert(id, entry.clone());
+            .insert(target_id, entry.clone());
         drop(previous);
         entry
     }
-    pub(crate) fn remove(&self, id: &str, expected: &Arc<Registration>) {
-        let previous = {
-            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            if state
+
+    pub(crate) fn remove(&self, target_id: u32, expected: &Arc<Registration<E>>) {
+        let removed = {
+            let mut entries = self
                 .entries
-                .get(id)
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if entries
+                .get(&target_id)
                 .is_some_and(|entry| Arc::ptr_eq(entry, expected))
             {
-                state.entries.remove(id)
+                entries.remove(&target_id)
             } else {
                 None
             }
         };
-        drop(previous);
+        drop(removed);
     }
-    pub(crate) fn invalidate(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .controllers
-            .clear();
-    }
-    pub(crate) fn prepare(
-        &self,
-        id: &str,
-        target_id: u32,
-    ) -> std::result::Result<Prepared, GenerationError> {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        if state
+
+    pub(crate) fn dispatch(&self, target_id: u32, event: E) {
+        let entry = self
             .entries
-            .get(id)
-            .is_some_and(|entry| entry.target_id != target_id)
-        {
-            return Err(GenerationError::WrongTarget);
-        }
-        state.next_generation = state
-            .next_generation
-            .checked_add(1)
-            .ok_or(GenerationError::Exhausted)?;
-        let generation = state.next_generation;
-        let previous_tag = state
-            .controllers
-            .insert(
-                id.into(),
-                Controller {
-                    target_id,
-                    generation,
-                    native_tag: None,
-                },
-            )
-            .and_then(|controller| controller.native_tag);
-        Ok(Prepared {
-            generation,
-            previous_tag,
-        })
-    }
-    pub(crate) fn attach(
-        &self,
-        id: &str,
-        target_id: u32,
-        generation: u32,
-        native_tag: &str,
-    ) -> bool {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        let Some(controller) = state.controllers.get_mut(id).filter(|controller| {
-            controller.target_id == target_id
-                && controller.generation == generation
-                && generation != 0
-        }) else {
-            return false;
-        };
-        if native_tag.trim().is_empty()
-            || controller
-                .native_tag
-                .as_deref()
-                .is_some_and(|current| current != native_tag)
-        {
-            return false;
-        }
-        controller.native_tag = Some(native_tag.into());
-        true
-    }
-    pub(crate) fn owns_generation(&self, id: &str, target_id: u32, generation: u32) -> bool {
-        self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .controllers
-            .get(id)
-            .is_some_and(|controller| {
-                controller.target_id == target_id
-                    && controller.generation == generation
-                    && controller.native_tag.is_some()
-            })
-    }
-    pub(crate) fn is_current(&self, id: &str, native_tag: &str) -> bool {
-        self.state
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .controllers
-            .get(id)
-            .is_some_and(|controller| controller.native_tag.as_deref() == Some(native_tag))
-    }
-    pub(crate) fn retire(
-        &self,
-        id: &str,
-        target_id: u32,
-        generation: u32,
-        native_tag: &str,
-    ) -> bool {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        if state.controllers.get(id).is_some_and(|controller| {
-            controller.target_id == target_id
-                && controller.generation == generation
-                && controller
-                    .native_tag
-                    .as_deref()
-                    .is_none_or(|tag| tag == native_tag)
-        }) {
-            state.controllers.remove(id);
-            true
-        } else {
-            false
+            .get(&target_id)
+            .cloned();
+        if let Some(entry) = entry {
+            (entry.callback)(event);
         }
     }
-    pub(crate) fn cancel(&self, id: &str, target_id: u32, generation: u32) -> Option<String> {
-        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        if state.controllers.get(id).is_some_and(|controller| {
-            controller.target_id == target_id && controller.generation == generation
-        }) {
-            state
-                .controllers
-                .remove(id)
-                .and_then(|controller| controller.native_tag)
-        } else {
-            None
-        }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routes_are_target_indexed_and_plugin_local() {
+        let a = NativeEvents::default();
+        let b = NativeEvents::default();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let _registration = a.register(7, {
+            let received = received.clone();
+            move |event: u32| received.lock().unwrap().push(event)
+        });
+        b.dispatch(7, 1);
+        a.dispatch(8, 2);
+        a.dispatch(7, 3);
+        assert_eq!(*received.lock().unwrap(), [3]);
     }
-    pub(crate) fn dispatch(&self, event: NativeWebviewEvent) {
-        let callback = {
-            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            state
-                .controllers
-                .get(&event.id)
-                .filter(|controller| {
-                    controller.target_id == event.target_id
-                        && event.generation != 0
-                        && controller.generation == event.generation
-                })
-                .and_then(|_| state.entries.get(&event.id))
-                .filter(|entry| entry.target_id == event.target_id)
-                .map(|entry| entry.callback.clone())
-        };
-        if let Some(callback) = callback {
-            callback(event);
-        }
+
+    #[test]
+    fn stale_guard_cannot_remove_replacement() {
+        let routes = NativeEvents::default();
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let old = routes.register(7, |_| panic!("replaced callback"));
+        let new = routes.register(7, {
+            let received = received.clone();
+            move |event: u32| received.lock().unwrap().push(event)
+        });
+        routes.remove(7, &old);
+        routes.dispatch(7, 1);
+        routes.remove(7, &new);
+        routes.dispatch(7, 2);
+        assert_eq!(*received.lock().unwrap(), [1]);
+    }
+
+    #[test]
+    fn callback_runs_without_holding_registry_lock() {
+        let routes = Arc::new(NativeEvents::default());
+        let _registration = routes.register(7, {
+            let routes = Arc::downgrade(&routes);
+            move |(): ()| {
+                routes.upgrade().unwrap().register(8, |_| {});
+            }
+        });
+        routes.dispatch(7, ());
     }
 }
