@@ -203,6 +203,7 @@ impl From<GestureInputData> for PointerInputData {
 /// The underlying ArkUI input object is only valid during the native callback, so the framework
 /// snapshots its useful values before delivering the event to the application.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct AxisEventData {
     pub pointer: PointerInputData,
     pub delta_x: f64,

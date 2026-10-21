@@ -38,6 +38,12 @@ Consumers can use the re-exported XComponent types without a direct binding depe
 openharmony-ability = { version = "1.0.0-beta.3", features = ["mouse"] }
 ```
 
+The feature also forwards ArkUI `api-17` for native wheel-step queries.
+`AxisEventData::scroll_step` is zero when the platform cannot report a discrete
+step; callers must not interpret zero as one detent. `AxisEventData` is
+non-exhaustive: consume framework snapshots and include `..` in destructuring
+patterns instead of constructing public struct literals.
+
 Enhanced ArkUI keyboard delivery is opt-in through the `keyboard` feature:
 
 ```toml
