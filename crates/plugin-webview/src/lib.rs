@@ -906,6 +906,35 @@ pub struct WebviewUserAgentRequest {
 
 impl_bridge_napi_type!(WebviewUserAgentRequest, "ohos.webview.UserAgentRequest");
 
+/// Changes document preferences on an existing controller without navigating.
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct WebviewDocumentOptionsRequest {
+    /// Controller ID; an empty value selects the receiving handle.
+    pub id: String,
+    /// JavaScript access; omitted values preserve the current preference.
+    pub javascript_enabled: Option<bool>,
+    /// Document-start scripts; an empty list clears application scripts.
+    pub initialization_scripts: Option<Vec<WebviewInitializationScript>>,
+}
+
+impl_bridge_napi_type!(
+    WebviewDocumentOptionsRequest,
+    "ohos.webview.DocumentOptionsRequest"
+);
+
+impl WebviewDocumentOptionsRequest {
+    fn for_controller(mut self, id: &str) -> Result<Self> {
+        if !self.id.is_empty() && self.id != id {
+            return Err(Error::from_reason(
+                "document options controller ID mismatch",
+            ));
+        }
+        self.id = id.to_owned();
+        Ok(self)
+    }
+}
+
 // ── drag events ─────────────────────────────────────────────────────────────────
 
 /// Drag enter/over/leave event (no file paths; `getData()` is only valid in onDrop).
@@ -1739,6 +1768,21 @@ impl WebviewHandle {
             .ensure()
     }
 
+    /// Updates document preferences in place; await this before the next navigation.
+    /// Use [`Self::set_user_agent`] to change the user agent independently.
+    pub async fn update_document_options(
+        &self,
+        options: WebviewDocumentOptionsRequest,
+    ) -> Result<()> {
+        self.client
+            .call::<_, WebviewAcknowledgement>(
+                "update-document-options",
+                options.for_controller(&self.id)?,
+            )
+            .await?
+            .ensure()
+    }
+
     /// Evaluates JavaScript in the currently loaded page and returns its string result.
     ///
     /// This is asynchronous because ArkWeb runs `runJavaScript` and its completion callback on
@@ -1926,7 +1970,32 @@ mod tests {
     }
 
     #[test]
+    fn document_options_select_only_the_receiving_controller() {
+        assert_eq!(
+            WebviewDocumentOptionsRequest::default()
+                .for_controller("same")
+                .unwrap()
+                .id,
+            "same"
+        );
+        let matching = WebviewDocumentOptionsRequest {
+            id: "same".into(),
+            ..Default::default()
+        };
+        assert!(matching.for_controller("same").is_ok());
+        let conflicting = WebviewDocumentOptionsRequest {
+            id: "other".into(),
+            ..Default::default()
+        };
+        assert!(conflicting.for_controller("same").is_err());
+    }
+
+    #[test]
     fn webview_actions_have_named_napi_contracts() {
+        assert_eq!(
+            WebviewDocumentOptionsRequest::TYPE_NAME,
+            "ohos.webview.DocumentOptionsRequest"
+        );
         assert_eq!(
             <WebviewCreateRequest as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.CreateRequest"

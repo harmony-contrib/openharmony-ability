@@ -18,6 +18,7 @@ async function production(api = 20, attachDuringBuild = false) {
       operations.push(["scroll", value]);
     }
     setCustomUserAgent(value) {
+      this.userAgent = value;
       operations.push(["ua", value]);
     }
     setDownloadDelegate() {}
@@ -312,6 +313,7 @@ async function production(api = 20, attachDuringBuild = false) {
     return {
       plugin,
       ctx,
+      call,
       events,
       borrowed,
       receipts,
@@ -617,4 +619,234 @@ test("failed native ready cannot install a controller observed during SDK build"
     operations.some(([event]) => event === "load"),
     false,
   );
+});
+
+function updateOptions(owner, value, typeName = "ohos.webview.DocumentOptionsRequest") {
+  return owner.plugin.invokeAsync("update-document-options", { typeName, value }, owner.call);
+}
+
+test("document options update actual API12/API20 builders before navigation without replacing history", async () => {
+  for (const api of [12, 20]) {
+    const { host, nodes, operations } = await production(api);
+    const owner = host("document-options");
+    await owner.create();
+    const node = nodes[0],
+      controller = node.data.controller;
+    const history = controller.history.slice();
+    await owner.plugin.invokeAsync(
+      "set-user-agent",
+      {
+        typeName: "ohos.webview.UserAgentRequest",
+        value: { id: "same", userAgent: "runtime-agent" },
+      },
+      owner.call,
+    );
+    const start = operations.length;
+    const options = {
+      id: "same",
+      javascriptEnabled: true,
+      initializationScripts: [
+        { script: "first-update", scriptRules: ["*", "nsh-asset://"] },
+        { script: "second-update", scriptRules: [] },
+      ],
+    };
+    const updating = updateOptions(owner, options);
+    options.initializationScripts[0].script = "mutated-after-validation";
+    await updating;
+    assert.equal(nodes.length, 1);
+    assert.equal(node.data.controller, controller);
+    assert.deepEqual(controller.history, history);
+    const changes = operations.slice(start);
+    assert.ok(changes.some(([name, value]) => name === "javascript" && value === true));
+    const attribute = api >= 15 ? "runJavaScriptOnDocumentStart" : "javaScriptOnDocumentStart";
+    const scripts = changes.find(([name]) => name === attribute)[1];
+    assert.deepEqual(
+      Array.from(scripts, (item) => item.script),
+      ["first-update", "second-update"],
+    );
+    assert.deepEqual(Array.from(scripts[0].scriptRules), ["*", "nsh-asset://"]);
+    node.attach(); // SDK may deliver the callback again after BuilderNode.update.
+    assert.equal(controller.userAgent, "runtime-agent");
+    assert.equal(operations.filter(([name]) => name === "ua").length, 2);
+    assert.equal(
+      owner.receipts.filter(({ event }) => event === "native-controller-attached").length,
+      1,
+    );
+    await owner.plugin.invokeAsync(
+      "load-url",
+      {
+        typeName: "ohos.webview.ControllerRequest",
+        value: { id: "same", url: "https://next.invalid/" },
+      },
+      owner.call,
+    );
+    assert.ok(
+      operations.findLastIndex(([name]) => name === "update") <
+        operations.findLastIndex(([name]) => name === "load"),
+    );
+    await updateOptions(owner, { id: "same", javascriptEnabled: false, initializationScripts: [] });
+    assert.deepEqual(operations.filter(([name]) => name === "javascript").at(-1), [
+      "javascript",
+      false,
+    ]);
+    assert.equal(operations.filter(([name]) => name === attribute).at(-1)[1].length, 0);
+    const count = controller.history.length;
+    await updateOptions(owner, { id: "same" });
+    assert.equal(node.data.javascriptEnabled, false);
+    assert.equal(node.data.initializationScripts.length, 0);
+    assert.equal(controller.history.length, count);
+  }
+});
+
+test("complete document payload validation rejects malformed updates before any mutation", async () => {
+  const { host, nodes, operations } = await production();
+  const owner = host("invalid-options");
+  await owner.create();
+  const data = nodes[0].data,
+    before = operations.length;
+  const invalid = [
+    { id: "same", javascriptEnabled: "true" },
+    { id: "same", javascriptEnabled: true, initializationScripts: {} },
+    { id: "same", javascriptEnabled: true, initializationScripts: [null] },
+    {
+      id: "same",
+      javascriptEnabled: true,
+      initializationScripts: [{ script: 12, scriptRules: [] }],
+    },
+    {
+      id: "same",
+      javascriptEnabled: true,
+      initializationScripts: [{ script: "valid", scriptRules: [2] }],
+    },
+    { id: "same", javascriptEnabled: true, initializationScripts: new Array(1) },
+    { id: 7, javascriptEnabled: true },
+  ];
+  for (const value of invalid) await assert.rejects(updateOptions(owner, value));
+  await assert.rejects(
+    updateOptions(owner, { id: "same" }, "wrong.type"),
+    /DocumentOptionsRequest/,
+  );
+  await assert.rejects(updateOptions(owner, { id: "unknown", javascriptEnabled: true }), /Unknown/);
+  assert.equal(data.javascriptEnabled, false);
+  assert.equal(data.initializationScripts[0].script, "initial-script");
+  assert.equal(operations.length, before);
+  await assert.rejects(
+    owner.plugin.invokeAsync(
+      "create-native",
+      {
+        typeName: "ohos.webview.NativeCreateRequest",
+        value: {
+          targetId: 8,
+          webview: {
+            id: "invalid-create",
+            html: "page",
+            initializationScripts: [{ script: "ok", scriptRules: [9] }],
+          },
+          settings: { id: "invalid-create", scrollEnabled: true },
+        },
+      },
+      owner.call,
+    ),
+    /rules/,
+  );
+  assert.equal(nodes.length, 1);
+});
+
+test("BuilderNode update failure rejects the document-options acknowledgement", async () => {
+  const { host, nodes } = await production();
+  const owner = host("update-failure");
+  await owner.create();
+  const node = nodes[0],
+    update = node.update.bind(node);
+  node.update = () => {
+    throw new Error("SDK update failed");
+  };
+  const options = {
+    id: "same",
+    javascriptEnabled: true,
+    initializationScripts: [{ script: "retry-script", scriptRules: ["*"] }],
+  };
+  await assert.rejects(updateOptions(owner, options), /SDK update failed/);
+  assert.equal(node.disposed, false);
+  assert.equal(node.data.controller.history.length, 1);
+  assert.equal(node.data.javascriptEnabled, false);
+  assert.equal(node.data.initializationScripts[0].script, "initial-script");
+  node.update = update;
+  await updateOptions(owner, options);
+  assert.equal(node.data.javascriptEnabled, true);
+  assert.equal(node.data.initializationScripts[0].script, "retry-script");
+});
+
+test("closing or disposal during controller readiness cannot update the retired entry", async () => {
+  for (const dispose of [false, true]) {
+    const { host, nodes, operations } = await production();
+    const owner = host("retired-options");
+    await owner.create();
+    const before = operations.filter(([name]) => name === "update").length;
+    const pending = updateOptions(owner, { id: "same", javascriptEnabled: true });
+    const rejected = assert.rejects(pending, /retired|disposed/);
+    owner.plugin.onClosing(owner.ctx);
+    if (dispose) await owner.plugin.onDispose(owner.ctx);
+    await rejected;
+    assert.equal(nodes[0].data.javascriptEnabled, false);
+    assert.equal(operations.filter(([name]) => name === "update").length, before);
+  }
+});
+
+test("controller identity is rechecked after the readiness await", async () => {
+  const { host, nodes } = await production();
+  const owner = host("old-options"),
+    replacement = host("replacement-options");
+  await owner.create(7);
+  await replacement.create(8);
+  const entries = owner.plugin.surface.entries;
+  const old = entries.get("same");
+  const pending = updateOptions(owner, { id: "same", javascriptEnabled: true });
+  // Install another actual production entry during the async readiness boundary.
+  entries.set("same", replacement.plugin.surface.entries.get("same"));
+  await assert.rejects(pending, /replaced/);
+  assert.equal(nodes[0].data.javascriptEnabled, false);
+  assert.equal(nodes[1].data.javascriptEnabled, false);
+  entries.set("same", old);
+});
+
+test("cancelled options do not reach the SDK after the readiness await", async () => {
+  const { host, nodes } = await production();
+  const owner = host("cancelled-options");
+  await owner.create();
+  const pending = updateOptions(owner, { id: "same", javascriptEnabled: true });
+  owner.cancel();
+  await assert.rejects(pending, /no longer active/);
+  assert.equal(nodes[0].data.javascriptEnabled, false);
+});
+
+test("options recheck disposal between controllerEntry completion and caller continuation", async () => {
+  const { host, nodes } = await production();
+  const owner = host("continuation-dispose");
+  await owner.create();
+  const pending = updateOptions(owner, { id: "same", javascriptEnabled: true });
+  let disposal;
+  queueMicrotask(() => {
+    disposal = owner.plugin.onDispose(owner.ctx);
+  });
+  await assert.rejects(pending, /disposed|retired/);
+  await disposal;
+  assert.equal(nodes[0].data.javascriptEnabled, false);
+});
+
+test("reentrant SDK update teardown cannot return a successful acknowledgement", async () => {
+  const { host, nodes } = await production();
+  const owner = host("update-reentry");
+  await owner.create();
+  const node = nodes[0],
+    update = node.update.bind(node);
+  node.update = (data) => {
+    update(data);
+    owner.plugin.onClosing(owner.ctx);
+  };
+  await assert.rejects(
+    updateOptions(owner, { id: "same", javascriptEnabled: true }),
+    /retired|disposed/,
+  );
+  assert.equal(owner.borrowed.size, 0);
 });
