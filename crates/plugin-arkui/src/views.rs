@@ -175,7 +175,9 @@ pub(crate) fn dispatch<'env>(
     let payload = event.decode::<NativeViewAction>()?;
     let callback =
         ACTIONS.with(|actions| actions.borrow().get(owner, &payload.id, payload.target_id));
-    let accepted = callback.is_some_and(|callback| callback(payload));
+    let accepted = openharmony_ability::NativeAttachment::dispatch(payload.target_id, || {
+        callback.is_some_and(|callback| callback(payload))
+    })?;
     event.respond(NodeAcknowledgement { accepted })
 }
 impl NativeViewBatch {
