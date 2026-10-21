@@ -10,7 +10,6 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use crate::{controller, controller_key::ControllerKey};
 use http::{HeaderName, HeaderValue, Request, Response};
 use napi_ohos::{Error, Result};
 use ohos_web_binding::{ArkWebResponse, CustomProtocol, CustomProtocolHandler, Web};
@@ -35,11 +34,11 @@ struct ProtocolState {
     flushed: bool,
     engine_initialized: bool,
     /// Rust-owned declarations survive a controller remove/create cycle for the same WebView ID.
-    declarations: BTreeMap<ControllerKey, BTreeMap<String, ProtocolDeclaration>>,
+    declarations: BTreeMap<String, BTreeMap<String, ProtocolDeclaration>>,
     /// A controller-attached event is the earliest point where ArkWeb guarantees that a
     /// BrowserContext exists for a concrete Web component.
     /// Business WebView ID -> process-unique ArkWeb controller tag.
-    attached_webviews: BTreeMap<ControllerKey, String>,
+    attached_webviews: BTreeMap<String, String>,
     /// Per-native-tag installation bookkeeping prevents a concurrent declaration and
     /// controller-attached callback from registering the same handler twice, without allowing a
     /// stale controller completion to mark its replacement as installed.
@@ -223,7 +222,12 @@ impl WebviewProtocolResponder {
     }
 }
 
-/// Declares a legacy-ID custom-scheme handler before controller creation.
+/// Declares a custom-scheme handler for a module-local WebView ID.
+///
+/// The declaration may be made before the ArkTS node exists. The handler is attached only when
+/// the Web component reports `controller-attached`, after ArkWeb has created its BrowserContext
+/// and before the plugin performs the initial navigation. This keeps the first custom-scheme load
+/// race-free without retaining an ArkTS object or calling ArkWeb before it is ready.
 pub fn bind_custom_protocol<S, F>(
     webview_id: impl Into<String>,
     scheme: S,
@@ -236,40 +240,7 @@ where
         + Sync
         + 'static,
 {
-    bind_custom_protocol_for(ControllerKey::new(None, webview_id), scheme, callback)
-}
-/// Declares a legacy-ID asynchronous custom-scheme handler.
-pub fn bind_custom_protocol_async<S, F>(
-    webview_id: impl Into<String>,
-    scheme: S,
-    callback: F,
-) -> Result<()>
-where
-    S: AsRef<str>,
-    F: Fn(&str, WebviewProtocolRequest, bool, WebviewProtocolResponder) + Send + Sync + 'static,
-{
-    bind_custom_protocol_async_for(ControllerKey::new(None, webview_id), scheme, callback)
-}
-
-/// Declares a custom-scheme handler for a module-local WebView ID.
-///
-/// The declaration may be made before the ArkTS node exists. The handler is attached only when
-/// the Web component reports `controller-attached`, after ArkWeb has created its BrowserContext
-/// and before the plugin performs the initial navigation. This keeps the first custom-scheme load
-/// race-free without retaining an ArkTS object or calling ArkWeb before it is ready.
-pub(crate) fn bind_custom_protocol_for<S, F>(
-    webview_id: ControllerKey,
-    scheme: S,
-    callback: F,
-) -> Result<()>
-where
-    S: AsRef<str>,
-    F: Fn(&str, WebviewProtocolRequest, bool) -> Option<WebviewProtocolResponse>
-        + Send
-        + Sync
-        + 'static,
-{
-    bind_custom_protocol_async_for(
+    bind_custom_protocol_async(
         webview_id,
         scheme,
         move |url, request, is_main_frame, responder| {
@@ -281,8 +252,8 @@ where
 }
 
 /// Asynchronous custom-scheme variant. The handler owns the responder and may resolve it later.
-pub(crate) fn bind_custom_protocol_async_for<S, F>(
-    webview_id: ControllerKey,
+pub fn bind_custom_protocol_async<S, F>(
+    webview_id: impl Into<String>,
     scheme: S,
     callback: F,
 ) -> Result<()>
@@ -290,8 +261,9 @@ where
     S: AsRef<str>,
     F: Fn(&str, WebviewProtocolRequest, bool, WebviewProtocolResponder) + Send + Sync + 'static,
 {
+    let webview_id = webview_id.into();
     let scheme = scheme.as_ref().to_owned();
-    validate_webview_id(webview_id.id())?;
+    validate_webview_id(&webview_id)?;
     WebviewProtocol::require_declared(&scheme)?;
 
     let declaration = ProtocolDeclaration {
@@ -338,8 +310,8 @@ where
 /// This is called from the scoped named N-API `controller-attached` event. It must complete before
 /// ArkTS starts the initial load so a custom-scheme document and every first-page subresource are
 /// handled by native Rust code.
-pub(crate) fn on_controller_attached(webview_id: &ControllerKey, native_tag: &str) -> Result<()> {
-    validate_webview_id(webview_id.id())?;
+pub(crate) fn on_controller_attached(webview_id: &str, native_tag: &str) -> Result<()> {
+    validate_webview_id(webview_id)?;
     validate_webview_id(native_tag)?;
     let declarations = {
         let mut state = PROTOCOL_STATE
@@ -376,7 +348,7 @@ pub(crate) fn on_controller_attached(webview_id: &ControllerKey, native_tag: &st
 
 /// Marks a controller detached while retaining declarations for a future controller with the same
 /// WebView ID and matching native tag.
-pub(crate) fn on_controller_removed(webview_id: &ControllerKey, native_tag: &str) -> Result<()> {
+pub(crate) fn on_controller_removed(webview_id: &str, native_tag: &str) -> Result<()> {
     let mut state = PROTOCOL_STATE
         .lock()
         .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?;
@@ -391,23 +363,13 @@ pub(crate) fn on_controller_removed(webview_id: &ControllerKey, native_tag: &str
 
 /// Clears controller-generation state at component/session teardown while retaining declarations
 /// and the process-global engine/scheme state for a later appearance.
-pub(crate) fn clear_attached(owner: Option<&Arc<()>>) -> Result<()> {
+pub(crate) fn clear_attached() -> Result<()> {
     let mut state = PROTOCOL_STATE
         .lock()
-        .map_err(|_| Error::from_reason("Failed to clear WebView protocol state"))?;
-    let tags = state
-        .attached_webviews
-        .iter()
-        .filter(|(key, _)| key.belongs_to(owner))
-        .map(|(_, tag)| tag.clone())
-        .collect::<Vec<_>>();
-    state
-        .attached_webviews
-        .retain(|key, _| !key.belongs_to(owner));
-    for tag in tags {
-        state.installing_schemes.remove(&tag);
-        state.installed_schemes.remove(&tag);
-    }
+        .map_err(|_| Error::from_reason("Failed to clear WebView protocol controller state"))?;
+    state.attached_webviews.clear();
+    state.installing_schemes.clear();
+    state.installed_schemes.clear();
     Ok(())
 }
 
@@ -419,13 +381,15 @@ pub(crate) fn clear_attached(owner: Option<&Arc<()>>) -> Result<()> {
 /// (`WebviewProtocol::register`) is intentionally untouched: it is shared
 /// across webviews, idempotent to re-declare, and bounded by the app's scheme
 /// list rather than by create attempts. Returns how many schemes were dropped.
-pub(crate) fn remove_declarations(webview_id: &ControllerKey) -> Result<usize> {
+pub fn remove_declarations(webview_id: &str) -> Result<usize> {
     let dropped = PROTOCOL_STATE
         .lock()
         .map_err(|_| Error::from_reason("Failed to lock WebView protocol state"))?
         .declarations
-        .remove(webview_id);
-    Ok(dropped.as_ref().map_or(0, BTreeMap::len))
+        .remove(webview_id)
+        .map(|schemes| schemes.len())
+        .unwrap_or(0);
+    Ok(dropped)
 }
 
 fn reserve_installation(state: &mut ProtocolState, native_tag: &str, scheme: &str) -> bool {
@@ -448,12 +412,12 @@ fn reserve_installation(state: &mut ProtocolState, native_tag: &str, scheme: &st
 }
 
 fn install_and_record(
-    webview_id: &ControllerKey,
+    webview_id: &str,
     native_tag: &str,
     declaration: ProtocolDeclaration,
 ) -> Result<()> {
     let scheme = declaration.scheme.clone();
-    match install_declaration(webview_id, native_tag, declaration) {
+    match install_declaration(native_tag, declaration) {
         Ok(()) => finish_installation(webview_id, native_tag, &scheme, true),
         Err(error) => {
             let _ = finish_installation(webview_id, native_tag, &scheme, false);
@@ -463,7 +427,7 @@ fn install_and_record(
 }
 
 fn finish_installation(
-    webview_id: &ControllerKey,
+    webview_id: &str,
     native_tag: &str,
     scheme: &str,
     installed: bool,
@@ -493,20 +457,10 @@ fn finish_installation(
     Ok(())
 }
 
-fn install_declaration(
-    key: &ControllerKey,
-    native_tag: &str,
-    declaration: ProtocolDeclaration,
-) -> Result<()> {
+fn install_declaration(native_tag: &str, declaration: ProtocolDeclaration) -> Result<()> {
     let ProtocolDeclaration { scheme, callback } = declaration;
     let handler = CustomProtocolHandler::new();
-    let key = key.clone();
-    let installed_tag = native_tag.to_owned();
     handler.on_request_start(move |request, request_handle| {
-        if !controller::is_current(&key, &installed_tag).unwrap_or(false) {
-            responder_for(request_handle).respond(retired_request_response());
-            return true;
-        }
         let url = request.url();
         let method = request.method().as_str().to_owned();
         let headers = request.headers();
@@ -515,17 +469,11 @@ fn install_declaration(
         if let Some(body) = request.http_body_stream() {
             let callback = Arc::clone(&callback);
             let mut request_handle = Some(request_handle);
-            let key = key.clone();
-            let installed_tag = installed_tag.clone();
             body.read(body.size() as usize, move |body| {
                 let Some(request_handle) = request_handle.take() else {
                     return;
                 };
                 let responder = responder_for(request_handle);
-                if !controller::is_current(&key, &installed_tag).unwrap_or(false) {
-                    responder.respond(retired_request_response());
-                    return;
-                }
                 match build_request(&method, &url, headers.iter(), body) {
                     Ok(native_request) => callback(&url, native_request, is_main_frame, responder),
                     Err(_) => responder.respond(invalid_request_response()),
@@ -571,12 +519,6 @@ fn build_request<'a>(
         }
     }
     builder.body(body)
-}
-
-fn retired_request_response() -> WebviewProtocolResponse {
-    let mut response = Response::new(Cow::Borrowed(&b"Controller retired"[..]));
-    *response.status_mut() = http::StatusCode::GONE;
-    response
 }
 
 fn invalid_request_response() -> WebviewProtocolResponse {
@@ -627,17 +569,6 @@ fn validate_webview_id(webview_id: &str) -> Result<()> {
             "WebView custom protocol id must not contain a NUL byte",
         ));
     }
-    Ok(())
-}
-
-pub(crate) fn remove_owner(owner: &Arc<()>) -> Result<()> {
-    let removed = {
-        let mut registry = PROTOCOL_STATE
-            .lock()
-            .map_err(|_| Error::from_reason("Failed to clear WebView declarations"))?;
-        crate::controller_key::take_owner(&mut registry.declarations, owner)
-    };
-    drop(removed);
     Ok(())
 }
 

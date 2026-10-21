@@ -206,6 +206,7 @@ async function production(api = 20, attachDuringBuild = false) {
     const events = [];
     const receipts = [];
     const borrowed = new Set();
+    const mounting = new Set();
     const failures = new Set();
     const state = { autoAttach: true, active: true, cancellation: [] };
     const ctx = {
@@ -216,17 +217,39 @@ async function production(api = 20, attachDuringBuild = false) {
       invokeNativeSyncProcessWide: () => [{ accepted: true, schemes: [] }],
       invokeNativeSync(event, _request, _response, value) {
         if (event === "native-node-ready") {
+          assert.equal(_request, "ohos.node.NativeNodeReady");
+          assert.equal(_response, "ohos.node.Acknowledgement");
+          if (state.rejectReady) throw new Error("attachment failed");
           borrowed.add(value.targetId);
+          mounting.add(value.targetId);
           if (state.autoAttach) value.content.owner.attach();
+          mounting.delete(value.targetId);
+          operations.push([event, value.targetId]);
         } else if (event === "native-node-retiring") {
+          assert.equal(_request, "ohos.node.NativeNodeRetiring");
+          assert.equal(_response, "ohos.node.Acknowledgement");
+          operations.push([event, value.targetId]);
           if (failures.has(value.targetId)) throw new Error("detach failed");
           borrowed.delete(value.targetId);
         } else if (
           event === "native-controller-attached" ||
           event === "native-controller-removed"
         ) {
+          assert.equal(_request, "ohos.webview.NativeControllerEvent");
+          assert.equal(_response, "ohos.webview.EventAcknowledgement");
+          assert.ok(
+            borrowed.has(value.targetId),
+            "controller dispatch requires an attached target",
+          );
+          assert.ok(
+            !mounting.has(value.targetId),
+            "controller dispatch cannot reenter native attach",
+          );
           receipts.push({ event, ...value });
-          operations.push([event, value.generation]);
+          operations.push([event, value.targetId]);
+          if (event === "native-controller-removed" && state.rejectRemoval) {
+            throw new Error("controller removal failed");
+          }
           if (event === "native-controller-attached" && state.closeOnReceipt) {
             plugin.onClosing(ctx);
             operations.push(["rust-destroy"]);
@@ -235,8 +258,11 @@ async function production(api = 20, attachDuringBuild = false) {
             state.active = false;
             for (const listener of state.cancellation) listener();
           }
-        } else if (event === "native-event") events.push(value);
-        else throw new Error(`native flow used legacy event ${event}`);
+        } else if (event === "native-event") {
+          assert.equal(_request, "ohos.webview.NativeEvent");
+          assert.equal(_response, "ohos.webview.EventAcknowledgement");
+          events.push(value);
+        } else throw new Error(`native flow used legacy event ${event}`);
         return { accepted: true };
       },
     };
@@ -253,13 +279,12 @@ async function production(api = 20, attachDuringBuild = false) {
         };
       },
     };
-    const create = (generation = 1, id = "same", targetId = 7) =>
+    const create = (targetId = 7, id = "same") =>
       plugin.invokeAsync(
         "create-native",
         {
           typeName: "ohos.webview.NativeCreateRequest",
           value: {
-            generation,
             targetId,
             webview: {
               id,
@@ -312,6 +337,10 @@ test("API12 and API15+ apply single-source document settings before first load",
     const load = operations.findIndex(([name]) => name === "load");
     assert.ok(start >= 0 && start < load);
     assert.ok(operations.findIndex(([name]) => name === "native-controller-attached") < load);
+    assert.ok(
+      operations.findIndex(([name]) => name === "native-node-ready") <
+        operations.findIndex(([name]) => name === "native-controller-attached"),
+    );
     assert.deepEqual(
       Array.from(operations[start][1], (item) => item.script),
       ["initial-script", "second-script"],
@@ -329,7 +358,7 @@ test("API12 and API15+ apply single-source document settings before first load",
   }
 });
 
-test("two Hosts share business ID while retired generations cannot emit", async () => {
+test("two Hosts share business ID while retired targets cannot emit", async () => {
   const { host, nodes } = await production();
   const a = host("a");
   const b = host("b");
@@ -341,14 +370,14 @@ test("two Hosts share business ID while retired generations cannot emit", async 
     { typeName: "ohos.webview.ControllerRequest", value: { id: "same" } },
     a.ctx,
   );
-  await a.create(2);
+  await a.create(8);
   old.nativeNotify("title");
   nodes[2].data.nativeNotify("title");
   nodes[1].data.nativeNotify("title");
   assert.equal(a.events.length, 1);
-  assert.equal(a.events[0].generation, 2);
+  assert.equal(a.events[0].targetId, 8);
   assert.equal(b.events.length, 1);
-  assert.equal(b.events[0].generation, 1);
+  assert.equal(b.events[0].targetId, 7);
 });
 
 test("closing retires synchronously then disposal waits for all page tasks", async () => {
@@ -379,8 +408,8 @@ test("closing retires synchronously then disposal waits for all page tasks", asy
 test("failed retirement retains owner and does not block other entry cleanup", async () => {
   const { host, nodes, failed } = await production();
   const owner = host("failure");
-  await owner.create(1, "first", 7);
-  await owner.create(2, "second", 8);
+  await owner.create(7, "first");
+  await owner.create(8, "second");
   owner.failures.add(7);
   assert.throws(() => owner.plugin.onClosing(owner.ctx), /detach failed/);
   assert.equal(owner.borrowed.has(8), false);
@@ -390,14 +419,15 @@ test("failed retirement retains owner and does not block other entry cleanup", a
   assert.equal(failed.size, 1);
 });
 
-test("superseded same-ID creation never creates a second unmanaged owner", async () => {
+test("same-ID replacement serializes teardown before attaching a fresh target", async () => {
   const { host, nodes } = await production();
   const owner = host("serial");
-  const results = await Promise.allSettled([owner.create(1), owner.create(2)]);
-  assert.equal(results[0].status, "rejected");
+  const results = await Promise.allSettled([owner.create(7), owner.create(8)]);
+  assert.equal(results[0].status, "fulfilled");
   assert.equal(results[1].status, "fulfilled");
-  assert.equal(nodes.length, 1);
-  assert.equal(nodes[0].data.nativeGeneration, 2);
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[0].disposed, true);
+  assert.equal(nodes[1].data.nativeTarget, 8);
 });
 
 test("cancellation after native mount retires through active plugin context", async () => {
@@ -413,38 +443,25 @@ test("cancellation after native mount retires through active plugin context", as
   assert.equal(nodes[0].disposed, true);
 });
 
-test("document option patches retain the live controller/history and share initial fields", async () => {
+test("native settings retain controller/history and leave creation options unchanged", async () => {
   const { host, nodes, operations } = await production(20);
   const owner = host("options");
   await owner.create();
   const node = nodes[0],
     controller = node.data.controller;
   const loads = controller.history.length;
-  await owner.plugin.invokeAsync(
-    "update-document-options",
-    {
-      typeName: "ohos.webview.DocumentOptionsRequest",
-      value: {
-        id: "same",
-        javascriptEnabled: true,
-        userAgent: "updated-agent",
-        initializationScripts: [{ script: "updated-script", scriptRules: ["*"] }],
-      },
-    },
-    owner.ctx,
-  );
   assert.equal(nodes.length, 1);
   assert.equal(node.data.controller, controller);
   assert.equal(controller.history.length, loads);
-  assert.equal(node.data.javascriptEnabled, true);
-  assert.equal(node.data.userAgent, "updated-agent");
-  assert.equal(node.data.initializationScripts[0].script, "updated-script");
+  assert.equal(node.data.javascriptEnabled, false);
+  assert.equal(node.data.userAgent, "initial-agent");
+  assert.equal(node.data.initializationScripts[0].script, "initial-script");
   node.attach();
   assert.equal(controller.history.length, loads);
   assert.ok(
     operations.some(
       ([name, value]) =>
-        name === "runJavaScriptOnDocumentStart" && value[0].script === "updated-script",
+        name === "runJavaScriptOnDocumentStart" && value[0].script === "initial-script",
     ),
   );
   await owner.plugin.invokeAsync(
@@ -463,16 +480,16 @@ test("document option patches retain the live controller/history and share initi
   assert.equal(controller.history.at(-1), "https://updated.invalid/");
 });
 test("replacement and closing send exact controller receipts once using the cleanup context", async () => {
-  const { host } = await production();
+  const { host, operations } = await production();
   const owner = host("receipts");
-  await owner.create(1);
-  await owner.create(2);
+  await owner.create(7);
+  await owner.create(8);
   assert.deepEqual(
-    owner.receipts.map((value) => [value.event, value.generation]),
+    owner.receipts.map((value) => [value.event, value.targetId]),
     [
-      ["native-controller-attached", 1],
-      ["native-controller-removed", 1],
-      ["native-controller-attached", 2],
+      ["native-controller-attached", 7],
+      ["native-controller-removed", 7],
+      ["native-controller-attached", 8],
     ],
   );
   let removed = 0;
@@ -487,7 +504,16 @@ test("replacement and closing send exact controller receipts once using the clea
   await owner.plugin.onDispose(cleanup);
   assert.equal(removed, 1);
   assert.equal(owner.receipts.at(-1).event, "native-controller-removed");
-  assert.equal(owner.receipts.at(-1).generation, 2);
+  assert.equal(owner.receipts.at(-1).targetId, 8);
+  for (const target of [7, 8]) {
+    const removed = operations.findIndex(
+      ([event, id]) => event === "native-controller-removed" && id === target,
+    );
+    const retired = operations.findIndex(
+      ([event, id]) => event === "native-node-retiring" && id === target,
+    );
+    assert.ok(removed >= 0 && removed < retired);
+  }
 });
 test("cancellation inside the attach receipt cannot navigate and still removes declarations", async () => {
   const { host, nodes, operations } = await production();
@@ -505,7 +531,7 @@ test("cancellation inside the attach receipt cannot navigate and still removes d
   assert.equal(nodes[0].disposed, true);
 });
 
-test("reentrant closing during SDK build removes controller declarations before native shutdown", async () => {
+test("SDK build callbacks wait for native ready before controller installation and reentrant closing", async () => {
   const { host, nodes, operations } = await production(20, true);
   const owner = host("build-close");
   owner.state.closeOnReceipt = true;
@@ -523,4 +549,72 @@ test("reentrant closing during SDK build removes controller declarations before 
   const disposed = operations.findIndex(([name]) => name === "dispose");
   assert.ok(removed < destroyed && destroyed < disposed);
   assert.equal(nodes[0].disposed, true);
+});
+
+test("failed controller cleanup retains the native target and allows a safe retry", async () => {
+  const { host, nodes } = await production();
+  const owner = host("removal-failure");
+  await owner.create();
+  owner.state.rejectRemoval = true;
+  assert.throws(() => owner.plugin.onClosing(owner.ctx), /controller removal failed/);
+  assert.equal(owner.borrowed.has(7), true);
+  assert.equal(nodes[0].disposed, false);
+  owner.state.rejectRemoval = false;
+  await owner.plugin.onDispose(owner.ctx);
+  assert.equal(owner.borrowed.size, 0);
+  assert.equal(nodes[0].disposed, true);
+});
+
+test("native creation rejects malformed targets and mismatched named contracts before building", async () => {
+  const { host, nodes } = await production();
+  const owner = host("invalid");
+  const request = {
+    targetId: 7,
+    webview: { id: "same", html: "<p>first</p>" },
+    settings: { id: "same", scrollEnabled: false },
+  };
+  for (const targetId of [0, -1, 1.5, 0x100000000, "7"]) {
+    await assert.rejects(
+      owner.plugin.invokeAsync(
+        "create-native",
+        { typeName: "ohos.webview.NativeCreateRequest", value: { ...request, targetId } },
+        owner.ctx,
+      ),
+      /Invalid native WebView target/,
+    );
+  }
+  await assert.rejects(
+    owner.plugin.invokeAsync(
+      "create-native",
+      { typeName: "ohos.webview.CreateRequest", value: request },
+      owner.ctx,
+    ),
+    /requires ohos.webview.NativeCreateRequest/,
+  );
+  await assert.rejects(
+    owner.plugin.invokeAsync(
+      "create-native",
+      {
+        typeName: "ohos.webview.NativeCreateRequest",
+        value: { ...request, settings: { id: "other", scrollEnabled: false } },
+      },
+      owner.ctx,
+    ),
+    /controller ID mismatch/,
+  );
+  assert.equal(nodes.length, 0);
+});
+
+test("failed native ready cannot install a controller observed during SDK build", async () => {
+  const { host, nodes, operations } = await production(20, true);
+  const owner = host("ready-failure");
+  owner.state.rejectReady = true;
+  await assert.rejects(owner.create(), /attachment failed/);
+  assert.equal(owner.receipts.length, 0);
+  assert.equal(owner.borrowed.size, 0);
+  assert.equal(nodes[0].disposed, true);
+  assert.equal(
+    operations.some(([event]) => event === "load"),
+    false,
+  );
 });

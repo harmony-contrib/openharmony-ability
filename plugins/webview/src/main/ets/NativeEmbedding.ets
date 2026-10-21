@@ -28,7 +28,6 @@ export interface NativeWebviewData {
   id: string;
   nativeTag: string;
   nativeTarget: number | null;
-  nativeGeneration: number;
   nativeActive: boolean;
   nativeAttached: boolean;
   nativeControllerAttached: boolean;
@@ -42,7 +41,6 @@ export interface NativeWebviewData {
 class NativeWebviewEvent {
   readonly id: string;
   readonly targetId: number;
-  readonly generation: number;
   readonly phase: string;
   readonly url: string;
   readonly title: string;
@@ -54,7 +52,6 @@ class NativeWebviewEvent {
   constructor(data: NativeWebviewData, phase: string, message?: string, code?: number) {
     this.id = data.id;
     this.targetId = data.nativeTarget!;
-    this.generation = data.nativeGeneration;
     this.phase = phase;
     this.url = data.controller.getUrl();
     this.title = data.controller.getTitle();

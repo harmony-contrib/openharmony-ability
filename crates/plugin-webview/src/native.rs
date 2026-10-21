@@ -31,8 +31,6 @@ pub struct NativeWebviewEvent {
     pub id: String,
     /// Native attachment target paired with this controller.
     pub target_id: u32,
-    /// Plugin-owned controller generation.
-    pub generation: u32,
     /// start, finish, title, error, focus or blur.
     pub phase: String,
     /// Current document URL.
@@ -52,12 +50,12 @@ pub struct NativeWebviewEvent {
 }
 impl_bridge_napi_type!(NativeWebviewEvent, "ohos.webview.NativeEvent");
 
-/// Owns a callback declaration for one facade-local ID and attachment target.
+/// Owns a callback declaration for one native attachment target.
 /// A new declaration replaces the previous one; an old guard cannot remove it.
 pub struct NativeWebviewEvents {
-    id: String,
-    owner: Arc<NativeEvents>,
-    registration: Arc<Registration>,
+    target_id: u32,
+    routes: Arc<NativeEvents<NativeWebviewEvent>>,
+    registration: Arc<Registration<NativeWebviewEvent>>,
 }
 impl NativeWebviewEvents {
     /// Registers before creating the matching native controller.
@@ -75,18 +73,18 @@ impl NativeWebviewEvents {
         let plugin = app
             .registered_plugin::<WebviewBridgePlugin>()?
             .ok_or_else(|| Error::from_reason("WebView plugin is not registered"))?;
-        let owner = plugin.native_events.clone();
-        let registration = owner.register(id.clone(), target_id, Arc::new(callback));
+        let routes = plugin.native_events.clone();
+        let registration = routes.register(target_id, callback);
         Ok(Self {
-            id,
-            owner,
+            target_id,
+            routes,
             registration,
         })
     }
 }
 impl Drop for NativeWebviewEvents {
     fn drop(&mut self) {
-        self.owner.remove(&self.id, &self.registration);
+        self.routes.remove(self.target_id, &self.registration);
     }
 }
 impl WebviewHandle {

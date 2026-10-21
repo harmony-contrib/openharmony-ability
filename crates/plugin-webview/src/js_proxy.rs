@@ -11,7 +11,6 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use crate::{controller, controller_key::ControllerKey};
 use napi_ohos::{Error, Result};
 use ohos_web_binding::WebProxyBuilder as ArkWebProxyBuilder;
 
@@ -25,7 +24,6 @@ struct ProxyMethod {
 
 #[derive(Clone)]
 struct ProxyDeclaration {
-    key: ControllerKey,
     webview_id: String,
     object_name: String,
     methods: Vec<ProxyMethod>,
@@ -34,8 +32,8 @@ struct ProxyDeclaration {
 #[derive(Default)]
 struct ProxyState {
     /// Business WebView ID -> process-unique ArkWeb controller tag.
-    attached_webviews: BTreeMap<ControllerKey, String>,
-    declarations: BTreeMap<ControllerKey, Vec<ProxyDeclaration>>,
+    attached_webviews: BTreeMap<String, String>,
+    declarations: BTreeMap<String, Vec<ProxyDeclaration>>,
 }
 
 static PROXY_STATE: LazyLock<Mutex<ProxyState>> =
@@ -48,7 +46,7 @@ static PROXY_STATE: LazyLock<Mutex<ProxyState>> =
 /// before `create` is the preferred path: the declaration is installed exactly when the
 /// process-unique ArkWeb controller attaches, before the initial document is loaded.
 pub struct WebviewJavascriptProxyBuilder {
-    key: ControllerKey,
+    webview_id: String,
     object_name: String,
     methods: Vec<ProxyMethod>,
 }
@@ -56,15 +54,7 @@ pub struct WebviewJavascriptProxyBuilder {
 impl WebviewJavascriptProxyBuilder {
     pub fn new(webview_id: impl Into<String>, object_name: impl Into<String>) -> Self {
         Self {
-            key: ControllerKey::new(None, webview_id),
-            object_name: object_name.into(),
-            methods: Vec::new(),
-        }
-    }
-
-    pub(crate) fn with_key(key: ControllerKey, object_name: impl Into<String>) -> Self {
-        Self {
-            key,
+            webview_id: webview_id.into(),
             object_name: object_name.into(),
             methods: Vec::new(),
         }
@@ -91,10 +81,13 @@ impl WebviewJavascriptProxyBuilder {
             let mut state = PROXY_STATE
                 .lock()
                 .map_err(|_| Error::from_reason("Failed to lock WebView JavaScript proxy state"))?;
-            let native_tag = state.attached_webviews.get(&declaration.key).cloned();
+            let native_tag = state
+                .attached_webviews
+                .get(&declaration.webview_id)
+                .cloned();
             state
                 .declarations
-                .entry(declaration.key.clone())
+                .entry(declaration.webview_id.clone())
                 .or_default()
                 .push(declaration.clone());
             native_tag.map(|native_tag| (declaration, native_tag))
@@ -106,7 +99,7 @@ impl WebviewJavascriptProxyBuilder {
     }
 
     fn into_declaration(self) -> Result<ProxyDeclaration> {
-        if self.key.id().trim().is_empty() {
+        if self.webview_id.trim().is_empty() {
             return Err(Error::from_reason(
                 "WebView JavaScript proxy id must not be empty",
             ));
@@ -127,8 +120,7 @@ impl WebviewJavascriptProxyBuilder {
             ));
         }
         Ok(ProxyDeclaration {
-            webview_id: self.key.id().to_owned(),
-            key: self.key,
+            webview_id: self.webview_id,
             object_name: self.object_name,
             methods: self.methods,
         })
@@ -136,7 +128,7 @@ impl WebviewJavascriptProxyBuilder {
 }
 
 /// Flushes queued page-to-Rust proxies once ArkTS has attached the native controller.
-pub(crate) fn on_controller_attached(webview_id: &ControllerKey, native_tag: &str) -> Result<()> {
+pub(crate) fn on_controller_attached(webview_id: &str, native_tag: &str) -> Result<()> {
     let declarations = {
         let mut state = PROXY_STATE
             .lock()
@@ -162,7 +154,7 @@ pub(crate) fn on_controller_attached(webview_id: &ControllerKey, native_tag: &st
 
 /// Marks a controller detached. Declarations remain queued for a future controller using the
 /// same WebView ID, while ArkWeb owns proxies that were already installed.
-pub(crate) fn on_controller_removed(webview_id: &ControllerKey, native_tag: &str) -> Result<()> {
+pub(crate) fn on_controller_removed(webview_id: &str, native_tag: &str) -> Result<()> {
     let mut state = PROXY_STATE
         .lock()
         .map_err(|_| Error::from_reason("Failed to lock WebView JavaScript proxy state"))?;
@@ -175,12 +167,12 @@ pub(crate) fn on_controller_removed(webview_id: &ControllerKey, native_tag: &str
 
 /// Clears controller-generation state at component/session teardown. Proxy declarations remain
 /// available for a later controller created with the same module-local business ID.
-pub(crate) fn clear_attached(owner: Option<&Arc<()>>) -> Result<()> {
+pub(crate) fn clear_attached() -> Result<()> {
     PROXY_STATE
         .lock()
-        .map_err(|_| Error::from_reason("Failed to clear WebView proxy state"))?
+        .map_err(|_| Error::from_reason("Failed to clear WebView JavaScript proxy state"))?
         .attached_webviews
-        .retain(|key, _| !key.belongs_to(owner));
+        .clear();
     Ok(())
 }
 
@@ -189,13 +181,15 @@ pub(crate) fn clear_attached(owner: Option<&Arc<()>>) -> Result<()> {
 /// Create-failure rollback path (see `callbacks::remove`): a failed create
 /// leaves no controller, so nothing was installed — only the queued
 /// declarations need removing. Returns how many declarations were dropped.
-pub(crate) fn remove_declarations(webview_id: &ControllerKey) -> Result<usize> {
+pub fn remove_declarations(webview_id: &str) -> Result<usize> {
     let dropped = PROXY_STATE
         .lock()
         .map_err(|_| Error::from_reason("Failed to lock WebView JavaScript proxy state"))?
         .declarations
-        .remove(webview_id);
-    Ok(dropped.as_ref().map_or(0, Vec::len))
+        .remove(webview_id)
+        .map(|decls| decls.len())
+        .unwrap_or(0);
+    Ok(dropped)
 }
 
 fn install(
@@ -208,13 +202,9 @@ fn install(
     for method in declaration.methods {
         let callback = Arc::clone(&method.callback);
         let callback_webview_id = webview_id.clone();
-        let key = declaration.key.clone();
-        let tag = native_tag.to_owned();
         builder = builder.add_method(method.name, move |_native_tag, arguments| {
-            if controller::is_current(&key, &tag).unwrap_or(false) {
-                if let Ok(mut callback) = callback.lock() {
-                    callback(callback_webview_id.clone(), arguments);
-                }
+            if let Ok(mut callback) = callback.lock() {
+                callback(callback_webview_id.clone(), arguments);
             }
         });
     }
@@ -231,17 +221,6 @@ fn install(
             ))
         })?;
     }
-    Ok(())
-}
-
-pub(crate) fn remove_owner(owner: &Arc<()>) -> Result<()> {
-    let removed = {
-        let mut registry = PROXY_STATE
-            .lock()
-            .map_err(|_| Error::from_reason("Failed to clear WebView declarations"))?;
-        crate::controller_key::take_owner(&mut registry.declarations, owner)
-    };
-    drop(removed);
     Ok(())
 }
 

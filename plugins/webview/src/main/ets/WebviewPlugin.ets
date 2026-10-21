@@ -37,7 +37,6 @@ const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
 const NATIVE_CREATE_REQUEST_TYPE = "ohos.webview.NativeCreateRequest";
 interface NativeCreatePayload {
   targetId: number;
-  generation: number;
   webview: WebviewCreatePayload;
   settings: NativeWebviewSettings;
 }
@@ -135,16 +134,9 @@ interface WebviewStyle {
   blurRadius?: number | null;
 }
 
-interface DocumentOptionsRequest {
-  id: string;
-  javascriptEnabled?: boolean | null;
-  userAgent?: string | null;
-  initializationScripts?: WebviewInitializationScript[] | null;
-}
 interface NativeControllerEvent {
   id: string;
   targetId: number;
-  generation: number;
   nativeTag: string;
 }
 interface WebviewInitializationScript {
@@ -284,19 +276,30 @@ class WebviewEntry {
   private attaching = false;
   private attached = false;
   private controllerFailure: Error | null = null;
+  private nativeReady: boolean;
+  private controllerObserved = false;
   private readonly controllerWaiters: ControllerWaiter[] = [];
 
   constructor(data: ManagedWebview, node: BuilderNode<[ManagedWebview]>) {
     this.data = data;
     this.node = node;
+    this.nativeReady = data.nativeTarget === null;
   }
 
   beginControllerAttach(): boolean {
-    if (this.attaching || this.attached || this.controllerFailure !== null) {
+    this.controllerObserved = true;
+    if (!this.nativeReady || this.attaching || this.attached || this.controllerFailure !== null) {
       return false;
     }
     this.attaching = true;
     return true;
+  }
+
+  markNativeReady(): void {
+    this.nativeReady = true;
+    if (this.controllerObserved) {
+      handleControllerAttached(this.data);
+    }
   }
 
   markControllerReady(): void {
@@ -719,35 +722,6 @@ function ensureWebEngineInitialized(context: BridgePluginContext): void {
     ENGINE_LIFECYCLE_EVENT_TYPE,
     new WebviewEngineLifecycleEvent("engine-initialized", webEngineSchemes) as ESObject,
   );
-}
-
-function parseDocumentOptions(payload: BridgeTypedValue): DocumentOptionsRequest {
-  if (
-    payload.typeName !== "ohos.webview.DocumentOptionsRequest" ||
-    !payload.value ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error("update-document-options requires ohos.webview.DocumentOptionsRequest");
-  }
-  const value = payload.value as DocumentOptionsRequest;
-  if (
-    typeof value.id !== "string" ||
-    !value.id.trim() ||
-    (value.javascriptEnabled != null && typeof value.javascriptEnabled !== "boolean") ||
-    (value.userAgent != null && typeof value.userAgent !== "string") ||
-    (value.initializationScripts != null &&
-      (!Array.isArray(value.initializationScripts) ||
-        value.initializationScripts.some(
-          (script: WebviewInitializationScript): boolean =>
-            !script ||
-            typeof script.script !== "string" ||
-            !Array.isArray(script.scriptRules) ||
-            script.scriptRules.some((rule: string): boolean => typeof rule !== "string"),
-        )))
-  ) {
-    throw new Error("Invalid WebView document options");
-  }
-  return value;
 }
 
 function parseCreatePayload(payload: BridgeTypedValue): WebviewCreatePayload {
@@ -1841,7 +1815,6 @@ const failedNativeRetirements: Set<WebviewEntry> = new Set();
 class WebviewSurface {
   private readonly entries: Map<string, WebviewEntry> = new Map();
   private readonly nativeOperations: Map<string, Promise<void>> = new Map();
-  private readonly nativeGenerations: Map<string, number> = new Map();
   private disposed = false;
   private nextMountKey = 1;
   private readonly pluginContext: BridgePluginContext;
@@ -1871,7 +1844,6 @@ class WebviewSurface {
     callContext: BridgeCallContext,
     nativeTarget: number | null = null,
     nativeSettings: NativeWebviewSettings | null = null,
-    nativeGeneration: number = 0,
   ): Promise<void> {
     if (nativeTarget === null) {
       if (
@@ -1885,15 +1857,8 @@ class WebviewSurface {
       }
       return this.createEntry(payload, callContext);
     }
-    if (nativeGeneration <= (this.nativeGenerations.get(payload.id) ?? 0)) {
-      throw new Error("Stale native WebView creation");
-    }
-    this.nativeGenerations.set(payload.id, nativeGeneration);
     return this.serializeNative(payload.id, async (): Promise<void> => {
-      if (this.nativeGenerations.get(payload.id) !== nativeGeneration) {
-        throw new Error("Superseded native WebView creation");
-      }
-      await this.createEntry(payload, callContext, nativeTarget, nativeSettings, nativeGeneration);
+      await this.createEntry(payload, callContext, nativeTarget, nativeSettings);
     });
   }
 
@@ -1902,7 +1867,6 @@ class WebviewSurface {
     callContext: BridgeCallContext,
     nativeTarget: number | null = null,
     nativeSettings: NativeWebviewSettings | null = null,
-    nativeGeneration: number = 0,
   ): Promise<void> {
     this.assertActive();
     this.assertCallActive(callContext);
@@ -1958,7 +1922,6 @@ class WebviewSurface {
       mountParentHandle: parentHandle,
       nativeTarget,
       nativeSettings,
-      nativeGeneration,
       nativeActive: true,
       nativeAttached: false,
       nativeControllerAttached: false,
@@ -2281,7 +2244,6 @@ class WebviewSurface {
         const receipt: NativeControllerEvent = {
           id: data.id,
           targetId: nativeTarget,
-          generation: data.nativeGeneration,
           nativeTag: data.nativeTag,
         };
         const response = this.pluginContext.invokeNativeSync(
@@ -2332,6 +2294,9 @@ class WebviewSurface {
         if (receipt?.accepted !== true) {
           throw new Error("Native attachment target rejected WebView");
         }
+        // SDK build/mount may synchronously announce the controller. Only install
+        // declarations after the ready callback has released the target's attach guard.
+        entry.markNativeReady();
       } else if (parentHandle !== null) {
         this.pluginContext.getFrameNode(parentHandle).appendChild(frameNode);
         hilog.info(
@@ -3039,28 +3004,13 @@ class WebviewSurface {
     }
     const context = cleanup ?? this.pluginContext;
     let failure: Error | undefined;
-    if (entry.data.nativeAttached) {
-      try {
-        const response = context.invokeNativeSync(
-          "native-node-retiring",
-          "ohos.node.NativeNodeRetiring",
-          "ohos.node.Acknowledgement",
-          new NativeNodeRetiringPayload(entry.data.nativeTarget!),
-        ) as BridgeAcknowledgement;
-        if (response?.accepted !== true) {
-          throw new Error("Native WebView retirement rejected");
-        }
-        entry.data.nativeAttached = false;
-      } catch (error) {
-        failure = new Error(String(error));
-      }
-    }
+    // Remove declarations while the Ability target is still live. Retiring the
+    // native edge then closes the dispatch guard and releases the retained owner.
     if (entry.data.nativeControllerAttached) {
       try {
         const receipt: NativeControllerEvent = {
           id: entry.data.id,
           targetId: entry.data.nativeTarget!,
-          generation: entry.data.nativeGeneration,
           nativeTag: entry.data.nativeTag,
         };
         const response = context.invokeNativeSync(
@@ -3073,6 +3023,22 @@ class WebviewSurface {
           throw new Error("Native controller removal rejected");
         }
         entry.data.nativeControllerAttached = false;
+      } catch (error) {
+        failure = new Error(String(error));
+      }
+    }
+    if (!failure && entry.data.nativeAttached) {
+      try {
+        const response = context.invokeNativeSync(
+          "native-node-retiring",
+          "ohos.node.NativeNodeRetiring",
+          "ohos.node.Acknowledgement",
+          new NativeNodeRetiringPayload(entry.data.nativeTarget!),
+        ) as BridgeAcknowledgement;
+        if (response?.accepted !== true) {
+          throw new Error("Native WebView retirement rejected");
+        }
+        entry.data.nativeAttached = false;
       } catch (error) {
         failure ??= new Error(String(error));
       }
@@ -3101,25 +3067,6 @@ class WebviewSurface {
     if (firstError) {
       throw firstError;
     }
-  }
-
-  async updateDocumentOptions(
-    options: DocumentOptionsRequest,
-    context: BridgeCallContext,
-  ): Promise<void> {
-    const entry = await this.controllerEntry(options.id, context);
-    if (options.javascriptEnabled != null) {
-      entry.data.javascriptEnabled = options.javascriptEnabled;
-    }
-    if (options.userAgent != null) {
-      entry.data.userAgent = options.userAgent;
-      entry.data.controller.setCustomUserAgent(options.userAgent);
-    }
-    if (options.initializationScripts != null) {
-      entry.data.initializationScripts = options.initializationScripts;
-    }
-    entry.node.update(entry.data);
-    this.assertCallActive(context);
   }
 
   async configureNative(
@@ -3245,12 +3192,9 @@ export class WebviewPlugin extends AsyncPluginBase {
       if (
         !Number.isInteger(native.targetId) ||
         native.targetId <= 0 ||
-        native.targetId > 0xffffffff ||
-        !Number.isInteger(native.generation) ||
-        native.generation <= 0 ||
-        native.generation > 0xffffffff
+        native.targetId > 0xffffffff
       ) {
-        throw new Error("Invalid native WebView target or generation");
+        throw new Error("Invalid native WebView target");
       }
       const create = ensureCreatePayload(
         parseCreatePayload({ typeName: CREATE_REQUEST_TYPE, value: native.webview }),
@@ -3262,15 +3206,11 @@ export class WebviewPlugin extends AsyncPluginBase {
       if (settings.id !== create.id) {
         throw new Error("Native settings controller ID mismatch");
       }
-      await surface.create(create, context, native.targetId, settings, native.generation);
+      await surface.create(create, context, native.targetId, settings);
       if (!context.isActive()) {
         throw new Error("Session closed while creating native WebView");
       }
       return { typeName: CREATE_RESPONSE_TYPE, value: new WebviewCreatedResponse(create.id) };
-    }
-    if (action === "update-document-options") {
-      await surface.updateDocumentOptions(parseDocumentOptions(payload), context);
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
     }
     if (action === "configure-native") {
       if (payload.typeName !== "ohos.webview.NativeSettings") {
