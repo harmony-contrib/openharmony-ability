@@ -1,9 +1,9 @@
 //! Native WebView assembled under a Rust-owned NodeContent parent.
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Env, Error, Result};
-use openharmony_ability::arkui::component::{
-    attribute::ArkUICommonAttribute, built_in_component::Column, content_root::ContentRoot,
-    native_attachment::NativeAttachment,
+use openharmony_ability::{
+    arkui::component::{attribute::ArkUICommonAttribute, built_in_component::Column},
+    ContentRoot, NativeAttachment,
 };
 use openharmony_ability_plugin_webview::{
     NativeWebviewEvents, NativeWebviewSettings, WebviewCreateRequest, WebviewExt,
@@ -37,9 +37,9 @@ pub fn demo_native_webview(env: &Env) -> Result<Object<'_>> {
     let target = attachment.id();
     let events = NativeWebviewEvents::new(&app, ID.into(), target, |event| {
         log::info!(
-            "native WebView {} generation={} url={}",
+            "native WebView {} target={} url={}",
             event.phase,
-            event.generation,
+            event.target_id,
             event.url
         )
     })?;
@@ -52,7 +52,7 @@ pub fn demo_native_webview(env: &Env) -> Result<Object<'_>> {
             content,
         })
     });
-    let client = app.webview()?.native()?;
+    let client = app.webview()?;
     std::thread::spawn(move || {
         let mut request=WebviewCreateRequest::new(ID).html("<h3 id='state'>Native WebView</h3><script>document.getElementById('state').textContent=window.initialNativeText</script>");
         request.javascript_enabled = Some(true);
@@ -86,12 +86,7 @@ pub fn demo_native_webview(env: &Env) -> Result<Object<'_>> {
 /// Waits for ArkTS native-edge retirement and script cleanup before the parent is released.
 #[napi]
 pub async fn demo_remove_native_webview() -> Result<()> {
-    super::current_app()?
-        .webview()?
-        .native()?
-        .handle(ID)
-        .remove()
-        .await
+    super::current_app()?.webview()?.handle(ID).remove().await
 }
 /// Releases the Rust parent on the UI thread after demoRemoveNativeWebview resolves.
 #[napi]

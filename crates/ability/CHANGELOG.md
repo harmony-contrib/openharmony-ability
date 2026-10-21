@@ -1,3 +1,19 @@
+# Unreleased
+
+- Move `NativeAttachment` and `ContentRoot` ownership into Ability; bindings now
+  supplies only node, content and retention primitives. Strong N-API references
+  keep attached FrameNode/NodeContent objects alive until successful retirement.
+- **Breaking:** native ready requests decode without mounting. Main-thread
+  handlers must explicitly call `receipt.attach(&event)`. Use Ability's
+  `NativeAttachment`, key callbacks only by `target_id`, and dispatch them inside
+  `NativeAttachment::dispatch`. Unknown/retired IDs are errors; IDs are never reused.
+- **Breaking:** `NativeAttachment::with_child` returns a `Result`, and retirement
+  permanently closes its target. Create a new target for a new content generation.
+- **Breaking:** the optional `keyboard` feature now forwards ArkUI `api-19` to
+  match its native lock-state queries. Selecting ArkUI keyboard delivery below
+  API 19 returns an explicit error. Applications supporting older systems should
+  retain the default raw XComponent keyboard stream.
+
 # 1.0.0-beta.3
 
 - Add window-specific surfaces, redraw, input, resize, focus and close events, with per-window

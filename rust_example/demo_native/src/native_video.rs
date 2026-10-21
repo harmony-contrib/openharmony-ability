@@ -5,9 +5,9 @@ use napi_ohos::{
     Env, Error, Result,
 };
 use openharmony_ability::arkui::component::{
-    attribute::ArkUICommonAttribute, built_in_component::Column, content_root::ContentRoot,
-    native_attachment::NativeAttachment,
+    attribute::ArkUICommonAttribute, built_in_component::Column,
 };
+use openharmony_ability::{ContentRoot, NativeAttachment};
 use openharmony_ability_plugin_video::{
     VideoBytesRequest, VideoClient, VideoCommandRequest, VideoCreateRequest, VideoEvents,
     VideoSettings,
@@ -27,9 +27,9 @@ struct Playback {
     busy: AtomicBool,
 }
 struct Owner {
-    content: ContentRoot,
-    attachment: NativeAttachment,
     _events: VideoEvents,
+    attachment: NativeAttachment,
+    content: ContentRoot,
     playback: Arc<Playback>,
 }
 thread_local! { static OWNER: RefCell<Option<Owner>> = RefCell::default(); }

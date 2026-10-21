@@ -9,7 +9,6 @@ use std::{
     sync::{Arc, LazyLock, RwLock},
 };
 
-use crate::controller_key::ControllerKey;
 use napi_ohos::{Error, Result};
 
 use super::{
@@ -91,7 +90,7 @@ impl WebviewCallbacks {
     }
 }
 
-static CALLBACKS: LazyLock<RwLock<BTreeMap<ControllerKey, WebviewCallbacks>>> =
+static CALLBACKS: LazyLock<RwLock<BTreeMap<String, WebviewCallbacks>>> =
     LazyLock::new(|| RwLock::new(BTreeMap::new()));
 
 /// Builder for Rust-owned WebView lifecycle and platform callbacks.
@@ -100,21 +99,14 @@ static CALLBACKS: LazyLock<RwLock<BTreeMap<ControllerKey, WebviewCallbacks>>> =
 /// declaration and callback declarations remain valid across a remove and create cycle.
 #[derive(Default)]
 pub struct WebviewCallbacksBuilder {
-    key: ControllerKey,
+    webview_id: String,
     callbacks: WebviewCallbacks,
 }
 
 impl WebviewCallbacksBuilder {
     pub fn new(webview_id: impl Into<String>) -> Self {
         Self {
-            key: ControllerKey::new(None, webview_id),
-            callbacks: WebviewCallbacks::default(),
-        }
-    }
-
-    pub(crate) fn with_key(key: ControllerKey) -> Self {
-        Self {
-            key,
+            webview_id: webview_id.into(),
             callbacks: WebviewCallbacks::default(),
         }
     }
@@ -251,7 +243,7 @@ impl WebviewCallbacksBuilder {
     }
 
     pub fn build(self) -> Result<()> {
-        if self.key.id().trim().is_empty() {
+        if self.webview_id.trim().is_empty() {
             return Err(Error::from_reason("WebView callback id must not be empty"));
         }
         if self.callbacks.is_empty() {
@@ -259,11 +251,10 @@ impl WebviewCallbacksBuilder {
                 "WebView callbacks must declare at least one callback",
             ));
         }
-        let previous = CALLBACKS
+        CALLBACKS
             .write()
             .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-            .insert(self.key, self.callbacks);
-        drop(previous);
+            .insert(self.webview_id, self.callbacks);
         Ok(())
     }
 }
@@ -274,7 +265,7 @@ impl WebviewCallbacksBuilder {
 /// bridge `create`; when that create fails, the entry would otherwise stay in
 /// the registry forever (wry ids are per-attempt, so nothing reuses it).
 /// Returns whether an entry was removed.
-pub(crate) fn remove(webview_id: &ControllerKey) -> Result<bool> {
+pub fn remove(webview_id: &str) -> Result<bool> {
     let removed = CALLBACKS
         .write()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
@@ -282,7 +273,7 @@ pub(crate) fn remove(webview_id: &ControllerKey) -> Result<bool> {
     Ok(removed.is_some())
 }
 
-pub(crate) fn options_for(webview_id: &ControllerKey) -> Result<WebviewCallbackOptions> {
+pub(crate) fn options_for(webview_id: &str) -> Result<WebviewCallbackOptions> {
     let callbacks = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?;
@@ -293,10 +284,9 @@ pub(crate) fn options_for(webview_id: &ControllerKey) -> Result<WebviewCallbackO
 }
 
 pub(crate) fn navigation_decision(
-    key: ControllerKey,
     request: WebviewNavigationRequest,
 ) -> Result<WebviewNavigationResponse> {
-    if !controller::is_current(&key, &request.native_tag)? {
+    if !controller::is_current(&request.id, &request.native_tag)? {
         return Ok(WebviewNavigationResponse { intercept: false });
     }
     // Route close-window URLs to the dedicated close_window callback before the generic
@@ -305,7 +295,7 @@ pub(crate) fn navigation_decision(
         let close_callback = CALLBACKS
             .read()
             .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-            .get(&key)
+            .get(&request.id)
             .and_then(|callbacks| callbacks.close_window.as_ref())
             .cloned();
         if let Some(close_callback) = close_callback {
@@ -316,7 +306,7 @@ pub(crate) fn navigation_decision(
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&request.id)
         .and_then(|callbacks| callbacks.navigation.as_ref())
         .cloned();
     Ok(WebviewNavigationResponse {
@@ -332,16 +322,15 @@ fn is_close_window_url(url: &str) -> bool {
 }
 
 pub(crate) fn download_start_decision(
-    key: ControllerKey,
     request: WebviewDownloadStartRequest,
 ) -> Result<WebviewDownloadStartResponse> {
-    if !controller::is_current(&key, &request.native_tag)? {
+    if !controller::is_current(&request.id, &request.native_tag)? {
         return Ok(WebviewDownloadStartResponse::cancel());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&request.id)
         .and_then(|callbacks| callbacks.download_start.as_ref())
         .cloned();
     Ok(callback
@@ -355,11 +344,10 @@ pub(crate) fn download_start_decision(
 /// or the handler declines. The caller (ArkTS `onInterceptRequest`) translates `handled: false`
 /// into a `null` return so ArkWeb uses its default network stack.
 pub(crate) fn https_intercept_decision(
-    key: ControllerKey,
     request: WebviewHttpsInterceptRequest,
 ) -> Result<WebviewHttpsInterceptResponse> {
     let req_id = request.id.clone();
-    if !controller::is_current(&key, &request.native_tag)? {
+    if !controller::is_current(&request.id, &request.native_tag)? {
         log::warn!(
             "[https-intercept] stale controller: id={} native_tag={}",
             req_id,
@@ -370,7 +358,7 @@ pub(crate) fn https_intercept_decision(
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&request.id)
         .and_then(|callbacks| callbacks.https_intercept.as_ref())
         .cloned();
     Ok(callback
@@ -384,14 +372,14 @@ pub(crate) fn https_intercept_decision(
         }))
 }
 
-pub(crate) fn dispatch_drag_enter(key: ControllerKey, event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&key, &event.native_tag)? {
+pub(crate) fn dispatch_drag_enter(event: WebviewDragEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&event.id)
         .and_then(|callbacks| callbacks.drag_enter.as_ref())
         .cloned();
     if let Some(callback) = callback {
@@ -400,14 +388,14 @@ pub(crate) fn dispatch_drag_enter(key: ControllerKey, event: WebviewDragEvent) -
     Ok(())
 }
 
-pub(crate) fn dispatch_drag_over(key: ControllerKey, event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&key, &event.native_tag)? {
+pub(crate) fn dispatch_drag_over(event: WebviewDragEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&event.id)
         .and_then(|callbacks| callbacks.drag_over.as_ref())
         .cloned();
     if let Some(callback) = callback {
@@ -416,14 +404,14 @@ pub(crate) fn dispatch_drag_over(key: ControllerKey, event: WebviewDragEvent) ->
     Ok(())
 }
 
-pub(crate) fn dispatch_drag_drop(key: ControllerKey, event: WebviewDropEvent) -> Result<()> {
-    if !controller::is_current(&key, &event.native_tag)? {
+pub(crate) fn dispatch_drag_drop(event: WebviewDropEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&event.id)
         .and_then(|callbacks| callbacks.drag_drop.as_ref())
         .cloned();
     if let Some(callback) = callback {
@@ -432,14 +420,14 @@ pub(crate) fn dispatch_drag_drop(key: ControllerKey, event: WebviewDropEvent) ->
     Ok(())
 }
 
-pub(crate) fn dispatch_drag_leave(key: ControllerKey, event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&key, &event.native_tag)? {
+pub(crate) fn dispatch_drag_leave(event: WebviewDragEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&event.id)
         .and_then(|callbacks| callbacks.drag_leave.as_ref())
         .cloned();
     if let Some(callback) = callback {
@@ -449,16 +437,15 @@ pub(crate) fn dispatch_drag_leave(key: ControllerKey, event: WebviewDragEvent) -
 }
 
 pub(crate) fn new_window_decision(
-    key: ControllerKey,
     request: WebviewNewWindowRequest,
 ) -> Result<WebviewNewWindowResponse> {
-    if !controller::is_current(&key, &request.native_tag)? {
+    if !controller::is_current(&request.id, &request.native_tag)? {
         return Ok(WebviewNewWindowResponse { allow: false });
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&request.id)
         .and_then(|callbacks| callbacks.new_window.as_ref())
         .cloned();
     Ok(WebviewNewWindowResponse {
@@ -466,14 +453,14 @@ pub(crate) fn new_window_decision(
     })
 }
 
-pub(crate) fn dispatch_page_begin(key: ControllerKey, event: WebviewPageEvent) -> Result<()> {
-    if !controller::is_current(&key, &event.native_tag)? {
+pub(crate) fn dispatch_page_begin(event: WebviewPageEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&event.id)
         .and_then(|callbacks| callbacks.page_begin.as_ref())
         .cloned();
     if let Some(callback) = callback {
@@ -482,14 +469,14 @@ pub(crate) fn dispatch_page_begin(key: ControllerKey, event: WebviewPageEvent) -
     Ok(())
 }
 
-pub(crate) fn dispatch_page_end(key: ControllerKey, event: WebviewPageEvent) -> Result<()> {
-    if !controller::is_current(&key, &event.native_tag)? {
+pub(crate) fn dispatch_page_end(event: WebviewPageEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&event.id)
         .and_then(|callbacks| callbacks.page_end.as_ref())
         .cloned();
     if let Some(callback) = callback {
@@ -498,17 +485,14 @@ pub(crate) fn dispatch_page_end(key: ControllerKey, event: WebviewPageEvent) -> 
     Ok(())
 }
 
-pub(crate) fn dispatch_download_end(
-    key: ControllerKey,
-    event: WebviewDownloadEndEvent,
-) -> Result<()> {
-    if !controller::is_current(&key, &event.native_tag)? {
+pub(crate) fn dispatch_download_end(event: WebviewDownloadEndEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&event.id)
         .and_then(|callbacks| callbacks.download_end.as_ref())
         .cloned();
     if let Some(callback) = callback {
@@ -517,33 +501,19 @@ pub(crate) fn dispatch_download_end(
     Ok(())
 }
 
-pub(crate) fn dispatch_title_change(
-    key: ControllerKey,
-    event: WebviewTitleChangeEvent,
-) -> Result<()> {
-    if !controller::is_current(&key, &event.native_tag)? {
+pub(crate) fn dispatch_title_change(event: WebviewTitleChangeEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&key)
+        .get(&event.id)
         .and_then(|callbacks| callbacks.title_change.as_ref())
         .cloned();
     if let Some(callback) = callback {
         callback(event);
     }
-    Ok(())
-}
-
-pub(crate) fn remove_owner(owner: &Arc<()>) -> Result<()> {
-    let removed = {
-        let mut registry = CALLBACKS
-            .write()
-            .map_err(|_| Error::from_reason("Failed to clear WebView declarations"))?;
-        crate::controller_key::take_owner(&mut registry, owner)
-    };
-    drop(removed);
     Ok(())
 }
 
@@ -573,32 +543,26 @@ mod tests {
             })
             .build()
             .unwrap();
-        controller::on_attached(&"stale-callback-test".into(), "native-new").unwrap();
+        controller::on_attached("stale-callback-test", "native-new").unwrap();
 
-        let stale = navigation_decision(
-            "stale-callback-test".into(),
-            WebviewNavigationRequest {
-                id: "stale-callback-test".to_owned(),
-                native_tag: "native-old".to_owned(),
-                url: "https://stale.example".to_owned(),
-            },
-        )
+        let stale = navigation_decision(WebviewNavigationRequest {
+            id: "stale-callback-test".to_owned(),
+            native_tag: "native-old".to_owned(),
+            url: "https://stale.example".to_owned(),
+        })
         .unwrap();
         assert!(!stale.intercept);
         assert_eq!(calls.load(Ordering::Relaxed), 0);
 
-        let current = navigation_decision(
-            "stale-callback-test".into(),
-            WebviewNavigationRequest {
-                id: "stale-callback-test".to_owned(),
-                native_tag: "native-new".to_owned(),
-                url: "https://current.example".to_owned(),
-            },
-        )
+        let current = navigation_decision(WebviewNavigationRequest {
+            id: "stale-callback-test".to_owned(),
+            native_tag: "native-new".to_owned(),
+            url: "https://current.example".to_owned(),
+        })
         .unwrap();
         assert!(current.intercept);
         assert_eq!(calls.load(Ordering::Relaxed), 1);
-        controller::on_removed(&"stale-callback-test".into(), "native-new").unwrap();
+        controller::on_removed("stale-callback-test", "native-new").unwrap();
     }
 
     #[test]
@@ -623,34 +587,28 @@ mod tests {
             })
             .build()
             .unwrap();
-        controller::on_attached(&"close-window-test".into(), "native-cw").unwrap();
+        controller::on_attached("close-window-test", "native-cw").unwrap();
 
-        let response = navigation_decision(
-            "close-window-test".into(),
-            WebviewNavigationRequest {
-                id: "close-window-test".to_owned(),
-                native_tag: "native-cw".to_owned(),
-                url: "http://close-window.invalid".to_owned(),
-            },
-        )
+        let response = navigation_decision(WebviewNavigationRequest {
+            id: "close-window-test".to_owned(),
+            native_tag: "native-cw".to_owned(),
+            url: "http://close-window.invalid".to_owned(),
+        })
         .unwrap();
         assert!(response.intercept);
         assert_eq!(close_calls.load(Ordering::Relaxed), 1);
 
         // Normal URL does not trigger close-window.
-        let normal = navigation_decision(
-            "close-window-test".into(),
-            WebviewNavigationRequest {
-                id: "close-window-test".to_owned(),
-                native_tag: "native-cw".to_owned(),
-                url: "https://example.com".to_owned(),
-            },
-        )
+        let normal = navigation_decision(WebviewNavigationRequest {
+            id: "close-window-test".to_owned(),
+            native_tag: "native-cw".to_owned(),
+            url: "https://example.com".to_owned(),
+        })
         .unwrap();
         assert!(!normal.intercept);
         assert_eq!(close_calls.load(Ordering::Relaxed), 1);
 
-        controller::on_removed(&"close-window-test".into(), "native-cw").unwrap();
+        controller::on_removed("close-window-test", "native-cw").unwrap();
     }
 
     // ─── S7 纯变换批：options 派生 + 三个 decision 函数的全分支 ─────────────────
@@ -705,33 +663,27 @@ mod tests {
             .on_navigation_request(|_| false)
             .build()
             .unwrap();
-        controller::on_attached(&"https-decision-test".into(), "native-h1").unwrap();
+        controller::on_attached("https-decision-test", "native-h1").unwrap();
 
         // stale controller → passthrough，callback 不被触达
-        let stale = https_intercept_decision(
-            "https-decision-test".into(),
-            WebviewHttpsInterceptRequest {
-                id: "https-decision-test".to_owned(),
-                native_tag: "native-old".to_owned(),
-                url: "https://stale.example".to_owned(),
-            },
-        )
+        let stale = https_intercept_decision(WebviewHttpsInterceptRequest {
+            id: "https-decision-test".to_owned(),
+            native_tag: "native-old".to_owned(),
+            url: "https://stale.example".to_owned(),
+        })
         .unwrap();
         assert!(!stale.handled);
 
         // current controller 但未注册 https_intercept callback → passthrough
-        let no_callback = https_intercept_decision(
-            "https-decision-test".into(),
-            WebviewHttpsInterceptRequest {
-                id: "https-decision-test".to_owned(),
-                native_tag: "native-h1".to_owned(),
-                url: "https://current.example".to_owned(),
-            },
-        )
+        let no_callback = https_intercept_decision(WebviewHttpsInterceptRequest {
+            id: "https-decision-test".to_owned(),
+            native_tag: "native-h1".to_owned(),
+            url: "https://current.example".to_owned(),
+        })
         .unwrap();
         assert!(!no_callback.handled);
 
-        controller::on_removed(&"https-decision-test".into(), "native-h1").unwrap();
+        controller::on_removed("https-decision-test", "native-h1").unwrap();
     }
 
     #[test]
@@ -748,22 +700,19 @@ mod tests {
             })
             .build()
             .unwrap();
-        controller::on_attached(&"https-handle-test".into(), "native-h2").unwrap();
+        controller::on_attached("https-handle-test", "native-h2").unwrap();
 
-        let handled = https_intercept_decision(
-            "https-handle-test".into(),
-            WebviewHttpsInterceptRequest {
-                id: "https-handle-test".to_owned(),
-                native_tag: "native-h2".to_owned(),
-                url: "https://handled.example".to_owned(),
-            },
-        )
+        let handled = https_intercept_decision(WebviewHttpsInterceptRequest {
+            id: "https-handle-test".to_owned(),
+            native_tag: "native-h2".to_owned(),
+            url: "https://handled.example".to_owned(),
+        })
         .unwrap();
         assert!(handled.handled);
         assert_eq!(handled.status, 200);
         assert_eq!(handled.mime_type, "text/html");
 
-        controller::on_removed(&"https-handle-test".into(), "native-h2").unwrap();
+        controller::on_removed("https-handle-test", "native-h2").unwrap();
     }
 
     #[test]
@@ -776,35 +725,29 @@ mod tests {
             .on_navigation_request(|_| false)
             .build()
             .unwrap();
-        controller::on_attached(&"dl-decision-test".into(), "native-d1").unwrap();
+        controller::on_attached("dl-decision-test", "native-d1").unwrap();
 
         // stale → cancel
-        let stale = download_start_decision(
-            "dl-decision-test".into(),
-            WebviewDownloadStartRequest {
-                id: "dl-decision-test".to_owned(),
-                native_tag: "native-old".to_owned(),
-                url: "https://stale.example".to_owned(),
-                temp_path: None,
-            },
-        )
+        let stale = download_start_decision(WebviewDownloadStartRequest {
+            id: "dl-decision-test".to_owned(),
+            native_tag: "native-old".to_owned(),
+            url: "https://stale.example".to_owned(),
+            temp_path: None,
+        })
         .unwrap();
         assert!(!stale.allow);
 
         // current 但无 download_start callback → cancel
-        let no_cb = download_start_decision(
-            "dl-decision-test".into(),
-            WebviewDownloadStartRequest {
-                id: "dl-decision-test".to_owned(),
-                native_tag: "native-d1".to_owned(),
-                url: "https://current.example".to_owned(),
-                temp_path: None,
-            },
-        )
+        let no_cb = download_start_decision(WebviewDownloadStartRequest {
+            id: "dl-decision-test".to_owned(),
+            native_tag: "native-d1".to_owned(),
+            url: "https://current.example".to_owned(),
+            temp_path: None,
+        })
         .unwrap();
         assert!(!no_cb.allow);
 
-        controller::on_removed(&"dl-decision-test".into(), "native-d1").unwrap();
+        controller::on_removed("dl-decision-test", "native-d1").unwrap();
 
         // 注册 callback → allow 透传
         WebviewCallbacksBuilder::new("dl-allow-test")
@@ -813,20 +756,17 @@ mod tests {
             })
             .build()
             .unwrap();
-        controller::on_attached(&"dl-allow-test".into(), "native-d2").unwrap();
-        let allowed = download_start_decision(
-            "dl-allow-test".into(),
-            WebviewDownloadStartRequest {
-                id: "dl-allow-test".to_owned(),
-                native_tag: "native-d2".to_owned(),
-                url: "https://dl.example/file".to_owned(),
-                temp_path: None,
-            },
-        )
+        controller::on_attached("dl-allow-test", "native-d2").unwrap();
+        let allowed = download_start_decision(WebviewDownloadStartRequest {
+            id: "dl-allow-test".to_owned(),
+            native_tag: "native-d2".to_owned(),
+            url: "https://dl.example/file".to_owned(),
+            temp_path: None,
+        })
         .unwrap();
         assert!(allowed.allow);
         assert_eq!(allowed.temp_path.as_deref(), Some("/tmp/dl.bin"));
-        controller::on_removed(&"dl-allow-test".into(), "native-d2").unwrap();
+        controller::on_removed("dl-allow-test", "native-d2").unwrap();
     }
 
     #[test]
@@ -838,7 +778,7 @@ mod tests {
             .on_navigation_request(|_| false)
             .build()
             .unwrap();
-        controller::on_attached(&"nw-decision-test".into(), "native-n1").unwrap();
+        controller::on_attached("nw-decision-test", "native-n1").unwrap();
 
         let mk = |tag: &str| WebviewNewWindowRequest {
             id: "nw-decision-test".to_owned(),
@@ -849,25 +789,17 @@ mod tests {
         };
 
         // stale → 拒绝
-        assert!(
-            !new_window_decision("nw-decision-test".into(), mk("native-old"))
-                .unwrap()
-                .allow
-        );
+        assert!(!new_window_decision(mk("native-old")).unwrap().allow);
         // current 但无 new_window callback → 拒绝
-        assert!(
-            !new_window_decision("nw-decision-test".into(), mk("native-n1"))
-                .unwrap()
-                .allow
-        );
-        controller::on_removed(&"nw-decision-test".into(), "native-n1").unwrap();
+        assert!(!new_window_decision(mk("native-n1")).unwrap().allow);
+        controller::on_removed("nw-decision-test", "native-n1").unwrap();
 
         // 注册 callback → 放行
         WebviewCallbacksBuilder::new("nw-allow-test")
             .on_new_window_request(|_| true)
             .build()
             .unwrap();
-        controller::on_attached(&"nw-allow-test".into(), "native-n2").unwrap();
+        controller::on_attached("nw-allow-test", "native-n2").unwrap();
         let req = WebviewNewWindowRequest {
             id: "nw-allow-test".to_owned(),
             native_tag: "native-n2".to_owned(),
@@ -875,11 +807,7 @@ mod tests {
             is_alert: false,
             is_user_trigger: true,
         };
-        assert!(
-            new_window_decision("nw-allow-test".into(), req)
-                .unwrap()
-                .allow
-        );
-        controller::on_removed(&"nw-allow-test".into(), "native-n2").unwrap();
+        assert!(new_window_decision(req).unwrap().allow);
+        controller::on_removed("nw-allow-test", "native-n2").unwrap();
     }
 }
