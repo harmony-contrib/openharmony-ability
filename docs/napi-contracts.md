@@ -164,6 +164,7 @@ platform failure policies remain in the [plugin standard](plugin-development-sta
 | `ohos.webview.ControllerRequest` | `WebviewControllerRequest` | [source](../crates/plugin-webview/src/lib.rs) |
 | `ohos.webview.CreateRequest` | `WebviewCreateRequest` | [source](../crates/plugin-webview/src/lib.rs) |
 | `ohos.webview.CreateResponse` | `WebviewCreateResponse` | [source](../crates/plugin-webview/src/lib.rs) |
+| `ohos.webview.DocumentOptionsRequest` | `WebviewDocumentOptionsRequest` | [source](../crates/plugin-webview/src/lib.rs) |
 | `ohos.webview.DownloadEndEvent` | `WebviewDownloadEndEvent` | [source](../crates/plugin-webview/src/lib.rs) |
 | `ohos.webview.DownloadStartRequest` | `WebviewDownloadStartRequest` | [source](../crates/plugin-webview/src/lib.rs) |
 | `ohos.webview.DownloadStartResponse` | `WebviewDownloadStartResponse` | [source](../crates/plugin-webview/src/lib.rs) |
@@ -393,6 +394,7 @@ defined by their linked source, not by an invented object layout.
 | `openharmony_ability_plugin_webview::WebviewControllerRequest` | `{ id: String, visible: Option<bool>, color: Option<String>, url: Option<String>, html: Option<String>, headers: Option<BTreeMap<String , String>>, zoom: Option<f64>, x: Option<f64>, y: Option<f64>, width: Option<f64>, height: Option<f64> }` | [source](../crates/plugin-webview/src/lib.rs) |
 | `openharmony_ability_plugin_webview::WebviewCreateRequest` | `{ id: String, parent_handle: Option<u32>, window_id: Option<i64>, url: Option<String>, html: Option<String>, style: WebviewStyle, javascript_enabled: Option<bool>, devtools: Option<bool>, dom_storage_access: Option<bool>, user_agent: Option<String>, autoplay: Option<bool>, initialization_scripts: Option<Vec<WebviewInitializationScript>>, headers: Option<BTreeMap<String , String>>, transparent: Option<bool>, clipboard: Option<bool>, zoom_hotkeys: Option<bool>, drag_drop_overlay: Option<bool>, https_intercept_protocol_list: Option<Vec<String>>, event_options: WebviewCallbackOptions }` | [source](../crates/plugin-webview/src/lib.rs) |
 | `openharmony_ability_plugin_webview::WebviewCreateResponse` | `{ id: String }` | [source](../crates/plugin-webview/src/lib.rs) |
+| `openharmony_ability_plugin_webview::WebviewDocumentOptionsRequest` | `{ id: String, javascript_enabled: Option<bool>, initialization_scripts: Option<Vec<WebviewInitializationScript>> }` | [source](../crates/plugin-webview/src/lib.rs) |
 | `openharmony_ability_plugin_webview::WebviewDownloadEndEvent` | `{ id: String, native_tag: String, url: String, temp_path: Option<String>, success: bool }` | [source](../crates/plugin-webview/src/lib.rs) |
 | `openharmony_ability_plugin_webview::WebviewDownloadStartRequest` | `{ id: String, native_tag: String, url: String, temp_path: Option<String> }` | [source](../crates/plugin-webview/src/lib.rs) |
 | `openharmony_ability_plugin_webview::WebviewDownloadStartResponse` | `{ allow: bool, temp_path: Option<String> }` | [source](../crates/plugin-webview/src/lib.rs) |

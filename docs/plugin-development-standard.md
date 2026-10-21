@@ -252,6 +252,7 @@ the generated declarations; a documentation diff is not a cross-language type ch
 | `ohos.webview` / 控制器 action | `ohos.webview.ControllerRequest` → `ohos.webview.Acknowledgement` / `StringResponse` / `ScriptResponse` | async / `ui-context` |
 | ohos.webview / create-native | NativeCreateRequest { targetId, webview: CreateRequest, settings: NativeSettings } → CreateResponse | async / ui-context; target ID is the non-reused Ability attachment lifetime |
 | ohos.webview / configure-native | NativeSettings { id, scrollEnabled, injectedJavascript?, htmlBaseUrl? } → Acknowledgement | async / ui-context |
+| ohos.webview / update-document-options | DocumentOptionsRequest { id, javascriptEnabled?, initializationScripts? } → Acknowledgement | async / ui-context; updates the existing controller without navigation; await before the next load; omitted fields retain values and an empty script list clears application scripts |
 | ohos.webview / go-back, go-forward, stop-loading | ControllerRequest → Acknowledgement | async / ui-context |
 | ohos.webview / native-event | NativeEvent { id, targetId, phase, url, title, loading, canGoBack, canGoForward, message?, code? } → EventAcknowledgement | scoped main-thread; target-indexed callback under Ability dispatch guard; notification failure only logged |
 | ohos.webview / native-controller-attached, native-controller-removed | NativeControllerEvent { id, targetId, nativeTag } → EventAcknowledgement | Ability target dispatch guard; attach before navigation; remove before synchronous target retirement |
