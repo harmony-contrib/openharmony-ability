@@ -102,8 +102,8 @@ pub enum Event<'a> {
     SurfaceDestroy,
     SubWindowSurfaceDestroy(i64),
     SubWindowClosed(i64),
-    /// A native editor lifetime changed independently of the render surface.
-    /// Every event invalidates previous attachments, even when readiness stays true.
+    /// A native editor lifetime changed independently of the rendering surface.
+    /// Invalidate cached attachments even when a replacement is also ready.
     TextInputReadyChanged {
         window_id: i64,
         ready: bool,
