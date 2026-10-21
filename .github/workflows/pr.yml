@@ -48,10 +48,8 @@ jobs:
 
       - name: Audio execution regressions
         env:
-          TYPESCRIPT: ${{ steps.setup-ohos.outputs.ohos-base-sdk-home }}/ets/build-tools/ets-loader/node_modules/typescript
-        run: |
-          node plugins/audio/tests/audio_plugin.cjs "$TYPESCRIPT"
-          node plugins/audio/tests/player_session.cjs "$TYPESCRIPT"
+          OHOS_SDK_HOME: ${{ steps.setup-ohos.outputs.ohos-base-sdk-home }}
+        run: node --test plugins/audio/tests/*.cjs
 
       - name: Format and lint
         run: npm run prek -- --all-files

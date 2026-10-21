@@ -3,7 +3,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const ts = require(process.argv[2] || "typescript");
+const { test } = require("node:test");
+const sdk = process.env.OHOS_SDK_HOME;
+if (!sdk) throw new Error("Set OHOS_SDK_HOME to the SDK directory containing ets/.");
+const ts = require(path.join(sdk, "ets/build-tools/ets-loader/node_modules/typescript"));
 const source = fs.readFileSync(path.join(__dirname, "../src/main/ets/player_session.ets"), "utf8");
 const result = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
@@ -90,7 +93,7 @@ const fixture = (factory) => {
   );
   return { source, player, errors, session, creates: () => creates };
 };
-(async () => {
+test("audio sessions release owned sources across asynchronous lifecycle paths", async () => {
   let cases = 0;
   {
     const f = fixture();
@@ -246,7 +249,4 @@ const fixture = (factory) => {
     cases++;
   }
   console.log(JSON.stringify({ all_passed: true, lifecycle_cases: cases }));
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
 });

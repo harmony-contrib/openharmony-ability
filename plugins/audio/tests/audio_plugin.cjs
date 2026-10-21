@@ -2,7 +2,10 @@ const assert = require("node:assert/strict"),
   fs = require("node:fs"),
   path = require("node:path"),
   vm = require("node:vm");
-const ts = require(process.argv[2] || "typescript");
+const { test } = require("node:test");
+const sdk = process.env.OHOS_SDK_HOME;
+if (!sdk) throw new Error("Set OHOS_SDK_HOME to the SDK directory containing ets/.");
+const ts = require(path.join(sdk, "ets/build-tools/ets-loader/node_modules/typescript"));
 const settle = async () => {
   for (let i = 0; i < 40; i++) await Promise.resolve();
 };
@@ -155,7 +158,7 @@ const request = (plugin, changes = {}) =>
     },
     context,
   );
-(async () => {
+test("audio plugin owns SDK descriptors without reverse bridge events", async () => {
   let cases = 0;
   const plugin = new AudioPlugin();
   const accepted = request(plugin, { replace: true, sourceFd: 81, volume: 0.25 });
@@ -352,7 +355,4 @@ const request = (plugin, changes = {}) =>
       closed: closed.length,
     }),
   );
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
 });

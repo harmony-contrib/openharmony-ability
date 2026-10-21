@@ -29,13 +29,12 @@ for playback logging, seek, volume, or position changes.
 ## Execution regressions
 
 CI executes the production ArkTS plugin and lifecycle owner through the SDK's
-TypeScript compiler with controlled platform implementations:
+TypeScript compiler with controlled platform implementations. Set `OHOS_SDK_HOME`
+to the SDK directory containing `ets/`; no per-file compiler arguments or separate
+TypeScript installation are needed:
 
 ```bash
-node plugins/audio/tests/audio_plugin.cjs \
-  "$OHOS_SDK_HOME/ets/build-tools/ets-loader/node_modules/typescript"
-node plugins/audio/tests/player_session.cjs \
-  "$OHOS_SDK_HOME/ets/build-tools/ets-loader/node_modules/typescript"
+node --test plugins/audio/tests/*.cjs
 ```
 
 These tests validate ownership, ordering, cancellation/disposal, SDK failures,
