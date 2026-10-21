@@ -24,7 +24,9 @@ mod stack;
 pub use stack::{WindowStackRequest, WindowStackResponse};
 
 mod prompt;
-pub use prompt::{WindowPromptAnchor, WindowPromptRequest, WindowPromptResponse};
+pub use prompt::{
+    WindowPromptAnchor, WindowPromptAppearance, WindowPromptRequest, WindowPromptResponse,
+};
 
 pub struct WindowBridgePlugin;
 

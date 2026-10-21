@@ -50,6 +50,13 @@ Run `npm run format` to format Rust and ArkTS sources. Git hooks run formatting 
 lint checks through prek; CI runs prek for all files and Rust clippy for each
 supported OpenHarmony target.
 
+CI's compile SDK baseline is OpenHarmony 7.0 (API 26), required by the opt-in
+native input features. Run `pnpm test` for SDK-backed Node regressions and
+`pnpm run test:contracts` for host-safe Rust tooling tests and the generated
+[N-API inventory](docs/napi-contracts.md) diff. Plugin tests are cross-compiled
+with the SDK linker, not executed on a non-OHOS host; see the
+[CI and native capability baseline](docs/native-capabilities.md#ci-sdk-and-test-baseline).
+
 ## Usage
 
 1. Add Rust dependencies:
@@ -123,41 +130,3 @@ Register the standalone plugin factories in the Ability's `bridgePlugins` array.
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
-
-
-## Desktop runtime adaptation
-
-The runtime supports independently managed window Abilities, window-owned
-native menus and prompts, per-window IME ownership, synchronous content focus,
-and cancellation when windows or bridge sessions are destroyed. Keyboard input
-readiness is independent of rendering Surface creation. Applications opting into
-these paths must update their native render exports and ArkTS runtime together.
-
-Independent window recovery delegates to `NativeWindowAbility.restoreApplication(want)`;
-hosts may override it to restore their own document or workspace. The default
-forwards the launch Want to the application's entry Ability. Window teardown
-notifies its creating native module, and close interceptors have independent
-registrations even when modules share an Ability session.
-
-Fullscreen and maximized Ability windows retain system-managed geometry.
-`focusOnShow` is only guaranteed for child windows by the SDK; it cannot promise
-non-activating launches of independent UIAbility main windows. These capabilities
-must be verified separately from successful creation or parameter delivery.
-
-`MenuPlugin({ showMenuBar: false, handleKeyboardShortcuts: false })` retains native
-popups while leaving menu placement and contextual accelerators to the application.
-Interactive prompts and permission requests use `BridgeCallOptions::for_user_interaction()`;
-session teardown still cancels them. The files plugin supports `open-mixed` and an
-optional `parentWindowId`. Explicit clipboard reads can request permission after a
-denied read; background refreshes never open permission UI.
-
-Run SDK-backed runtime checks with Node 22+:
-
-```sh
-OHOS_SDK_HOME=/path/to/openharmony node --test scripts/runtime-regressions.cjs
-python3 scripts/keyboard-focus-regressions.py
-```
-
-These host checks substitute native APIs and do not establish device timing.
-Task-center close/restore and input typed during creation of another window still
-require further work; this adaptation does not claim complete desktop parity.

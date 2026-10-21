@@ -494,7 +494,7 @@ struct FloatPage {
       // Menu key handling — clipboard / zoom shortcut blocking per window
       // flags, accelerator dispatch, ESC fullscreen recover — lives in the
       // menu plugin's MenuBarPort implementation (MenuBarSlot.ets seam).
-      const menuPort = getMenuBarPort();
+      const menuPort = getMenuBarPort(arkWindow.findWindow(this.getUIContext().getWindowName()));
       if (menuPort !== null && menuPort.onKeyPreIme(event, this.windowId)) {
         return true;
       }

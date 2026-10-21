@@ -196,7 +196,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ::openharmony_ability::attach_bridge_session(env, bindings, &bridge_owner, &APP)?;
                 let mut bridge_guard = BridgeSessionInitGuard::new(bridge_owner);
                 (*APP).set_init_context(init_context);
-                // A native module can outlive one UIAbility instance. Configure its process-wide
+                // A native module can outlive one UIAbility instance. Configure its module-local
                 // Rust plugin registry exactly once, while still refreshing the per-session init
                 // context and lifecycle handle on every Ability recreation.
                 APP_CONFIGURED.get_or_init(|| #fn_name((*APP).clone()));

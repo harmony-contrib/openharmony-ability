@@ -1,100 +1,41 @@
 import { MenuItemData } from "./menu_types";
-import { AcceleratorMatcher, unregisterAcceleratorMatcher } from "./accelerator_matcher";
+import {
+  AcceleratorMatcher,
+  getAcceleratorMatcher,
+  unregisterAcceleratorMatcher,
+} from "./accelerator_matcher";
 import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
-import { FrameNode, SymbolGlyphModifier } from "@kit.ArkUI";
+import { FrameNode, SymbolGlyphModifier, window } from "@kit.ArkUI";
+import { menuKeyForWindow } from "@ohos-rs/ability";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { deviceInfo, systemDateTime } from "@kit.BasicServicesKit";
 
-// --- Per-window click handler registry (MW-1) ---
-const windowMenuClickHandlers: Map<number, (item: MenuItemData) => void> = new Map();
-let menuWillOpenHandler: ((windowId: number) => void) | null = null;
-
-export function setMenuWillOpenHandler(handler: ((windowId: number) => void) | null): void {
-  menuWillOpenHandler = handler;
-}
-
-export function setMenuClickHandler(windowId: number, handler: (item: MenuItemData) => void): void {
-  hilog.info(0x1999, "MenuBar", "setMenuClickHandler registered for windowId=%{public}d", windowId);
-  windowMenuClickHandlers.set(windowId, handler);
-}
-
-export function getMenuClickHandler(windowId: number): ((item: MenuItemData) => void) | null {
-  const handler = windowMenuClickHandlers.get(windowId) ?? null;
-  if (!handler) {
-    hilog.warn(
-      0x1999,
-      "MenuBar",
-      "getMenuClickHandler NULL for windowId=%{public}d (map size=%{public}d)",
-      windowId,
-      windowMenuClickHandlers.size,
-    );
-  }
-  return handler;
-}
-
-export function unregisterMenuClickHandler(windowId: number): void {
-  windowMenuClickHandlers.delete(windowId);
-}
-
-// --- Per-window recover function registry (MW-1) ---
-const windowRecoverFns: Map<number, () => void> = new Map();
-
-export function setMenuBarRecoverFn(windowId: number, fn: () => void): void {
-  windowRecoverFns.set(windowId, fn);
-}
-
-export function getMenuBarRecoverFn(windowId: number): (() => void) | null {
-  return windowRecoverFns.get(windowId) ?? null;
-}
-
-export function unregisterMenuBarRecoverFn(windowId: number): void {
-  windowRecoverFns.delete(windowId);
-}
-
-// --- Per-window menu data callback registry (MW-5) ---
-export interface MenuDataCallback {
-  onMenubarJson?: (json: string) => void;
-  onMenubarVisible?: (visible: boolean) => void;
-  onMenuPopup?: (json: string, x: number, y: number) => void;
-  onMenuCommands?: (items: MenuItemData[], x: number, y: number, restoreFocusId?: string) => void;
-  onMenuShown?: (shown: boolean) => void;
-  onApplicationMenu?: (
-    menuName: string | undefined,
-    x: number,
-    y: number,
-    restoreFocusId?: string,
-  ) => void;
-}
-
-const menuDataCallbacks: Map<string, MenuDataCallback> = new Map();
-
-export function registerMenuDataCallback(windowKey: string, callback: MenuDataCallback): void {
-  menuDataCallbacks.set(windowKey, callback);
-}
-
-export function getMenuDataCallback(windowKey: string): MenuDataCallback | undefined {
-  return menuDataCallbacks.get(windowKey);
-}
-
-export function unregisterMenuDataCallback(windowKey: string): void {
-  menuDataCallbacks.delete(windowKey);
-}
-
-/**
- * Converts a numeric windowId to the AppStorage key suffix.
- * windowId 0 → "main", others → string representation.
- */
-export function windowKeyForId(windowId: number): string {
-  return windowId === 0 ? "main" : String(windowId);
-}
-
-// --- Per-window menubar visibility tracker (for ESC handler in parent pages) ---
-const menubarVisibilityTracker: Map<number, boolean> = new Map();
-
-export function isMenubarVisible(windowId: number): boolean {
-  return menubarVisibilityTracker.get(windowId) ?? true;
-}
+import {
+  MenuDataCallback,
+  getMenuClickHandler,
+  notifyMenuWillOpen,
+  registerMenuDataCallback,
+  unregisterMenuDataCallback,
+  menubarVisibilityTracker,
+} from "./MenuWindowRegistry";
+export {
+  MenuDataCallback,
+  getMenuClickHandler,
+  setMenuClickHandler,
+  unregisterMenuClickHandler,
+  setMenuWillOpenHandler,
+  getMenuBarRecoverFn,
+  setMenuBarRecoverFn,
+  unregisterMenuBarRecoverFn,
+  registerMenuDataCallback,
+  getMenuDataCallback,
+  waitForMenuDataCallback,
+  cancelMenuDataWaiters,
+  unregisterMenuDataCallback,
+  windowKeyForId,
+  isMenubarVisible,
+} from "./MenuWindowRegistry";
 
 interface MenuRenderData {
   items: MenuItemData[];
@@ -104,6 +45,13 @@ interface MenuRenderData {
 @Component
 export struct MenuBarComponent {
   @Prop windowId: number = 0;
+  @Prop menuKey: string = "";
+  private menuCallback?: MenuDataCallback;
+  private hostMenuKey: string = "";
+
+  private registryKey(): string {
+    return this.menuKey || this.hostMenuKey;
+  }
   @Prop showMenuBar: boolean = true;
   /** Shared AcceleratorMatcher instance — the parent (this package's slot
    *  builder, see MenuPlugin.ets) passes the per-window registry instance from
@@ -351,7 +299,7 @@ export struct MenuBarComponent {
                     }
                     this.menuShown = false;
                     this.activeDropdownShown = false;
-                    const handler = getMenuClickHandler(this.windowId);
+                    const handler = getMenuClickHandler(this.registryKey());
                     if (handler) {
                       handler(item);
                     }
@@ -377,7 +325,7 @@ export struct MenuBarComponent {
                 .selectIcon(true)
                 .onChange((checked: boolean) => {
                   item.checked = checked;
-                  const handler = getMenuClickHandler(this.windowId);
+                  const handler = getMenuClickHandler(this.registryKey());
                   if (handler) {
                     handler(item);
                   }
@@ -394,7 +342,7 @@ export struct MenuBarComponent {
               }
               .enabled(item.enabled ?? true)
               .onClick(() => {
-                const handler = getMenuClickHandler(this.windowId);
+                const handler = getMenuClickHandler(this.registryKey());
                 if (handler) {
                   handler(item);
                 }
@@ -409,7 +357,7 @@ export struct MenuBarComponent {
               })
                 .enabled(item.enabled ?? true)
                 .onClick(() => {
-                  const handler = getMenuClickHandler(this.windowId);
+                  const handler = getMenuClickHandler(this.registryKey());
                   hilog.info(
                     0x1999,
                     "MenuBar",
@@ -558,7 +506,7 @@ export struct MenuBarComponent {
             // Validation covers the whole menubar and requires the application's focus.
             // Switching an open menu must retain that snapshot while ArkUI owns focus.
             if (!this.activeDropdownShown && !pressedDuringDismissal) {
-              menuWillOpenHandler?.(this.windowId);
+              notifyMenuWillOpen(this.windowId, this.registryKey());
             }
             this.activeDropdownId = itemId;
             this.activeDropdownShown = true;
@@ -577,16 +525,16 @@ export struct MenuBarComponent {
               showInSubWindow: false,
               transition: TransitionEffect.IDENTITY.animation({ duration: 0 }),
               aboutToAppear: () => this.observeDropdownMouse(itemId),
-              onDidAppear: () => {
+              onAppear: () => {
                 this.observeDropdownMouse(itemId);
                 this.focusDropdown(itemId);
               },
-              aboutToDisappear: () => this.releaseDropdownMouse(itemId),
-              onWillDisappear: () => {
+              aboutToDisappear: () => {
+                this.releaseDropdownMouse(itemId);
                 hilog.info(
                   0x1999,
                   "MenuBar",
-                  "onWillDisappear activeId=%{public}s",
+                  "aboutToDisappear activeId=%{public}s",
                   this.activeDropdownId,
                 );
                 if (this.activeDropdownId === itemId) {
@@ -598,7 +546,7 @@ export struct MenuBarComponent {
                   this.activeDropdownShown = false;
                 }
               },
-              onDidDisappear: () => {
+              onDisappear: () => {
                 if (!this.activeDropdownShown && this.activeDropdownId === itemId) {
                   this.activeDropdownId = "";
                 }
@@ -747,16 +695,21 @@ export struct MenuBarComponent {
   // --- Lifecycle ---
 
   aboutToAppear(): void {
+    if (!this.menuKey) {
+      // Direct embeddings and legacy builders still belong to their actual window.
+      this.hostMenuKey = menuKeyForWindow(window.findWindow(this.getUIContext().getWindowName()));
+      this.acceleratorMatcher = getAcceleratorMatcher(this.hostMenuKey);
+    }
     // Register callback for this window's menu data (MW-5)
-    const windowKey = windowKeyForId(this.windowId);
-    menubarVisibilityTracker.set(this.windowId, this.menubarVisible);
-    registerMenuDataCallback(windowKey, {
+    const windowKey = this.registryKey();
+    menubarVisibilityTracker.set(this.registryKey(), this.menubarVisible);
+    this.menuCallback = {
       onMenubarJson: (json: string) => {
         this.menubarJson = json;
       },
       onMenubarVisible: (visible: boolean) => {
         this.menubarVisible = visible;
-        menubarVisibilityTracker.set(this.windowId, visible);
+        menubarVisibilityTracker.set(this.registryKey(), visible);
       },
       onMenuPopup: (json: string, x: number, y: number) => {
         this.restoreFocusId = undefined;
@@ -808,7 +761,7 @@ export struct MenuBarComponent {
         ) {
           throw new Error(`Application menu '${menuName ?? "all"}' is not available`);
         }
-        menuWillOpenHandler?.(this.windowId);
+        notifyMenuWillOpen(this.windowId, this.registryKey());
         this.restoreFocusId = restoreFocusId;
         this.applicationMenu = true;
         this.commandMenu = false;
@@ -817,7 +770,8 @@ export struct MenuBarComponent {
         this.menuY = y;
         this.menuShown = true;
       },
-    });
+    };
+    registerMenuDataCallback(windowKey, this.menuCallback);
   }
 
   aboutToDisappear(): void {
@@ -827,12 +781,12 @@ export struct MenuBarComponent {
     }
     this.menubarItemAreas.clear();
     // Unregister callback and handlers for this window
-    const windowKey = windowKeyForId(this.windowId);
-    unregisterMenuDataCallback(windowKey);
-    unregisterMenuClickHandler(this.windowId);
-    unregisterMenuBarRecoverFn(this.windowId);
-    unregisterAcceleratorMatcher(this.windowId);
-    menubarVisibilityTracker.delete(this.windowId);
+    const windowKey = this.registryKey();
+    if (this.menuCallback && unregisterMenuDataCallback(windowKey, this.menuCallback)) {
+      unregisterAcceleratorMatcher(windowKey);
+      menubarVisibilityTracker.delete(windowKey);
+    }
+    this.menuCallback = undefined;
 
     // Release all icon PixelMaps
     for (const pm of this.iconPixelMaps.values()) {
@@ -850,9 +804,13 @@ export struct MenuBarComponent {
       offset: deviceInfo.sdkApiVersion >= 20 ? undefined : { x: this.menuX, y: this.menuY },
       // Otherwise the dismissing press reaches the application's trigger and reopens the menu.
       modalMode:
-        this.applicationMenu || this.commandMenu ? ModalMode.TARGET_WINDOW : ModalMode.AUTO,
+        deviceInfo.sdkApiVersion >= 20
+          ? this.applicationMenu || this.commandMenu
+            ? ModalMode.TARGET_WINDOW
+            : ModalMode.AUTO
+          : undefined,
       transition: TransitionEffect.IDENTITY.animation({ duration: 0 }),
-      onDidAppear: () => {
+      onAppear: () => {
         if (!this.menuShown) {
           return;
         }
@@ -873,7 +831,7 @@ export struct MenuBarComponent {
         this.menuShown = false;
         this.restorePopupFocus(false);
       },
-      onDidDisappear: () => {
+      onDisappear: () => {
         this.restorePopupFocus(true);
       },
     };

@@ -1,10 +1,14 @@
-// Run the actual ArkTS matcher's TypeScript subset on Node. Supply the local
-// DevEco TypeScript compiler as argv[2]; no network or generated matcher copy.
+// Run the actual ArkTS matcher with the installed SDK parser.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const ts = require(process.argv[2] || "typescript");
+const { test } = require("node:test");
+const sdk = process.env.OHOS_SDK_HOME;
+const compiler =
+  process.argv[2] || (sdk && path.join(sdk, "ets/build-tools/ets-loader/node_modules/typescript"));
+if (!compiler) throw new Error("Set OHOS_SDK_HOME to the SDK directory containing ets/.");
+const ts = require(compiler);
 const source = fs.readFileSync(
   path.join(__dirname, "../src/main/ets/accelerator_matcher.ets"),
   "utf8",
@@ -50,12 +54,6 @@ const owned = {
   accelerator: "Ctrl+Shift+Super+right",
   acceleratorDisplayOnly: true,
 };
-let count = 0;
-function test(name, body) {
-  body();
-  ++count;
-  console.log(name + " passed");
-}
 test("legacy native accelerators still match and preserve modifier identity", () => {
   const matcher = new AcceleratorMatcher();
   matcher.buildFromItems([native, { ...owned, acceleratorDisplayOnly: false }]);
@@ -100,10 +98,3 @@ test("replacing native matching with renderer ownership clears stale chords", ()
   matcher.resetModifiers();
   assert.equal(matcher.matches(key(2015, ["Ctrl", "Shift"])), false);
 });
-console.log(
-  JSON.stringify({
-    passed: count,
-    scope:
-      "Actual ArkTS matcher; renderer ownership, native default/false, nested items, replacement and independent Ctrl/Super",
-  }),
-);

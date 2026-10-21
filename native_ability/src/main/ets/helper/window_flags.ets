@@ -1,3 +1,12 @@
+import type { window } from "@kit.ArkUI";
+
+interface WindowKeyboardFlags {
+  clipboard?: boolean;
+  zoomHotkeys?: boolean;
+}
+
+const nativeWindowFlags: WeakMap<window.Window, WindowKeyboardFlags> = new WeakMap();
+
 // Per-window webview feature flags. This state is window-builder configuration
 // (WebviewWindowBuilder::with_clipboard / with_zoom_hotkeys), not menu behavior,
 // so it stays with the core window layer: WindowManager.setWebviewFlags is the
@@ -14,17 +23,24 @@
 // See ohos-webview-flag-clipboard spec.
 const clipboardEnabledMap: Map<number, boolean> = new Map();
 
-export function setClipboardEnabled(windowId: number, enabled: boolean): void {
-  clipboardEnabledMap.set(windowId, enabled);
+export function setClipboardEnabled(windowId: number, enabled: boolean, win?: window.Window): void {
+  if (win) {
+    const flags: WindowKeyboardFlags = nativeWindowFlags.get(win) ?? {};
+    flags.clipboard = enabled;
+    nativeWindowFlags.set(win, flags);
+  } else clipboardEnabledMap.set(windowId, enabled);
 }
 
-export function isClipboardEnabled(windowId: number): boolean {
+export function isClipboardEnabled(windowId: number, win?: window.Window): boolean {
   // Default true (ArkWeb native clipboard) when not explicitly set.
-  return clipboardEnabledMap.get(windowId) ?? true;
+  return (win ? nativeWindowFlags.get(win)?.clipboard : clipboardEnabledMap.get(windowId)) ?? true;
 }
 
-export function clearClipboardEnabled(windowId: number): void {
-  clipboardEnabledMap.delete(windowId);
+export function clearClipboardEnabled(windowId: number, win?: window.Window): void {
+  if (win) {
+    const flags = nativeWindowFlags.get(win);
+    if (flags) flags.clipboard = undefined;
+  } else clipboardEnabledMap.delete(windowId);
 }
 
 // Per-window zoom-hotkeys flag: windowId -> enabled (default true = ArkWeb native).
@@ -36,19 +52,36 @@ const zoomHotkeysEnabledMap: Map<number, boolean> = new Map();
 // WindowManager records defaults even when a WebView omits its flags. Native
 // windows have no entries. Like the flags themselves, this policy lasts until
 // window teardown and is shared by WebViews in the same window.
-export function hasWebviewKeyboardPolicy(windowId: number): boolean {
+export function hasWebviewKeyboardPolicy(windowId: number, win?: window.Window): boolean {
+  if (win) {
+    const flags = nativeWindowFlags.get(win);
+    return flags?.clipboard !== undefined || flags?.zoomHotkeys !== undefined;
+  }
   return clipboardEnabledMap.has(windowId) || zoomHotkeysEnabledMap.has(windowId);
 }
 
-export function setZoomHotkeysEnabled(windowId: number, enabled: boolean): void {
-  zoomHotkeysEnabledMap.set(windowId, enabled);
+export function setZoomHotkeysEnabled(
+  windowId: number,
+  enabled: boolean,
+  win?: window.Window,
+): void {
+  if (win) {
+    const flags: WindowKeyboardFlags = nativeWindowFlags.get(win) ?? {};
+    flags.zoomHotkeys = enabled;
+    nativeWindowFlags.set(win, flags);
+  } else zoomHotkeysEnabledMap.set(windowId, enabled);
 }
 
-export function isZoomHotkeysEnabled(windowId: number): boolean {
+export function isZoomHotkeysEnabled(windowId: number, win?: window.Window): boolean {
   // Default true (ArkWeb native zoom) when not explicitly set.
-  return zoomHotkeysEnabledMap.get(windowId) ?? true;
+  return (
+    (win ? nativeWindowFlags.get(win)?.zoomHotkeys : zoomHotkeysEnabledMap.get(windowId)) ?? true
+  );
 }
 
-export function clearZoomHotkeysEnabled(windowId: number): void {
-  zoomHotkeysEnabledMap.delete(windowId);
+export function clearZoomHotkeysEnabled(windowId: number, win?: window.Window): void {
+  if (win) {
+    const flags = nativeWindowFlags.get(win);
+    if (flags) flags.zoomHotkeys = undefined;
+  } else zoomHotkeysEnabledMap.delete(windowId);
 }
