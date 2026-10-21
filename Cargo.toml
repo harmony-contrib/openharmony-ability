@@ -44,15 +44,15 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393" }
-ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393", features = ["multi_mode", "accessibility", "api-15"] }
-ohos-udmf-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393", features = ["api-13"] }
-ohos-ime-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393" }
-ohos-web-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393" }
-ohos-display-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393" }
-ohos-resource-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393" }
-ohos-hilog-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393" }
-ohos-window-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "ca5326134ac03d49354c3c862d1a2884d7f6e393" }
+ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70" }
+ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70", features = ["multi_mode", "accessibility", "api-15"] }
+ohos-udmf-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70", features = ["api-13"] }
+ohos-ime-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70" }
+ohos-web-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70" }
+ohos-display-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70" }
+ohos-resource-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70" }
+ohos-hilog-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70" }
+ohos-window-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "6922af6454bc5f2789befd356c6527aaffb75a70" }
 
 # Bridge runtime and examples use these without pinning versions in member manifests.
 futures-channel = { version = "0.3" }
