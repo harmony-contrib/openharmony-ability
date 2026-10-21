@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Breaking**: native ArkUI keys are delivered once through the shared input/wake
+  FIFO as `ArkUiInputEvent::Key`, with `KeyboardEventData::ime_consumed`; remove
+  `KeyPreIme`, `KeyboardEventResponse`, timestamp deduplication and synchronous
+  foreground-task draining from consumers. Legacy raw keys remain post-IME-only.
+- Queue IME edits with per-editor `Arc` owner tokens and report
+  `Event::TextInputReadyChanged` independently of render surfaces. Ability owns
+  UI-thread attachment transfer and uses the thin native IME binding without
+  background attachment workers or a binding session registry.
+- Make render `platformWindowId` optional, with zero selecting main; unavailable
+  main-window lookup no longer prevents native rendering.
 - Match native styling for sub-window title bars, with system theme colors, focus feedback
   and decoration-button availability.
 - Fix the Float-window restore button for apps targeting API 12/13.

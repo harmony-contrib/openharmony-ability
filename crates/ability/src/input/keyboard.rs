@@ -2,11 +2,6 @@
 use ohos_arkui_binding::event::{KeyEvent, KeyEventType};
 #[cfg(feature = "keyboard")]
 use ohos_xcomponent_binding::{Action, EventSource, KeyCode};
-#[cfg(feature = "keyboard")]
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
 
 /// Selects one keyboard stream; the same physical key is never delivered twice.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -14,7 +9,7 @@ pub enum KeyboardInputDelivery {
     /// Raw XComponent key codes, available on older systems.
     #[default]
     RawXComponent,
-    /// ArkUI keys not consumed by the IME, including Unicode and held-key state (API 14+).
+    /// Every ArkUI physical key once, with its IME disposition (API 14+).
     #[cfg(feature = "keyboard")]
     ArkUi,
 }
@@ -35,32 +30,9 @@ pub struct KeyboardEventData {
     /// Lock queries are optional on systems before API 19.
     pub caps_lock: Option<bool>,
     pub num_lock: Option<bool>,
-    /// Consume a post-IME key synchronously before its native callback returns.
-    /// Late changes to this owned reply cannot affect a later native key.
-    pub response: KeyboardEventResponse,
-}
-
-#[cfg(feature = "keyboard")]
-#[derive(Clone, Debug, Default)]
-pub struct KeyboardEventResponse(Arc<AtomicBool>);
-
-#[cfg(feature = "keyboard")]
-impl PartialEq for KeyboardEventResponse {
-    fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-}
-#[cfg(feature = "keyboard")]
-impl Eq for KeyboardEventResponse {}
-
-#[cfg(feature = "keyboard")]
-impl KeyboardEventResponse {
-    pub fn consume(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-    pub(crate) fn is_consumed(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
+    /// The transition was handled before post-IME delivery. Update held-key state,
+    /// but do not execute a shortcut or insert hardware text for a consumed key.
+    pub ime_consumed: bool,
 }
 
 #[cfg(feature = "keyboard")]
@@ -94,13 +66,18 @@ impl KeyboardEventData {
             code,
             action,
             device_id: event.device_id() as i64,
-            source: EventSource::from(u32::from(event.source())),
+            source: match u32::from(event.source()) {
+                1 => EventSource::Mouse,
+                4 => EventSource::Keyboard,
+                5 => EventSource::Joystick,
+                _ => EventSource::Unknown,
+            },
             timestamp: event.event_time(),
             unicode: event.unicode(),
             pressed_keys,
             caps_lock: locks.caps_lock,
             num_lock: locks.num_lock,
-            response: KeyboardEventResponse::default(),
+            ime_consumed: false,
         })
     }
 }

@@ -68,10 +68,7 @@ pub fn create_lifecycle_handle<'a>(
     let bridge_plugins = app.bridge_plugin_declarations()?;
     let waker_app = app.clone();
     let waker: Function<'_, (), ()> = env.create_function_from_closure("waker", move |_ctx| {
-        if let Some(ref mut h) = *waker_app.event_loop.borrow_mut() {
-            h(Event::UserEvent)
-        }
-
+        waker_app.drain_input();
         Ok(())
     })?;
 
@@ -88,7 +85,10 @@ pub fn create_lifecycle_handle<'a>(
             .write()
             .map_err(|_| napi_ohos::Error::from_reason("Failed to write WAKER"))?;
 
-        guard.replace(Arc::new(tsfn));
+        guard.replace(Arc::new(crate::waker::InputWake {
+            queue: app.input_queue.clone(),
+            callback: tsfn,
+        }));
     }
 
     let on_memory_level_app = app.clone();

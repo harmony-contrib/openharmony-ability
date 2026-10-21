@@ -2,7 +2,6 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use super::pan::PanTracker;
 
-use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
 use napi_ohos::{Env, Error, Result};
 use ohos_arkui_binding::component::attribute::{
     ArkUIAttributeBasic, ArkUICommonAttribute, ArkUIEvent, ArkUIGesture,
@@ -15,13 +14,12 @@ use ohos_arkui_binding::{
     api::node_custom_event::IntOffset, common::node::ArkUINode, types::advanced::LengthMetricUnit,
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
-use ohos_ime_binding::IME;
 use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
 
 #[cfg(feature = "keyboard")]
 use crate::KeyboardEventData;
 use crate::{
-    input, set_main_thread_env, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase,
+    set_main_thread_env, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase,
     InputEvent, KeyboardInputDelivery, OpenHarmonyApp, PanGestureEvent, PointerInputData, Rect,
     Size, SwipeGestureEvent, TapGestureEvent, XComponentInputEvent,
 };
@@ -75,14 +73,9 @@ fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
     if !app.is_render_surface_active(owner) {
         return;
     }
-    if let Some(ref mut handler) = *app.event_loop.borrow_mut() {
-        match app.render_window_id(owner) {
-            Some(0) => handler(Event::Input(event)),
-            Some(window_id) => handler(Event::SubWindowInput { window_id, event }),
-            None => {}
-        }
+    if let Some(callback) = app.input_callback(owner) {
+        callback.send(event);
     }
-    app.drain_after_input();
 }
 
 fn pointer_snapshot(
@@ -267,9 +260,9 @@ pub fn render_for_window(
     window_id: i64,
     platform_window_id: i32,
 ) -> Result<RootNode> {
-    if platform_window_id <= 0 {
+    if platform_window_id < 0 {
         return Err(Error::from_reason(
-            "Native render requires a positive platform Window ID",
+            "Native render requires a nonnegative platform Window ID (0 = main)",
         ));
     }
     set_main_thread_env(*env);
@@ -319,29 +312,6 @@ pub fn render_for_window(
     let on_surface_created_app = app.clone();
     let on_surface_created_owner = render_owner.clone();
 
-    let (
-        insert_text_callback_tsfn,
-        on_ime_hide_callback_tsfn,
-        on_backspace_callback_tsfn,
-        on_ime_enter_callback_tsfn,
-        preview_callback_tsfn,
-        finish_callback_tsfn,
-        delete_forward_callback_tsfn,
-        move_cursor_callback_tsfn,
-        selection_callback_tsfn,
-        extend_action_callback_tsfn,
-    ) = input::ime_ts_fn(env, app.clone(), render_owner.clone())?;
-    let insert_text_callback_tsfn = Arc::new(insert_text_callback_tsfn);
-    let on_ime_hide_callback_tsfn = Arc::new(on_ime_hide_callback_tsfn);
-    let on_backspace_callback_tsfn = Arc::new(on_backspace_callback_tsfn);
-    let on_ime_enter_callback_tsfn = Arc::new(on_ime_enter_callback_tsfn);
-    let preview_callback_tsfn = Arc::new(preview_callback_tsfn);
-    let finish_callback_tsfn = Arc::new(finish_callback_tsfn);
-    let delete_forward_callback_tsfn = Arc::new(delete_forward_callback_tsfn);
-    let move_cursor_callback_tsfn = Arc::new(move_cursor_callback_tsfn);
-    let selection_callback_tsfn = Arc::new(selection_callback_tsfn);
-    let extend_action_callback_tsfn = Arc::new(extend_action_callback_tsfn);
-
     xcomponent.on_surface_created(move |xc_raw, win| {
         // NDK callback boundary: a panic here aborts the process (no unwinding
         // across "extern C"). Degrade to 0x0 + warn instead (issue #87 minor-2);
@@ -374,71 +344,8 @@ pub fn render_for_window(
 
         created_pan_tracker.borrow_mut().reset();
 
-        // We need to create IME instance when app is focused.
-        let ime = IME::new_for_window(Default::default(), platform_window_id);
-
-        {
-            let insert_text_callback_tsfn = insert_text_callback_tsfn.clone();
-            let on_ime_hide_callback_tsfn = on_ime_hide_callback_tsfn.clone();
-            let on_backspace_callback_tsfn = on_backspace_callback_tsfn.clone();
-            let on_ime_enter_callback_tsfn = on_ime_enter_callback_tsfn.clone();
-            let preview_callback_tsfn = preview_callback_tsfn.clone();
-            let finish_callback_tsfn = finish_callback_tsfn.clone();
-            let delete_forward_callback_tsfn = delete_forward_callback_tsfn.clone();
-            let move_cursor_callback_tsfn = move_cursor_callback_tsfn.clone();
-            let selection_callback_tsfn = selection_callback_tsfn.clone();
-            let extend_action_callback_tsfn = extend_action_callback_tsfn.clone();
-
-            // // run in other thread
-            ime.insert_text(move |s| {
-                insert_text_callback_tsfn.call(s, NonBlocking);
-            });
-            ime.on_status_change(move |s| {
-                on_ime_hide_callback_tsfn.call(s.into(), NonBlocking);
-            });
-            ime.on_backspace(move |len| {
-                on_backspace_callback_tsfn.call(len, NonBlocking);
-            });
-            ime.on_delete_forward(move |len| {
-                delete_forward_callback_tsfn.call(len, NonBlocking);
-            });
-            ime.on_move_cursor(move |direction| {
-                move_cursor_callback_tsfn.call(u32::from(direction) as i32, NonBlocking);
-            });
-            ime.on_set_selection(move |selection| {
-                selection_callback_tsfn.call(
-                    input::SelectionEventData {
-                        start: selection.start,
-                        end: selection.end,
-                    },
-                    NonBlocking,
-                );
-            });
-            ime.on_extend_action(move |action| {
-                extend_action_callback_tsfn.call(u32::from(action) as i32, NonBlocking);
-            });
-            ime.on_enter(move |key| {
-                on_ime_enter_callback_tsfn.call(u32::from(key) as i32, NonBlocking);
-            });
-            ime.on_preview(move |text, start, end| {
-                preview_callback_tsfn.call(
-                    input::PreviewTextEventData { text, start, end },
-                    NonBlocking,
-                );
-            });
-            ime.on_finish_preview(move || {
-                finish_callback_tsfn.call(true, NonBlocking);
-            });
-        }
-
-        if window_id == 0 {
-            *on_surface_created_app.ime.borrow_mut() = Some(ime);
-        } else {
-            on_surface_created_app
-                .sub_ime
-                .borrow_mut()
-                .insert(window_id, ime);
-        }
+        on_surface_created_app
+            .initialize_render_input(&on_surface_created_owner, platform_window_id)?;
 
         {
             if let Some(ref mut h) = *on_surface_created_app.event_loop.borrow_mut() {
@@ -549,29 +456,18 @@ pub fn render_for_window(
             xcomponent_native.on_key_pre_ime(move |event| {
                 if let Some(input) = event.key_event() {
                     if let Some(data) = KeyboardEventData::from_key_callback(&input) {
-                        dispatch_input(
-                            &pre_ime_app,
-                            &pre_ime_owner,
-                            InputEvent::ArkUi(ArkUiInputEvent::KeyPreIme(data)),
-                        );
+                        if let Some(callback) = pre_ime_app.input_callback(&pre_ime_owner) {
+                            callback.key(data);
+                        }
                     }
                 }
                 // Keep system shortcuts and IME processing intact.
                 None
             });
             xcomponent_native.on_key_event(move |event| {
-                if let Some(input) = event.key_event() {
-                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
-                        let response = data.response.clone();
-                        dispatch_input(
-                            &on_key_event_app,
-                            &on_key_event_owner,
-                            InputEvent::ArkUi(ArkUiInputEvent::Key(data)),
-                        );
-                        if response.is_consumed() {
-                            input.set_consumed(true);
-                            input.stop_propagation(true);
-                        }
+                if event.key_event().is_some() {
+                    if let Some(callback) = on_key_event_app.input_callback(&on_key_event_owner) {
+                        callback.after_ime();
                     }
                 }
             });
@@ -748,6 +644,7 @@ pub fn render_for_window(
 
     xcomponent.register_callback()?;
 
+    app.initialize_render_input(&render_owner, platform_window_id)?;
     root.mount(xcomponent_native)
         .map_err(|error| Error::from_reason(error.reason.to_string()))?;
     render_guard.disarm();

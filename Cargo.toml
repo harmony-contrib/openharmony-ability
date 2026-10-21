@@ -47,7 +47,8 @@ proc-macro2 = { version = "1.0" }
 ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "2323eef66b8a1c22781eb1a97f13af9f86a78555" }
 ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "2323eef66b8a1c22781eb1a97f13af9f86a78555", features = ["multi_mode", "accessibility", "api-15"] }
 ohos-udmf-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "2323eef66b8a1c22781eb1a97f13af9f86a78555", features = ["api-13"] }
-ohos-ime-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "2323eef66b8a1c22781eb1a97f13af9f86a78555" }
+# Thin IME API; unify the remaining bindings after the native attachment migration.
+ohos-ime-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "c7a41783c87ed22bb363491a77b9f3db3a6baa8f" }
 ohos-web-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "2323eef66b8a1c22781eb1a97f13af9f86a78555" }
 ohos-display-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "2323eef66b8a1c22781eb1a97f13af9f86a78555" }
 ohos-resource-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "2323eef66b8a1c22781eb1a97f13af9f86a78555" }

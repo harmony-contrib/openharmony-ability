@@ -102,6 +102,12 @@ pub enum Event<'a> {
     SurfaceDestroy,
     SubWindowSurfaceDestroy(i64),
     SubWindowClosed(i64),
+    /// A native editor lifetime changed independently of the rendering surface.
+    /// Invalidate cached attachments even when a replacement is also ready.
+    TextInputReadyChanged {
+        window_id: i64,
+        ready: bool,
+    },
     /// surface input event
     /// IME
     Input(InputEvent),
@@ -152,6 +158,7 @@ impl<'a> Event<'a> {
             Event::SurfaceDestroy => "SurfaceDestroy",
             Event::SubWindowSurfaceDestroy(_) => "SubWindowSurfaceDestroy",
             Event::SubWindowClosed(_) => "SubWindowClosed",
+            Event::TextInputReadyChanged { .. } => "TextInputReadyChanged",
             Event::Input(_) => "Input",
             Event::SubWindowInput { .. } => "SubWindowInput",
             Event::UserEvent => "UserEvent",
