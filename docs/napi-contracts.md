@@ -75,28 +75,10 @@ platform failure policies remain in the [plugin standard](plugin-development-sta
 | `ohos.autostart.EnableRequest` | `AutostartEnableRequest` | [source](../crates/plugin-autostart/src/lib.rs) |
 | `ohos.autostart.IsEnabledRequest` | `AutostartIsEnabledRequest` | [source](../crates/plugin-autostart/src/lib.rs) |
 | `ohos.autostart.IsEnabledResponse` | `AutostartIsEnabledResponse` | [source](../crates/plugin-autostart/src/lib.rs) |
-| `ohos.clipboard.ChangedEvent` | `ClipboardChangedEvent` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.ClearRequest` | `ClipboardClearRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.ClearResponse` | `ClipboardClearResponse` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `ohos.clipboard.MimeContent` | `ClipboardMimeContent` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.ReadAuthorizedRecordsRequest` | `ClipboardReadAuthorizedRecordsRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `ohos.clipboard.ReadContentResponse` | `ClipboardReadContentResponse` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.ReadMimeRequest` | `ClipboardReadMimeRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `ohos.clipboard.ReadMimeResponse` | `ClipboardReadMimeResponse` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.ReadRecordsResponse` | `ClipboardReadRecordsResponse` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.ReadTextRequest` | `ClipboardReadTextRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.ReadTextResponse` | `ClipboardReadTextResponse` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `ohos.clipboard.Record` | `ClipboardRecord` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteEncodedImageRequest` | `ClipboardWriteEncodedImageRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteHtmlRequest` | `ClipboardWriteHtmlRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteHtmlResponse` | `ClipboardWriteHtmlResponse` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteImageRequest` | `ClipboardWriteImageRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteImageResponse` | `ClipboardWriteImageResponse` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteMimeRequest` | `ClipboardWriteMimeRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteRecordsRequest` | `ClipboardWriteRecordsRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteTextRequest` | `ClipboardWriteTextRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteTextResponse` | `ClipboardWriteTextResponse` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `ohos.clipboard.WriteUrisRequest` | `ClipboardWriteUrisRequest` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `ohos.deep-link.GetUriRequest` | `DeepLinkGetUriRequest` | [source](../crates/plugin-deep-link/src/lib.rs) |
 | `ohos.deep-link.GetUriResponse` | `DeepLinkGetUriResponse` | [source](../crates/plugin-deep-link/src/lib.rs) |
 | `ohos.fault-injection.Ack` | `FaultInjectionAck` | [source](../crates/plugin-fault-injection/src/lib.rs) |
@@ -246,8 +228,10 @@ platform failure policies remain in the [plugin standard](plugin-development-sta
 
 Includes nested objects without an independent bridge name. Fields and types are
 Rust declarations; N-API maps snake_case to camelCase unless an explicit JS name is
-shown. Handwritten native-object conversions (for example `ResourceManagerRef`)
-are defined by their linked source, not by an invented object layout.
+shown. A marker layout is not the entire callback payload when its methods read
+additional borrowed platform objects; see the explicit object reads below.
+Handwritten native-object conversions (for example `ResourceManagerRef`) are
+defined by their linked source, not by an invented object layout.
 
 | Rust object | Fields | Source |
 | --- | --- | --- |
@@ -296,28 +280,10 @@ are defined by their linked source, not by an invented object layout.
 | `openharmony_ability_plugin_autostart::AutostartEnableRequest` | `{  }` | [source](../crates/plugin-autostart/src/lib.rs) |
 | `openharmony_ability_plugin_autostart::AutostartIsEnabledRequest` | `{  }` | [source](../crates/plugin-autostart/src/lib.rs) |
 | `openharmony_ability_plugin_autostart::AutostartIsEnabledResponse` | `{ enabled: bool }` | [source](../crates/plugin-autostart/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardChangedEvent` | `{  }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardClearRequest` | `{  }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardClearResponse` | `{ accepted: bool }` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `openharmony_ability_plugin_clipboard::ClipboardMimeContent` | `{ mime: String, data: Vec<u8> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardReadAuthorizedRecordsRequest` | `{  }` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `openharmony_ability_plugin_clipboard::ClipboardReadContentResponse` | `{ text: Option<String>, png: Option<Vec<u8>>, uris: Vec<String> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardReadMimeRequest` | `{ mimes: Vec<String>, list: bool }` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `openharmony_ability_plugin_clipboard::ClipboardReadMimeResponse` | `{ contents: Vec<ClipboardMimeContent>, available: Vec<String> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardReadRecordsResponse` | `{ records: Vec<ClipboardRecord> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardReadTextRequest` | `{  }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardReadTextResponse` | `{ text: Option<String> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `openharmony_ability_plugin_clipboard::ClipboardRecord` | `{ text: Option<String>, metadata: Option<String>, encoded_image: Option<Vec<u8>>, uri: Option<String> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteEncodedImageRequest` | `{ bytes: Vec<u8> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteHtmlRequest` | `{ html: String }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteHtmlResponse` | `{ accepted: bool }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteImageRequest` | `{ rgba: Vec<u8>, width: u32, height: u32 }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteImageResponse` | `{ accepted: bool }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteMimeRequest` | `{ contents: Vec<ClipboardMimeContent> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteRecordsRequest` | `{ records: Vec<ClipboardRecord> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteTextRequest` | `{ text: String }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteTextResponse` | `{ accepted: bool }` | [source](../crates/plugin-clipboard/src/lib.rs) |
-| `openharmony_ability_plugin_clipboard::ClipboardWriteUrisRequest` | `{ uris: Vec<String> }` | [source](../crates/plugin-clipboard/src/lib.rs) |
 | `openharmony_ability_plugin_deep_link::DeepLinkGetUriRequest` | `{  }` | [source](../crates/plugin-deep-link/src/lib.rs) |
 | `openharmony_ability_plugin_deep_link::DeepLinkGetUriResponse` | `{ uri: Option<String> }` | [source](../crates/plugin-deep-link/src/lib.rs) |
 | `openharmony_ability_plugin_fault_injection::FaultInjectionAck` | `{ accepted: bool }` | [source](../crates/plugin-fault-injection/src/lib.rs) |
@@ -463,3 +429,14 @@ are defined by their linked source, not by an invented object layout.
 | `openharmony_ability_plugin_window::prompt::WindowPromptResponse` | `{ index: u32 }` | [source](../crates/plugin-window/src/prompt.rs) |
 | `openharmony_ability_plugin_window::stack::WindowStackRequest` | `{ display_id: i64, window_ids: Vec<i64> }` | [source](../crates/plugin-window/src/stack.rs) |
 | `openharmony_ability_plugin_window::stack::WindowStackResponse` | `{ window_ids: Vec<i64> }` | [source](../crates/plugin-window/src/stack.rs) |
+
+## Explicit object reads in named-type methods
+
+These fields are read into callback-local N-API `Object` values by the linked
+Rust methods, in addition to any owned marker fields above. This is an inventory
+of literal `.get(...)` reads, not inferred action routing or a complete wire schema.
+FrameNode/NodeContent ownership and lifetimes remain defined by the decoder and
+the plugin standard; these objects must not be moved onto workers.
+
+| Named Rust type | Method | Object field | Local Rust type | Source |
+| --- | --- | --- | --- | --- |

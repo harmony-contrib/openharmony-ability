@@ -1,3 +1,15 @@
+# Unreleased — D4 native-only clipboard (breaking)
+
+- `ClipboardPlugin` is now a no-argument registration/lifecycle identity only.
+  Remove `ClipboardPluginOptions` and move metadata configuration to Rust
+  `ClipboardClient::with_metadata_mime_type`.
+- Remove every ArkTS pasteboard action, observer, image codec and permission prompt.
+  Old clipboard actions explicitly fail instead of falling back.
+- Upgrade Rust and HAR from the same source revision. Rust uses native-only clipboard
+  APIs with typed errors, API-18 pull revision, and no automatic authorization.
+- Empty opaque representations return `ClipboardError::EmptyBinaryUnsupported`;
+  empty plain text/HTML use typed native UDS. There is no private empty-value encoding.
+
 # 1.0.0-beta.3
 
 - Introduce the `ohos.clipboard` async plugin for text, HTML, images, URI lists and ordered
