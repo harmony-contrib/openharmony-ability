@@ -10,7 +10,16 @@ default = ["log", "window"]
 log = ["dep:log"]
 window = ["dep:ohos-window-manager-binding"]
 # ArkUI keyboard snapshots and consumption are opt-in; raw XComponent keys remain available.
-keyboard = ["ohos-arkui-binding/api-14", "dep:libloading"]
+keyboard = ["ohos-arkui-binding/api-14"]
+# These features select linked NDK APIs and raise the application's minimum API.
+keyboard-focus = ["keyboard", "ohos-arkui-binding/api-15"]
+keyboard-lock-state = ["keyboard", "ohos-arkui-binding/api-19"]
+keyboard-text-input = ["keyboard", "ohos-ime-binding/api-26"]
+keyboard-focus-recovery = [
+    "keyboard-focus",
+    "dep:ohos-window-manager-binding",
+    "ohos-window-manager-binding/api-26",
+]
 # API-18 mouse cancellation is opt-in; basic XComponent mouse input remains available.
 mouse = ["ohos-xcomponent-binding/api-18", "ohos-arkui-binding/api-17"]
 stylus = ["ohos-arkui-binding/api-17"]
@@ -27,7 +36,6 @@ tokio = { workspace = true }
 png = { workspace = true }
 
 log = { version = "0.4", optional = true }
-libloading = { version = "0.8", optional = true }
 
 # for napi binding
 napi-ohos = { workspace = true, features = ["napi8"] }
@@ -36,7 +44,6 @@ napi-derive-ohos = { workspace = true }
 # for xcomponent native render
 ohos-arkui-binding = { workspace = true, features = ["napi"] }
 ohos-xcomponent-binding = { workspace = true }
-ohos-xcomponent-sys = { workspace = true }
 ohos-udmf-binding = { workspace = true, optional = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }

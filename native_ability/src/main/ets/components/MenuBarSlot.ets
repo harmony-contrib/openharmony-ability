@@ -1,3 +1,5 @@
+import { window } from "@kit.ArkUI";
+
 /**
  * Core-side extension seam for the menu plugin.
  *
@@ -33,6 +35,8 @@
 /** Props passed to the registered menubar builder. */
 export interface MenuBarSlotProps {
   windowId: number;
+  /** Actual window identity; logical zero is local to each component host. */
+  menuKey?: string;
 }
 
 /** Menubar builder slot. Registered by the menu plugin at install time. */
@@ -55,10 +59,45 @@ export interface MenuBarPort {
   onMenuShown: (windowId: number, shown: boolean) => void;
   /** Clear held modifiers when key-up may be delivered to another window. */
   onWindowFocusLost?: (windowId: number) => void;
+  /** Release handlers owned by a page whose window/menu host is disappearing. */
+  onHostDisappear?: () => void;
 }
 
 let menuBarSlotBuilder: MenuBarSlotBuilder | null = null;
 let menuBarPort: MenuBarPort | null = null;
+
+interface WindowMenuBar {
+  builder: MenuBarSlotBuilder;
+  port: MenuBarPort;
+  windowId: number;
+}
+
+const windowMenuBars: Map<string, WindowMenuBar> = new Map();
+
+export function menuKeyForWindow(win: window.Window): string {
+  return `native:${win.getWindowProperties().id}`;
+}
+
+/** Register one window's presentation. A stale owner cannot remove its replacement. */
+export function registerWindowMenuBar(
+  win: window.Window,
+  builder: MenuBarSlotBuilder,
+  port: MenuBarPort,
+  windowId: number = 0,
+): () => boolean {
+  const key = menuKeyForWindow(win);
+  const registration: WindowMenuBar = { builder, port, windowId };
+  windowMenuBars.set(key, registration);
+  notifyMenuSlotChanged();
+  return (): boolean => {
+    if (windowMenuBars.get(key) !== registration) {
+      return false;
+    }
+    windowMenuBars.delete(key);
+    notifyMenuSlotChanged();
+    return true;
+  };
+}
 
 /**
  * AppStorage key bumped every time the menubar slot is registered;
@@ -67,25 +106,54 @@ let menuBarPort: MenuBarPort | null = null;
  */
 const MENU_SLOT_VERSION_KEY = "__openharmony_ability_menu_slot_version__";
 
-export function setMenuBarSlotBuilder(builder: MenuBarSlotBuilder): void {
+export function setMenuBarSlotBuilder(builder: MenuBarSlotBuilder | null): void {
   menuBarSlotBuilder = builder;
+  notifyMenuSlotChanged();
+}
+
+function notifyMenuSlotChanged(): void {
   AppStorage.setOrCreate<number>(
     MENU_SLOT_VERSION_KEY,
     (AppStorage.get<number>(MENU_SLOT_VERSION_KEY) ?? 0) + 1,
   );
 }
 
-export function getMenuBarSlotBuilder(): MenuBarSlotBuilder | null {
-  return menuBarSlotBuilder;
+export function getMenuBarSlotBuilder(win?: window.Window): MenuBarSlotBuilder | null {
+  if (win) return windowMenuBars.get(menuKeyForWindow(win))?.builder ?? menuBarSlotBuilder;
+  if (menuBarSlotBuilder) return menuBarSlotBuilder;
+  for (const registration of windowMenuBars.values()) return registration.builder;
+  return null;
 }
 
-export function setMenuBarPort(port: MenuBarPort): void {
+export function setMenuBarPort(port: MenuBarPort | null): void {
   menuBarPort = port;
 }
 
-export function getMenuBarPort(): MenuBarPort | null {
-  return menuBarPort;
+export function getMenuBarPort(win?: window.Window): MenuBarPort | null {
+  if (!win) return menuBarPort ?? (windowMenuBars.size > 0 ? legacyMenuPort : null);
+  return windowMenuBars.get(menuKeyForWindow(win))?.port ?? menuBarPort;
 }
+
+// Existing window integrations call getMenuBarPort() and supply the logical ID
+// on the port method. Keep that routing until they migrate to actual windows.
+// Ambiguous zero retains the first registered root; component callers pass win.
+function legacyWindowPort(windowId: number): MenuBarPort | undefined {
+  for (const registration of windowMenuBars.values()) {
+    if (registration.windowId === windowId) return registration.port;
+  }
+  return undefined;
+}
+
+const legacyMenuPort: MenuBarPort = {
+  onKeyPreIme: (event: KeyEvent, windowId: number): boolean =>
+    legacyWindowPort(windowId)?.onKeyPreIme(event, windowId) ?? false,
+  onMenubarVisibility: (windowId: number, visible: boolean): void =>
+    legacyWindowPort(windowId)?.onMenubarVisibility(windowId, visible),
+  onMenuShown: (windowId: number, shown: boolean): void =>
+    legacyWindowPort(windowId)?.onMenuShown(windowId, shown),
+  onWindowFocusLost: (windowId: number): void =>
+    legacyWindowPort(windowId)?.onWindowFocusLost?.(windowId),
+};
 
 /**
  * Renders the registered menubar builder slot for one window.
@@ -106,19 +174,31 @@ export struct MenuBarSlotHost {
   @Watch("onSlotRegistered")
   slotVersion: number = 0;
   @State private slot: MenuBarSlotBuilder | null = null;
+  private menuKey: string = "";
+  private hostWindow?: window.Window;
 
   aboutToAppear(): void {
-    this.slot = getMenuBarSlotBuilder();
+    this.hostWindow = window.findWindow(this.getUIContext().getWindowName());
+    this.onSlotRegistered();
   }
 
   /** Registration (or re-registration) bumped the version — refresh the slot. */
   onSlotRegistered(): void {
-    this.slot = getMenuBarSlotBuilder();
+    const win = this.hostWindow;
+    if (!win) return;
+    this.menuKey = menuKeyForWindow(win);
+    this.slot = getMenuBarSlotBuilder(win);
+  }
+
+  aboutToDisappear(): void {
+    // The native window may already be destroyed; use the identity saved at mount.
+    (windowMenuBars.get(this.menuKey)?.port ?? menuBarPort)?.onHostDisappear?.();
+    this.hostWindow = undefined;
   }
 
   build() {
     if (this.slot) {
-      this.slot.builder({ windowId: this.windowId });
+      this.slot.builder({ windowId: this.windowId, menuKey: this.menuKey });
     }
   }
 }

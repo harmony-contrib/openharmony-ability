@@ -1,14 +1,13 @@
+#[cfg(all(feature = "keyboard", not(feature = "keyboard-lock-state")))]
+use ohos_arkui_binding::event::KeyLockState;
 #[cfg(feature = "keyboard")]
-use ohos_arkui_binding::{
-    arkui_input_binding::{sys::ArkUI_UIInputEvent, ArkUIInputEvent},
-    event::{inner_event::Event, KeyEventType, KeyLockState},
-};
+use ohos_arkui_binding::event::{inner_event::Event, KeyEventType};
 #[cfg(feature = "keyboard")]
 use ohos_xcomponent_binding::{Action, EventSource, KeyCode};
 #[cfg(feature = "keyboard")]
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc, OnceLock,
+    Arc,
 };
 
 /// Selects one keyboard stream; the same physical key is never delivered twice.
@@ -21,8 +20,7 @@ pub enum KeyboardInputDelivery {
     #[cfg(feature = "keyboard")]
     ArkUi,
     /// ArkUI delivery for editors that handle all unconsumed hardware text and
-    /// function keys. Advertises this capability to the IME on API 26+; older
-    /// systems retain ordinary ArkUI delivery.
+    /// function keys. Requires the `keyboard-text-input` feature and API 26+.
     #[cfg(feature = "keyboard")]
     ArkUiWithTextInput,
 }
@@ -40,7 +38,7 @@ pub struct KeyboardEventData {
     pub unicode: u32,
     /// `None` means the system query failed, rather than no keys being held.
     pub pressed_keys: Option<Vec<KeyCode>>,
-    /// Lock queries are optional on systems before API 19.
+    /// Available with `keyboard-lock-state` (API 19+); otherwise unknown.
     pub caps_lock: Option<bool>,
     pub num_lock: Option<bool>,
     /// Consume a pre- or post-IME key synchronously before its native callback returns.
@@ -75,7 +73,6 @@ impl KeyboardEventResponse {
 impl KeyboardEventData {
     pub(crate) fn from_node_callback(node_event: &Event) -> Option<Self> {
         let event = node_event.key_event()?;
-        let native_input = node_event.input_event()?;
         let action = match event.event_type() {
             KeyEventType::Down => Action::Down,
             KeyEventType::Up => Action::Up,
@@ -99,7 +96,10 @@ impl KeyboardEventData {
                 _ => {}
             }
         }
-        let locks = KeyLockQueries::state(&native_input);
+        #[cfg(feature = "keyboard-lock-state")]
+        let locks = event.lock_state();
+        #[cfg(not(feature = "keyboard-lock-state"))]
+        let locks = KeyLockState::default();
         Some(Self {
             code,
             action,
@@ -118,68 +118,5 @@ impl KeyboardEventData {
             num_lock: locks.num_lock,
             response: KeyboardEventResponse::default(),
         })
-    }
-}
-
-#[cfg(feature = "keyboard")]
-type KeyLockQuery = unsafe extern "C" fn(*const ArkUI_UIInputEvent, *mut bool) -> u32;
-
-#[cfg(feature = "keyboard")]
-struct KeyLockQueries {
-    _library: libloading::Library,
-    caps_lock: Option<KeyLockQuery>,
-    num_lock: Option<KeyLockQuery>,
-    scroll_lock: Option<KeyLockQuery>,
-}
-
-#[cfg(feature = "keyboard")]
-impl KeyLockQueries {
-    fn state(event: &ArkUIInputEvent) -> KeyLockState {
-        static QUERIES: OnceLock<Option<KeyLockQueries>> = OnceLock::new();
-        let Some(queries) = QUERIES.get_or_init(Self::load) else {
-            return KeyLockState::default();
-        };
-        KeyLockState {
-            caps_lock: Self::query(queries.caps_lock, event),
-            num_lock: Self::query(queries.num_lock, event),
-            scroll_lock: Self::query(queries.scroll_lock, event),
-        }
-    }
-
-    fn load() -> Option<Self> {
-        // N-API modules cannot resolve these symbols through the process handle
-        // on OHOS. Keep the NDK library open for the optional API-19 queries.
-        let library = match unsafe { libloading::Library::new("libace_ndk.z.so") } {
-            Ok(library) => library,
-            Err(error) => {
-                crate::warn!("Cannot load ArkUI keyboard lock queries: {error}");
-                return None;
-            }
-        };
-        // SAFETY: native_key_event.h declares all three functions with this
-        // signature. Missing symbols on older systems leave the state unknown.
-        unsafe {
-            Some(Self {
-                caps_lock: library
-                    .get::<KeyLockQuery>(b"OH_ArkUI_KeyEvent_IsCapsLockOn\0")
-                    .ok()
-                    .map(|query| *query),
-                num_lock: library
-                    .get::<KeyLockQuery>(b"OH_ArkUI_KeyEvent_IsNumLockOn\0")
-                    .ok()
-                    .map(|query| *query),
-                scroll_lock: library
-                    .get::<KeyLockQuery>(b"OH_ArkUI_KeyEvent_IsScrollLockOn\0")
-                    .ok()
-                    .map(|query| *query),
-                _library: library,
-            })
-        }
-    }
-
-    fn query(query: Option<KeyLockQuery>, event: &ArkUIInputEvent) -> Option<bool> {
-        let mut state = false;
-        // SAFETY: the input pointer is used only within its native node callback.
-        (unsafe { query?(event.raw(), &mut state) } == 0).then_some(state)
     }
 }

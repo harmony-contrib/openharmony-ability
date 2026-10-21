@@ -3,7 +3,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const ts = require(process.argv[2] || "typescript");
+const { test } = require("node:test");
+const sdk = process.env.OHOS_SDK_HOME;
+if (!sdk) throw new Error("Set OHOS_SDK_HOME to the SDK directory containing ets/.");
+const ts = require(path.join(sdk, "ets/build-tools/ets-loader/node_modules/typescript"));
 const source = fs.readFileSync(path.join(__dirname, "../src/main/ets/player_session.ets"), "utf8");
 const result = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2021 },
@@ -90,7 +93,7 @@ const fixture = (factory) => {
   );
   return { source, player, errors, session, creates: () => creates };
 };
-(async () => {
+test("audio sessions release owned sources across asynchronous lifecycle paths", async () => {
   let cases = 0;
   {
     const f = fixture();
@@ -154,6 +157,23 @@ const fixture = (factory) => {
     cases++;
   }
   {
+    const creation = deferred();
+    const f = fixture(() => creation.promise);
+    f.player.release = () => {
+      f.player.released++;
+      return Promise.reject(new Error("late release failed"));
+    };
+    f.session.begin(Promise.resolve());
+    await settle();
+    const closing = f.session.close();
+    creation.resolve(f.player);
+    await closing;
+    assert.equal(f.player.released, 1);
+    assert.equal(f.source.closed, 1);
+    assert.match(f.errors[0], /late release failed/);
+    cases++;
+  }
+  {
     const f = fixture();
     f.session.begin(Promise.resolve());
     await settle();
@@ -185,6 +205,7 @@ const fixture = (factory) => {
     f.session.begin(Promise.resolve());
     await settle();
     assert.match(f.errors[0], /creation failed/);
+    assert.equal(f.source.closed, 1);
     await f.session.close();
     assert.equal(f.source.closed, 1);
     cases++;
@@ -222,11 +243,10 @@ const fixture = (factory) => {
     assert.deepEqual(f.errors, ["decoder failed"]);
     assert.equal(f.creates(), 1);
     assert.equal(f.player.calls.filter((c) => c[0] === "play").length, 0);
+    assert.equal(f.player.released, 1);
+    assert.equal(f.source.closed, 1);
     await f.session.close();
     cases++;
   }
   console.log(JSON.stringify({ all_passed: true, lifecycle_cases: cases }));
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
 });

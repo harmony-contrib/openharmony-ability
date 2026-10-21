@@ -126,11 +126,16 @@ async function showFileDialog(
       throw new Error("Window-owned file dialogs require API 13 or newer");
     }
     const manager = WindowManager.getInstance();
-    await manager.waitForWindowCreation(options.parentWindowId);
+    // Zero is the calling component's window, just as in the window plugin.
+    // Ability-only callers without an attached component must omit the parent.
+    const hostWindow = options.parentWindowId === 0 ? context.getWindow() : undefined;
+    if (hostWindow === undefined) {
+      await manager.waitForWindowCreation(options.parentWindowId);
+    }
     if (!context.isActive() || context.isCancelled()) {
       throw new Error("File dialog was cancelled before its parent window was ready");
     }
-    const parent = manager.getWindow(options.parentWindowId);
+    const parent = hostWindow ?? manager.getWindow(options.parentWindowId);
     if (parent === undefined) {
       throw new Error(`File dialog parent window ${options.parentWindowId} no longer exists`);
     }

@@ -28,64 +28,18 @@ const PAN_GESTURE_DISTANCE: f64 = 8.0;
 const SWIPE_GESTURE_MIN_SPEED: f64 = 100.0;
 
 #[cfg(feature = "keyboard")]
-type FocusRequest =
-    unsafe extern "C" fn(ohos_arkui_binding::arkui_input_binding::sys::ArkUI_NodeHandle) -> u32;
-
-#[cfg(feature = "keyboard")]
-struct NativeFocusRequest {
-    _library: libloading::Library,
-    request: FocusRequest,
-}
-
-#[cfg(feature = "keyboard")]
-impl NativeFocusRequest {
-    fn get() -> Result<Option<&'static Self>> {
-        static API: std::sync::OnceLock<std::result::Result<Option<NativeFocusRequest>, String>> =
-            std::sync::OnceLock::new();
-        API.get_or_init(Self::load)
-            .as_ref()
-            .map(Option::as_ref)
-            .map_err(|error| Error::from_reason(error.clone()))
-    }
-
-    fn load() -> std::result::Result<Option<Self>, String> {
-        // N-API modules cannot resolve NDK symbols through the process handle.
-        // Retain the NDK library with its optional API-15 entry point.
-        let library = unsafe { libloading::Library::new("libace_ndk.z.so") }
-            .map_err(|error| format!("Cannot load native focus API: {error}"))?;
-        // SAFETY: native_interface_focus.h declares this signature. Older images
-        // without the symbol retain the existing FocusStatus compatibility path.
-        let request = match unsafe { library.get::<FocusRequest>(b"OH_ArkUI_FocusRequest\0") } {
-            Ok(request) => *request,
-            Err(error) => {
-                crate::debug!("Native synchronous focus is unavailable: {error}");
-                return Ok(None);
-            }
-        };
-        Ok(Some(Self {
-            _library: library,
-            request,
-        }))
-    }
-}
-
-#[cfg(feature = "keyboard")]
 pub(crate) fn request_xcomponent_focus(component: &XComponent) -> Result<()> {
-    if let Some(api) = NativeFocusRequest::get()? {
-        // SAFETY: the caller retains this live component and checks its UI-thread
-        // session before invoking the helper.
-        let status = unsafe { (api.request)(component.raw().raw_handle()) };
-        if status != 0 {
-            return Err(Error::from_reason(format!(
-                "Native render surface focus failed with status {status}"
-            )));
-        }
-        Ok(())
-    } else {
+    #[cfg(feature = "keyboard-focus")]
+    {
         component
-            .set_focus_status(true)
+            .raw()
+            .request_focus()
             .map_err(|error| Error::from_reason(error.to_string()))
     }
+    #[cfg(not(feature = "keyboard-focus"))]
+    component
+        .set_focus_status(true)
+        .map_err(|error| Error::from_reason(error.to_string()))
 }
 
 struct RenderOwnerGuard {
@@ -445,7 +399,7 @@ pub fn render_for_window(
         }
 
         created_pan_tracker.borrow_mut().reset();
-        #[cfg(feature = "keyboard")]
+        #[cfg(feature = "keyboard-focus-recovery")]
         if let Err(error) = super::install_keyboard_focus_recovery(
             &on_surface_created_app,
             &on_surface_created_owner,

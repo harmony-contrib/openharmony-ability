@@ -1,4 +1,4 @@
-//! Cursor grab (mouse cursor lock) — facade over the crates.io
+//! Cursor grab (mouse cursor lock) — facade over the
 //! `ohos-window-manager-binding` crate (ohos-rs binding family).
 //!
 //! `OH_WindowManager_LockCursor` / `OH_WindowManager_UnlockCursor` are pure
@@ -6,14 +6,10 @@
 //! permission `ohos.permission.LOCK_WINDOW_CURSOR` / normal / system_grant) —
 //! no ArkTS bridge involvement. No ArkTS API exists for cursor locking.
 //!
-//! The binding crate links `libnative_window_manager.so` at load time, so the
-//! pre-binding dlopen/dlsym probe is replaced with an explicit API-version
-//! gate: below API 22 the system does not export the symbols, and calling
-//! them would abort at PLT resolution instead of returning an error — the
-//! gate is what keeps `compatibleSdkVersion` 12 builds degrading gracefully
-//! (`NotSupported`) on older devices. `version::init()` runs during ability
-//! initialization, before any bridge command — hence before any cursor-grab
-//! call — can arrive, so the gate is authoritative on the real call path.
+//! The `window` feature selects the binding's API-22 cursor functions. Callers
+//! using these functions must deploy to API 22 or newer. The runtime version
+//! guard provides a useful error once loaded; it does not guarantee that a
+//! binary linked to newer symbols can load on older devices.
 //!
 //! Ported from upstream PR#45 (50d3f00). Unlike upstream, this port takes the
 //! REAL OHOS window id directly. Upstream resolved the tao window id → real id
