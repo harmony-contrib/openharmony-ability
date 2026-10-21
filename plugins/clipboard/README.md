@@ -1,35 +1,25 @@
-# Clipboard plugin
+# Clipboard registration plugin
 
-English | [简体中文](README.zh-CN.md)
-
-## Install
-
-```bash
-ohpm install @ohos-rs/ability-plugin-clipboard
-```
-
-## Assembly
-
-Each factory must configure its text metadata MIME through the constructor options object:
+`ClipboardPlugin` retains `ohos.clipboard` / async / `["ability"]` identity for paired
+registration. All clipboard data operations use the Rust facade's native
+`OH_Pasteboard` path. The HAR contains no pasteboard import, data transport,
+permission prompt, image conversion, observer or legacy fallback.
 
 ```ts
 import { LazyPlugin } from "@ohos-rs/ability";
 import { ClipboardPlugin } from "@ohos-rs/ability-plugin-clipboard";
 
-new LazyPlugin(() => new ClipboardPlugin({ metadataMimeType: "application/x-my-app-metadata-v1" }));
+new LazyPlugin(() => new ClipboardPlugin());
 ```
 
-The instance uses this MIME for writing and reading the `metadata` field of text records.
-Writers and readers sharing custom metadata must use the same MIME. Metadata is UTF-8
-encoded with the framework's version byte, including when the metadata string is empty.
-Use a custom `type/subtype` without MIME parameters, up to 1024 ASCII characters.
-The constructor rejects platform content MIME types and the legacy unversioned metadata MIME.
+**Breaking:** remove `ClipboardPluginOptions` and the constructor options argument.
+Configure metadata in Rust using `ClipboardClient::with_metadata_mime_type`.
+All former ArkTS clipboard actions explicitly fail. Upgrade the Rust package and
+HAR from the **same source revision**; do not mix old and new data contracts.
 
-The framework provides no default MIME. Reads also accept
-`application/x-gpui-ohos-text-metadata-v1` and the original
-unversioned `application/x-gpui-ohos-text-metadata` so existing clipboard contents remain readable.
-Platform text, HTML, URI and image records use the SDK's standard content types.
+See the [Rust README](../../crates/plugin-clipboard/README.md) for MIME mapping,
+typed empty-binary errors, explicit application-owned authorization, caller-owned
+scheduling and the API-18 pull revision contract. There is no change subscription.
 
-## License
-
-Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+`pnpm test` runs production HAR/BridgeHost tests proving registration works while
+every former clipboard data action is rejected without importing platform APIs.

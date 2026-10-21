@@ -668,11 +668,7 @@ pub fn render_for_window(
         xcomponent_native.on_drag_leave(move |event| {
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Leave);
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                negotiate_drag(&drag_app, &drag_owner, snapshot);
             }
         });
         let drag_app = app.clone();
