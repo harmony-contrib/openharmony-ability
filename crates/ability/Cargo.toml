@@ -44,7 +44,8 @@ napi-derive-ohos = { workspace = true }
 # for xcomponent native render
 ohos-arkui-binding = { workspace = true, features = ["napi"] }
 ohos-xcomponent-binding = { workspace = true }
-ohos-udmf-binding = { workspace = true, optional = true }
+# D5: remove this drag-only override when the bindings release unifies ArkUI/clipboard pins.
+ohos-udmf-binding = { version = "0.0.7", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "842f4d4105b6c34a7c108d29c88d17cb496ed912", features = ["api-13"], optional = true }
 ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }

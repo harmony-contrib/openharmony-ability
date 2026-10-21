@@ -10,6 +10,11 @@ Use the Rust crate and HAR from the **same source revision**. Bindings PR
 [#187](https://github.com/ohos-rs/ohos-native-bindings/pull/187) is pinned until release;
 published pasteboard/UDMF 0.0.7 alone does not contain the required APIs.
 
+During development, clipboard uses UDMF `a5542e29` while Ability's drag path keeps
+UDMF `842f4d41` to match ArkUI's Rust types. These identities must not cross the
+facades. **D5 blocks Ability release** until the bindings release unifies the pins
+and the drag-only override is removed.
+
 ```rust
 use openharmony_ability_plugin_clipboard::{ClipboardBridgePlugin, ClipboardExt};
 

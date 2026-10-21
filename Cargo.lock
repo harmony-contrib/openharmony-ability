@@ -833,7 +833,7 @@ dependencies = [
  "ohos-display-binding",
  "ohos-ime-binding",
  "ohos-resource-manager-binding",
- "ohos-udmf-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=a5542e29d45041175942ab4044531929842359b5)",
+ "ohos-udmf-binding 0.0.7 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
  "ohos-window-manager-binding",
  "ohos-xcomponent-binding",
  "png",
