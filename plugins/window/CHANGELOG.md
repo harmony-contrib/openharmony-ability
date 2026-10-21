@@ -1,3 +1,10 @@
+# Unreleased
+
+- Add the named `set-status-bar` action for API 12, preserving navigation-bar settings
+  and awaiting native completion before acknowledgement.
+- Run status-bar targeting, validation, completion, cancellation and platform-failure
+  regression tests in PR CI.
+
 # 1.0.0-beta.3
 
 - Expand window creation/control for desktop and mobile, including display selection,

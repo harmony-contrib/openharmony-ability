@@ -49,5 +49,8 @@ jobs:
       - name: Format and lint
         run: npm run prek -- --all-files
 
+      - name: Window status-bar regression tests
+        run: node --experimental-vm-modules --test scripts/window-status-bar.test.mjs
+
       - name: Rust clippy
         run: npm run lint:rs

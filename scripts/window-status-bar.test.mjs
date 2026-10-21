@@ -204,3 +204,23 @@ test("closure after resolution or a native await stops subsequent work and ackno
   await assert.rejects(r.invoke(), /platform rejection/);
   assert.equal(r.calls.length, 0);
 });
+
+test("an inactive call is rejected before resolving or mutating a window", async () => {
+  const r = await runtime();
+  r.state.active = false;
+  r.plugin.requireWindow = () => {
+    assert.fail("cancelled calls must not resolve a window");
+  };
+  await assert.rejects(r.invoke(), /no longer active/);
+  assert.equal(r.calls.length, 0);
+});
+
+test("visibility failure propagates after colors without a successful acknowledgement", async () => {
+  const r = await runtime();
+  const failure = new Error("visibility rejected");
+  r.component.setSpecificSystemBarEnabled = async () => {
+    throw failure;
+  };
+  await assert.rejects(r.invoke(), (error) => error === failure);
+  assert.deepEqual(r.calls, [[10, "properties", { statusBarContentColor: "#ffffffff" }]]);
+});
