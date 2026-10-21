@@ -46,6 +46,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audio execution regressions
+        env:
+          TYPESCRIPT: ${{ steps.setup-ohos.outputs.ohos-base-sdk-home }}/ets/build-tools/ets-loader/node_modules/typescript
+        run: |
+          node plugins/audio/tests/audio_plugin.cjs "$TYPESCRIPT"
+          node plugins/audio/tests/player_session.cjs "$TYPESCRIPT"
+
       - name: Format and lint
         run: npm run prek -- --all-files
 

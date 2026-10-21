@@ -820,8 +820,6 @@ dependencies = [
 name = "openharmony-ability-plugin-audio"
 version = "1.0.0-beta.3"
 dependencies = [
- "libc",
- "log",
  "napi-derive-ohos",
  "napi-ohos",
  "openharmony-ability",

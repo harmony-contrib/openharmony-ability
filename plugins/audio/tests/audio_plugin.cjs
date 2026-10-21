@@ -36,8 +36,16 @@ function compile(file, imports) {
 const warnings = [],
   closed = [],
   created = [],
-  duplicates = [],
-  events = [];
+  duplicates = [];
+let nextFd = 100,
+  duplicateFailure,
+  creationFailure,
+  creationTask,
+  rendererFailure,
+  sourceFailure,
+  prepareFailure,
+  playFailure,
+  releaseFailure;
 const sessions = compile("player_session.ets", {});
 class NativePlayer {
   state = "idle";
@@ -52,10 +60,12 @@ class NativePlayer {
     this.listeners[kind]?.(value);
   }
   set fdSrc(value) {
+    if (sourceFailure) throw sourceFailure;
     this.calls.push(["source", value.fd]);
     this.emit("stateChange", "initialized");
   }
   prepare() {
+    if (prepareFailure) return Promise.reject(prepareFailure);
     this.calls.push(["prepare"]);
     this.emit("stateChange", "prepared");
     return Promise.resolve();
@@ -69,6 +79,7 @@ class NativePlayer {
     this.emit("seekDone", value);
   }
   play() {
+    if (playFailure) return Promise.reject(playFailure);
     this.calls.push(["play"]);
     this.emit("stateChange", "playing");
     return Promise.resolve();
@@ -76,25 +87,37 @@ class NativePlayer {
   release() {
     this.releases++;
     this.emit("stateChange", "released");
+    if (releaseFailure) return Promise.reject(releaseFailure);
     return this.releasePromise || Promise.resolve();
+  }
+  set audioRendererInfo(value) {
+    if (rendererFailure) throw rendererFailure;
+    this.rendererInfo = value;
   }
 }
 const { AudioPlugin } = compile("AudioPlugin.ets", {
   "@ohos.multimedia.media": {
     default: {
       createAVPlayer: () => {
+        if (creationFailure) return Promise.reject(creationFailure);
         const player = new NativePlayer();
         created.push(player);
-        return Promise.resolve(player);
+        return creationTask ? creationTask.promise.then(() => player) : Promise.resolve(player);
       },
     },
   },
   "@ohos.multimedia.audio": { default: { StreamUsage: { STREAM_USAGE_NOTIFICATION: 7 } } },
   "@ohos.file.fs": {
     default: {
-      closeSync: (fd) => {
-        assert.ok(!closed.includes(fd));
-        closed.push(fd);
+      dup: (fd) => {
+        if (duplicateFailure) throw duplicateFailure;
+        duplicates.push(fd);
+        return { fd: nextFd++ };
+      },
+      closeSync: (file) => {
+        assert.equal(typeof file.fd, "number");
+        assert.ok(!closed.includes(file.fd));
+        closed.push(file.fd);
       },
     },
   },
@@ -107,19 +130,11 @@ const { AudioPlugin } = compile("AudioPlugin.ets", {
   },
   "./player_session": sessions,
 });
-let active = true,
-  nextFd = 100;
+let active = true;
 const context = {
   isActive: () => active,
-  invokeNativeSync: (event, request, response, value) => {
-    if (event === "duplicate") {
-      assert.equal(response, "std.i32");
-      duplicates.push(value.fd);
-      return nextFd++;
-    }
-    assert.equal(event, "playback");
-    events.push(value);
-    return true;
+  invokeNativeSync: () => {
+    assert.fail("Audio must not invoke reverse bridge events");
   },
 };
 const request = (plugin, changes = {}) =>
@@ -135,7 +150,6 @@ const request = (plugin, changes = {}) =>
         volume: 0.5,
         reportErrors: true,
         label: "bell.wav",
-        diagnostics: true,
         ...changes,
       },
     },
@@ -171,8 +185,10 @@ const request = (plugin, changes = {}) =>
   await settle();
   assert.deepEqual(created[0].calls.slice(-3), [["volume", 0.5], ["seek", 0], ["play"]]);
   cases++;
-  created[0].emit("error", new Error("decoder"));
-  assert.equal(warnings.filter((m) => m.includes("decoder")).length, 1);
+  assert.deepEqual(Object.keys(created[0].listeners).sort(), ["error", "stateChange"]);
+  created[0].emit("seekDone", 0);
+  created[0].emit("volumeChange", 0.5);
+  created[0].emit("timeUpdate", 10);
   cases++;
   const delayed = deferred();
   created[0].releasePromise = delayed.promise;
@@ -215,8 +231,118 @@ const request = (plugin, changes = {}) =>
   cases++;
   assert.equal(created[0].releases, 1);
   assert.equal(created[1].releases, 1);
-  assert.ok(events.some((e) => e.event === "created"));
-  assert.ok(events.some((e) => e.event === "seek" && e.value === 0));
+  active = true;
+  {
+    const plugin = new AudioPlugin();
+    await request(plugin, { replace: true, sourceFd: 83 });
+    await settle();
+    const player = created.at(-1);
+    const sdkError = Object.assign(new Error("Too many open files"), { code: 13900022 });
+    duplicateFailure = sdkError;
+    await assert.rejects(request(plugin, { replace: true, sourceFd: 84 }), (e) => e === sdkError);
+    duplicateFailure = undefined;
+    assert.equal(player.releases, 0);
+    await request(plugin);
+    await settle();
+    assert.equal(player.calls.filter((c) => c[0] === "seek").length, 2);
+    await plugin.onDispose();
+    assert.equal(player.releases, 1);
+    cases++;
+  }
+  {
+    const plugin = new AudioPlugin();
+    creationTask = deferred();
+    await request(plugin, { replace: true, sourceFd: 85 });
+    await settle();
+    const player = created.at(-1);
+    const cleanup = plugin.onDispose();
+    const before = closed.length;
+    await settle();
+    assert.equal(closed.length, before);
+    creationTask.resolve();
+    creationTask = undefined;
+    await cleanup;
+    assert.equal(closed.length, before + 1);
+    assert.equal(player.releases, 1);
+    assert.deepEqual(player.calls, []);
+    await plugin.onDispose();
+    assert.equal(player.releases, 1);
+    cases++;
+  }
+  {
+    const plugin = new AudioPlugin();
+    await request(plugin, { replace: true, sourceFd: 86 });
+    await settle();
+    const player = created.at(-1);
+    const releasing = deferred();
+    player.releasePromise = releasing.promise;
+    const before = closed.length;
+    const clear = request(plugin, { release: true, play: false });
+    active = false;
+    releasing.resolve();
+    await assert.rejects(clear, /no longer active/);
+    assert.equal(closed.length, before + 1);
+    await plugin.onDispose();
+    active = true;
+    cases++;
+  }
+  {
+    const plugin = new AudioPlugin();
+    await request(plugin, { replace: true, sourceFd: 88 });
+    await settle();
+    const player = created.at(-1);
+    const releasing = deferred();
+    player.releasePromise = releasing.promise;
+    await request(plugin, { replace: true, sourceFd: 89 });
+    const before = closed.length;
+    const count = created.length;
+    const cleanup = plugin.onDispose();
+    await settle();
+    assert.equal(closed.length, before);
+    releasing.resolve();
+    await cleanup;
+    assert.equal(closed.length, before + 2);
+    assert.equal(created.length, count);
+    assert.equal(player.releases, 1);
+    cases++;
+  }
+  for (const failure of ["create", "source", "renderer", "prepare", "play", "decoder", "release"]) {
+    const plugin = new AudioPlugin();
+    const error = new Error(`${failure} SDK failure`);
+    creationFailure = failure === "create" ? error : undefined;
+    sourceFailure = failure === "source" ? error : undefined;
+    rendererFailure = failure === "renderer" ? error : undefined;
+    prepareFailure = failure === "prepare" ? error : undefined;
+    playFailure = failure === "play" ? error : undefined;
+    const before = closed.length;
+    await request(plugin, { replace: true, sourceFd: 87 });
+    await settle();
+    if (failure === "decoder") {
+      created.at(-1).emit("error", error);
+      await settle();
+    }
+    if (failure === "release") {
+      releaseFailure = error;
+    } else {
+      assert.equal(closed.length, before + 1, failure);
+    }
+    await plugin.onDispose();
+    assert.equal(closed.length, before + 1, failure);
+    assert.ok(
+      warnings.some((message) => message.includes(error.message)),
+      failure,
+    );
+    if (failure !== "create") assert.equal(created.at(-1).releases, 1, failure);
+    creationFailure =
+      sourceFailure =
+      rendererFailure =
+      prepareFailure =
+      playFailure =
+      releaseFailure =
+        undefined;
+    cases++;
+  }
+  assert.equal(duplicates.length, closed.length);
   console.log(
     JSON.stringify({
       all_passed: true,

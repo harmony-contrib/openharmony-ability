@@ -58,11 +58,10 @@ export class PlayerSession {
         return;
       }
       const player = await this.factory.create();
+      this.player = player;
       if (this.closed) {
-        await player.release();
         return;
       }
-      this.player = player;
       player.observe(
         (state: string): void => {
           if (this.closed) {
@@ -90,6 +89,9 @@ export class PlayerSession {
   private fail(message: string): void {
     if (!this.closed) {
       this.report(message);
+      this.close().catch((error: Error): void => {
+        this.report(`close: ${String(error)}`);
+      });
     }
   }
   private flush(): void {
@@ -136,8 +138,8 @@ export class PlayerSession {
   }
   private async dispose(): Promise<void> {
     try {
-      // A create still in flight releases its own late result. Waiting for it
-      // also guarantees the descriptor remains valid until all native users end.
+      // Waiting for a pending create also releases its late result and keeps
+      // the descriptor valid until all native users end.
       await this.startTask;
       if (this.player !== undefined) {
         await this.player.release();

@@ -154,6 +154,23 @@ const fixture = (factory) => {
     cases++;
   }
   {
+    const creation = deferred();
+    const f = fixture(() => creation.promise);
+    f.player.release = () => {
+      f.player.released++;
+      return Promise.reject(new Error("late release failed"));
+    };
+    f.session.begin(Promise.resolve());
+    await settle();
+    const closing = f.session.close();
+    creation.resolve(f.player);
+    await closing;
+    assert.equal(f.player.released, 1);
+    assert.equal(f.source.closed, 1);
+    assert.match(f.errors[0], /late release failed/);
+    cases++;
+  }
+  {
     const f = fixture();
     f.session.begin(Promise.resolve());
     await settle();
@@ -185,6 +202,7 @@ const fixture = (factory) => {
     f.session.begin(Promise.resolve());
     await settle();
     assert.match(f.errors[0], /creation failed/);
+    assert.equal(f.source.closed, 1);
     await f.session.close();
     assert.equal(f.source.closed, 1);
     cases++;
@@ -222,6 +240,8 @@ const fixture = (factory) => {
     assert.deepEqual(f.errors, ["decoder failed"]);
     assert.equal(f.creates(), 1);
     assert.equal(f.player.calls.filter((c) => c[0] === "play").length, 0);
+    assert.equal(f.player.released, 1);
+    assert.equal(f.source.closed, 1);
     await f.session.close();
     cases++;
   }

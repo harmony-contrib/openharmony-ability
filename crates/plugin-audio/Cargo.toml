@@ -9,5 +9,3 @@ description = "Owned, reusable media-file playback through the Ability bridge"
 openharmony-ability.workspace = true
 napi-ohos.workspace = true
 napi-derive-ohos.workspace = true
-libc.workspace = true
-log.workspace = true
