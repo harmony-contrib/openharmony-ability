@@ -22,6 +22,8 @@
 | native provider / `native-node-retiring` | `ohos.node.NativeNodeRetiring { targetId }` | `ohos.node.Acknowledgement` | synchronous teardown scope / active session |
 | `ohos.arkui` / `apply-editors` | `ohos.arkui.EditorBatch` | `ohos.node.Acknowledgement` | sync / UI context; API 20 |
 | `ohos.arkui` / `editor-event` | `ohos.arkui.EditorEvent { id, targetId, ... }` | `ohos.node.Acknowledgement` | synchronous owned snapshot |
+| `ohos.arkui` / `apply-native-views` | `ohos.arkui.NativeViewBatch` → `ohos.node.Acknowledgement` | sync / UI context; API 20; optional state descriptions 23 and custom actions 26 |
+| `ohos.arkui` / `view-action` | `ohos.arkui.NativeViewAction { id, targetId, action, kind?, generation? }` → `ohos.node.Acknowledgement` | synchronous owner/generation-scoped snapshot |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest` → `{ code }` | `ohos.app_control.TerminateResponse` → `{ accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest` → `{ permissions }` | `ohos.permission.PermissionResponse` → `{ codes }` | async / `ability` |
 | `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest` → `{ areaType }` | `ohos.window.AvoidAreaResponse` → `{ area: { visible, leftRect, topRect, rightRect, bottomRect } }` | async / `ui-context`；查询当前 component 所在窗口 |

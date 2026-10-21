@@ -6,6 +6,7 @@ import {
   BridgeTypedValue,
   MainThreadSyncBridgePlugin,
 } from "@ohos-rs/ability";
+import { NativeViews } from "./NativeViews";
 import { NativeEditors } from "./NativeEditors";
 import deviceInfo from "@ohos.deviceInfo";
 
@@ -14,6 +15,7 @@ export class ArkuiPlugin implements MainThreadSyncBridgePlugin {
   readonly id: string = "ohos.arkui";
   readonly execution: "sync-main-thread" = "sync-main-thread";
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
+  private views: NativeViews = new NativeViews();
   private editors: NativeEditors = new NativeEditors();
   invokeSync(
     action: string,
@@ -26,20 +28,31 @@ export class ArkuiPlugin implements MainThreadSyncBridgePlugin {
     if (deviceInfo.sdkApiVersion < 20) {
       throw new Error("ArkUI editors require API 20");
     }
+    if (action === "apply-native-views") {
+      return this.views.apply(payload, context);
+    }
     if (action === "apply-editors") {
       return this.editors.apply(payload, context);
     }
     throw new Error(`Unsupported ohos.arkui action '${action}'`);
   }
-  onLifecycle(event: BridgeLifecycleEvent, _context: BridgePluginHookContext): void {
+  async onLifecycle(event: BridgeLifecycleEvent, _context: BridgePluginHookContext): Promise<void> {
     if (event.kind === "ui-context-destroy") {
-      this.onDispose(_context);
+      await this.onDispose(_context);
     }
   }
   onClosing(context: BridgePluginHookContext): void {
-    this.editors.dispose(context);
+    try {
+      this.views.dispose(context);
+    } finally {
+      this.editors.dispose(context);
+    }
   }
-  onDispose(context: BridgePluginHookContext): void {
-    this.editors.dispose(context);
+  async onDispose(context: BridgePluginHookContext): Promise<void> {
+    try {
+      this.onClosing(context);
+    } finally {
+      await this.views.settled();
+    }
   }
 }

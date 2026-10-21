@@ -514,3 +514,6 @@ export interface TerminateResponse {
 
 export function demoNativeEditor(): NodeContent;
 export function demoDisposeNativeEditor(): void;
+
+export function demoNativeWrapper(): NodeContent;
+export function demoDisposeNativeWrapper(): void;

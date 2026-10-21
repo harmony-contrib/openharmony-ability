@@ -211,6 +211,8 @@ export { LoginPlugin };
 | --- | --- | --- |
 | `ohos.arkui` / `apply-editors` | `ohos.arkui.EditorBatch { updates, commands, remove }` → `ohos.node.Acknowledgement` | sync / `ui-context`; API 20 |
 | `ohos.arkui` / `editor-event` | `ohos.arkui.EditorEvent { id, targetId, ... }` → `ohos.node.Acknowledgement` | synchronous owned snapshot; plugin owner and native generation isolate delivery |
+| `ohos.arkui` / `apply-native-views` | `ohos.arkui.NativeViewBatch` → `ohos.node.Acknowledgement` | sync / UI context; API 20; optional state descriptions 23 and custom actions 26 |
+| `ohos.arkui` / `view-action` | `ohos.arkui.NativeViewAction { id, targetId, action, kind?, generation? }` → `ohos.node.Acknowledgement` | synchronous owner/generation-scoped snapshot |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
@@ -466,7 +468,9 @@ while closing. Destruction/dispose hooks also receive a cleanup-scoped
 `invokeNativeSync`; its permission expires when the hook completes, is cancelled
 or times out. Rust still checks the registered plugin, active session and event
 contexts. Async resource release belongs in `onDispose`, which must await every
-owner and continue after individual failures.
+owner and continue after individual failures. This lifecycle barrier is independent
+of outbound call mode: synchronous plugins may return Promise from onLifecycle/onDispose;
+onClosing and invokeSync remain synchronous.
 
 ### 6.1 多 XComponent 与多窗口
 

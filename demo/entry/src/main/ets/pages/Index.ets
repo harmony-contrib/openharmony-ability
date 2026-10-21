@@ -4,6 +4,8 @@ import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/Entry
 import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
   demoNativeEditor,
+  demoNativeWrapper,
+  demoDisposeNativeWrapper,
   demoDisposeNativeEditor,
   createBottomDemoWebview,
   createComposedDemoWebview,
@@ -679,9 +681,14 @@ struct Index {
           .onClick((): void => {
             this.nativeEditorContent = demoNativeEditor();
           })
+        Button("Semantic wrapper")
+          .onClick((): void => {
+            this.nativeEditorContent = demoNativeWrapper();
+          })
         Button("Release editor")
           .onClick((): void => {
             demoDisposeNativeEditor();
+            demoDisposeNativeWrapper();
             this.nativeEditorContent = new NodeContent();
           })
       }

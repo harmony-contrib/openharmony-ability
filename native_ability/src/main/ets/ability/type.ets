@@ -457,13 +457,16 @@ export interface MainThreadSyncBridgePlugin extends BridgePluginBase {
   /** See [`AsyncBridgePlugin.attachContext`]. */
   attachContext?: (context: BridgePluginContext) => void;
   onInstall?: (context: BridgePluginHookContext) => void;
-  onLifecycle?: (event: BridgeLifecycleEvent, context: BridgePluginHookContext) => void;
+  onLifecycle?: (
+    event: BridgeLifecycleEvent,
+    context: BridgePluginHookContext,
+  ) => void | Promise<void>;
   invokeSync: (
     action: string,
     request: BridgeTypedValue,
     context: BridgeCallContext,
   ) => BridgeTypedValue;
-  onDispose?: (context: BridgePluginHookContext) => void;
+  onDispose?: (context: BridgePluginHookContext) => void | Promise<void>;
 }
 
 export type BridgePlugin = AsyncBridgePlugin | MainThreadSyncBridgePlugin;

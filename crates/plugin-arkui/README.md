@@ -17,3 +17,17 @@ Native attachment retirement follows the [plugin standard](../../docs/plugin-dev
 
 The demo's **Native editor** and **Release editor** buttons exercise the full
 Rust → named bridge → ArkTS editor → native parent → ContentSlot path.
+
+`apply_native_views` wraps an owned C subtree using `NativeViewBatch`. Register
+`NativeViewEvents::new(app, id, target_id, callback)` before creation. Semantic
+roles, state and context menus belong to the wrapper; native descendants retain
+their own semantics. Optional state descriptions require API 23; custom actions
+require API 26. Menu callbacks echo their current menu generation. `ViewMenuItem.kind` explicitly selects `action` or `paste`; a paste grant returns
+the original opaque item name. A normal action named `paste` stays ordinary.
+Menu close/dispose promises join the plugin teardown barrier. Failed retirement retains the
+ArkTS owner. The demo's **Semantic wrapper** button exercises the subtree path.
+
+| Action/event | Request | Response |
+|---|---|---|
+| `apply-native-views` | `ohos.arkui.NativeViewBatch` | `ohos.node.Acknowledgement` |
+| `view-action` | `ohos.arkui.NativeViewAction` | `ohos.node.Acknowledgement` |

@@ -1,6 +1,12 @@
 //! UI-thread ArkUI nodes with named batch configuration and native attachment.
 //! ArkTS owns editors and BuilderNodes; Rust retains only attachment IDs and data.
 
+mod views;
+pub use views::{
+    apply_native_views, NativeViewAction, NativeViewBatch, NativeViewEvents, NativeViewSettings,
+    ViewAction, ViewMenu, ViewMenuItem,
+};
+
 mod event_routes;
 use event_routes::EventRoutes;
 
@@ -46,6 +52,13 @@ impl BridgePlugin for ArkuiBridgePlugin {
         event: BridgeMainThreadEvent<'env>,
     ) -> Result<Unknown<'env>> {
         match event.name() {
+            "native-subtree-ready" => {
+                let accepted = event
+                    .decode::<openharmony_ability::NativeSubtreeReady>()?
+                    .accepted();
+                event.respond(NodeAcknowledgement { accepted })
+            }
+            "view-action" => views::dispatch(self.owner_key(), event),
             "native-node-ready" => {
                 let accepted = event.decode::<NativeNodeReady>()?.accepted();
                 event.respond(NodeAcknowledgement { accepted })
