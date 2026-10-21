@@ -519,3 +519,6 @@ export function demoNativeWrapper(): NodeContent;
 export function demoDisposeNativeWrapper(): void;
 
 export function demoNativeTexture(surfaceId: string): NodeContent;
+export function demoNativeWebview(): NodeContent;
+export function demoRemoveNativeWebview(): Promise<void>;
+export function demoReleaseNativeWebview(): void;

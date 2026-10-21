@@ -56,3 +56,7 @@
 - Requires `ui-context`; mounts the WebView `FrameNode` into a business-owned `BridgeNodeHost` slot.
 
 ---
+
+## Unreleased
+
+- Add generation-owned native-tree WebView embedding and synchronous edge retirement.

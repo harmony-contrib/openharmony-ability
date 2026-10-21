@@ -3,6 +3,7 @@
 mod login_bridge;
 mod main_thread_bridge;
 mod native_embedding;
+mod native_webview;
 mod raw_bridge;
 mod tsfn_sync_bridge;
 
@@ -460,7 +461,7 @@ fn openharmony_app(app: OpenHarmonyApp) {
         .expect("demo permission facade must be registered");
     app.register_plugin(AppControlBridgePlugin)
         .expect("demo app-control facade must be registered");
-    app.register_plugin(WebviewBridgePlugin)
+    app.register_plugin(WebviewBridgePlugin::new())
         .expect("demo WebView facade must be registered");
     app.register_plugin(WindowBridgePlugin)
         .expect("demo Window facade must be registered");

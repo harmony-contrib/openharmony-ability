@@ -11,3 +11,7 @@
   replacement and plugin teardown.
 - Inherit version `1.0.0-beta.3`, Rust edition `2021`, and license `MIT OR Apache-2.0`
   from the Cargo workspace.
+
+## Unreleased
+
+- Add generation-owned native-tree WebView embedding and synchronous edge retirement.

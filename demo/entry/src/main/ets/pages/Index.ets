@@ -3,6 +3,9 @@ import { DefaultXComponent, invokeNativeBackPressInterceptor } from "@ohos-rs/ab
 import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/EntryAbility";
 import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
+  demoNativeWebview,
+  demoRemoveNativeWebview,
+  demoReleaseNativeWebview,
   demoNativeEditor,
   demoNativeWrapper,
   demoNativeTexture,
@@ -37,6 +40,7 @@ const MODULE_NAME = "demo_native";
 @Component
 struct Index {
   @State currentDemo: number = 0;
+  @State nativeWebviewContent: NodeContent = new NodeContent();
   @State nativeEditorContent: NodeContent = new NodeContent();
   @State textureSurface: string = "";
   private textureController: XComponentController = new XComponentController();
@@ -711,6 +715,17 @@ struct Index {
           this.textureSurface = this.textureController.getXComponentSurfaceId();
         })
       Stack() {
+        Button("Native WebView (API 20)")
+          .onClick(() => {
+            this.nativeWebviewContent = demoNativeWebview();
+          })
+        Button("Remove native WebView")
+          .onClick(async () => {
+            await demoRemoveNativeWebview();
+            this.nativeWebviewContent = new NodeContent();
+            demoReleaseNativeWebview();
+          })
+        ContentSlot(this.nativeWebviewContent)
         ContentSlot(this.nativeEditorContent)
       }
       .width(320)

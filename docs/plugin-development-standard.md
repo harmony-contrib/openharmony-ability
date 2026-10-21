@@ -236,6 +236,13 @@ export { LoginPlugin };
 | `ohos.node`（内置） / `mount-into-root` | `ohos.node.MountIntoRootRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
 | `ohos.node`（内置） / `dispose` | `ohos.node.DisposeRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
 | `ohos.webview` / 控制器 action | `ohos.webview.ControllerRequest` → `ohos.webview.Acknowledgement` / `StringResponse` / `ScriptResponse` | async / `ui-context` |
+| ohos.webview / create-native | NativeCreateRequest { targetId, generation, webview: CreateRequest, settings: NativeSettings } → CreateResponse | async / ui-context |
+| ohos.webview / configure-native | NativeSettings { id, scrollEnabled, injectedJavascript?, htmlBaseUrl? } → Acknowledgement | async / ui-context |
+| ohos.webview / go-back, go-forward, stop-loading | ControllerRequest → Acknowledgement | async / ui-context |
+| ohos.webview / native-event | NativeEvent { id, targetId, generation, phase, url, title, loading, canGoBack, canGoForward, message?, code? } → EventAcknowledgement | scoped main-thread; notification failure only logged |
+| ohos.webview / native-controller-attached, native-controller-removed | NativeControllerEvent { id, targetId, generation, nativeTag } → EventAcknowledgement | scoped owner; attach before navigation; remove during synchronous teardown |
+| ohos.webview / update-document-options | DocumentOptionsRequest { id, javascriptEnabled?, userAgent?, initializationScripts? } → Acknowledgement | async / ui-context; retains controller/history |
+| ohos.webview / native-node-ready, native-node-retiring | existing ohos.node native receipt types → NodeAcknowledgement | UI-thread callback; retiring requires no context and uses closing hook permit |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` | 入站事件 / `ability` |
 
 `resource` 是纯入站插件：ArkTS wrapper 在 `ability-create` 时经 `invokeNativeSync` 推送平台

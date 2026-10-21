@@ -104,6 +104,11 @@ On Ability/session disposal, the HAR removes its nodes and controller state thro
 See the [plugin development standard](../../docs/plugin-development-standard.md) for reverse
 type names, threading, lifecycle, node cleanup and acceptance criteria.
 
+## Native-tree embedding
+
+See the [Rust native embedding contract](../../crates/plugin-webview/README.md#native-tree-embedding)
+for scoped clients, controller declarations, document options and retirement.
+
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

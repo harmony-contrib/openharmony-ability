@@ -41,7 +41,7 @@ use openharmony_ability_plugin_webview::{
 fn configure_ability(app: OpenHarmonyApp) {
     WebviewProtocol::register("asset", WebviewProtocolOptions::Standard)
         .expect("scheme must be declared before Web engine initialization");
-    app.register_plugin(WebviewBridgePlugin)
+    app.register_plugin(WebviewBridgePlugin::new())
         .expect("webview facade must be registered once");
 }
 ```
@@ -216,6 +216,25 @@ the controller-attached callback that starts the first navigation. Both retain
 the scripts supplied by `keySynthesisScripts`, including the main-window keyboard
 shim; drag callbacks remain on the Web node in direct mode and on the separate
 Stack in overlay mode.
+
+## Native-tree embedding
+
+Register `WebviewBridgePlugin::new()` and select `let client = app.webview()?.native()?`.
+Declare native callbacks with `client.callbacks(id)` and JavaScript proxies with
+`client.javascript_proxy(id, object)`; custom protocols declared on that client use
+its registered plugin owner. Legacy builder signatures retain their existing scope.
+Call `client.create_native(target_id, CreateRequest, NativeWebviewSettings)` to embed
+in a Rust-owned node tree. `CreateRequest` owns the initial JavaScript, user agent
+and document-start scripts; native settings add scrolling, page-end script and
+inline HTML base URL. `handle.update_document_options(WebviewDocumentOptionsRequest)`
+updates the same controller without replacing its navigation history.
+
+`NativeWebviewEvents::new(&app, id, target_id, callback)` belongs to that registered
+plugin instance and rejects stale controller generations. Attachment installs
+protocol/proxy/callback declarations before first navigation, even without an event
+subscriber. Native creation/removal is serialized per ID. Closing retires native
+edges and controller registrations synchronously; disposal awaits page tasks and
+preserves any owner whose retirement fails.
 
 ## License
 

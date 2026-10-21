@@ -54,6 +54,8 @@
 |---|---|---|
 | `seal-engine-schemes` / `before-engine-init` / `engine-initialized` | `ohos.webview.EngineLifecycleEvent` → `ohos.webview.EngineLifecycleResponse` | ArkTS → Rust |
 | `controller-attached` / `controller-removed` | `ohos.webview.ControllerEvent` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
+| `native-controller-attached` / `native-controller-removed` | `ohos.webview.NativeControllerEvent { id, targetId, generation, nativeTag }` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust; scoped owner; synchronous retirement |
+| `update-document-options` | `ohos.webview.DocumentOptionsRequest { id, javascriptEnabled?, userAgent?, initializationScripts? }` → `ohos.webview.Acknowledgement` | Rust → ArkTS; async / UI context |
 | `navigation-request` | `ohos.webview.NavigationRequest` → `ohos.webview.NavigationResponse` | ArkTS → Rust |
 | `download-start` | `ohos.webview.DownloadStartRequest` → `ohos.webview.DownloadStartResponse` | ArkTS → Rust |
 | `download-end` | `ohos.webview.DownloadEndEvent` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
