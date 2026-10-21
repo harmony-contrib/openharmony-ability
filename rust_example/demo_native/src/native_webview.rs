@@ -1,10 +1,10 @@
 //! Native WebView assembled under a Rust-owned NodeContent parent.
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Env, Error, Result};
-use openharmony_ability::arkui::component::{
-    attribute::ArkUICommonAttribute, built_in_component::Column, content_root::ContentRoot,
+use openharmony_ability::{
+    arkui::component::{attribute::ArkUICommonAttribute, built_in_component::Column},
+    ContentRoot, NativeAttachment,
 };
-use openharmony_ability::NativeAttachment;
 use openharmony_ability_plugin_webview::{
     NativeWebviewEvents, NativeWebviewSettings, WebviewCreateRequest, WebviewExt,
     WebviewInitializationScript,

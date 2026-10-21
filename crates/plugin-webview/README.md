@@ -236,7 +236,9 @@ subscription on Drop without removing a newer replacement. Ability's `NativeAtta
 owns the UI-thread dispatch guard, target liveness and retained N-API owners. Target IDs
 are never reused; create a fresh attachment when replacing a retired native WebView.
 The native-ready handler decodes the receipt and explicitly attaches it before
-acknowledging success. Attachment installs
+acknowledging success. A controller observed synchronously during SDK build or mount
+waits until that handshake returns successfully, so its installer cannot dispatch
+against an unattached target or reenter the attachment guard. Attachment installs
 protocol/proxy/callback declarations before first navigation, even without an event
 subscriber. Native creation/removal is serialized per ID. Closing retires native
 edges and controller registrations synchronously; disposal awaits page tasks and

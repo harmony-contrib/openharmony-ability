@@ -276,19 +276,30 @@ class WebviewEntry {
   private attaching = false;
   private attached = false;
   private controllerFailure: Error | null = null;
+  private nativeReady: boolean;
+  private controllerObserved = false;
   private readonly controllerWaiters: ControllerWaiter[] = [];
 
   constructor(data: ManagedWebview, node: BuilderNode<[ManagedWebview]>) {
     this.data = data;
     this.node = node;
+    this.nativeReady = data.nativeTarget === null;
   }
 
   beginControllerAttach(): boolean {
-    if (this.attaching || this.attached || this.controllerFailure !== null) {
+    this.controllerObserved = true;
+    if (!this.nativeReady || this.attaching || this.attached || this.controllerFailure !== null) {
       return false;
     }
     this.attaching = true;
     return true;
+  }
+
+  markNativeReady(): void {
+    this.nativeReady = true;
+    if (this.controllerObserved) {
+      handleControllerAttached(this.data);
+    }
   }
 
   markControllerReady(): void {
@@ -2283,6 +2294,9 @@ class WebviewSurface {
         if (receipt?.accepted !== true) {
           throw new Error("Native attachment target rejected WebView");
         }
+        // SDK build/mount may synchronously announce the controller. Only install
+        // declarations after the ready callback has released the target's attach guard.
+        entry.markNativeReady();
       } else if (parentHandle !== null) {
         this.pluginContext.getFrameNode(parentHandle).appendChild(frameNode);
         hilog.info(

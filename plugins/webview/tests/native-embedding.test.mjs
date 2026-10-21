@@ -206,6 +206,7 @@ async function production(api = 20, attachDuringBuild = false) {
     const events = [];
     const receipts = [];
     const borrowed = new Set();
+    const mounting = new Set();
     const failures = new Set();
     const state = { autoAttach: true, active: true, cancellation: [] };
     const ctx = {
@@ -218,8 +219,12 @@ async function production(api = 20, attachDuringBuild = false) {
         if (event === "native-node-ready") {
           assert.equal(_request, "ohos.node.NativeNodeReady");
           assert.equal(_response, "ohos.node.Acknowledgement");
+          if (state.rejectReady) throw new Error("attachment failed");
           borrowed.add(value.targetId);
+          mounting.add(value.targetId);
           if (state.autoAttach) value.content.owner.attach();
+          mounting.delete(value.targetId);
+          operations.push([event, value.targetId]);
         } else if (event === "native-node-retiring") {
           assert.equal(_request, "ohos.node.NativeNodeRetiring");
           assert.equal(_response, "ohos.node.Acknowledgement");
@@ -232,6 +237,14 @@ async function production(api = 20, attachDuringBuild = false) {
         ) {
           assert.equal(_request, "ohos.webview.NativeControllerEvent");
           assert.equal(_response, "ohos.webview.EventAcknowledgement");
+          assert.ok(
+            borrowed.has(value.targetId),
+            "controller dispatch requires an attached target",
+          );
+          assert.ok(
+            !mounting.has(value.targetId),
+            "controller dispatch cannot reenter native attach",
+          );
           receipts.push({ event, ...value });
           operations.push([event, value.targetId]);
           if (event === "native-controller-removed" && state.rejectRemoval) {
@@ -324,6 +337,10 @@ test("API12 and API15+ apply single-source document settings before first load",
     const load = operations.findIndex(([name]) => name === "load");
     assert.ok(start >= 0 && start < load);
     assert.ok(operations.findIndex(([name]) => name === "native-controller-attached") < load);
+    assert.ok(
+      operations.findIndex(([name]) => name === "native-node-ready") <
+        operations.findIndex(([name]) => name === "native-controller-attached"),
+    );
     assert.deepEqual(
       Array.from(operations[start][1], (item) => item.script),
       ["initial-script", "second-script"],
@@ -514,7 +531,7 @@ test("cancellation inside the attach receipt cannot navigate and still removes d
   assert.equal(nodes[0].disposed, true);
 });
 
-test("reentrant closing during SDK build removes controller declarations before native shutdown", async () => {
+test("SDK build callbacks wait for native ready before controller installation and reentrant closing", async () => {
   const { host, nodes, operations } = await production(20, true);
   const owner = host("build-close");
   owner.state.closeOnReceipt = true;
@@ -586,4 +603,18 @@ test("native creation rejects malformed targets and mismatched named contracts b
     /controller ID mismatch/,
   );
   assert.equal(nodes.length, 0);
+});
+
+test("failed native ready cannot install a controller observed during SDK build", async () => {
+  const { host, nodes, operations } = await production(20, true);
+  const owner = host("ready-failure");
+  owner.state.rejectReady = true;
+  await assert.rejects(owner.create(), /attachment failed/);
+  assert.equal(owner.receipts.length, 0);
+  assert.equal(owner.borrowed.size, 0);
+  assert.equal(nodes[0].disposed, true);
+  assert.equal(
+    operations.some(([event]) => event === "load"),
+    false,
+  );
 });
