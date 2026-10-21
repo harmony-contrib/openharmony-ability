@@ -5,9 +5,9 @@ use std::{cell::RefCell, rc::Rc};
 use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Object, Env, Error, Result};
 use openharmony_ability::arkui::component::{
-    attribute::ArkUICommonAttribute, built_in_component::Column, content_root::ContentRoot,
-    native_attachment::NativeAttachment,
+    attribute::ArkUICommonAttribute, built_in_component::Column,
 };
+use openharmony_ability::{ContentRoot, NativeAttachment};
 use openharmony_ability_plugin_arkui::{apply_editors, EditorBatch, EditorEvents, EditorSettings};
 
 struct DemoEditor {

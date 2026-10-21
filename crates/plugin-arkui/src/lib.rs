@@ -8,7 +8,8 @@ use napi_derive_ohos::napi;
 use napi_ohos::{bindgen_prelude::Unknown, Env, Error, Result};
 use openharmony_ability::{
     impl_bridge_napi_type, BridgeContextRequirement, BridgeMainThreadEvent, BridgePlugin,
-    MainThreadSyncBridge, NativeNodeReady, NativeNodeRetiring, NodeAcknowledgement, OpenHarmonyApp,
+    MainThreadSyncBridge, NativeAttachment, NativeNodeReady, NativeNodeRetiring,
+    NodeAcknowledgement, OpenHarmonyApp,
 };
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
@@ -47,8 +48,8 @@ impl BridgePlugin for ArkuiBridgePlugin {
     ) -> Result<Unknown<'env>> {
         match event.name() {
             "native-node-ready" => {
-                let accepted = event.decode::<NativeNodeReady>()?.accepted();
-                event.respond(NodeAcknowledgement { accepted })
+                event.decode::<NativeNodeReady>()?.attach(&event)?;
+                event.respond(NodeAcknowledgement { accepted: true })
             }
             "native-node-retiring" => {
                 event.decode::<NativeNodeRetiring>()?.detach()?;
@@ -56,7 +57,9 @@ impl BridgePlugin for ArkuiBridgePlugin {
             }
             "editor-event" => {
                 let payload = event.decode::<EditorEvent>()?;
-                dispatch_editor(self.owner_key(), payload);
+                NativeAttachment::dispatch(payload.target_id, || {
+                    dispatch_editor(self.owner_key(), payload)
+                })?;
                 event.respond(NodeAcknowledgement { accepted: true })
             }
             _ => Err(Error::from_reason("Unsupported ohos.arkui native event")),
