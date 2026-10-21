@@ -416,6 +416,9 @@ export interface BridgeCallContext extends BridgePluginHookContext {
 /**
  * A bounded execution scope for one plugin hook. BridgeHost cancels the scope when the session
  * closes or the hook exceeds its watchdog, allowing teardown to continue with the next plugin.
+ * During destruction/dispose hooks, invokeNativeSync can synchronously retire native resources
+ * while the host is closing. This permission ends with the hook, including cancellation/timeout;
+ * pass this context to cleanup instead of retaining an ordinary creation context.
  */
 export interface BridgePluginHookContext extends BridgePluginContext {
   isCancelled: () => boolean;
@@ -423,6 +426,8 @@ export interface BridgePluginHookContext extends BridgePluginContext {
 }
 
 interface BridgePluginBase {
+  /** Synchronously retire native borrows before Rust receives Ability destruction. No Promise. */
+  onClosing?: (context: BridgePluginHookContext) => void;
   id: string;
   requires?: BridgeContextRequirement[];
 }
@@ -471,6 +476,8 @@ export type BridgePlugin = AsyncBridgePlugin | MainThreadSyncBridgePlugin;
  * constructors never need it.
  */
 export abstract class PluginBase {
+  /** Retires native borrows while the session's Rust callback is still attached. */
+  onClosing(_context: BridgePluginHookContext): void {}
   abstract readonly id: string;
   abstract readonly requires: BridgeContextRequirement[];
   private context?: BridgePluginContext;

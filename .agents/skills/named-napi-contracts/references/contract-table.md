@@ -17,6 +17,9 @@
 
 | 插件 / action | request type → ArkTS value | response type → ArkTS value | 模式 / context |
 |---|---|---|---|
+| native provider / `native-node-ready` | `ohos.node.NativeNodeReady { targetId, content }` | `ohos.node.Acknowledgement` | synchronous callback / UI context; API 12 |
+| native wrapper / `native-subtree-ready` | `ohos.node.NativeSubtreeReady { targetId, content, slot }` | `ohos.node.Acknowledgement` | synchronous callback / UI context; API 12 |
+| native provider / `native-node-retiring` | `ohos.node.NativeNodeRetiring { targetId }` | `ohos.node.Acknowledgement` | synchronous teardown scope / active session |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest` → `{ code }` | `ohos.app_control.TerminateResponse` → `{ accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest` → `{ permissions }` | `ohos.permission.PermissionResponse` → `{ codes }` | async / `ability` |
 | `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest` → `{ areaType }` | `ohos.window.AvoidAreaResponse` → `{ area: { visible, leftRect, topRect, rightRect, bottomRect } }` | async / `ui-context`；查询当前 component 所在窗口 |

@@ -448,6 +448,24 @@ Stack() {
 这套规则同时保留 WebView 与 XComponent 的混合接入，并允许任意插件（以及 Rust 组树）接入 node
 节点；没有命名插槽、注册表或对业务布局的隐式所有权。
 
+### Native attachment ownership
+
+Native providers may send `ohos.node.NativeNodeReady { targetId, content }` or
+`NativeSubtreeReady { targetId, content, slot }` in a synchronous named callback.
+The API-12 binding converts these borrowed objects inside that callback; Rust
+retains native handles only. Before disposing an ArkTS owner, send
+`NativeNodeRetiring { targetId }` and require `ohos.node.Acknowledgement`.
+A failed detach must retain the owner to prevent a dangling native borrow.
+
+`onClosing(context)` is a synchronous plugin hook: retire native edges before
+NativeAbility immediately dispatches Rust's destroy event. It must return no
+Promise. Pass its context to cleanup; cached ordinary contexts cannot dispatch
+while closing. Destruction/dispose hooks also receive a cleanup-scoped
+`invokeNativeSync`; its permission expires when the hook completes, is cancelled
+or times out. Rust still checks the registered plugin, active session and event
+contexts. Async resource release belongs in `onDispose`, which must await every
+owner and continue after individual failures.
+
 ### 6.1 多 XComponent 与多窗口
 
 多组件由多 native module 实现，不在一个 Host 内再建立 window/surface 子注册表。例如 Ability 声明

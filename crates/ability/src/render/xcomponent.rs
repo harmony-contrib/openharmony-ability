@@ -90,8 +90,9 @@ fn pointer_snapshot(
     node: *mut std::ffi::c_void,
 ) -> PointerInputData {
     let mut pointer = PointerInputData::from_arkui_event(input);
-    // This borrowed node view exists only while its native callback is active.
-    if let Some(node) = ArkUINode::from_raw_handle(node.cast()) {
+    // SAFETY: the registered UI callback's render root owns this node; the
+    // temporary view is discarded before returning and never retains a child.
+    if let Some(node) = unsafe { ArkUINode::from_raw_handle(node.cast()) } {
         if let Ok(origin) = node.layout_position_in_screen() {
             pointer.display_x = origin.x as f32 + pointer.x;
             pointer.display_y = origin.y as f32 + pointer.y;
@@ -101,7 +102,9 @@ fn pointer_snapshot(
 }
 
 fn content_offset_in_window(node: *mut std::ffi::c_void) -> Option<IntOffset> {
-    ArkUINode::from_raw_handle(node.cast())?
+    // SAFETY: only the owning render root's live surface callbacks call this;
+    // the borrowed view is used for this synchronous position query only.
+    unsafe { ArkUINode::from_raw_handle(node.cast()) }?
         .layout_position_in_window()
         .ok()
 }

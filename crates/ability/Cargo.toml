@@ -9,8 +9,8 @@ description = "Binding Rust application on Harmony with Ability"
 default = ["log", "window"]
 log = ["dep:log"]
 window = ["dep:ohos-window-manager-binding"]
-# ArkUI keyboard snapshots and consumption are opt-in; raw XComponent keys remain available.
-keyboard = ["ohos-arkui-binding/api-14"]
+# API-19 keyboard snapshots include lock state; raw XComponent keys remain available.
+keyboard = ["ohos-arkui-binding/api-19"]
 # API-18 mouse cancellation is opt-in; basic XComponent mouse input remains available.
 mouse = ["ohos-xcomponent-binding/api-18"]
 stylus = ["ohos-arkui-binding/api-17"]

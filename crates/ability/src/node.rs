@@ -16,6 +16,9 @@ use crate::{
     BridgeRuntime,
 };
 
+mod native_attachment;
+pub use native_attachment::{NativeNodeReady, NativeNodeRetiring, NativeSubtreeReady};
+
 /// Plugin identity shared with the ArkTS built-in surface plugin.
 pub const NODE_SURFACE_PLUGIN_ID: &str = "ohos.node";
 
