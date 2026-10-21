@@ -30,7 +30,7 @@
   或通过重导出的原始函数绕过封装。缺少接口时先补充对应的 `ohos-native-bindings`。
   具名 N-API transport 可以使用 `napi-ohos` 重导出的不透明类型，但不得调用原始 N-API 函数。
 - feature 必须标明最低运行时 API；关闭后不得引用对应原生符号。运行时版本判断不能解决
-  新符号在旧系统上的加载问题。合入前执行 `python3 scripts/check-native-boundary.py`，
+  新符号在旧系统上的加载问题。合入前执行 `cargo run -p xtask --locked -- native-boundary`，
   feature 的具体要求见 [原生能力配置](native-capabilities.md)。
 - Rust crate 位于 `crates/plugin-<name>`，依赖 `openharmony-ability`；需要复用其他插件类型时依赖
   对应的 `plugin-*` crate（如 `plugin-statusbar` 复用 `plugin-menu` 的类型），但不能依赖 ArkTS
@@ -211,6 +211,12 @@ export { LoginPlugin };
 ```
 
 ### 3.3 既有内置插件的契约基线
+
+The canonical type-name inventory, object layouts and plugin mode/context declarations are
+generated from Rust in [napi-contracts.md](napi-contracts.md). Regenerate it with
+`cargo run -p xtask -- contracts`; CI rejects stale output with `--check`. The overview below
+documents action semantics, not a second exhaustive type inventory. Keep ArkTS aligned with
+the generated declarations; a documentation diff is not a cross-language type checker.
 
 迁移 helper 或新增 action 时，应以现有插件的类型名、模式和 context 作为兼容语义基线；不兼容
 契约必须引入新的 action/typeName，不能修改已有具名 N-API 类型的含义。

@@ -50,6 +50,13 @@ Run `npm run format` to format Rust and ArkTS sources. Git hooks run formatting 
 lint checks through prek; CI runs prek for all files and Rust clippy for each
 supported OpenHarmony target.
 
+CI's compile SDK baseline is OpenHarmony 7.0 (API 26), required by the opt-in
+native input features. Run `pnpm test` for SDK-backed Node regressions and
+`pnpm run test:contracts` for host-safe Rust tooling tests and the generated
+[N-API inventory](docs/napi-contracts.md) diff. Plugin tests are cross-compiled
+with the SDK linker, not executed on a non-OHOS host; see the
+[CI and native capability baseline](docs/native-capabilities.md#ci-sdk-and-test-baseline).
+
 ## Usage
 
 1. Add Rust dependencies:

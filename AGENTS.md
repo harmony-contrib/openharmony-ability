@@ -10,8 +10,14 @@
 # Check the whole workspace
 cargo check --workspace
 
-# Host unit tests for a plugin crate (typeName / validation / mode+context assertions)
-cargo test -p openharmony-ability-plugin-<name> --lib
+# Host-safe contract tooling tests and generated inventory check
+pnpm run test:contracts
+
+# SDK-backed ArkTS runtime tests (OHOS_SDK_HOME must contain ets/)
+pnpm test
+
+# Compile plugin unit tests with the OHOS linker; execution requires OHOS
+pnpm run test:plugins
 
 # Lint: oxk lint for ArkTS/TS + clippy per OHOS arch with -D warnings
 # (clippy excludes webview_example and xcomponent_example)
@@ -114,4 +120,4 @@ Follow the local spec `docs/plugin-development-standard.md` (§1 creation order,
 - No workspace member or workspace dependency may directly depend on a `*-sys` package (including renamed dependencies and `napi-sys-ohos`). Core, plugins and examples consume binding APIs. Do not bypass bindings with local FFI imports or calls through re-exported raw functions.
 - Missing native APIs must be implemented in the owning `ohos-native-bindings` crate; only its `sys/*` packages declare FFI. Bindings own pointer validation, native error conversion and lifetime safety. N-API transport may use opaque types re-exported by `napi-ohos`, without calling raw N-API functions.
 - A feature that links a newer API must document its minimum runtime API. Runtime version checks do not make linked symbols loadable on older systems. Disabled features must omit those symbols and report unavailable capability explicitly.
-- Run `python3 scripts/check-native-boundary.py` before committing. See [native feature requirements](docs/native-capabilities.md).
+- Run `cargo run -p xtask --locked -- native-boundary` before committing. See [native feature requirements](docs/native-capabilities.md).

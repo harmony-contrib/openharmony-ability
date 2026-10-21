@@ -181,7 +181,8 @@ ArkTS object/function，也不得将响应交给 worker 后再返回。完整线
   - [ ] `execution` 与 Rust `type Mode` 一致：async → `invokeAsync`，sync → `invokeSync`
 - [ ] `Cargo.toml` workspace 与 `native_ability/oh-package.json5` 登记
 - [ ] demo 接入（如 `demo/entry/.../EntryAbility.ets` 的 `bridgePlugins` 数组）
-- [ ] 文档：`docs/plugin-development-standard.md` §3.3 契约基线补充新行
+- [ ] Documentation: regenerate `docs/napi-contracts.md` with `cargo run -p xtask -- contracts`;
+  keep action semantics in `docs/plugin-development-standard.md` §3.3.
 - [ ] 验证：`cargo check --workspace`、`cargo clippy --workspace --all-targets`、
   `cargo test -p openharmony-ability-plugin-<name> --lib`、`pnpm run prek --all-files`
 
@@ -200,7 +201,8 @@ rg -n "typeName !==|typeName ===" plugins/*/src
 
 ## 参考
 
-- 现有契约表：见 [references/contract-table.md](references/contract-table.md)
+- Canonical generated contracts: [docs/napi-contracts.md](../../../docs/napi-contracts.md);
+  see [references/contract-table.md](references/contract-table.md) for update commands.
 - 开发规范：`docs/plugin-development-standard.md`（§3 命名契约、§4 线程模式）
 - 核心实现：`crates/ability/src/bridge/mod.rs`（`impl_bridge_napi_type!`、
   `BridgeNapiType`、`BridgePlugin`）

@@ -39,7 +39,40 @@ dependencies on raw APIs. The OHOS build keeps N-API's `dyn-symbols` feature off
 and links `ace_napi.z` normally; the boundary check also rejects enabling
 `dyn-symbols` from workspace manifests.
 
-`python3 scripts/check-native-boundary.py` checks member manifests (including
-renamed dependencies) and native imports. `scripts/keyboard-focus-regressions.py`
-uses a statically linked SDK substitute and separately tests feature-disabled
-configuration without linking that substitute.
+`cargo run -p xtask --locked -- native-boundary` checks Cargo metadata (including
+renamed and target-specific direct dependencies) and parses Rust imports/calls
+with `syn`. Comments and string literals are not treated as native imports.
+
+## CI SDK and test baseline
+
+CI uses OpenHarmony **7.0 / API 26**, installed by
+`openharmony-rs/setup-ohos-sdk@v1.0.1`, and asserts the installed API version.
+API 12 cannot compile/link the API-19 keyboard, default API-22 window and opt-in
+API-26 input paths. The all-features job needs API 26. This is a **compile SDK**
+baseline, not a claim that every feature works on older devices or a change to
+the demo's deployment settings.
+
+With `OHOS_SDK_HOME` pointing to the SDK directory containing `ets/`:
+
+```sh
+pnpm test
+pnpm run test:contracts
+cargo run -p xtask --locked -- native-boundary
+```
+
+The Node runner searches `scripts/`, `native_ability/tests/` and `plugins/*/tests/`
+for existing `.cjs` files and named `*.test.mjs` / `*.spec.mjs` /
+`*-regressions.mjs` tests (also `.js`), excluding dependency/build directories.
+It executes them with `node --test`, using the SDK's real ArkTS parser.
+Rust contract tooling tests run on the host without the NDK. The generated
+[contract inventory](napi-contracts.md) is checked byte-for-byte against Rust
+declarations, including handwritten `BridgeNapiType` implementations.
+
+Plugin tests currently inherit native library imports from core, so they cannot
+link or execute on a stock Linux/macOS host. CI uses the SDK linker to compile
+the **real** ARM64 plugin test binaries with `pnpm run test:plugins` (`--no-run`)
+and links both native demos. It also retains the individual native feature
+Clippy configurations. It does not claim to execute plugin tests on a host or
+device. Running those binaries requires an OHOS test runner/device environment.
+The source-spliced Python keyboard harness and fake native library have been
+removed; they did not test the compiled framework against the real bindings.
