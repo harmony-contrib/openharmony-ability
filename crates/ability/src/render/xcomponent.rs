@@ -19,7 +19,7 @@ use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
 #[cfg(feature = "keyboard")]
 use crate::KeyboardEventData;
 use crate::{
-    input, set_main_thread_env, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase,
+    set_main_thread_env, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase,
     InputEvent, KeyboardInputDelivery, OpenHarmonyApp, PanGestureEvent, PointerInputData, Rect,
     Size, SwipeGestureEvent, TapGestureEvent, XComponentInputEvent,
 };
@@ -85,28 +85,40 @@ fn gesture_phase(action: &GestureEventAction) -> Option<GesturePhase> {
 }
 
 fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
-    app.drain_ime_input();
     let requires_surface = match &event {
         InputEvent::Ime(_) => false,
         InputEvent::XComponent(XComponentInputEvent::Key(_)) => false,
         InputEvent::ArkUi(ArkUiInputEvent::FocusChanged(_)) => false,
         #[cfg(feature = "keyboard")]
-        InputEvent::ArkUi(ArkUiInputEvent::Key(_) | ArkUiInputEvent::KeyPreIme(_)) => false,
+        InputEvent::ArkUi(ArkUiInputEvent::Key(_)) => false,
         _ => true,
     };
-    if !app.is_render_input_ready(owner)
-        || (requires_surface && !app.is_render_surface_active(owner))
-    {
+    if requires_surface && !app.is_render_surface_active(owner) {
         return;
     }
-    if let Some(ref mut handler) = *app.event_loop.borrow_mut() {
+    if let Some(callback) = app.input_callback(owner) {
+        callback.send(event);
+    }
+}
+
+#[cfg(feature = "drag")]
+fn negotiate_drag(app: &OpenHarmonyApp, owner: &str, event: crate::DragInputData) {
+    if !app.is_render_surface_active(owner) {
+        return;
+    }
+    // Drop acceptance is an immediate native reply, not deferred foreground work.
+    let Ok(mut handler) = app.event_loop.try_borrow_mut() else {
+        crate::warn!("Cannot negotiate native drop during a nested application callback");
+        return;
+    };
+    if let Some(handler) = handler.as_mut() {
+        let event = InputEvent::ArkUi(ArkUiInputEvent::Drag(event));
         match app.render_window_id(owner) {
             Some(0) => handler(Event::Input(event)),
             Some(window_id) => handler(Event::SubWindowInput { window_id, event }),
             None => {}
         }
     }
-    app.drain_after_input();
 }
 
 fn dispatch_focus(app: &OpenHarmonyApp, owner: &str, focused: bool) {
@@ -117,16 +129,7 @@ fn dispatch_focus(app: &OpenHarmonyApp, owner: &str, focused: bool) {
         }
     }
     let event = InputEvent::ArkUi(ArkUiInputEvent::FocusChanged(focused));
-    // Setting node focus from a window event can invoke this callback synchronously.
-    // Defer that nested notification until the embedding event handler is released.
-    if app.event_loop.try_borrow_mut().is_err() {
-        let deferred_app = app.clone();
-        let owner = owner.to_owned();
-        app.queue_after_input(move || dispatch_input(&deferred_app, &owner, event));
-        app.create_waker().wake();
-    } else {
-        dispatch_input(app, owner, event);
-    }
+    dispatch_input(app, owner, event);
 }
 
 fn pointer_snapshot(
@@ -307,9 +310,9 @@ pub fn render_for_window(
     window_id: i64,
     native_window_id: i32,
 ) -> Result<RootNode> {
-    if native_window_id <= 0 {
+    if native_window_id < 0 {
         return Err(Error::from_reason(
-            "Rendering requires a positive native OHOS window ID",
+            "Native render requires a nonnegative platform Window ID (0 = main)",
         ));
     }
     set_main_thread_env(*env);
@@ -364,10 +367,6 @@ pub fn render_for_window(
     let on_surface_created_app = app.clone();
     let on_surface_created_owner = render_owner.clone();
 
-    let ime_callback_source =
-        input::ime_ts_fn(env, app.clone(), render_owner.clone(), native_window_id)?;
-    let surface_ime_callback_source = ime_callback_source.clone();
-
     xcomponent.on_surface_created(move |xc_raw, win| {
         // NDK callback boundary: a panic here aborts the process (no unwinding
         // across "extern C"). Degrade to 0x0 + warn instead (issue #87 minor-2);
@@ -408,7 +407,8 @@ pub fn render_for_window(
         ) {
             crate::warn!("Cannot install native keyboard focus recovery: {error}");
         }
-        on_surface_created_app.initialize_render_input(&surface_ime_callback_source)?;
+        on_surface_created_app
+            .initialize_render_input(&on_surface_created_owner, native_window_id)?;
 
         {
             if let Some(ref mut h) = *on_surface_created_app.event_loop.borrow_mut() {
@@ -524,41 +524,21 @@ pub fn render_for_window(
     let on_key_event_owner = render_owner.clone();
     match app.keyboard_input_delivery() {
         #[cfg(feature = "keyboard")]
-        KeyboardInputDelivery::ArkUi | KeyboardInputDelivery::ArkUiWithTextInput => {
+        KeyboardInputDelivery::ArkUi => {
             let pre_ime_app = app.clone();
             let pre_ime_owner = render_owner.clone();
             xcomponent_native.on_key_pre_ime(move |event| {
                 if let Some(data) = KeyboardEventData::from_node_callback(event) {
-                    let response = data.response.clone();
-                    dispatch_input(
-                        &pre_ime_app,
-                        &pre_ime_owner,
-                        InputEvent::ArkUi(ArkUiInputEvent::KeyPreIme(data)),
-                    );
-                    if response.is_consumed() {
-                        // Pre-IME keys are native input events. A component return
-                        // value is rejected, so consume the native key itself.
-                        if let Some(input) = event.key_event() {
-                            input.set_consumed(true);
-                            input.stop_propagation(true);
-                        }
+                    if let Some(callback) = pre_ime_app.input_callback(&pre_ime_owner) {
+                        callback.key(data);
                     }
                 }
                 None
             });
             xcomponent_native.on_key_event(move |event| {
-                if let Some(input) = event.key_event() {
-                    if let Some(data) = KeyboardEventData::from_node_callback(event) {
-                        let response = data.response.clone();
-                        dispatch_input(
-                            &on_key_event_app,
-                            &on_key_event_owner,
-                            InputEvent::ArkUi(ArkUiInputEvent::Key(data)),
-                        );
-                        if response.is_consumed() {
-                            input.set_consumed(true);
-                            input.stop_propagation(true);
-                        }
+                if event.key_event().is_some() {
+                    if let Some(callback) = on_key_event_app.input_callback(&on_key_event_owner) {
+                        callback.after_ime();
                     }
                 }
             });
@@ -661,11 +641,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Enter);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                negotiate_drag(&drag_app, &drag_owner, snapshot);
                 if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
                         crate::warn!("Failed to suggest drop operation: {error}");
@@ -679,11 +655,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Move);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                negotiate_drag(&drag_app, &drag_owner, snapshot);
                 if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
                         crate::warn!("Failed to suggest drop operation: {error}");
@@ -709,11 +681,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Drop);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                negotiate_drag(&drag_app, &drag_owner, snapshot);
                 use ohos_arkui_binding::types::drag::DragResult;
                 let result = if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
@@ -741,7 +709,7 @@ pub fn render_for_window(
 
     // Node callbacks and the window ID are usable before native surface creation.
     // Replacing this editor on the first SurfaceCreate would cancel in-flight composition.
-    app.initialize_render_input(&ime_callback_source)?;
+    app.initialize_render_input(&render_owner, native_window_id)?;
     root.mount(xcomponent_native)
         .map_err(|error| Error::from_reason(error.reason.to_string()))?;
     render_guard.disarm();
