@@ -14,6 +14,20 @@ pub struct WindowPromptAnchor {
 }
 impl_bridge_napi_type!(WindowPromptAnchor, "ohos.window.PromptAnchor");
 
+/// Application-owned semantic colors in ARGB order, including alpha.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowPromptAppearance {
+    pub background: u32,
+    pub foreground: u32,
+    pub muted_foreground: u32,
+    pub primary: u32,
+    pub primary_foreground: u32,
+    pub border: u32,
+    pub focus: u32,
+}
+impl_bridge_napi_type!(WindowPromptAppearance, "ohos.window.PromptAppearance");
+
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct WindowPromptRequest {
@@ -26,6 +40,8 @@ pub struct WindowPromptRequest {
     pub cancel_index: Option<u32>,
     /// Optional content-local position in logical vp units, not physical px or screen coordinates.
     pub anchor: Option<WindowPromptAnchor>,
+    /// Omit to follow the target window's system colors.
+    pub appearance: Option<WindowPromptAppearance>,
 }
 impl_bridge_napi_type!(WindowPromptRequest, "ohos.window.PromptRequest");
 
@@ -84,6 +100,10 @@ mod tests {
     use openharmony_ability::BridgeNapiType;
     #[test]
     fn prompt_contract_and_cancellation() {
+        assert_eq!(
+            WindowPromptAppearance::TYPE_NAME,
+            "ohos.window.PromptAppearance"
+        );
         assert_eq!(WindowPromptAnchor::TYPE_NAME, "ohos.window.PromptAnchor");
         assert_eq!(WindowPromptRequest::TYPE_NAME, "ohos.window.PromptRequest");
         assert_eq!(
@@ -98,6 +118,7 @@ mod tests {
             buttons: vec!["Save".into(), "Cancel".into()],
             cancel_index: Some(1),
             anchor: None,
+            appearance: None,
         };
         assert!(request.validate().is_ok());
         request.anchor = Some(WindowPromptAnchor {

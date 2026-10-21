@@ -45,6 +45,8 @@ export { WindowManager } from "./src/main/ets/window/WindowManager";
 export {
   setMenuBarSlotBuilder,
   getMenuBarSlotBuilder,
+  menuKeyForWindow,
+  registerWindowMenuBar,
   setMenuBarPort,
   getMenuBarPort,
 } from "./src/main/ets/components/MenuBarSlot";

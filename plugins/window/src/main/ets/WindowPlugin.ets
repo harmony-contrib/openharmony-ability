@@ -812,6 +812,14 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-background-color") {
       const request = parseColorRequest(payload);
+      if (
+        WindowManager.getInstance().configureDeferredWindow(request.windowId, (options): void => {
+          options.transparent = false;
+          options.backgroundColor = request.color;
+        })
+      ) {
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
       const win = await this.requireWindow(request.windowId, context);
       try {
         const color = this.colorString(request.color);
@@ -874,16 +882,20 @@ export class WindowPlugin extends AsyncPluginBase {
             beforeRun: (): void => this.assertCallActive(context),
           });
         } else {
-          await manager.serializeOp(request.windowId, async (): Promise<void> => {
-            this.assertCallActive(context);
-            // showWindow also raises independent child windows and restores hidden ones.
-            // raiseToAppTop does not change their stacking when the parent constraint is loosened.
-            if (deviceInfo.sdkApiVersion >= 20) {
-              await win.showWindow({ focusOnShow: true });
-            } else {
-              await win.showWindow();
-            }
-          });
+          await manager.serializeOp(
+            request.windowId,
+            async (): Promise<void> => {
+              this.assertCallActive(context);
+              // showWindow also raises independent child windows and restores hidden ones.
+              // raiseToAppTop does not change their stacking when the parent constraint is loosened.
+              if (deviceInfo.sdkApiVersion >= 20) {
+                await win.showWindow({ focusOnShow: true });
+              } else {
+                await win.showWindow();
+              }
+            },
+            win,
+          );
         }
         this.assertCallActive(context);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -916,6 +928,14 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "move-to") {
       const request = parseMoveRequest(payload);
+      if (
+        WindowManager.getInstance().configureDeferredWindow(request.windowId, (options): void => {
+          options.x = request.x;
+          options.y = request.y;
+        })
+      ) {
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
       const win = await this.requireWindow(request.windowId, context);
       try {
         await win.moveWindowTo(request.x, request.y);
@@ -927,6 +947,14 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "resize") {
       const request = parseResizeRequest(payload);
+      if (
+        WindowManager.getInstance().configureDeferredWindow(request.windowId, (options): void => {
+          options.width = request.width;
+          options.height = request.height;
+        })
+      ) {
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
       const win = await this.requireWindow(request.windowId, context);
       try {
         await win.resize(request.width, request.height);
@@ -1253,43 +1281,47 @@ export class WindowPlugin extends AsyncPluginBase {
           beforeRun: (): void => this.assertCallActive(context),
         });
       } else {
-        await manager.serializeOp(request.windowId, async (): Promise<void> => {
-          this.assertCallActive(context);
-          const dynamic: ESObject = this.dynamic(win);
-          if (action === "minimize") {
-            await (dynamic.minimize() as Promise<void>);
-          } else if (action === "maximize") {
-            // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
-            // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
-            // layout gap (white bar at bottom) after recover().
-            // Snapshot the floating rect first: WMS recover() re-anchors the floating
-            // position to the pointer (GetFullScreenToFloatingRect), so the paired
-            // recover below must moveTo() back — see WindowManager.preMaximizeRects.
-            // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
-            // losing this bridge's await-completion semantics (callers immediately
-            // query is-maximized afterwards).
-            manager.snapshotPreMaximizeRect(request.windowId, win);
-            await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
-          } else if (action === "recover") {
-            await (dynamic.recover() as Promise<void>);
-            // Restore the pre-maximize position snapshotted above (WMS recover()
-            // pointer-anchors the floating rect). Best-effort — recover already
-            // succeeded.
-            await manager.restorePreMaximizeRect(request.windowId, win);
-            // NOTE: Do NOT call showWindow() after recover() — recover() already makes
-            // the window visible, and showWindow() resets the window position to centered
-            // state, causing the window to jump to the center of the screen.
-          } else if (action === "show") {
-            // A hidden window can still report its pre-placement rectangle. The
-            // OS applies its pending move on show; replaying that snapshot loses it.
-            const focusOnShow = manager.focusOnShow(request.windowId);
-            if (deviceInfo.sdkApiVersion >= 20 && focusOnShow !== undefined) {
-              await win.showWindow({ focusOnShow });
-            } else {
-              await win.showWindow();
+        await manager.serializeOp(
+          request.windowId,
+          async (): Promise<void> => {
+            this.assertCallActive(context);
+            const dynamic: ESObject = this.dynamic(win);
+            if (action === "minimize") {
+              await (dynamic.minimize() as Promise<void>);
+            } else if (action === "maximize") {
+              // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
+              // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
+              // layout gap (white bar at bottom) after recover().
+              // Snapshot the floating rect first: WMS recover() re-anchors the floating
+              // position to the pointer (GetFullScreenToFloatingRect), so the paired
+              // recover below must moveTo() back — see WindowManager.preMaximizeRects.
+              // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
+              // losing this bridge's await-completion semantics (callers immediately
+              // query is-maximized afterwards).
+              manager.snapshotPreMaximizeRect(request.windowId, win);
+              await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
+            } else if (action === "recover") {
+              await (dynamic.recover() as Promise<void>);
+              // Restore the pre-maximize position snapshotted above (WMS recover()
+              // pointer-anchors the floating rect). Best-effort — recover already
+              // succeeded.
+              await manager.restorePreMaximizeRect(request.windowId, win);
+              // NOTE: Do NOT call showWindow() after recover() — recover() already makes
+              // the window visible, and showWindow() resets the window position to centered
+              // state, causing the window to jump to the center of the screen.
+            } else if (action === "show") {
+              // A hidden window can still report its pre-placement rectangle. The
+              // OS applies its pending move on show; replaying that snapshot loses it.
+              const focusOnShow = manager.focusOnShow(request.windowId);
+              if (deviceInfo.sdkApiVersion >= 20 && focusOnShow !== undefined) {
+                await win.showWindow({ focusOnShow });
+              } else {
+                await win.showWindow();
+              }
             }
-          }
-        });
+          },
+          win,
+        );
       }
       this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };

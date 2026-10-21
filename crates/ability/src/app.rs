@@ -884,6 +884,12 @@ impl OpenHarmonyApp {
 
     /// Selects the keyboard stream before any main or child render starts.
     pub fn set_keyboard_input_delivery(&self, delivery: KeyboardInputDelivery) -> Result<()> {
+        #[cfg(all(feature = "keyboard", not(feature = "keyboard-text-input")))]
+        if delivery == KeyboardInputDelivery::ArkUiWithTextInput {
+            return Err(Error::from_reason(
+                "ArkUiWithTextInput requires the keyboard-text-input feature (API 26+)",
+            ));
+        }
         #[cfg(feature = "keyboard")]
         if matches!(
             delivery,
@@ -915,9 +921,15 @@ impl OpenHarmonyApp {
     }
 
     /// Enables early key focus recovery when one render surface owns each window's keyboard input.
-    /// Must be configured before rendering. Runtimes without filter inspection retain focus callbacks.
+    /// Requires `keyboard-focus-recovery` (API 26+) and configuration before rendering.
     #[cfg(feature = "keyboard")]
     pub fn set_window_keyboard_focus_recovery(&self, enabled: bool) -> Result<()> {
+        #[cfg(not(feature = "keyboard-focus-recovery"))]
+        if enabled {
+            return Err(Error::from_reason(
+                "Window keyboard focus recovery requires the keyboard-focus-recovery feature (API 26+)",
+            ));
+        }
         let mut inner = self.inner.write().map_err(|_| {
             Error::from_reason("Failed to configure window keyboard focus recovery")
         })?;
@@ -930,7 +942,7 @@ impl OpenHarmonyApp {
         Ok(())
     }
 
-    #[cfg(feature = "keyboard")]
+    #[cfg(feature = "keyboard-focus-recovery")]
     pub(crate) fn window_keyboard_focus_recovery_enabled(&self) -> bool {
         match self.inner.read() {
             Ok(inner) => inner.window_keyboard_focus_recovery,
@@ -955,7 +967,7 @@ impl OpenHarmonyApp {
         }
     }
 
-    #[cfg(feature = "keyboard")]
+    #[cfg(feature = "keyboard-focus-recovery")]
     pub(crate) fn window_has_focus(&self, window_id: i64) -> bool {
         match self.inner.read() {
             Ok(inner) => inner.window_focus.get(&window_id).copied().unwrap_or(false),
@@ -1130,7 +1142,7 @@ impl OpenHarmonyApp {
             })
             .unwrap_or(false);
         if deactivated {
-            #[cfg(feature = "keyboard")]
+            #[cfg(feature = "keyboard-focus-recovery")]
             crate::render::release_keyboard_focus_recovery(self, owner);
             self.ime_input.discard(owner);
             if let Some(window_id) = window_id {
@@ -1165,7 +1177,7 @@ impl OpenHarmonyApp {
     /// from an old DefaultXComponent cannot clear a replacement component's native state.
     #[doc(hidden)]
     pub fn release_render(&self, owner: &str) {
-        #[cfg(feature = "keyboard")]
+        #[cfg(feature = "keyboard-focus-recovery")]
         crate::render::release_keyboard_focus_recovery(self, owner);
         let released = self.inner.write().ok().and_then(|mut inner| {
             if inner.owns_render(owner) {
@@ -1373,19 +1385,7 @@ impl OpenHarmonyApp {
             // XComponent's keyboard-demand flag defaults to false. Its generic
             // onNeedSoftkeyboard callback can veto that flag, but cannot enable
             // it; without this update ArkUI closes the IME on window activation.
-            let status = unsafe {
-                ohos_xcomponent_sys::OH_NativeXComponent_SetNeedSoftKeyboard(
-                    component.native_xcomponent().raw(),
-                    active,
-                )
-            };
-            if status == 0 {
-                Ok(())
-            } else {
-                Err(Error::from_reason(format!(
-                    "Cannot set native keyboard demand for window {window_id}: {status}"
-                )))
-            }
+            component.native_xcomponent().set_need_soft_keyboard(active)
         })
         .ok_or_else(|| {
             Error::from_reason(format!(
@@ -1770,14 +1770,16 @@ pub fn is_desktop_device() -> bool {
     cfg!(desktop)
 }
 
-// ─── Process-level globals (NAPI-entry-point state) ─────────────────────────────
-// PROCESS-LEVEL SINGLE-SESSION ASSUMPTION (issue #87 major-9): every static in
+// ─── Native-module globals (NAPI-entry-point state) ────────────────────────────
+// SINGLE-SESSION PER NATIVE MODULE (issue #87 major-9): every static in
 // this section is written by a `#[napi]` free function — an entry point with no
 // receiver, so the state must live at module scope. The NAPI writer receives no
 // app handle from ArkTS, which is why these CANNOT migrate into
-// `OpenHarmonyAppInner` like the want/continuation session state did. They are
-// correct under a single UIAbility instance per process; under multiple
-// concurrent UIAbility instances the events interleave in one shared queue.
+// `OpenHarmonyAppInner` like the want/continuation session state did without
+// extending the ABI. Each loaded native module owns its queue and app instance.
+// Multiple windows of that app share the queue and route by logical window ID;
+// independent sessions cannot share the same module concurrently. This is a
+// framework ownership constraint, not a one-UIAbility-per-process platform limit.
 // Do not add new statics here without an equivalent NAPI constraint.
 
 /// Global queue for pending window close requests from ArkTS.

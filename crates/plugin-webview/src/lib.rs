@@ -1048,115 +1048,26 @@ fn snapshot_call_options() -> BridgeCallOptions {
     BridgeCallOptions::default().with_timeout_ms(60_000)
 }
 
-/// Returns the active ArkWeb engine version, e.g. `"M132"` / `"M132 (evergreen)"`.
-///
-/// ArkWeb identifies its engine by kernel generation rather than a semantic
-/// version string — there is no `getWebVersion()`-style API; the public native
-/// surface is `OH_NativeArkWeb_GetActiveWebEngineVersion` (API 20+) from
-/// `libohweb.so`, resolved lazily via dlopen+dlsym (same pattern as the
-/// cursor-lock C API in the window module) so systems below API 20 degrade to
-/// an error instead of a load-time link failure. No ArkTS round-trip is
-/// involved: consumers may call this during app bootstrap, while the Rust
-/// main thread is still inside the NAPI `openharmony()` entry and the ArkTS
-/// loop cannot answer a bridge call.
+/// Returns the active ArkWeb engine version without an ArkTS round trip.
+/// Requires `engine-version` and API 20+. The optional `engine-evergreen`
+/// feature adds the API-23 evergreen query and raises the minimum runtime API.
+#[cfg(feature = "engine-version")]
 pub fn arkweb_engine_version() -> Result<String> {
-    arkweb_version_capi::engine_version().map_err(Error::from_reason)
-}
-
-/// `ArkWebEngineVersion` values from `native_interface_arkweb.h`.
-mod arkweb_version_capi {
-    use std::ffi::{c_char, c_int, c_void};
-    use std::sync::OnceLock;
-
-    const ENGINE_VERSION_M114: i32 = 1;
-    const ENGINE_VERSION_M132: i32 = 2;
-    const ENGINE_VERSION_M144: i32 = 3;
-    const ENGINE_VERSION_EVERGREEN: i32 = 99999;
-
-    type GetActiveWebEngineVersionFn = unsafe extern "C" fn() -> i32;
-    type IsActiveWebEngineEvergreenFn = unsafe extern "C" fn() -> bool;
-
-    struct ArkWebVersionApi {
-        get_active_web_engine_version: GetActiveWebEngineVersionFn,
-        // API 23+; `None` on older systems (the flag is informational only).
-        is_active_web_engine_evergreen: Option<IsActiveWebEngineEvergreenFn>,
+    use ohos_web_binding::{WebEngine, WebEngineVersion};
+    let version = WebEngine::active_version();
+    let name = match version {
+        WebEngineVersion::SystemDefault => "SYSTEM_DEFAULT".to_string(),
+        WebEngineVersion::M114 => "M114".to_string(),
+        WebEngineVersion::M132 => "M132".to_string(),
+        WebEngineVersion::M144 => "M144".to_string(),
+        WebEngineVersion::Evergreen => "ARKWEB_EVERGREEN".to_string(),
+        WebEngineVersion::Unknown(other) => format!("ArkWebEngineVersion({other})"),
+    };
+    #[cfg(feature = "engine-evergreen")]
+    if WebEngine::is_evergreen() {
+        return Ok(format!("{name} (evergreen)"));
     }
-
-    static ARKWEB_VERSION_API: OnceLock<Option<ArkWebVersionApi>> = OnceLock::new();
-
-    extern "C" {
-        fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
-        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-    }
-
-    /// Resolves the ArkWeb version C API once per process; `Err` when the
-    /// system does not provide it (below API 20). The handle is intentionally
-    /// never closed — the library stays loaded for the process lifetime.
-    fn api() -> Option<&'static ArkWebVersionApi> {
-        ARKWEB_VERSION_API
-            .get_or_init(|| unsafe {
-                // RTLD_NOW | RTLD_LOCAL = 2 on OHOS musl.
-                let handle = dlopen(c"libohweb.so".as_ptr(), 2);
-                if handle.is_null() {
-                    log::warn!("[webview] dlopen libohweb.so failed — ArkWeb version unavailable");
-                    return None;
-                }
-                let get_version = dlsym(
-                    handle,
-                    c"OH_NativeArkWeb_GetActiveWebEngineVersion".as_ptr(),
-                );
-                if get_version.is_null() {
-                    log::warn!(
-                        "[webview] OH_NativeArkWeb_GetActiveWebEngineVersion not exported \
-                         (API < 20) — ArkWeb version unavailable"
-                    );
-                    return None;
-                }
-                let is_evergreen = dlsym(
-                    handle,
-                    c"OH_NativeArkWeb_IsActiveWebEngineEvergreen".as_ptr(),
-                );
-                Some(ArkWebVersionApi {
-                    get_active_web_engine_version: std::mem::transmute::<
-                        *mut c_void,
-                        GetActiveWebEngineVersionFn,
-                    >(get_version),
-                    is_active_web_engine_evergreen: (!is_evergreen.is_null()).then(|| {
-                        std::mem::transmute::<*mut c_void, IsActiveWebEngineEvergreenFn>(
-                            is_evergreen,
-                        )
-                    }),
-                })
-            })
-            .as_ref()
-    }
-
-    pub fn engine_version() -> Result<String, String> {
-        let api = api().ok_or(
-            "libohweb.so does not export OH_NativeArkWeb_GetActiveWebEngineVersion \
-             (device below API 20)"
-                .to_string(),
-        )?;
-        let version = unsafe { (api.get_active_web_engine_version)() };
-        let mut name = match version {
-            ENGINE_VERSION_M114 => "M114",
-            ENGINE_VERSION_M132 => "M132",
-            ENGINE_VERSION_M144 => "M144",
-            ENGINE_VERSION_EVERGREEN => "ARKWEB_EVERGREEN",
-            // 0 (SYSTEM_DEFAULT): the app never pinned an engine, so the
-            // system default applies (M132 on 6.0, M144 on 7.0). Any other
-            // value is a future generation — report the raw enum number.
-            0 => "SYSTEM_DEFAULT",
-            other => return Ok(format!("ArkWebEngineVersion({other})")),
-        }
-        .to_string();
-        if let Some(is_evergreen) = api.is_active_web_engine_evergreen {
-            if unsafe { is_evergreen() } {
-                name.push_str(" (evergreen)");
-            }
-        }
-        Ok(name)
-    }
+    Ok(name)
 }
 
 pub trait WebviewExt {

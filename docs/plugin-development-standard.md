@@ -24,6 +24,14 @@
 
 每个插件必须满足以下边界：
 
+- 原生能力必须通过 Cargo feature 选择或开启，禁止使用 `libloading`、`dlopen`、`dlsym`
+  等运行时符号探测方式，包括宿主测试。整个 workspace 禁止直接依赖 `*-sys`（含重命名依赖
+  和 `napi-sys-ohos`）；core、插件和示例只能调用 binding 的公开封装，不得本地声明 FFI
+  或通过重导出的原始函数绕过封装。缺少接口时先补充对应的 `ohos-native-bindings`。
+  具名 N-API transport 可以使用 `napi-ohos` 重导出的不透明类型，但不得调用原始 N-API 函数。
+- feature 必须标明最低运行时 API；关闭后不得引用对应原生符号。运行时版本判断不能解决
+  新符号在旧系统上的加载问题。合入前执行 `cargo run -p xtask --locked -- native-boundary`，
+  feature 的具体要求见 [原生能力配置](native-capabilities.md)。
 - Rust crate 位于 `crates/plugin-<name>`，依赖 `openharmony-ability`；需要复用其他插件类型时依赖
   对应的 `plugin-*` crate（如 `plugin-statusbar` 复用 `plugin-menu` 的类型），但不能依赖 ArkTS
   实现或应用页面；对外通过扩展 trait/client 暴露能力。
@@ -204,6 +212,12 @@ export { LoginPlugin };
 
 ### 3.3 既有内置插件的契约基线
 
+The canonical type-name inventory, object layouts and plugin mode/context declarations are
+generated from Rust in [napi-contracts.md](napi-contracts.md). Regenerate it with
+`cargo run -p xtask -- contracts`; CI rejects stale output with `--check`. The overview below
+documents action semantics, not a second exhaustive type inventory. Keep ArkTS aligned with
+the generated declarations; a documentation diff is not a cross-language type checker.
+
 迁移 helper 或新增 action 时，应以现有插件的类型名、模式和 context 作为兼容语义基线；不兼容
 契约必须引入新的 action/typeName，不能修改已有具名 N-API 类型的含义。
 
@@ -214,8 +228,7 @@ export { LoginPlugin };
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
 | `ohos.clipboard` / `write-records` | `ohos.clipboard.WriteRecordsRequest { records: Record[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；1..512 个文本（可带 metadata）、图片或文件 URI 记录，保持顺序 |
 | `ohos.clipboard` / `read-records` | `ohos.clipboard.ReadTextRequest {}` → `ohos.clipboard.ReadRecordsResponse { records: Record[] }` | async / `ability`；`Record { text?, metadata?, encodedImage?, uri? }` 每条仅一种主内容；需要 READ_PASTEBOARD 的 ACL 和运行时授权 |
-| `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `ohos.audio.UpdateResponse { accepted }` | async / `ability`；借用文件至 CLOEXEC 复制完成，按 player 复用和等待释放 |
-| `ohos.audio` / 入站 `duplicate`、`playback` | `ohos.audio.DuplicateRequest { fd }` → `std.i32` / `ohos.audio.PlaybackEvent` → `std.bool` | 主线程同步；仅传具名数据，不保留 N-API 对象 |
+| `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `ohos.audio.UpdateResponse { accepted }` | async / `ability`; ArkTS owns an API 10+ `fs.dup` file until player release; source descriptors are private transport data, with no reverse events or playback-log contract |
 | `ohos.clipboard` / `write-mime` | `ohos.clipboard.WriteMimeRequest { contents: MimeContent[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；同一记录的二进制多表示，空数组清空，系统提交后完成 |
 | `ohos.clipboard` / `read-mime` | `ohos.clipboard.ReadMimeRequest { mimes, list }` → `ohos.clipboard.ReadMimeResponse { contents, available }` | async / `ability`；按请求顺序读回，空 mimes 只列元数据，读取等待先前写入 |
 | `ohos.clipboard` / 入站 `changed` | `ohos.clipboard.ChangedEvent {}` → `std.bool` | 系统 pasteboard update 使 Rust revision 递增；监听随插件生命周期释放 |

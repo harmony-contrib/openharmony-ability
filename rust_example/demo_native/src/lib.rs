@@ -601,14 +601,12 @@ pub async fn play_audio_demo() -> Result<()> {
         .update(
             AudioUpdateRequest {
                 player: "demo".into(),
-                source_fd: None,
                 replace: true,
                 release: false,
                 play: true,
                 volume: 0.5,
                 report_errors: true,
                 label: "Demo tone".into(),
-                diagnostics: false,
             },
             Some(file.as_fd()),
         )
