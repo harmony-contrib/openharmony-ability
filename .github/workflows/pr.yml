@@ -1,4 +1,4 @@
-name: Format & Lint
+name: Contracts, Tests & Lint
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  pull-requests: write
+  contents: read
 
 jobs:
   Lint:
@@ -23,6 +23,18 @@ jobs:
         id: setup-ohos
         with:
           version: "7.0"
+
+      - name: Verify SDK baseline and configure native compiler
+        env:
+          SDK_API: ${{ steps.setup-ohos.outputs.api-version }}
+          SDK_NATIVE: ${{ steps.setup-ohos.outputs.ohos_sdk_native }}
+          SDK_HOME: ${{ steps.setup-ohos.outputs.ohos-base-sdk-home }}
+        run: |
+          test "$SDK_API" = "26"
+          echo "OHOS_SDK_HOME=$SDK_HOME" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=$SDK_NATIVE/llvm/bin/aarch64-unknown-linux-ohos-clang" >> "$GITHUB_ENV"
+          echo "CC_aarch64_unknown_linux_ohos=$SDK_NATIVE/llvm/bin/aarch64-unknown-linux-ohos-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64_unknown_linux_ohos=$SDK_NATIVE/llvm/bin/llvm-ar" >> "$GITHUB_ENV"
 
       - name: setup Rust
         uses: dtolnay/rust-toolchain@master
@@ -44,12 +56,22 @@ jobs:
           cache: pnpm
 
       - name: Native attachment lifecycle tests
-        run: |
-          bash crates/ability/tests/run-attachment-host.sh
-          node --experimental-vm-modules --test scripts/ability-shutdown.test.mjs scripts/bridge-cleanup.test.mjs
+        run: bash crates/ability/tests/run-attachment-host.sh
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Host contract tooling tests and generated inventory diff
+        run: pnpm run test:contracts
+
+      - name: SDK-backed Node runtime tests
+        run: pnpm test
+
+      - name: Compile real plugin tests for OHOS (not host execution)
+        run: pnpm run test:plugins
+
+      - name: Link ARM64 native demos
+        run: cargo build -p demo_native -p demo_sub_native --locked --target aarch64-unknown-linux-ohos
 
       - name: Format and lint
         run: npm run prek -- --all-files
