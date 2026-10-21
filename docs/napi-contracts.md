@@ -35,6 +35,7 @@ platform failure policies remain in the [plugin standard](plugin-development-sta
 | `ohos.system-state` | `AsyncBridge` | `& [BridgeContextRequirement::Ability]` | [source](../crates/plugin-system-state/src/lib.rs) |
 | `ohos.updater` | `AsyncBridge` | `& [BridgeContextRequirement::Ability]` | [source](../crates/plugin-updater/src/lib.rs) |
 | `ohos.url` | `AsyncBridge` | `& [BridgeContextRequirement::Ability]` | [source](../crates/plugin-url/src/lib.rs) |
+| `ohos.video` | `AsyncBridge` | `& [BridgeContextRequirement::UiContext]` | [source](../crates/plugin-video/src/lib.rs) |
 | `ohos.webview` | `AsyncBridge` | `& [BridgeContextRequirement::UiContext]` | [source](../crates/plugin-webview/src/lib.rs) |
 | `ohos.window` | `AsyncBridge` | `& [BridgeContextRequirement::UiContext]` | [source](../crates/plugin-window/src/lib.rs) |
 
@@ -49,9 +50,15 @@ platform failure policies remain in the [plugin standard](plugin-development-sta
 | `ohos.accessibility.IsOpenAccessibilityResponse` | `AccessibilityIsOpenResponse` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `ohos.accessibility.IsTouchExploreRequest` | `AccessibilityIsTouchExploreRequest` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `ohos.accessibility.IsTouchExploreResponse` | `AccessibilityIsTouchExploreResponse` | [source](../crates/plugin-accessibility/src/lib.rs) |
+| `ohos.accessibility.LiveAnnouncement` | `AccessibilityLiveAnnouncement` | [source](../crates/plugin-accessibility/src/events.rs) |
+| `ohos.accessibility.MotionRequest` | `AccessibilityMotionRequest` | [source](../crates/plugin-accessibility/src/motion.rs) |
+| `ohos.accessibility.MotionState` | `AccessibilityMotionState` | [source](../crates/plugin-accessibility/src/motion.rs) |
+| `ohos.accessibility.SendEventRequest` | `AccessibilitySendEventRequest` | [source](../crates/plugin-accessibility/src/events.rs) |
 | `ohos.accessibility.StateChangedEvent` | `AccessibilityStateChangedEvent` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `ohos.accessibility.SubscribeRequest` | `AccessibilitySubscribeRequest` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `ohos.accessibility.SubscribeResponse` | `AccessibilitySubscribeResponse` | [source](../crates/plugin-accessibility/src/lib.rs) |
+| `ohos.accessibility.Subscriptions` | `AccessibilitySubscriptions` | [source](../crates/plugin-accessibility/src/lib.rs) |
+| `ohos.accessibility.SubscriptionsRequest` | `AccessibilitySubscriptionsRequest` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `ohos.accessibility.UnsubscribeRequest` | `AccessibilityUnsubscribeRequest` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `ohos.accessibility.UnsubscribeResponse` | `AccessibilityUnsubscribeResponse` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `ohos.account.LoginRequest` | `AccountLoginRequest` | [source](../crates/plugin-account/src/lib.rs) |
@@ -158,6 +165,12 @@ platform failure policies remain in the [plugin standard](plugin-development-sta
 | `ohos.url.RevealRequest` | `UrlRevealRequest` | [source](../crates/plugin-url/src/lib.rs) |
 | `ohos.url.SchemeRequest` | `UrlSchemeRequest` | [source](../crates/plugin-url/src/lib.rs) |
 | `ohos.url.SchemeResponse` | `UrlSchemeResponse` | [source](../crates/plugin-url/src/lib.rs) |
+| `ohos.video.Acknowledgement` | `VideoAcknowledgement` | [source](../crates/plugin-video/src/lib.rs) |
+| `ohos.video.BytesRequest` | `VideoBytesRequest` | [source](../crates/plugin-video/src/lib.rs) |
+| `ohos.video.CommandRequest` | `VideoCommandRequest` | [source](../crates/plugin-video/src/lib.rs) |
+| `ohos.video.CreateRequest` | `VideoCreateRequest` | [source](../crates/plugin-video/src/lib.rs) |
+| `ohos.video.Event` | `VideoEvent` | [source](../crates/plugin-video/src/lib.rs) |
+| `ohos.video.Settings` | `VideoSettings` | [source](../crates/plugin-video/src/lib.rs) |
 | `ohos.webview.Acknowledgement` | `WebviewAcknowledgement` | [source](../crates/plugin-webview/src/lib.rs) |
 | `ohos.webview.CaptureResponse` | `WebviewCaptureResponse` | [source](../crates/plugin-webview/src/lib.rs) |
 | `ohos.webview.ControllerEvent` | `WebviewControllerEvent` | [source](../crates/plugin-webview/src/lib.rs) |
@@ -226,6 +239,7 @@ platform failure policies remain in the [plugin standard](plugin-development-sta
 | `ohos.window.StackRequest` | `WindowStackRequest` | [source](../crates/plugin-window/src/stack.rs) |
 | `ohos.window.StackResponse` | `WindowStackResponse` | [source](../crates/plugin-window/src/stack.rs) |
 | `ohos.window.StateResponse` | `WindowStateResponse` | [source](../crates/plugin-window/src/lib.rs) |
+| `ohos.window.StatusBarRequest` | `WindowStatusBarRequest` | [source](../crates/plugin-window/src/system_bars.rs) |
 | `ohos.window.TitleRequest` | `WindowTitleRequest` | [source](../crates/plugin-window/src/lib.rs) |
 | `ohos.window.TopmostRequest` | `WindowTopmostRequest` | [source](../crates/plugin-window/src/lib.rs) |
 | `ohos.window.TouchableRequest` | `WindowTouchableRequest` | [source](../crates/plugin-window/src/lib.rs) |
@@ -250,8 +264,6 @@ defined by their linked source, not by an invented object layout.
 | --- | --- | --- |
 | `openharmony_ability::app::AbilityInitContext` | `{ base_path: Option<String>, pref_path: Option<String>, preferred_locales: Option<String>, module_name: Option<String>, sdk_api_version: Option<i32>, distribution_api_version (JS: distributionOSApiVersion): Option<i32> }` | [source](../crates/ability/src/app.rs) |
 | `openharmony_ability::bridge::BridgePluginDeclaration` | `{ id: String, execution: String, requires: Vec<String> }` | [source](../crates/ability/src/bridge/mod.rs) |
-| `openharmony_ability::input::ime::PreviewTextEventData` | `{ text: String, start: i32, end: i32 }` | [source](../crates/ability/src/input/ime.rs) |
-| `openharmony_ability::input::ime::SelectionEventData` | `{ start: i32, end: i32 }` | [source](../crates/ability/src/input/ime.rs) |
 | `openharmony_ability::lifecycle::ApplicationLifecycle` | `{ bridge_plugins: Vec<BridgePluginDeclaration>, environment_callback: EnvironmentCallback<'a>, window_stage_event_callback: WindowStageEventCallback<'a>, keyboard_event_callback: KeyboardCallback<'a> }` | [source](../crates/ability/src/lifecycle.rs) |
 | `openharmony_ability::lifecycle::EnvironmentCallback` | `{ on_configuration_updated: Function<'a , () , ()>, on_memory_level: Function<'a , i32 , ()> }` | [source](../crates/ability/src/lifecycle.rs) |
 | `openharmony_ability::lifecycle::KeyboardCallback` | `{ on_keyboard_height_change: Function<'a , i32 , ()> }` | [source](../crates/ability/src/lifecycle.rs) |
@@ -275,8 +287,14 @@ defined by their linked source, not by an invented object layout.
 | `openharmony_ability_plugin_accessibility::AccessibilityStateChangedEvent` | `{ enabled: bool }` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `openharmony_ability_plugin_accessibility::AccessibilitySubscribeRequest` | `{  }` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `openharmony_ability_plugin_accessibility::AccessibilitySubscribeResponse` | `{ accepted: bool }` | [source](../crates/plugin-accessibility/src/lib.rs) |
+| `openharmony_ability_plugin_accessibility::AccessibilitySubscriptions` | `{ screen_reader: bool, motion_ids: Vec<String> }` | [source](../crates/plugin-accessibility/src/lib.rs) |
+| `openharmony_ability_plugin_accessibility::AccessibilitySubscriptionsRequest` | `{  }` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `openharmony_ability_plugin_accessibility::AccessibilityUnsubscribeRequest` | `{  }` | [source](../crates/plugin-accessibility/src/lib.rs) |
 | `openharmony_ability_plugin_accessibility::AccessibilityUnsubscribeResponse` | `{ accepted: bool }` | [source](../crates/plugin-accessibility/src/lib.rs) |
+| `openharmony_ability_plugin_accessibility::events::AccessibilityLiveAnnouncement` | `{ text: String, assertive: bool }` | [source](../crates/plugin-accessibility/src/events.rs) |
+| `openharmony_ability_plugin_accessibility::events::AccessibilitySendEventRequest` | `{ announcement: Option<String>, element_id: Option<i32> }` | [source](../crates/plugin-accessibility/src/events.rs) |
+| `openharmony_ability_plugin_accessibility::motion::AccessibilityMotionRequest` | `{ id: String }` | [source](../crates/plugin-accessibility/src/motion.rs) |
+| `openharmony_ability_plugin_accessibility::motion::AccessibilityMotionState` | `{ id: String, enabled: bool }` | [source](../crates/plugin-accessibility/src/motion.rs) |
 | `openharmony_ability_plugin_account::AccountLoginRequest` | `{  }` | [source](../crates/plugin-account/src/lib.rs) |
 | `openharmony_ability_plugin_account::AccountLoginResponse` | `{ uid: String, open_id: String, union_id: String, display_name: String, avatar_uri: String, authorization_code: String, access_token: Option<String> }` | [source](../crates/plugin-account/src/lib.rs) |
 | `openharmony_ability_plugin_account::AccountLogoutRequest` | `{  }` | [source](../crates/plugin-account/src/lib.rs) |
@@ -386,6 +404,11 @@ defined by their linked source, not by an invented object layout.
 | `openharmony_ability_plugin_url::UrlRevealRequest` | `{ path: String }` | [source](../crates/plugin-url/src/lib.rs) |
 | `openharmony_ability_plugin_url::UrlSchemeRequest` | `{ scheme: String }` | [source](../crates/plugin-url/src/lib.rs) |
 | `openharmony_ability_plugin_url::UrlSchemeResponse` | `{ declared: bool }` | [source](../crates/plugin-url/src/lib.rs) |
+| `openharmony_ability_plugin_video::VideoAcknowledgement` | `{ accepted: bool }` | [source](../crates/plugin-video/src/lib.rs) |
+| `openharmony_ability_plugin_video::VideoCommandRequest` | `{ id: String, source: Option<String>, value: Option<f64> }` | [source](../crates/plugin-video/src/lib.rs) |
+| `openharmony_ability_plugin_video::VideoCreateRequest` | `{ target_id: u32, settings: VideoSettings }` | [source](../crates/plugin-video/src/lib.rs) |
+| `openharmony_ability_plugin_video::VideoEvent` | `{ id: String, target_id: u32, phase: String, current_time: f64, duration: f64, width: f64, height: f64, buffering: bool, message: Option<String> }` | [source](../crates/plugin-video/src/lib.rs) |
+| `openharmony_ability_plugin_video::VideoSettings` | `{ id: String, paused: bool, muted: bool, volume: f64, rate: f64, repeat: bool, resize_mode: String, controls: bool, progress_interval_ms: f64 }` | [source](../crates/plugin-video/src/lib.rs) |
 | `openharmony_ability_plugin_webview::NativeWebviewControllerEvent` | `{ id: String, target_id: u32, native_tag: String }` | [source](../crates/plugin-webview/src/lib.rs) |
 | `openharmony_ability_plugin_webview::WebviewAcknowledgement` | `{ accepted: bool }` | [source](../crates/plugin-webview/src/lib.rs) |
 | `openharmony_ability_plugin_webview::WebviewCallbackOptions` | `{ navigation_intercept: bool, download_start: bool, download_end: bool, title_change: bool, drag_drop: bool, new_window: bool, page_begin: bool, page_end: bool }` | [source](../crates/plugin-webview/src/lib.rs) |
@@ -465,6 +488,7 @@ defined by their linked source, not by an invented object layout.
 | `openharmony_ability_plugin_window::prompt::WindowPromptResponse` | `{ index: u32 }` | [source](../crates/plugin-window/src/prompt.rs) |
 | `openharmony_ability_plugin_window::stack::WindowStackRequest` | `{ display_id: i64, window_ids: Vec<i64> }` | [source](../crates/plugin-window/src/stack.rs) |
 | `openharmony_ability_plugin_window::stack::WindowStackResponse` | `{ window_ids: Vec<i64> }` | [source](../crates/plugin-window/src/stack.rs) |
+| `openharmony_ability_plugin_window::system_bars::WindowStatusBarRequest` | `{ window_id: i64, enabled: bool, light_content: bool, background: Option<u32>, animated: bool }` | [source](../crates/plugin-window/src/system_bars.rs) |
 
 ## Explicit object reads in named-type methods
 

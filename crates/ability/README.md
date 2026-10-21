@@ -45,17 +45,22 @@ openharmony-ability = { version = "1.0.0-beta.3", features = ["keyboard"] }
 ```
 
 `keyboard` enables `KeyboardInputDelivery::ArkUi`, `KeyboardEventData`,
-`KeyboardEventResponse`, and `ArkUiInputEvent::{KeyPreIme, Key}`. It forwards
-`ohos-arkui-binding/api-19` and is not part of the default feature set. The
+and `ArkUiInputEvent::Key`. It forwards
+`ohos-arkui-binding/api-14` and is not part of the default feature set. The
 default stream remains raw XComponent input; select
 `OpenHarmonyApp::set_keyboard_input_delivery(KeyboardInputDelivery::ArkUi)`
-before rendering to receive Unicode, held-key state, optional lock state, and
-synchronous key consumption. Selecting ArkUI delivery on a runtime below API 19
+before rendering to receive each physical transition once, including Unicode,
+held-key state and `ime_consumed`. Update key state even when consumed, but do not
+dispatch the consumed key as a shortcut or hardware text. Input and wakes share
+the UI-thread FIFO; do not deduplicate timestamps or synchronously drain foreground
+tasks. Lock state is opt-in through `keyboard-lock-state` (API 19).
+Selecting ArkUI delivery on a runtime below API 14
 returns an error. Enabling `drag` does not enable `keyboard`.
 
-**Migration:** applications enabling `keyboard` must target API 19 or later.
-Applications supporting older systems can leave it disabled and retain raw
-XComponent key delivery.
+The breaking input contract removes `KeyPreIme` and `KeyboardEventResponse`.
+Configure API-26 native key consumption explicitly through `with_ime_for` and
+`keyboard-text-input` before attachment. Editor lifetime changes emit
+`TextInputReadyChanged` independently of EGL surface readiness.
 
 Native file drag/drop is opt-in:
 

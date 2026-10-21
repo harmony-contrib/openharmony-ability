@@ -14,6 +14,9 @@ permissions:
 jobs:
   Lint:
     runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -76,6 +79,11 @@ jobs:
       - name: Format and lint
         run: npm run prek -- --all-files
 
+      - name: Queued input behavior
+        run: |
+          rustc --edition=2021 --test crates/ability/src/input/queue.rs -o "$RUNNER_TEMP/ability-input-tests"
+          "$RUNNER_TEMP/ability-input-tests"
+
       - name: Window status-bar regression tests
         run: node --experimental-vm-modules --test scripts/window-status-bar.test.mjs
 
@@ -86,3 +94,11 @@ jobs:
 
       - name: Rust clippy
         run: npm run lint:rs
+
+      - name: Native input feature boundaries and ARM64 test linking
+        run: |
+          cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --locked -- -D warnings
+          for feature in keyboard keyboard-lock-state keyboard-text-input; do
+            cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --features "$feature" --locked -- -D warnings
+          done
+          cargo test -p openharmony-ability --lib --all-features --target aarch64-unknown-linux-ohos --no-run --locked

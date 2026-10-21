@@ -9,34 +9,6 @@
       "recommendation": "Main-side recommendation: preserve legitimate core N-API transport; remove the unused direct workspace declaration separately. This is transport, not OHOS platform FFI; no audit finding ID was assigned."
     },
     {
-      "path": "Cargo.toml",
-      "kind": "native-sys-or-loader-dependency",
-      "identity": "ohos-resource-manager-sys = { version = \"0.3\" }",
-      "count": 1,
-      "recommendation": "Main-side resource-manager boundary migration recommendation; ohos-native-bindings#186 / B17 thread-safety counterpart and ResourceManager::from_napi_value KeepList. B17 does not itself describe raw N-API extraction."
-    },
-    {
-      "path": "crates/plugin-resource/Cargo.toml",
-      "kind": "native-sys-or-loader-dependency",
-      "identity": "{\"name\":\"ohos-resource-manager-sys\",\"rename\":null,\"req\":\"^0.3\",\"target\":null,\"kind\":null,\"features\":[]}",
-      "count": 1,
-      "recommendation": "Main-side resource-manager boundary migration recommendation; ohos-native-bindings#186 / B17 thread-safety counterpart and ResourceManager::from_napi_value KeepList. B17 does not itself describe raw N-API extraction."
-    },
-    {
-      "path": "crates/plugin-resource/src/lib.rs",
-      "kind": "native-sys-import",
-      "identity": "use ohos_resource_manager_sys :: OH_ResourceManager_InitNativeResourceManager ;",
-      "count": 1,
-      "recommendation": "Main-side resource-manager boundary migration recommendation; ohos-native-bindings#186 / B17 thread-safety counterpart and ResourceManager::from_napi_value KeepList. B17 does not itself describe raw N-API extraction."
-    },
-    {
-      "path": "crates/plugin-resource/src/lib.rs",
-      "kind": "raw-native-call",
-      "identity": "OH_ResourceManager_InitNativeResourceManager (raw . env , raw . value)",
-      "count": 1,
-      "recommendation": "Main-side resource-manager boundary migration recommendation; ohos-native-bindings#186 / B17 thread-safety counterpart and ResourceManager::from_napi_value KeepList. B17 does not itself describe raw N-API extraction."
-    },
-    {
       "path": "crates/plugin-webview/src/lib.rs",
       "kind": "local-ffi-import",
       "identity": "fn dlopen (filename : * const c_char , flags : c_int) -> * mut c_void ;",

@@ -1,3 +1,4 @@
+import { resolveComponentWindow } from "./ComponentWindow";
 import common from "@ohos.app.ability.common";
 import { FrameNode } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
@@ -560,17 +561,7 @@ class BridgeHost {
     if (boundWindow !== undefined) {
       return boundWindow;
     }
-    const windowName = this.requireUiContext(state).getWindowName();
-    if (!windowName) {
-      throw new Error(`Native module '${this.moduleName}' has no component Window`);
-    }
-    try {
-      return window.findWindow(windowName);
-    } catch (error) {
-      throw new Error(
-        `Unable to resolve Window '${windowName}' for native module '${this.moduleName}': ${String(error)}`,
-      );
-    }
+    return resolveComponentWindow(this.requireUiContext(state), this.moduleName);
   }
 
   private attachComponentWindow(state: HostComponentState): void {
@@ -580,7 +571,15 @@ class BridgeHost {
     if (this.applicationLifecycle === undefined) {
       return;
     }
-    const componentWindow = this.requireComponentWindow(state);
+    let componentWindow: window.Window;
+    try {
+      componentWindow = this.requireComponentWindow(state);
+    } catch (error) {
+      console.warn(
+        `Component Window is not available for '${this.moduleName}'; Window listeners are not attached: ${String(error)}`,
+      );
+      return;
+    }
     const onSizeChange = (size: window.Size): void => {
       if (this.component !== state || this.closing || this.disposed) {
         return;

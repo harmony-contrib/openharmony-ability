@@ -124,6 +124,52 @@ new LazyPlugin(() => new NotificationPlugin({ scheme: "my-app-notification" }));
 
 Register the standalone plugin factories in the Ability's `bridgePlugins` array.
 
+## Native window input
+
+Ability owns one asynchronous input FIFO per native module. Native callbacks copy owned input into it;
+the lifecycle waker drains input and `Event::UserEvent` on the same N-API/UI-thread turn.
+IME callbacks never invoke application code or wait for a foreground task. Each editor
+lifetime has an `Arc` owner token: retirement drops queued edits and rejects callbacks
+already running for the old editor, including when an owner name is reused.
+
+With `keyboard` and `KeyboardInputDelivery::ArkUi`, `ArkUiInputEvent::Key` reports each
+physical down/up transition once. `KeyboardEventData::ime_consumed` is true when an
+owner's IME edit resolves that dispatch, or no post-IME callback reaches the component
+before its queued delivery. Pre/post callbacks resolve the current dispatch, never
+deduplicate timestamps. This is an Ability correlation contract, not a native
+consumed-result API; hardware IME callback ordering must be verified on supported
+devices. Long-press/click semantic callbacks are not additional transitions.
+
+Consumers update modifier/held-key state for every transition, but must not execute
+shortcuts or insert hardware text for consumed keys. Remove timestamp deduplication
+and the former `KeyPreIme`/`KeyboardEventResponse` synchronous reply path. Baseline
+`RawXComponent` remains a legacy post-IME-only stream; it cannot observe keys the IME
+does not forward.
+
+Use `try_attach_ime_for(window_id)` to attach without opening the keyboard and
+`try_show_keyboard_for(window_id)` to attach/show explicitly. Ability detaches the
+previous editor before switching windows; an error prevents ownership transfer.
+`try_detach_ime_for` releases editor focus, while `hide_keyboard_for` only hides the
+keyboard. Configure API-26 native key consumption explicitly through `with_ime_for`
+with the `keyboard-text-input` feature before attachment; it is not consumer policy
+enabled by default. Native operations are UI-thread-only and never use attachment
+workers or a process-wide binding session registry.
+
+Native drag acceptance remains a callback-scoped synchronous reply: delaying it would
+return the default rejection to the platform. This narrow path never drains user wakes
+or foreground tasks and does not create another keyboard/IME channel.
+
+`Event::TextInputReadyChanged { window_id, ready }` is independent of EGL surface
+creation. Query `is_text_input_ready_for`; invalidate cached attachments on every
+readiness event. `reset_ime_for` retires an editor before recreating it; reapply its
+configuration/text snapshot afterwards. `set_text_input_active_for` controls the
+XComponent keyboard-demand flag independently of soft-keyboard visibility.
+
+ArkTS render exports accept optional `platformWindowId`. Missing/zero selects the
+platform main window. The component's real Window ID is separate from framework
+routing IDs; failure to look up the main window logs and uses zero, while subwindow
+assembly must resolve a real positive platform ID instead of silently targeting main.
+
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

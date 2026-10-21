@@ -29,6 +29,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             env: &'a napi_ohos::Env,
             #[napi(ts_arg_type = "NodeContent")] slot: ::openharmony_ability::arkui::ArkUIHandle,
             render_owner: String,
+            platform_window_id: Option<i32>,
         ) -> napi_ohos::Result<()> {
             if render_owner.is_empty() {
                 return Err(napi_ohos::Error::from_reason("renderOwner must not be empty"));
@@ -43,6 +44,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                 slot,
                 render_owner.clone(),
                 (*APP).clone(),
+                platform_window_id.unwrap_or(0),
             )?;
             ROOT_NODE.with(|node| *node.borrow_mut() = Some((render_owner, root)));
             Ok(())
@@ -54,6 +56,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
             #[napi(ts_arg_type = "NodeContent")] slot: ::openharmony_ability::arkui::ArkUIHandle,
             render_owner: String,
             window_id: u32,
+            platform_window_id: Option<i32>,
         ) -> napi_ohos::Result<()> {
             if window_id == 0 || render_owner.is_empty() {
                 return Err(napi_ohos::Error::from_reason("A sub-window needs a positive window ID and render owner"));
@@ -62,7 +65,7 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                 return Err(napi_ohos::Error::from_reason("This sub-window is already rendered"));
             }
             let root = ::openharmony_ability::render_for_window(
-                env, slot, render_owner.clone(), (*APP).clone(), i64::from(window_id),
+                env, slot, render_owner.clone(), (*APP).clone(), i64::from(window_id), platform_window_id.unwrap_or(0),
             )?;
             SUB_ROOT_NODES.with(|nodes| { nodes.borrow_mut().insert(window_id, (render_owner, root)); });
             Ok(())

@@ -553,6 +553,19 @@ onClosing and invokeSync remain synchronous.
   组件状态；主窗口事件不得广播给 sub-window module，旧窗口的延迟回调也不得命中新 appearance。
 - `ohos.node` action 与 `WebviewCreateRequest` 不携带 `window_key`；要在另一个窗口操作，调用该窗口
   对应 native module 导出的 Rust API。
+- Native render assembly passes `platformWindowId` from the component Window's `getWindowProperties().id`.
+  This optional i32 is separate from framework routing IDs: absent/zero selects the platform main window.
+  `render(slot, owner, platformWindowId?)` and `renderWindow(slot, owner, routingWindowId, platformWindowId?)`
+  preserve the main-window default. A failed main lookup logs and uses zero; subwindow assembly requires
+  a positive real platform ID. Missing Window listeners do not prevent rendering; plugin `getWindow()`
+  still fails explicitly until that component's actual Window can be resolved.
+- Native input and user wakes share one owned FIFO drained by the lifecycle callback on the UI thread.
+  An editor's `Arc` token rejects retired callbacks and removes its pending input without touching
+  another window. `TextInputReadyChanged` is independent of EGL surface readiness.
+  ArkUI physical keys are queued once, with `ime_consumed` resolved by owner-scoped pre/post and IME
+  callback ordering, not timestamp deduplication. There is no native consumed-result C API.
+  Consumers update key state even for consumed transitions, but do not execute their shortcuts/text.
+  Native editor attachment transfer belongs to Ability, not binding workers or plugin policy.
 - 一个 module/component 内的 `WebviewSurface.entries` 按 WebView ID 保存多个 controller；不同 ID
   必须并存并使用独立 mount key，同 ID 的重新 create 才替换旧实例。所有 controller 平台回调都要
   携带内部 native tag，并在 Rust 分发前校验当前 generation，禁止旧实例的延迟回调命中替代实例。

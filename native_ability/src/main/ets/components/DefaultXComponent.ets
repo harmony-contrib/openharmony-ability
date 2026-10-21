@@ -1,3 +1,4 @@
+import { componentPlatformWindowId } from "../bridge/ComponentWindow";
 import { NodeContent } from "@kit.ArkUI";
 import { FrameNode, NodeController } from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
@@ -118,7 +119,12 @@ export struct DefaultXComponent {
         throw new Error(`Native module '${moduleName}' does not support sub-window rendering`);
       }
       const renderOwner = `${this.bridgeSessionId}:${moduleName}:${nextRenderOwnerId++}`;
-      nativeModule.renderWindow(this.rootSlot, renderOwner, this.windowId);
+      nativeModule.renderWindow(
+        this.rootSlot,
+        renderOwner,
+        this.windowId,
+        componentPlatformWindowId(this.getUIContext(), moduleName, this.windowId),
+      );
       if (generation !== this.appearanceGeneration) {
         nativeModule.disposeRender(renderOwner);
         return;
@@ -165,7 +171,11 @@ export struct DefaultXComponent {
     // NativeAbility owns the module/session sinks from ability-create onward. The component only
     // supplies the render surface and UI root; ability-only plugins never depend on appearance.
     const renderOwner = `${sessionId}:${moduleName}:${nextRenderOwnerId++}`;
-    nativeModule.render(this.rootSlot, renderOwner);
+    nativeModule.render(
+      this.rootSlot,
+      renderOwner,
+      componentPlatformWindowId(this.getUIContext(), moduleName),
+    );
 
     if (generation !== this.appearanceGeneration) {
       nativeModule.disposeRender(renderOwner);

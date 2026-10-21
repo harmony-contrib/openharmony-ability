@@ -168,9 +168,14 @@ export interface Module {
    * appearance and protects a later render from stale cleanup; another concurrently active
    * DefaultXComponent must use a different native module.
    */
-  render: (slot: NodeContent, renderOwner: string) => void;
+  render: (slot: NodeContent, renderOwner: string, platformWindowId?: number) => void;
   /** Mounts a second native render surface in the specified Float sub-window. */
-  renderWindow?: (slot: NodeContent, renderOwner: string, windowId: number) => void;
+  renderWindow?: (
+    slot: NodeContent,
+    renderOwner: string,
+    windowId: number,
+    platformWindowId?: number,
+  ) => void;
   notifyNativeWindowClose?: (windowId: number) => void;
   /** Releases only the render tree owned by `renderOwner`. */
   disposeRender: (renderOwner: string) => void;

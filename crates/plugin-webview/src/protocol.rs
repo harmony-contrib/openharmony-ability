@@ -417,7 +417,7 @@ fn install_and_record(
     declaration: ProtocolDeclaration,
 ) -> Result<()> {
     let scheme = declaration.scheme.clone();
-    match install_declaration(native_tag, declaration) {
+    match install_declaration(webview_id, native_tag, declaration) {
         Ok(()) => finish_installation(webview_id, native_tag, &scheme, true),
         Err(error) => {
             let _ = finish_installation(webview_id, native_tag, &scheme, false);
@@ -457,10 +457,20 @@ fn finish_installation(
     Ok(())
 }
 
-fn install_declaration(native_tag: &str, declaration: ProtocolDeclaration) -> Result<()> {
+fn install_declaration(
+    webview_id: &str,
+    native_tag: &str,
+    declaration: ProtocolDeclaration,
+) -> Result<()> {
     let ProtocolDeclaration { scheme, callback } = declaration;
     let handler = CustomProtocolHandler::new();
+    let id = webview_id.to_owned();
+    let installed_tag = native_tag.to_owned();
     handler.on_request_start(move |request, request_handle| {
+        if !super::controller::is_current(&id, &installed_tag).unwrap_or(false) {
+            responder_for(request_handle).respond(retired_request_response());
+            return true;
+        }
         let url = request.url();
         let method = request.method().as_str().to_owned();
         let headers = request.headers();
@@ -468,12 +478,18 @@ fn install_declaration(native_tag: &str, declaration: ProtocolDeclaration) -> Re
 
         if let Some(body) = request.http_body_stream() {
             let callback = Arc::clone(&callback);
-            let mut request_handle = Some(request_handle);
-            body.read(body.size() as usize, move |body| {
-                let Some(request_handle) = request_handle.take() else {
+            let id = id.clone();
+            let installed_tag = installed_tag.clone();
+            body.read_to_end(move |body| {
+                let responder = responder_for(request_handle);
+                if !super::controller::is_current(&id, &installed_tag).unwrap_or(false) {
+                    responder.respond(retired_request_response());
+                    return;
+                }
+                let Ok(body) = body else {
+                    responder.respond(invalid_request_response());
                     return;
                 };
-                let responder = responder_for(request_handle);
                 match build_request(&method, &url, headers.iter(), body) {
                     Ok(native_request) => callback(&url, native_request, is_main_frame, responder),
                     Err(_) => responder.respond(invalid_request_response()),
@@ -524,6 +540,12 @@ fn build_request<'a>(
 fn invalid_request_response() -> WebviewProtocolResponse {
     let mut response = Response::new(Cow::Borrowed(&b"Invalid custom-scheme request"[..]));
     *response.status_mut() = http::StatusCode::BAD_REQUEST;
+    response
+}
+
+fn retired_request_response() -> NativeResponse {
+    let mut response: NativeResponse = Response::new(Cow::Borrowed(&[]));
+    *response.status_mut() = http::StatusCode::GONE;
     response
 }
 
