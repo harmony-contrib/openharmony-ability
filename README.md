@@ -119,7 +119,7 @@ Register the standalone plugin factories in the Ability's `bridgePlugins` array.
 
 ## Native window input
 
-Ability owns one input FIFO per native module. Native callbacks copy owned input into it;
+Ability owns one asynchronous input FIFO per native module. Native callbacks copy owned input into it;
 the lifecycle waker drains input and `Event::UserEvent` on the same N-API/UI-thread turn.
 IME callbacks never invoke application code or wait for a foreground task. Each editor
 lifetime has an `Arc` owner token: retirement drops queued edits and rejects callbacks
@@ -147,6 +147,10 @@ keyboard. Configure API-26 native key consumption explicitly through `with_ime_f
 with the `keyboard-text-input` feature before attachment; it is not consumer policy
 enabled by default. Native operations are UI-thread-only and never use attachment
 workers or a process-wide binding session registry.
+
+Native drag acceptance remains a callback-scoped synchronous reply: delaying it would
+return the default rejection to the platform. This narrow path never drains user wakes
+or foreground tasks and does not create another keyboard/IME channel.
 
 `Event::TextInputReadyChanged { window_id, ready }` is independent of EGL surface
 creation. Query `is_text_input_ready_for`; invalidate cached attachments on every

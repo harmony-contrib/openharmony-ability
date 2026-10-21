@@ -78,6 +78,26 @@ fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
     }
 }
 
+#[cfg(feature = "drag")]
+fn dispatch_drag(app: &OpenHarmonyApp, owner: &str, event: crate::DragInputData) {
+    if !app.is_render_surface_active(owner) {
+        return;
+    }
+    // Drop acceptance is an immediate native reply, not deferred foreground work.
+    let Ok(mut handler) = app.event_loop.try_borrow_mut() else {
+        crate::warn!("Cannot negotiate native drop during a nested application callback");
+        return;
+    };
+    if let Some(handler) = handler.as_mut() {
+        let event = InputEvent::ArkUi(ArkUiInputEvent::Drag(event));
+        match app.render_window_id(owner) {
+            Some(0) => handler(Event::Input(event)),
+            Some(window_id) => handler(Event::SubWindowInput { window_id, event }),
+            None => {}
+        }
+    }
+}
+
 fn pointer_snapshot(
     input: &ohos_arkui_binding::arkui_input_binding::ArkUIInputEvent,
     node: *mut std::ffi::c_void,
@@ -454,11 +474,9 @@ pub fn render_for_window(
             let pre_ime_app = app.clone();
             let pre_ime_owner = render_owner.clone();
             xcomponent_native.on_key_pre_ime(move |event| {
-                if let Some(input) = event.key_event() {
-                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
-                        if let Some(callback) = pre_ime_app.input_callback(&pre_ime_owner) {
-                            callback.key(data);
-                        }
+                if let Some(data) = KeyboardEventData::from_node_callback(event) {
+                    if let Some(callback) = pre_ime_app.input_callback(&pre_ime_owner) {
+                        callback.key(data);
                     }
                 }
                 // Keep system shortcuts and IME processing intact.
@@ -566,11 +584,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Enter);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                dispatch_drag(&drag_app, &drag_owner, snapshot);
                 if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
                         crate::warn!("Failed to suggest drop operation: {error}");
@@ -584,11 +598,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Move);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                dispatch_drag(&drag_app, &drag_owner, snapshot);
                 if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
                         crate::warn!("Failed to suggest drop operation: {error}");
@@ -601,11 +611,7 @@ pub fn render_for_window(
         xcomponent_native.on_drag_leave(move |event| {
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Leave);
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                dispatch_drag(&drag_app, &drag_owner, snapshot);
             }
         });
         let drag_app = app.clone();
@@ -614,11 +620,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Drop);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                dispatch_drag(&drag_app, &drag_owner, snapshot);
                 use ohos_arkui_binding::types::drag::DragResult;
                 let result = if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {

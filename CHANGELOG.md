@@ -12,6 +12,10 @@
   background attachment workers or a binding session registry.
 - Make render `platformWindowId` optional, with zero selecting main; unavailable
   main-window lookup no longer prevents native rendering.
+- Keep API-14 keyboard snapshots independent of API-19 `keyboard-lock-state`.
+  Preserve synchronous native drag acceptance without draining foreground tasks.
+- Retain failed editor detachment for retry, guard editor access on the UI thread,
+  and preserve readiness transition values when delivery is deferred.
 - Match native styling for sub-window title bars, with system theme colors, focus feedback
   and decoration-button availability.
 - Fix the Float-window restore button for apps targeting API 12/13.

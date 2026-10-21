@@ -1290,6 +1290,7 @@ impl OpenHarmonyApp {
     /// Attach without opening the soft keyboard. Ownership transfer is serialized
     /// on the UI thread, and a failed detach prevents attachment to another window.
     pub fn try_attach_ime_for(&self, window_id: i64) -> Result<()> {
+        self.ensure_input_main_thread()?;
         if let Some(previous) = self.attached_ime.get().filter(|id| *id != window_id) {
             self.try_detach_ime_for(previous)?;
         }
@@ -1301,6 +1302,7 @@ impl OpenHarmonyApp {
 
     /// Release native editor focus without destroying its retained configuration.
     pub fn try_detach_ime_for(&self, window_id: i64) -> Result<()> {
+        self.ensure_input_main_thread()?;
         if self.attached_ime.get() == Some(window_id) {
             self.with_ime_for(window_id, |ime| ime.try_detach())?
                 .map_err(|error| Error::from_reason(error.to_string()))?;
@@ -1311,11 +1313,7 @@ impl OpenHarmonyApp {
 
     /// Logical editor focus is independent of soft-keyboard visibility.
     pub fn set_text_input_active_for(&self, window_id: i64, active: bool) -> Result<()> {
-        if !self.bridge()?.is_main_thread() {
-            return Err(Error::from_reason(
-                "Native input requires the N-API/UI thread",
-            ));
-        }
+        self.ensure_input_main_thread()?;
         let component = self
             .with_xcomponent_for(window_id, Clone::clone)
             .ok_or_else(|| {
@@ -1324,6 +1322,15 @@ impl OpenHarmonyApp {
                 ))
             })?;
         component.native_xcomponent().set_need_soft_keyboard(active)
+    }
+
+    pub(crate) fn ensure_input_main_thread(&self) -> Result<()> {
+        if !self.bridge()?.is_main_thread() {
+            return Err(Error::from_reason(
+                "Native input requires the N-API/UI thread",
+            ));
+        }
+        Ok(())
     }
 
     /// Retain and apply native editor attributes. Call only on the N-API main thread.
@@ -1354,11 +1361,7 @@ impl OpenHarmonyApp {
     }
 
     pub fn with_ime_for<T>(&self, window_id: i64, callback: impl FnOnce(&IME) -> T) -> Result<T> {
-        if !self.bridge()?.is_main_thread() {
-            return Err(Error::from_reason(
-                "Native input requires the N-API/UI thread",
-            ));
-        }
+        self.ensure_input_main_thread()?;
         let ime = if window_id == 0 {
             self.ime.borrow().clone()
         } else {
@@ -1373,6 +1376,10 @@ impl OpenHarmonyApp {
         self.hide_keyboard_for(0);
     }
     pub fn hide_keyboard_for(&self, window_id: i64) {
+        if let Err(error) = self.ensure_input_main_thread() {
+            crate::warn!("Cannot hide native keyboard for window {window_id}: {error}");
+            return;
+        }
         if self.attached_ime.get() != Some(window_id) {
             return;
         }

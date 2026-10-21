@@ -14,15 +14,30 @@ permissions:
 jobs:
   Lint:
     runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
     steps:
       - name: checkout
         uses: actions/checkout@v4
 
       - name: Setup OpenHarmony SDK
-        uses: openharmony-rs/setup-ohos-sdk@v0.1
+        uses: openharmony-rs/setup-ohos-sdk@v1.0.1
         id: setup-ohos
         with:
-          version: "5.0.0"
+          version: "7.0"
+
+      - name: Verify SDK baseline and configure native compiler
+        env:
+          SDK_API: ${{ steps.setup-ohos.outputs.api-version }}
+          SDK_NATIVE: ${{ steps.setup-ohos.outputs.ohos_sdk_native }}
+          SDK_HOME: ${{ steps.setup-ohos.outputs.ohos-base-sdk-home }}
+        run: |
+          test "$SDK_API" = "26"
+          echo "OHOS_SDK_HOME=$SDK_HOME" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=$SDK_NATIVE/llvm/bin/aarch64-unknown-linux-ohos-clang" >> "$GITHUB_ENV"
+          echo "CC_aarch64_unknown_linux_ohos=$SDK_NATIVE/llvm/bin/aarch64-unknown-linux-ohos-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64_unknown_linux_ohos=$SDK_NATIVE/llvm/bin/llvm-ar" >> "$GITHUB_ENV"
 
       - name: setup Rust
         uses: dtolnay/rust-toolchain@master
@@ -57,3 +72,11 @@ jobs:
 
       - name: Rust clippy
         run: npm run lint:rs
+
+      - name: Native input feature boundaries and ARM64 test linking
+        run: |
+          cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --locked -- -D warnings
+          for feature in keyboard keyboard-lock-state keyboard-text-input; do
+            cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --features "$feature" --locked -- -D warnings
+          done
+          cargo test -p openharmony-ability --lib --all-features --target aarch64-unknown-linux-ohos --no-run --locked

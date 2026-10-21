@@ -1,5 +1,7 @@
+#[cfg(all(feature = "keyboard", not(feature = "keyboard-lock-state")))]
+use ohos_arkui_binding::event::KeyLockState;
 #[cfg(feature = "keyboard")]
-use ohos_arkui_binding::event::{KeyEvent, KeyEventType};
+use ohos_arkui_binding::event::{inner_event::Event, KeyEventType};
 #[cfg(feature = "keyboard")]
 use ohos_xcomponent_binding::{Action, EventSource, KeyCode};
 
@@ -27,7 +29,7 @@ pub struct KeyboardEventData {
     pub unicode: u32,
     /// `None` means the system query failed, rather than no keys being held.
     pub pressed_keys: Option<Vec<KeyCode>>,
-    /// Lock queries are optional on systems before API 19.
+    /// Available with `keyboard-lock-state` (API 19+); otherwise unknown.
     pub caps_lock: Option<bool>,
     pub num_lock: Option<bool>,
     /// The transition was handled before post-IME delivery. Update held-key state,
@@ -37,7 +39,8 @@ pub struct KeyboardEventData {
 
 #[cfg(feature = "keyboard")]
 impl KeyboardEventData {
-    pub(crate) fn from_key_callback(event: &KeyEvent<'_>) -> Option<Self> {
+    pub(crate) fn from_node_callback(node_event: &Event) -> Option<Self> {
+        let event = node_event.key_event()?;
         let action = match event.event_type() {
             KeyEventType::Down => Action::Down,
             KeyEventType::Up => Action::Up,
@@ -61,11 +64,15 @@ impl KeyboardEventData {
                 _ => {}
             }
         }
+        #[cfg(feature = "keyboard-lock-state")]
         let locks = event.lock_state();
+        #[cfg(not(feature = "keyboard-lock-state"))]
+        let locks = KeyLockState::default();
         Some(Self {
             code,
             action,
             device_id: event.device_id() as i64,
+            // ArkUI and XComponent swap the numeric values for keyboard and joystick.
             source: match u32::from(event.source()) {
                 1 => EventSource::Mouse,
                 4 => EventSource::Keyboard,

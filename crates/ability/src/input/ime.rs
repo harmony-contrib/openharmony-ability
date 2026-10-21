@@ -106,6 +106,10 @@ impl OpenHarmonyApp {
     /// Whether this render owner has a native editor, independently of EGL surface creation.
     /// Call only on the N-API/UI thread.
     pub fn is_text_input_ready_for(&self, window_id: i64) -> bool {
+        if let Err(error) = self.ensure_input_main_thread() {
+            crate::warn!("Cannot inspect native editor for window {window_id}: {error}");
+            return false;
+        }
         self.ime_sources
             .borrow()
             .get(&window_id)
@@ -130,6 +134,8 @@ impl OpenHarmonyApp {
         if self.is_text_input_ready_for(window_id) {
             return Ok(());
         }
+        // A failed retirement retains the old session until detachment succeeds.
+        self.try_detach_ime_for(window_id)?;
         let source = ImeCallbackSource {
             owner: owner.to_owned(),
             platform_window_id,
@@ -148,7 +154,7 @@ impl OpenHarmonyApp {
             self.sub_ime.borrow_mut().insert(window_id, ime);
         }
         self.ime_sources.borrow_mut().insert(window_id, source);
-        self.notify_text_input_ready(window_id);
+        self.notify_text_input_ready(window_id, true);
         Ok(())
     }
 
@@ -165,22 +171,24 @@ impl OpenHarmonyApp {
         if let Err(error) = self.input_queue.discard(owner) {
             crate::warn!("{error}");
         }
+        self.ime_sources.borrow_mut().remove(&window_id);
         if let Err(error) = self.try_detach_ime_for(window_id) {
             crate::warn!("Cannot detach retiring editor for window {window_id}: {error}");
-            self.attached_ime.set(None);
+            self.notify_text_input_ready(window_id, false);
+            return;
         }
-        self.ime_sources.borrow_mut().remove(&window_id);
         if window_id == 0 {
             self.ime.borrow_mut().take();
         } else {
             self.sub_ime.borrow_mut().remove(&window_id);
         }
-        self.notify_text_input_ready(window_id);
+        self.notify_text_input_ready(window_id, false);
     }
 
     /// Reassign an editor without accepting delayed edits from its previous lifetime.
     /// Call only on the N-API/UI thread.
     pub fn reset_ime_for(&self, window_id: i64) -> Result<()> {
+        self.ensure_input_main_thread()?;
         let source = self
             .ime_sources
             .borrow()
@@ -193,17 +201,14 @@ impl OpenHarmonyApp {
         self.initialize_render_input(&source.owner, source.platform_window_id)
     }
 
-    fn notify_text_input_ready(&self, window_id: i64) {
+    fn notify_text_input_ready(&self, window_id: i64, ready: bool) {
         if let Ok(mut handler) = self.event_loop.try_borrow_mut() {
             if let Some(handler) = handler.as_mut() {
-                handler(Event::TextInputReadyChanged {
-                    window_id,
-                    ready: self.is_text_input_ready_for(window_id),
-                });
+                handler(Event::TextInputReadyChanged { window_id, ready });
             }
         } else {
             let app = self.clone();
-            self.queue_after_input(move || app.notify_text_input_ready(window_id));
+            self.queue_after_input(move || app.notify_text_input_ready(window_id, ready));
         }
     }
 
