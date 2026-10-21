@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 description = "WebView bridge plugin facade for openharmony-ability"
 
+[features]
+default = []
+engine-version = ["ohos-web-binding/api-20"]
+engine-evergreen = ["engine-version", "ohos-web-binding/api-23"]
+
 [dependencies]
 openharmony-ability = { workspace = true }
 napi-ohos = { workspace = true }

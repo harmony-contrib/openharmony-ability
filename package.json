@@ -2,6 +2,9 @@
   "private": true,
   "packageManager": "pnpm@10.22.0",
   "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "test:contracts": "cargo test -p xtask --locked && cargo run -p xtask --locked -- contracts --check",
+    "test:plugins": "cargo test -p 'openharmony-ability-plugin-*' --lib --locked --target aarch64-unknown-linux-ohos --no-run",
     "install:ohpm": "node scripts/install-ohpm.js",
     "format": "cargo fmt --all && oxk format \"**/*.{ets,js,ts,json5}\" -t=10",
     "lint": "pnpm run lint:oxk && pnpm run lint:rs",

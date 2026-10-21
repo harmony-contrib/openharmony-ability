@@ -6,103 +6,40 @@
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
-    ffi::c_void,
     rc::Rc,
-    sync::{Arc, OnceLock},
+    sync::Arc,
 };
 
 use napi_ohos::{Error, Result};
 
 use crate::OpenHarmonyApp;
 
-type KeyEventFilter = unsafe extern "C" fn(*mut c_void) -> bool;
-type RegisterFilter = unsafe extern "C" fn(i32, Option<KeyEventFilter>) -> i32;
-type UnregisterFilter = unsafe extern "C" fn(i32) -> i32;
-type GetFilter = unsafe extern "C" fn(i32, *mut Option<KeyEventFilter>) -> i32;
-type GetWindowId = unsafe extern "C" fn(*const c_void) -> i32;
+use ohos_window_manager_binding::{Input_KeyEvent, KeyEventFilter, KeyEventRef, Window};
 
-struct NativeKeyFilterApi {
-    _window_library: libloading::Library,
-    _input_library: libloading::Library,
-    register: RegisterFilter,
-    unregister: UnregisterFilter,
-    current: GetFilter,
-    window_id: GetWindowId,
+fn current_filter(native_window_id: i32) -> Result<Option<KeyEventFilter>> {
+    Window::from_id(native_window_id)
+        .key_event_filter()
+        .map_err(|error| {
+            Error::from_reason(format!("Cannot inspect native keyboard filter: {error}"))
+        })
 }
 
-impl NativeKeyFilterApi {
-    fn get() -> Result<Option<&'static Self>> {
-        static API: OnceLock<std::result::Result<Option<NativeKeyFilterApi>, String>> =
-            OnceLock::new();
-        API.get_or_init(Self::load)
-            .as_ref()
-            .map(Option::as_ref)
-            .map_err(|error| Error::from_reason(error.clone()))
-    }
-
-    fn load() -> std::result::Result<Option<Self>, String> {
-        let window_library = unsafe { libloading::Library::new("libnative_window_manager.so") }
-            .map_err(|error| format!("Cannot load native window key filters: {error}"))?;
-        // Querying the installed filter lets us preserve another window consumer
-        // and avoid removing a filter installed after ours. Older SDKs retain
-        // window-focus callback recovery without taking over this filter slot.
-        let current = match unsafe {
-            window_library.get::<GetFilter>(b"OH_NativeWindowManager_GetKeyEventFilter\0")
-        } {
-            Ok(function) => *function,
-            Err(error) => {
-                crate::debug!("Native key filter inspection is unavailable: {error}");
-                return Ok(None);
-            }
-        };
-        let input_library = unsafe { libloading::Library::new("libohinput.so") }
-            .map_err(|error| format!("Cannot load native key event window IDs: {error}"))?;
-        // SAFETY: oh_window_event_filter.h and oh_input_manager.h declare these
-        // C signatures. Both libraries outlive every registered callback.
-        let register = unsafe {
-            window_library.get::<RegisterFilter>(b"OH_NativeWindowManager_RegisterKeyEventFilter\0")
-        }
-        .map_err(|error| error.to_string())?;
-        let unregister = unsafe {
-            window_library
-                .get::<UnregisterFilter>(b"OH_NativeWindowManager_UnregisterKeyEventFilter\0")
-        }
-        .map_err(|error| error.to_string())?;
-        let window_id =
-            unsafe { input_library.get::<GetWindowId>(b"OH_Input_GetKeyEventWindowId\0") }
-                .map_err(|error| error.to_string())?;
-        Ok(Some(Self {
-            register: *register,
-            unregister: *unregister,
-            current,
-            window_id: *window_id,
-            _window_library: window_library,
-            _input_library: input_library,
-        }))
-    }
-
-    fn current_filter(&self, native_window_id: i32) -> Result<Option<KeyEventFilter>> {
-        let mut filter = None;
-        let status = unsafe { (self.current)(native_window_id, &mut filter) };
-        check_status(status, "inspect")?;
-        Ok(filter)
-    }
-
-    fn restore(&self, native_window_id: i32) -> Result<()> {
-        let mut current = None;
-        let status = unsafe { (self.current)(native_window_id, &mut current) };
-        if status == 1000 {
-            // INVALID_WINDOW_ID means the native window already released its filter.
-            crate::debug!("Keyboard focus filter window {native_window_id} is already destroyed");
+fn restore_filter(native_window_id: i32) -> Result<()> {
+    let window = Window::from_id(native_window_id);
+    let current = match window.key_event_filter() {
+        Ok(current) => current,
+        Err(error) if error.code() == Some(1000) => {
+            // The destroyed window has already released its filter.
             return Ok(());
         }
-        check_status(status, "inspect")?;
-        if !current.is_some_and(is_our_filter) {
-            return Ok(());
-        }
-        let status = unsafe { (self.unregister)(native_window_id) };
-        check_status(status, "restore")
+        Err(error) => return Err(Error::from_reason(error.to_string())),
+    };
+    if current.is_some_and(is_our_filter) {
+        window.unregister_key_event_filter().map_err(|error| {
+            Error::from_reason(format!("Cannot restore native keyboard filter: {error}"))
+        })?;
     }
+    Ok(())
 }
 
 struct Registration {
@@ -144,17 +81,7 @@ fn is_our_filter(filter: KeyEventFilter) -> bool {
     std::ptr::fn_addr_eq(filter, recover_key_focus as KeyEventFilter)
 }
 
-fn check_status(status: i32, operation: &str) -> Result<()> {
-    if status == 0 {
-        Ok(())
-    } else {
-        Err(Error::from_reason(format!(
-            "Cannot {operation} native keyboard focus filter: status {status}"
-        )))
-    }
-}
-
-unsafe extern "C" fn recover_key_focus(event: *mut c_void) -> bool {
+unsafe extern "C" fn recover_key_focus(event: *mut Input_KeyEvent) -> bool {
     if event.is_null() {
         return false;
     }
@@ -168,17 +95,12 @@ unsafe extern "C" fn recover_key_focus(event: *mut c_void) -> bool {
     }
 }
 
-fn recover_focus(event: *mut c_void) -> bool {
-    let api = match NativeKeyFilterApi::get() {
-        Ok(Some(api)) => api,
-        Ok(None) => return false,
-        Err(error) => {
-            crate::warn!("Cannot access native keyboard focus filter: {error}");
-            return false;
-        }
-    };
+fn recover_focus(event: *mut Input_KeyEvent) -> bool {
     // SAFETY: this borrowed event belongs to the current native filter invocation.
-    let native_window_id = unsafe { (api.window_id)(event) };
+    let Some(event) = (unsafe { KeyEventRef::from_raw(event) }) else {
+        return false;
+    };
+    let native_window_id = event.window_id();
     let registration = FILTERS.with(|filters| {
         filters
             .try_borrow()
@@ -236,10 +158,7 @@ pub(crate) fn install_keyboard_focus_recovery(
             }
         });
     }
-    let Some(api) = NativeKeyFilterApi::get()? else {
-        return Ok(());
-    };
-    let current = api.current_filter(native_window_id)?;
+    let current = current_filter(native_window_id)?;
     if current.is_some_and(|filter| !is_our_filter(filter)) {
         return Err(Error::from_reason(
             "The native window already has another keyboard filter",
@@ -270,8 +189,9 @@ pub(crate) fn install_keyboard_focus_recovery(
             .insert(native_window_id, registration.clone());
         Ok::<_, Error>((registration, replaced))
     })?;
-    let status = unsafe { (api.register)(native_window_id, Some(recover_key_focus)) };
-    if let Err(error) = check_status(status, "register") {
+    if let Err(error) =
+        Window::from_id(native_window_id).register_key_event_filter(recover_key_focus)
+    {
         registration.enabled.set(false);
         FILTERS.with(|filters| {
             if let Ok(mut filters) = filters.try_borrow_mut() {
@@ -283,7 +203,9 @@ pub(crate) fn install_keyboard_focus_recovery(
                 crate::warn!("Cannot roll back native keyboard focus registration");
             }
         });
-        return Err(error);
+        return Err(Error::from_reason(format!(
+            "Cannot register native keyboard filter: {error}"
+        )));
     }
     if let Some(replaced) = replaced {
         replaced.enabled.set(false);
@@ -307,8 +229,7 @@ fn restore_registration(native_window_id: i32, generation: u64) {
     });
     match registration {
         Ok(Some(registration)) => {
-            let result = NativeKeyFilterApi::get()
-                .and_then(|api| api.map_or(Ok(()), |api| api.restore(native_window_id)));
+            let result = restore_filter(native_window_id);
             if let Err(error) = result {
                 crate::warn!("Cannot release native keyboard focus filter: {error}");
                 return;
