@@ -18,11 +18,26 @@ let nextRenderOwnerId: number = 1;
  * attached and verified, injecting it into PredefinedActionExecutor so that Tray
  * right-click predefined actions (Copy/Cut/Paste/SelectAll/Undo/Redo) can reach the
  * live webview controller instead of no-op'ing. The callback itself is registered by
- * NativeAbility.setupMenuPopup via `setPrimaryWebviewControllerCallback`.
+ * MenuPlugin via `setPrimaryWebviewControllerCallback`, scoped to its window.
  */
 let primaryWebviewControllerCallback: ((controller: ESObject) => void) | null = null;
-export function setPrimaryWebviewControllerCallback(cb: (controller: ESObject) => void): void {
+const windowControllerCallbacks: Map<number, (controller: ESObject) => void> = new Map();
+
+export function setPrimaryWebviewControllerCallback(
+  cb: (controller: ESObject) => void,
+  win?: window.Window,
+): () => void {
+  if (win) {
+    const id = win.getWindowProperties().id;
+    windowControllerCallbacks.set(id, cb);
+    return (): void => {
+      if (windowControllerCallbacks.get(id) === cb) windowControllerCallbacks.delete(id);
+    };
+  }
   primaryWebviewControllerCallback = cb;
+  return (): void => {
+    if (primaryWebviewControllerCallback === cb) primaryWebviewControllerCallback = null;
+  };
 }
 export function clearPrimaryWebviewControllerCallback(): void {
   primaryWebviewControllerCallback = null;
@@ -31,11 +46,17 @@ export function clearPrimaryWebviewControllerCallback(): void {
 /**
  * Invoker for `primaryWebviewControllerCallback`. Called by WebviewPlugin.
  * handleControllerAttached to forward the freshly-attached webview controller to
- * NativeAbility's PredefinedActionExecutor. Kept as a same-module wrapper rather than
+ * the menu window's PredefinedActionExecutor. Kept as a same-module wrapper rather than
  * exporting the `let` directly: cross-module live-binding of a `let` is unreliable,
  * whereas an exported function closes over the module-local binding stably.
  */
-export function notifyPrimaryWebviewController(controller: ESObject): void {
+export function notifyPrimaryWebviewController(controller: ESObject, win?: window.Window): void {
+  if (win) {
+    const id = win.getWindowProperties().id;
+    const callback = windowControllerCallbacks.get(id);
+    windowControllerCallbacks.delete(id);
+    callback?.(controller);
+  }
   if (primaryWebviewControllerCallback) {
     primaryWebviewControllerCallback(controller);
     // one-shot: clear after injecting so only the first-attached webview (=main)
