@@ -18,6 +18,9 @@ use ohos_arkui_binding::{
 };
 
 /// Owns the platform object, native root and window listener on the creating UI thread.
+///
+/// Retire native attachments before unmounting or dropping `ContentRoot`. In owner structs,
+/// declare event subscriptions and `NativeAttachment` before `ContentRoot` so Rust drops them first.
 pub struct ContentRoot {
     owner: Option<ContentOwner>,
 }
