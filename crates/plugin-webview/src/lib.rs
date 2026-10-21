@@ -2047,7 +2047,7 @@ mod tests {
 
     #[test]
     fn engine_events_are_ability_scoped_but_controller_events_require_ui() {
-        let plugin = WebviewBridgePlugin;
+        let plugin = WebviewBridgePlugin::new();
         assert_eq!(
             plugin.required_contexts_for_main_thread_event(SEAL_ENGINE_SCHEMES_EVENT),
             &[BridgeContextRequirement::Ability]
@@ -2064,6 +2064,21 @@ mod tests {
             plugin.required_contexts_for_main_thread_event(CONTROLLER_ATTACHED_EVENT),
             &[BridgeContextRequirement::UiContext]
         );
+        for event in [
+            "native-node-ready",
+            "native-controller-attached",
+            "native-event",
+        ] {
+            assert_eq!(
+                plugin.required_contexts_for_main_thread_event(event),
+                &[BridgeContextRequirement::UiContext]
+            );
+        }
+        for event in ["native-node-retiring", "native-controller-removed"] {
+            assert!(plugin
+                .required_contexts_for_main_thread_event(event)
+                .is_empty());
+        }
     }
 
     // ── expect_engine_phase ───────────────────────────────────────────────
