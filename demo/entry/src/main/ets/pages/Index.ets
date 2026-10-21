@@ -797,8 +797,12 @@ struct Index {
             }
           })
         Button("Stop observation")
-          .onClick((): void => {
-            demoStopMotion();
+          .onClick(async (): Promise<void> => {
+            try {
+              await demoStopMotion();
+            } catch (error) {
+              this.nativeVideoStatus = String(error);
+            }
           })
       }
       ContentSlot(this.nativeVideoContent)

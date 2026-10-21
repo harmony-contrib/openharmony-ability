@@ -833,7 +833,6 @@ dependencies = [
 name = "openharmony-ability-plugin-accessibility"
 version = "1.0.0-beta.3"
 dependencies = [
- "futures-executor",
  "log",
  "napi-derive-ohos",
  "napi-ohos",

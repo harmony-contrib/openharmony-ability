@@ -28,11 +28,15 @@ pub async fn demo_observe_motion() -> Result<()> {
     *MOTION.lock().unwrap_or_else(|error| error.into_inner()) = Some(observation);
     Ok(())
 }
-/// Stops local delivery and schedules platform cleanup without blocking the UI.
+/// Retires local delivery and awaits platform unsubscribe without blocking the UI.
 #[napi]
-pub fn demo_stop_motion() {
-    MOTION
+pub async fn demo_stop_motion() -> Result<()> {
+    let observation = MOTION
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .take();
+    if let Some(observation) = observation {
+        observation.close().await?;
+    }
+    Ok(())
 }

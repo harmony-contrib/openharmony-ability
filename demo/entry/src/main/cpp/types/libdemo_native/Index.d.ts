@@ -530,4 +530,4 @@ export const demoDisposeNativeVideo: () => Promise<void>;
 
 export const demoAnnounce: (text: string) => Promise<void>;
 export const demoObserveMotion: () => Promise<void>;
-export const demoStopMotion: () => void;
+export const demoStopMotion: () => Promise<void>;
