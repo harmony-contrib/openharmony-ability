@@ -5,11 +5,19 @@ import test from "node:test";
 // Keep actual production ownership classes; replace only SDK object effects.
 const source = await readFile(new URL("../src/main/ets/NativeViews.ets", import.meta.url), "utf8");
 const classes = source.slice(source.indexOf("class ViewEntry"));
-const prefix = `const quarantinedViews = []; class NodeContent {} class BuilderNode { dispose() {} }
+const pointerSource = await readFile(
+  new URL("../src/main/ets/NativePointer.ets", import.meta.url),
+  "utf8",
+);
+const prefix =
+  pointerSource +
+  `class ViewState { constructor(settings) { this.settings = settings; } }
+const quarantinedViews = []; class NodeContent {} class BuilderNode { dispose() {} }
 class NativeMenuCleanup { async settled() {} }`;
-const { ViewEntry, NativeViews } = await import(
+const { ViewEntry, NativeViews, PointerPosting } = await import(
   `data:text/javascript;base64,${Buffer.from(stripTypeScriptTypes(prefix + classes + "\nexport { ViewEntry }; ")).toString("base64")}`
 );
+globalThis.PointerPosting = PointerPosting;
 function entry(accepted, calls) {
   const context = {
     getUIContext: () => ({}),
@@ -18,7 +26,12 @@ function entry(accepted, calls) {
       return { accepted };
     },
   };
-  return new ViewEntry({ id: "wrapper", targetId: 1 }, context, {});
+  return new ViewEntry(
+    { id: "wrapper", targetId: 1 },
+    context,
+    {},
+    new globalThis.PointerPosting(),
+  );
 }
 test("rejected retirement never returns a successful batch acknowledgement", () => {
   const calls = [];

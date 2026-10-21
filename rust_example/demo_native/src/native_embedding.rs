@@ -127,6 +127,16 @@ pub fn demo_dispose_native_wrapper(env: &Env) -> Result<()> {
 /// Embeds native C text inside an ArkTS-owned semantic wrapper.
 #[napi]
 pub fn demo_native_wrapper(env: &Env) -> Result<Object<'_>> {
+    build_native_wrapper(env, None)
+}
+
+/// Exports the live native subtree into a caller-owned XComponent surface.
+#[napi]
+pub fn demo_native_texture(env: &Env, surface_id: String) -> Result<Object<'_>> {
+    build_native_wrapper(env, Some(surface_id))
+}
+
+fn build_native_wrapper(env: &Env, surface_id: Option<String>) -> Result<Object<'_>> {
     demo_dispose_native_editor(env)?;
     demo_dispose_native_wrapper(env)?;
     let app = super::current_app()?;
@@ -150,6 +160,7 @@ pub fn demo_native_wrapper(env: &Env) -> Result<Object<'_>> {
         env,
         NativeViewBatch {
             updates: vec![NativeViewSettings {
+                texture_surface: surface_id,
                 id: WRAPPER_ID.into(),
                 target_id: attachment.id(),
                 width: 320.0,

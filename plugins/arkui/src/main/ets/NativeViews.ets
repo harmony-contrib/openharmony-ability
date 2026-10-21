@@ -1,5 +1,14 @@
 import { NativeMenuItem, NativeMenuCleanup, pasteAction } from "./NativeMenus";
-import { BuilderNode, ComponentContent, NodeContent } from "@ohos.arkui.node";
+import { TouchCoordinates, PointerPosting, TouchCancel, NativeRetirement } from "./NativePointer";
+import {
+  BuilderNode,
+  ComponentContent,
+  NodeContent,
+  NodeController,
+  NodeRenderType,
+  RenderOptions,
+  FrameNode,
+} from "@ohos.arkui.node";
 import { UIContext } from "@ohos.arkui.UIContext";
 import deviceInfo from "@ohos.deviceInfo";
 import {
@@ -21,6 +30,8 @@ interface ViewMenu {
   items: NativeMenuItem[];
 }
 interface Settings {
+  textureSurface?: string | null;
+  textureInsets?: TextureInsets | null;
   id: string;
   targetId: number;
   testId?: string | null;
@@ -43,6 +54,12 @@ interface Settings {
   actions: ViewAction[];
   menu?: ViewMenu | null;
 }
+interface TextureInsets {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
 interface Batch {
   updates: Settings[];
   remove: string[];
@@ -60,6 +77,16 @@ interface MenuLease {
   generation: number;
   opening: Promise<void>;
   retired: boolean;
+}
+function captureWidth(settings: Settings): number {
+  return (
+    settings.width + (settings.textureInsets?.left ?? 0) + (settings.textureInsets?.right ?? 0)
+  );
+}
+function captureHeight(settings: Settings): number {
+  return (
+    settings.height + (settings.textureInsets?.top ?? 0) + (settings.textureInsets?.bottom ?? 0)
+  );
 }
 interface Acknowledgement {
   accepted: boolean;
@@ -197,9 +224,86 @@ function nativeView(params: ViewParameters) {
     },
   );
 }
+class ViewController extends NodeController {
+  private node: BuilderNode<[ViewParameters]>;
+  constructor(node: BuilderNode<[ViewParameters]>) {
+    super();
+    this.node = node;
+  }
+  makeNode(_context: UIContext): FrameNode | null {
+    return this.node.getFrameNode();
+  }
+}
+@Observed
+class ViewState {
+  settings: Settings;
+  constructor(settings: Settings) {
+    this.settings = settings;
+  }
+}
+// Custom roots preserve ArkUI's native export boundary. Observed settings refresh
+// their attributes without rebuilding the slot or changing its native ownership.
+@Component
+struct SourceRoot {
+  entry!: ViewEntry;
+  @ObjectLink state!: ViewState;
+  build() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      nativeView({ entry: this.entry, settings: this.state.settings })
+    }
+    .width(captureWidth(this.state.settings))
+    .height(captureHeight(this.state.settings))
+    .padding(this.state.settings.textureInsets ?? { left: 0, top: 0, right: 0, bottom: 0 })
+    .clip(false)
+    .hitTestBehavior(HitTestMode.Transparent);
+  }
+}
+@Builder
+function sourceContent(params: ViewParameters) {
+  SourceRoot({ entry: params.entry, state: params.entry.state });
+}
+@Component
+struct TextureRoot {
+  entry!: ViewEntry;
+  @ObjectLink state!: ViewState;
+  build() {
+    NodeContainer(this.entry.sourceController!)
+      .width(captureWidth(this.state.settings))
+      .height(captureHeight(this.state.settings))
+      .clip(false)
+      .hitTestBehavior(HitTestMode.Transparent);
+  }
+}
+@Builder
+function textureContent(params: ViewParameters) {
+  TextureRoot({ entry: params.entry, state: params.entry.state });
+}
+@Builder
+function textureContainer(params: ViewParameters) {
+  NodeContainer(params.entry.textureController!)
+    .width(captureWidth(params.settings))
+    .height(captureHeight(params.settings))
+    .clip(false)
+    .hitTestBehavior(HitTestMode.Transparent)
+    .onTouch((event: TouchEvent): void => {
+      params.entry.postMouseTouch(event);
+    });
+}
+@Builder
+function viewContent(params: ViewParameters) {
+  if (params.entry.textureNode) {
+    textureContainer(params);
+  } else {
+    nativeView(params);
+  }
+}
 class ViewEntry {
-  private current: Settings;
+  readonly state: ViewState;
   readonly slot: NodeContent = new NodeContent();
+  readonly textureNode?: BuilderNode<[ViewParameters]>;
+  readonly sourceNode?: BuilderNode<[ViewParameters]>;
+  readonly sourceController?: ViewController;
+  readonly textureController?: ViewController;
   private node: BuilderNode<[ViewParameters]>;
   private context: BridgeCallContext;
   private ui: UIContext;
@@ -207,20 +311,50 @@ class ViewEntry {
   private closed: boolean = false;
   private retirementFailure?: Error;
   private menuLease?: MenuLease;
-  constructor(settings: Settings, context: BridgeCallContext, menus: NativeMenuCleanup) {
-    this.current = settings;
+  private pointerPosting: PointerPosting;
+  private retirement: NativeRetirement = new NativeRetirement();
+  constructor(
+    settings: Settings,
+    context: BridgeCallContext,
+    menus: NativeMenuCleanup,
+    posting: PointerPosting,
+  ) {
+    this.state = new ViewState(settings);
     this.menus = menus;
     this.context = context;
     this.ui = context.getUIContext();
+    this.pointerPosting = posting;
+    const options: RenderOptions | undefined =
+      settings.textureSurface == null
+        ? undefined
+        : {
+            type: NodeRenderType.RENDER_TYPE_TEXTURE,
+            surfaceId: settings.textureSurface,
+            selfIdealSize: { width: captureWidth(settings), height: captureHeight(settings) },
+          };
+    if (options !== undefined) {
+      this.textureNode = new BuilderNode<[ViewParameters]>(this.ui, options);
+      this.sourceNode = new BuilderNode<[ViewParameters]>(this.ui);
+      this.sourceController = new ViewController(this.sourceNode);
+      this.textureController = new ViewController(this.textureNode);
+    }
     this.node = new BuilderNode<[ViewParameters]>(this.ui);
   }
   get settings(): Settings {
-    return this.current;
+    return this.state.settings;
   }
   create(): void {
     try {
       const params: ViewParameters = { entry: this, settings: this.settings };
-      this.node.build(wrapBuilder(nativeView), params, { nestingBuilderSupported: true });
+      if (this.textureNode) {
+        this.sourceNode?.build(wrapBuilder(sourceContent), params, {
+          nestingBuilderSupported: true,
+        });
+        this.textureNode.build(wrapBuilder(textureContent), params, {
+          nestingBuilderSupported: true,
+        });
+      }
+      this.node.build(wrapBuilder(viewContent), params, { nestingBuilderSupported: true });
       const response = this.context.invokeNativeSync(
         "native-subtree-ready",
         "ohos.node.NativeSubtreeReady",
@@ -240,7 +374,7 @@ class ViewEntry {
     if (settings.targetId !== this.settings.targetId) {
       throw new Error("Native wrapper target cannot change");
     }
-    this.current = settings;
+    this.state.settings = settings;
     const params: ViewParameters = { entry: this, settings: settings };
     this.node.update(params);
     this.syncMenu();
@@ -318,6 +452,57 @@ class ViewEntry {
     );
   }
 
+  postMouseTouch(event: TouchEvent): void {
+    const pointer = event.changedTouches[0]?.id;
+    const down = event.type === TouchType.Down;
+    const terminal = event.type === TouchType.Up || event.type === TouchType.Cancel;
+    const owner = pointer === undefined ? undefined : this.pointerPosting.owners.get(pointer);
+    const target = this.sourceNode;
+    if (
+      this.closed ||
+      this.pointerPosting.busy ||
+      !target ||
+      !this.context.isActive() ||
+      event.source !== SourceType.Mouse ||
+      pointer === undefined ||
+      (down ? owner !== undefined : owner?.owner !== this.settings.id)
+    ) {
+      return;
+    }
+    const offset = target.getFrameNode()?.getPositionToParent();
+    if (!offset) {
+      return;
+    }
+    const coordinates = new TouchCoordinates(event);
+    this.pointerPosting.busy = true;
+    try {
+      coordinates.apply(this.ui, offset.x, offset.y);
+      const accepted = target.postInputEvent(event);
+      if (accepted) {
+        if (!terminal) {
+          const snapshot = new TouchCancel(event);
+          if (owner) {
+            owner.snapshot = snapshot;
+          } else {
+            this.pointerPosting.owners.set(pointer, {
+              owner: this.settings.id,
+              snapshot: snapshot,
+            });
+          }
+        }
+        event.stopPropagation();
+      } else if (down && !this.closed && this.context.isActive()) {
+        // Even a miss records DOWN in ArkUI. Close that attempt before another export tries.
+        coordinates.cancel();
+        target.postInputEvent(event);
+      }
+    } finally {
+      if (terminal) {
+        this.pointerPosting.owners.delete(pointer);
+      }
+      this.pointerPosting.finish(coordinates);
+    }
+  }
   paste(name: string, generation: number | undefined): void {
     if (
       generation === undefined ||
@@ -382,27 +567,56 @@ class ViewEntry {
         this.retireMenu(this.menuLease);
         this.menuLease = undefined;
       }
-      // Retirement is also required after partial construction: attachment may have failed after mounting the wrapper.
-      const response = cleanup.invokeNativeSync(
-        "native-node-retiring",
-        "ohos.node.NativeNodeRetiring",
-        "ohos.node.Acknowledgement",
-        { targetId: this.settings.targetId },
-      ) as Acknowledgement;
-      if (response.accepted !== true) {
-        throw new Error("Native wrapper retirement was rejected");
-      }
-      this.node.dispose();
+      this.retirement.detachThenDispose(
+        (): void => {
+          const response = cleanup.invokeNativeSync(
+            "native-node-retiring",
+            "ohos.node.NativeNodeRetiring",
+            "ohos.node.Acknowledgement",
+            { targetId: this.settings.targetId },
+          ) as Acknowledgement;
+          if (response.accepted !== true) {
+            throw new Error("Native wrapper retirement was rejected");
+          }
+        },
+        (): void => this.disposeBuilders(),
+        this.pointerPosting,
+      );
     } catch (error) {
       quarantinedViews.push(this);
       this.retirementFailure = new Error(`Native wrapper retirement failed: ${String(error)}`);
       throw this.retirementFailure;
     }
   }
+  private disposeBuilders(): void {
+    try {
+      this.pointerPosting.owners.forEach((stream, pointer: number): void => {
+        if (stream.owner !== this.settings.id) {
+          return;
+        }
+        this.pointerPosting.owners.delete(pointer);
+        if (this.sourceNode?.getFrameNode()) {
+          this.pointerPosting.busy = true;
+          try {
+            this.sourceNode.postInputEvent(stream.snapshot as TouchEvent);
+          } finally {
+            this.pointerPosting.finish();
+          }
+        }
+      });
+      this.node.dispose();
+      this.textureNode?.dispose();
+      this.sourceNode?.dispose();
+    } catch (error) {
+      quarantinedViews.push(this);
+      console.error(`[ArkUI] wrapper disposal failed: ${String(error)}`);
+    }
+  }
 }
 export class NativeViews {
   private entries: Map<string, ViewEntry> = new Map();
   private menus: NativeMenuCleanup = new NativeMenuCleanup();
+  private pointerPosting: PointerPosting = new PointerPosting();
   apply(payload: BridgeTypedValue, context: BridgeCallContext): BridgeTypedValue {
     expectBridgeRequestType(
       payload,
@@ -429,6 +643,18 @@ export class NativeViews {
         s.width < 0 ||
         s.height < 0 ||
         !Number.isFinite(s.hue) ||
+        (s.textureInsets != null &&
+          [
+            s.textureInsets.left,
+            s.textureInsets.top,
+            s.textureInsets.right,
+            s.textureInsets.bottom,
+          ].some((value: number): boolean => !Number.isFinite(value) || value < 0)) ||
+        !Number.isFinite(captureWidth(s)) ||
+        !Number.isFinite(captureHeight(s)) ||
+        (s.textureSurface != null &&
+          (!/^[1-9][0-9]{0,19}$/.test(s.textureSurface) ||
+            (s.textureSurface.length === 20 && s.textureSurface > "18446744073709551615"))) ||
         !Array.isArray(s.actions) ||
         new Set(s.actions.map((action: ViewAction): string => action.name)).size !==
           s.actions.length ||
@@ -494,12 +720,16 @@ export class NativeViews {
       this.entries.delete(id);
     }
     for (const s of batch.updates) {
-      const previous = this.entries.get(s.id);
+      let previous = this.entries.get(s.id);
+      if (previous && previous.settings.textureSurface !== s.textureSurface) {
+        previous.dispose(context);
+        this.entries.delete(s.id);
+        previous = undefined;
+      }
       if (previous) {
         previous.update(s);
       } else {
-        const entry = new ViewEntry(s, context, this.menus);
-
+        const entry = new ViewEntry(s, context, this.menus, this.pointerPosting);
         entry.create();
         this.entries.set(s.id, entry);
       }

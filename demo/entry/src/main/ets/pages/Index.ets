@@ -5,6 +5,7 @@ import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
   demoNativeEditor,
   demoNativeWrapper,
+  demoNativeTexture,
   demoDisposeNativeWrapper,
   demoDisposeNativeEditor,
   createBottomDemoWebview,
@@ -37,6 +38,8 @@ const MODULE_NAME = "demo_native";
 struct Index {
   @State currentDemo: number = 0;
   @State nativeEditorContent: NodeContent = new NodeContent();
+  @State textureSurface: string = "";
+  private textureController: XComponentController = new XComponentController();
   @State busyKey: string = "";
   @State interceptEnabled: boolean = true;
   @State webviewVisible: boolean = true;
@@ -681,6 +684,11 @@ struct Index {
           .onClick((): void => {
             this.nativeEditorContent = demoNativeEditor();
           })
+        Button("Export texture")
+          .enabled(this.textureSurface.length > 0)
+          .onClick((): void => {
+            this.nativeEditorContent = demoNativeTexture(this.textureSurface);
+          })
         Button("Semantic wrapper")
           .onClick((): void => {
             this.nativeEditorContent = demoNativeWrapper();
@@ -692,6 +700,16 @@ struct Index {
             this.nativeEditorContent = new NodeContent();
           })
       }
+      XComponent({
+        id: "demo_texture_consumer",
+        type: XComponentType.SURFACE,
+        controller: this.textureController,
+      })
+        .width(320)
+        .height(48)
+        .onLoad((): void => {
+          this.textureSurface = this.textureController.getXComponentSurfaceId();
+        })
       Stack() {
         ContentSlot(this.nativeEditorContent)
       }

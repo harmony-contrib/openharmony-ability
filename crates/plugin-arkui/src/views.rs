@@ -43,10 +43,28 @@ pub struct ViewMenu {
     /// Menu entries in display order.
     pub items: Vec<ViewMenuItem>,
 }
+/// Extra native subtree capture space in vp, preserving overflow and shadows.
+#[napi(object)]
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TextureInsets {
+    /// Space before the source's left border.
+    pub left: f64,
+    /// Space before the source's top border.
+    pub top: f64,
+    /// Space after the source's right border.
+    pub right: f64,
+    /// Space after the source's bottom border.
+    pub bottom: f64,
+}
 /// Visual and accessibility attributes on an ArkTS-owned native wrapper.
 #[napi(object)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativeViewSettings {
+    /// Optional NativeImage consumer surface. A texture generation is immutable;
+    /// changing it retires and rebuilds the ArkTS wrapper before reattachment.
+    pub texture_surface: Option<String>,
+    /// Optional overflow capture space, meaningful with `texture_surface`.
+    pub texture_insets: Option<TextureInsets>,
     /// Unique wrapper generation.
     pub id: String,
     /// Target containing the Rust-owned subtree.
@@ -185,6 +203,14 @@ impl NativeViewBatch {
             if update.id.is_empty()
                 || !ids.insert(&update.id)
                 || update.target_id == 0
+                || update.texture_insets.as_ref().is_some_and(|insets| {
+                    [insets.left, insets.top, insets.right, insets.bottom]
+                        .iter()
+                        .any(|value| !value.is_finite() || *value < 0.0)
+                })
+                || update.texture_surface.as_ref().is_some_and(|surface| {
+                    surface.parse::<u64>().ok().filter(|id| *id != 0).is_none()
+                })
                 || !update.hue.is_finite()
                 || !matches!(
                     update.role.as_str(),

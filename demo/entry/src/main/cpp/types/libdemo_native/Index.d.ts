@@ -517,3 +517,5 @@ export function demoDisposeNativeEditor(): void;
 
 export function demoNativeWrapper(): NodeContent;
 export function demoDisposeNativeWrapper(): void;
+
+export function demoNativeTexture(surfaceId: string): NodeContent;

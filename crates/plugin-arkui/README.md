@@ -31,3 +31,12 @@ ArkTS owner. The demo's **Semantic wrapper** button exercises the subtree path.
 |---|---|---|
 | `apply-native-views` | `ohos.arkui.NativeViewBatch` | `ohos.node.Acknowledgement` |
 | `view-action` | `ohos.arkui.NativeViewAction` | `ohos.node.Acknowledgement` |
+
+`NativeViewSettings.texture_surface` exports a live subtree into a caller-owned
+surface; `texture_insets` adds nonnegative overflow space in vp. DISPLAY and
+TEXTURE builder boundaries preserve nested exports. The API-20 pointer adapter
+forwards the original wrapped mouse touch event only within its callback and
+restores coordinates before bubbling. Terminal cancellation retains plain owned
+data. Reentrant closing detaches native edges immediately; only builder disposal
+waits for active posting to return. The demo's **Export texture** button uses an
+ordinary XComponent surface as the consumer.

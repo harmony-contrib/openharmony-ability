@@ -4,7 +4,7 @@
 mod views;
 pub use views::{
     apply_native_views, NativeViewAction, NativeViewBatch, NativeViewEvents, NativeViewSettings,
-    ViewAction, ViewMenu, ViewMenuItem,
+    TextureInsets, ViewAction, ViewMenu, ViewMenuItem,
 };
 
 mod event_routes;

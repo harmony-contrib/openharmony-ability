@@ -280,6 +280,7 @@ class EditorEntry {
   }
   private updating: boolean = false;
   private closed: boolean = false;
+  private retirementFailure?: Error;
   private focusedOnce: boolean = false;
   private context: BridgeCallContext;
   private sizePending: boolean = false;
@@ -404,6 +405,9 @@ class EditorEntry {
   }
   dispose(cleanup: BridgePluginContext = this.context): void {
     if (this.closed) {
+      if (this.retirementFailure) {
+        throw this.retirementFailure;
+      }
       return;
     }
     this.closed = true;
@@ -420,7 +424,8 @@ class EditorEntry {
       this.node.dispose();
     } catch (error) {
       quarantinedEditors.push(this);
-      console.error(`[ArkUI] editor retirement failed: ${String(error)}`);
+      this.retirementFailure = new Error(`Native editor retirement failed: ${String(error)}`);
+      throw this.retirementFailure;
     }
   }
 }
@@ -551,9 +556,17 @@ export class NativeEditors {
     return { typeName: "ohos.node.Acknowledgement", value: { accepted: true } };
   }
   dispose(cleanup: BridgePluginContext): void {
+    let firstError: Error | undefined;
     for (const entry of this.editors.values()) {
-      entry.dispose(cleanup);
+      try {
+        entry.dispose(cleanup);
+      } catch (error) {
+        firstError = firstError ?? new Error(String(error));
+      }
     }
     this.editors.clear();
+    if (firstError) {
+      throw firstError;
+    }
   }
 }
