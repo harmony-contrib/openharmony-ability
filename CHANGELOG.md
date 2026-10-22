@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retain native attachment nodes through their shared Rust owners and release those owners
+  as soon as retirement succeeds, even while an attachment wrapper remains alive.
 - Match native styling for sub-window title bars, with system theme colors, focus feedback
   and decoration-button availability.
 - Fix the Float-window restore button for apps targeting API 12/13.

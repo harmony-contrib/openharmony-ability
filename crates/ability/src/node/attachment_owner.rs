@@ -13,10 +13,7 @@ use napi_ohos::{
 };
 use ohos_arkui_binding::{
     api::node_content::NodeContent,
-    common::{
-        node::{ArkUINode, ArkUINodeRaw},
-        node_retention::NodeRetention,
-    },
+    common::node::{ArkUINode, ArkUINodeRaw},
     component::attribute::ArkUICommonAttribute,
     ArkUIHandle,
 };
@@ -60,11 +57,9 @@ impl Drop for RetainedContent {
 struct Target {
     id: u32,
     state: AttachmentState,
-    parent: Rc<RefCell<ArkUINode>>,
-    parent_retention: RefCell<Option<NodeRetention>>,
+    parent: RefCell<Option<Rc<RefCell<ArkUINode>>>>,
     child: RefCell<Option<Rc<RefCell<ArkUINode>>>>,
-    inner: Option<Rc<RefCell<ArkUINode>>>,
-    inner_retention: RefCell<Option<NodeRetention>>,
+    inner: RefCell<Option<Rc<RefCell<ArkUINode>>>>,
     inner_receiver_active: Cell<bool>,
     slot: Cell<Option<ArkUIHandle>>,
     retained: RefCell<Option<RetainedContent>>,
@@ -78,7 +73,8 @@ impl Target {
     }
 
     fn detach_inner(&self) -> Result<()> {
-        if let (Some(handle), Some(inner)) = (self.slot.get(), self.inner.as_ref()) {
+        let inner = self.inner.borrow();
+        if let (Some(handle), Some(inner)) = (self.slot.get(), inner.as_ref()) {
             if self.inner_receiver_active.get() {
                 inner
                     .borrow()
@@ -93,7 +89,11 @@ impl Target {
             ohos_arkui_binding::common::node_registry::unregister(&inner.borrow());
         }
         if let Some(child) = self.child.borrow().clone() {
-            let mut parent = self.parent.borrow_mut();
+            let parent = self.parent.borrow();
+            let parent = parent
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("Native attachment parent is retired"))?;
+            let mut parent = parent.borrow_mut();
             let index = parent
                 .children()
                 .iter()
@@ -133,8 +133,8 @@ impl Target {
             Error::from_reason(format!("Native attachment target {} {error}", self.id))
         })?;
         self.detach_inner()?;
-        self.inner_retention.borrow_mut().take();
-        self.parent_retention.borrow_mut().take();
+        self.inner.borrow_mut().take();
+        self.parent.borrow_mut().take();
         TARGETS.with(|targets| targets.borrow_mut().remove(&self.id));
         Ok(())
     }
@@ -150,6 +150,7 @@ fn target(id: u32) -> Result<Rc<Target>> {
 ///
 /// Target IDs are monotonically allocated and never reused, including across sessions.
 /// This type is neither `Send` nor `Sync`; create, attach, dispatch and retire on the UI thread.
+/// Successful retirement releases the parent and inner node owners even if this wrapper lives on.
 pub struct NativeAttachment(Rc<Target>);
 
 impl NativeAttachment {
@@ -173,29 +174,28 @@ impl NativeAttachment {
         parent: &Rc<RefCell<ArkUINode>>,
         inner: Option<Rc<RefCell<ArkUINode>>>,
     ) -> Result<Self> {
-        let parent_retention = parent
-            .borrow()
-            .retain_native()
-            .map_err(|error| Error::from_reason(error.to_string()))?;
-        let inner_retention = inner
-            .as_ref()
-            .map(|inner| {
-                inner
-                    .borrow()
-                    .retain_native()
-                    .map_err(|error| Error::from_reason(error.to_string()))
-            })
-            .transpose()?;
+        if !parent.borrow().is_owned() || parent.borrow().raw_handle().is_null() {
+            return Err(Error::from_reason(
+                "native retention requires an owned node",
+            ));
+        }
+        ArkUINode::bind_rc(parent);
+        if let Some(inner) = inner.as_ref() {
+            if !inner.borrow().is_owned() || inner.borrow().raw_handle().is_null() {
+                return Err(Error::from_reason(
+                    "native retention requires an owned node",
+                ));
+            }
+            ArkUINode::bind_rc(inner);
+        }
         let id = allocate_id(&NEXT_TARGET_ID)
             .ok_or_else(|| Error::from_reason("Native attachment IDs exhausted"))?;
         let target = Rc::new(Target {
             id,
             state: AttachmentState::default(),
-            parent: parent.clone(),
-            parent_retention: RefCell::new(Some(parent_retention)),
+            parent: RefCell::new(Some(parent.clone())),
             child: RefCell::default(),
-            inner,
-            inner_retention: RefCell::new(inner_retention),
+            inner: RefCell::new(inner),
             inner_receiver_active: Cell::new(false),
             slot: Cell::new(None),
             retained: RefCell::default(),
@@ -253,7 +253,12 @@ impl NativeAttachment {
         if target.child.borrow().is_some() {
             return Err(Error::from_reason("Native attachment is already occupied"));
         }
-        if slot.is_some() != target.inner.is_some() {
+        let parent = target.parent.borrow();
+        let parent = parent
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("Native attachment parent is retired"))?;
+        let inner = target.inner.borrow();
+        if slot.is_some() != inner.is_some() {
             return Err(Error::from_reason(
                 "Native attachment subtree does not match its registered target",
             ));
@@ -273,7 +278,7 @@ impl NativeAttachment {
                 unsafe { ArkUIHandle::from_napi_value(env.raw(), slot.raw()) }
             })
             .transpose()?;
-        if let Some(inner) = target.inner.as_ref() {
+        if let Some(inner) = inner.as_ref() {
             inner
                 .borrow()
                 .remove_event_receiver()
@@ -286,20 +291,18 @@ impl NativeAttachment {
                 }
                 return Err(Error::from_reason(error.to_string()));
             }
-            target
-                .parent
+            parent
                 .borrow_mut()
                 .children_mut()
                 .retain(|child| !Rc::ptr_eq(child, inner));
         }
-        target
-            .parent
+        parent
             .borrow_mut()
             .add_existing_node(child.clone())
             .map_err(|error| Error::from_reason(error.to_string()))?;
         *target.child.borrow_mut() = Some(child);
         *target.retained.borrow_mut() = Some(retained);
-        if let (Some(handle), Some(inner)) = (handle, target.inner.as_ref()) {
+        if let (Some(handle), Some(inner)) = (handle, inner.as_ref()) {
             if let Err(error) = NodeContent::from_handle(handle).add_node(&inner.borrow()) {
                 target.detach_inner()?;
                 return Err(Error::from_reason(error.to_string()));
@@ -354,27 +357,48 @@ mod tests {
     #[test]
     fn retirement_is_guarded_and_permanently_closes_callback_admission() {
         let id = allocate_id(&NEXT_TARGET_ID).unwrap();
+        let parent = Rc::new(RefCell::new(ArkUINode::default()));
+        let inner = Rc::new(RefCell::new(ArkUINode::default()));
         let target = Rc::new(Target {
             id,
             state: AttachmentState::default(),
-            parent: Rc::new(RefCell::new(ArkUINode::default())),
-            parent_retention: RefCell::default(),
+            parent: RefCell::new(Some(parent.clone())),
             child: RefCell::default(),
-            inner: None,
-            inner_retention: RefCell::default(),
+            inner: RefCell::new(Some(inner.clone())),
             inner_receiver_active: Cell::new(false),
             slot: Cell::new(None),
             retained: RefCell::default(),
         });
+        let attachment = NativeAttachment(target.clone());
         TARGETS.with(|targets| targets.borrow_mut().insert(id, target.clone()));
         {
             let _callback = target.begin().unwrap();
             assert!(NativeAttachment::retire(id).is_err());
+            assert_eq!(Rc::strong_count(&parent), 2);
+            assert_eq!(Rc::strong_count(&inner), 2);
         }
         NativeAttachment::retire(id).unwrap();
+        // The external attachment still owns Target, but retirement releases both nodes now.
+        assert_eq!(attachment.id(), id);
+        assert!(target.parent.borrow().is_none());
+        assert!(target.inner.borrow().is_none());
+        assert_eq!(Rc::strong_count(&parent), 1);
+        assert_eq!(Rc::strong_count(&inner), 1);
         let mut dispatched = false;
         assert!(NativeAttachment::dispatch(id, || dispatched = true).is_err());
         assert!(!dispatched);
         assert!(target.begin().is_err());
+        attachment.invalidate().unwrap();
+        drop(attachment);
+        assert_eq!(Rc::strong_count(&parent), 1);
+        assert_eq!(Rc::strong_count(&inner), 1);
+    }
+
+    #[test]
+    fn empty_nodes_cannot_be_retained() {
+        let parent = Rc::new(RefCell::new(ArkUINode::default()));
+        let error = NativeAttachment::new(&parent).err().unwrap();
+        assert_eq!(error.reason, "native retention requires an owned node");
+        assert_eq!(Rc::strong_count(&parent), 1);
     }
 }
