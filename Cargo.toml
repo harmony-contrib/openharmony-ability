@@ -41,18 +41,18 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { version = "0.4.2", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "842f4d4105b6c34a7c108d29c88d17cb496ed912" }
-ohos-xcomponent-binding = { version = "0.5.2", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "842f4d4105b6c34a7c108d29c88d17cb496ed912", features = ["multi_mode", "accessibility", "api-15"] }
-ohos-udmf-binding = { version = "0.0.7", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "a5542e29d45041175942ab4044531929842359b5", features = ["api-13"] }
+ohos-arkui-binding = { version = "0.4.2", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-xcomponent-binding = { version = "0.5.2", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19", features = ["multi_mode", "accessibility", "api-15"] }
+ohos-udmf-binding = { version = "0.0.7", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19", features = ["api-13"] }
 # D3/D4 share PR #187's revision, which contains the D3 IME parent unchanged.
-ohos-pasteboard-binding = { version = "0.0.7", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "a5542e29d45041175942ab4044531929842359b5", features = ["api-13"] }
-ohos-ime-binding = { version = "0.3.1", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "a5542e29d45041175942ab4044531929842359b5" }
-ohos-web-binding = { version = "0.3.0", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "842f4d4105b6c34a7c108d29c88d17cb496ed912" }
-ohos-display-binding = { version = "0.1.4", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "842f4d4105b6c34a7c108d29c88d17cb496ed912" }
-ohos-resource-manager-binding = { version = "0.3.4", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "842f4d4105b6c34a7c108d29c88d17cb496ed912" }
-ohos-hilog-binding = { version = "0.2.4", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "842f4d4105b6c34a7c108d29c88d17cb496ed912" }
+ohos-pasteboard-binding = { version = "0.0.7", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19", features = ["api-13"] }
+ohos-ime-binding = { version = "0.3.1", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-web-binding = { version = "0.3.0", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-display-binding = { version = "0.1.4", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-resource-manager-binding = { version = "0.3.4", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-hilog-binding = { version = "0.2.4", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
 # Keep native wrappers on the same revision until the binding updates are released.
-ohos-window-manager-binding = { version = "0.1.1", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "842f4d4105b6c34a7c108d29c88d17cb496ed912" }
+ohos-window-manager-binding = { version = "0.1.1", git = "https://github.com/ohos-rs/ohos-native-bindings.git", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
 
 # Bridge runtime and examples use these without pinning versions in member manifests.
 futures-channel = { version = "0.3" }
