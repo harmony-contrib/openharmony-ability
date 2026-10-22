@@ -670,6 +670,12 @@ class WebviewPickColorResponse {
   }
 }
 
+interface DocumentOptionsRequest {
+  id: string;
+  javascriptEnabled?: boolean | null;
+  initializationScripts?: WebviewInitializationScript[] | null;
+}
+
 interface WebviewUserAgentRequest {
   id: string;
   userAgent: string;
@@ -722,6 +728,61 @@ function ensureWebEngineInitialized(context: BridgePluginContext): void {
     ENGINE_LIFECYCLE_EVENT_TYPE,
     new WebviewEngineLifecycleEvent("engine-initialized", webEngineSchemes) as ESObject,
   );
+}
+
+function validateDocumentOptions(
+  javascriptEnabled: boolean | null | undefined,
+  scripts: WebviewInitializationScript[] | null | undefined,
+): void {
+  if (javascriptEnabled != null && typeof javascriptEnabled !== "boolean") {
+    throw new Error("WebView javascriptEnabled must be a boolean");
+  }
+  if (scripts == null) {
+    return;
+  }
+  if (!Array.isArray(scripts)) {
+    throw new Error("WebView initializationScripts must be an array");
+  }
+  for (const item of scripts) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof item.script !== "string" ||
+      !Array.isArray(item.scriptRules)
+    ) {
+      throw new Error("WebView initialization script requires script and scriptRules");
+    }
+    for (const rule of item.scriptRules) {
+      if (typeof rule !== "string") {
+        throw new Error("WebView initialization script rules must be strings");
+      }
+    }
+  }
+}
+
+function parseDocumentOptions(payload: BridgeTypedValue): DocumentOptionsRequest {
+  if (
+    payload.typeName !== "ohos.webview.DocumentOptionsRequest" ||
+    !payload.value ||
+    typeof payload.value !== "object"
+  ) {
+    throw new Error("update-document-options requires ohos.webview.DocumentOptionsRequest");
+  }
+  const value = payload.value as DocumentOptionsRequest;
+  if (typeof value.id !== "string" || !value.id.trim()) {
+    throw new Error("WebView document options controller id must not be empty");
+  }
+  validateDocumentOptions(value.javascriptEnabled, value.initializationScripts);
+  return {
+    id: value.id,
+    javascriptEnabled: value.javascriptEnabled,
+    initializationScripts: value.initializationScripts?.map(
+      (item: WebviewInitializationScript): WebviewInitializationScript => ({
+        script: item.script,
+        scriptRules: item.scriptRules.slice(),
+      }),
+    ),
+  };
 }
 
 function parseCreatePayload(payload: BridgeTypedValue): WebviewCreatePayload {
@@ -823,6 +884,7 @@ function parseUserAgentRequest(payload: BridgeTypedValue): WebviewUserAgentReque
 }
 
 function ensureCreatePayload(payload: WebviewCreatePayload): WebviewCreatePayload {
+  validateDocumentOptions(payload.javascriptEnabled, payload.initializationScripts);
   if (!payload?.id?.trim()) {
     throw new Error("WebView id must not be empty");
   }
@@ -3069,6 +3131,30 @@ class WebviewSurface {
     }
   }
 
+  async updateDocumentOptions(
+    options: DocumentOptionsRequest,
+    context: BridgeCallContext,
+  ): Promise<void> {
+    const entry = await this.controllerEntry(options.id, context);
+    this.assertCurrentEntry(options.id, entry, context);
+    const previousJavascript = entry.data.javascriptEnabled;
+    const previousScripts = entry.data.initializationScripts;
+    if (options.javascriptEnabled != null) {
+      entry.data.javascriptEnabled = options.javascriptEnabled;
+    }
+    if (options.initializationScripts != null) {
+      entry.data.initializationScripts = options.initializationScripts;
+    }
+    try {
+      entry.node.update(entry.data);
+    } catch (error) {
+      entry.data.javascriptEnabled = previousJavascript;
+      entry.data.initializationScripts = previousScripts;
+      throw new Error(String(error));
+    }
+    this.assertCurrentEntry(options.id, entry, context);
+  }
+
   async configureNative(
     settings: NativeWebviewSettings,
     context: BridgeCallContext,
@@ -3129,14 +3215,30 @@ class WebviewSurface {
   }
 
   private async controllerEntry(id: string, callContext: BridgeCallContext): Promise<WebviewEntry> {
+    this.assertActive();
     this.assertCallActive(callContext);
     const entry = this.entries.get(id);
     if (!entry) {
       throw new Error(`Unknown WebView controller '${id}'`);
     }
     await entry.waitForController(callContext.onCancel);
-    this.assertCallActive(callContext);
+    this.assertCurrentEntry(id, entry, callContext);
     return entry;
+  }
+
+  private assertCurrentEntry(
+    id: string,
+    entry: WebviewEntry,
+    callContext: BridgeCallContext,
+  ): void {
+    this.assertActive();
+    this.assertCallActive(callContext);
+    if (
+      this.entries.get(id) !== entry ||
+      (entry.data.nativeTarget !== null && !entry.data.nativeActive)
+    ) {
+      throw new Error(`WebView controller '${id}' was retired or replaced`);
+    }
   }
 
   private assertCallActive(callContext: BridgeCallContext): void {
@@ -3211,6 +3313,10 @@ export class WebviewPlugin extends AsyncPluginBase {
         throw new Error("Session closed while creating native WebView");
       }
       return { typeName: CREATE_RESPONSE_TYPE, value: new WebviewCreatedResponse(create.id) };
+    }
+    if (action === "update-document-options") {
+      await surface.updateDocumentOptions(parseDocumentOptions(payload), context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
     }
     if (action === "configure-native") {
       if (payload.typeName !== "ohos.webview.NativeSettings") {

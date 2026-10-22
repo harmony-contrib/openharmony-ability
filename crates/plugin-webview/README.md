@@ -229,6 +229,10 @@ in a Rust-owned node tree. `CreateRequest` owns the initial JavaScript, user age
 and document-start scripts; native settings add scrolling, page-end script and
 inline HTML base URL. `handle.configure_native(settings)` changes only native settings;
 `go_back`, `go_forward` and `stop_loading` operate on the existing controller/history.
+`handle.update_document_options(WebviewDocumentOptionsRequest)` changes JavaScript access
+and document-start scripts on that same controller. Await it before the next
+navigation; omitted fields retain their values and an empty script list clears application
+scripts. User-agent updates continue to use `set_user_agent`.
 
 `NativeWebviewEvents::new(&app, id, target_id, callback)` belongs to that registered
 plugin instance and indexes the callback solely by `target_id`. Its guard removes the
