@@ -410,18 +410,18 @@ checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
 [[package]]
 name = "ohos-accessibility-binding"
 version = "0.1.3"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "bitflags 2.13.2",
  "ohos-accessibility-sys",
  "ohos-arkui-input-sys",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
 ]
 
 [[package]]
 name = "ohos-accessibility-sys"
 version = "0.0.7"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-arkui-input-sys",
 ]
@@ -429,16 +429,17 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-binding"
 version = "0.4.2"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "bitflags 2.13.2",
+ "log",
  "napi-ohos",
  "napi-sys-ohos",
  "ohos-accessibility-binding",
  "ohos-arkui-input-binding",
  "ohos-arkui-sys",
  "ohos-drawing-binding",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-image-binding",
  "ohos-image-native-binding",
  "ohos-udmf-binding",
@@ -449,21 +450,21 @@ dependencies = [
 [[package]]
 name = "ohos-arkui-input-binding"
 version = "0.1.6"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-arkui-input-sys",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
 ]
 
 [[package]]
 name = "ohos-arkui-input-sys"
 version = "0.1.5"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 
 [[package]]
 name = "ohos-arkui-sys"
 version = "0.1.5"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "napi-sys-ohos",
  "ohos-arkui-input-sys",
@@ -475,41 +476,30 @@ dependencies = [
 [[package]]
 name = "ohos-display-binding"
 version = "0.1.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-display-sys",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
 ]
 
 [[package]]
 name = "ohos-display-sys"
 version = "0.1.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 
 [[package]]
 name = "ohos-drawing-binding"
 version = "0.2.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-native-drawing-sys",
 ]
 
 [[package]]
 name = "ohos-enum-derive"
 version = "0.1.2"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
-dependencies = [
- "convert_case 0.6.0",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "ohos-enum-derive"
-version = "0.1.2"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=c7a41783c87ed22bb363491a77b9f3db3a6baa8f#c7a41783c87ed22bb363491a77b9f3db3a6baa8f"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro2",
@@ -520,25 +510,25 @@ dependencies = [
 [[package]]
 name = "ohos-hilog-binding"
 version = "0.2.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-hilogs-sys",
 ]
 
 [[package]]
 name = "ohos-hilogs-sys"
 version = "0.1.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 
 [[package]]
 name = "ohos-image-binding"
 version = "0.1.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "napi-ohos",
  "napi-sys-ohos",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-image-sys",
  "ohos-resource-manager-sys",
 ]
@@ -546,11 +536,11 @@ dependencies = [
 [[package]]
 name = "ohos-image-native-binding"
 version = "0.0.7"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "libc",
  "napi-sys-ohos",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-image-native-sys",
  "ohos-native-buffer-binding",
  "ohos-native-buffer-sys",
@@ -560,7 +550,7 @@ dependencies = [
 [[package]]
 name = "ohos-image-native-sys"
 version = "0.0.5"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "napi-sys-ohos",
  "ohos-native-buffer-sys",
@@ -570,7 +560,7 @@ dependencies = [
 [[package]]
 name = "ohos-image-sys"
 version = "0.0.5"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "napi-sys-ohos",
  "ohos-resource-manager-sys",
@@ -579,10 +569,10 @@ dependencies = [
 [[package]]
 name = "ohos-ime-binding"
 version = "0.3.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=c7a41783c87ed22bb363491a77b9f3db3a6baa8f#c7a41783c87ed22bb363491a77b9f3db3a6baa8f"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "log",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=c7a41783c87ed22bb363491a77b9f3db3a6baa8f)",
+ "ohos-enum-derive",
  "ohos-input-method-sys",
  "rustc-hash",
 ]
@@ -590,12 +580,12 @@ dependencies = [
 [[package]]
 name = "ohos-input-method-sys"
 version = "0.2.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=c7a41783c87ed22bb363491a77b9f3db3a6baa8f#c7a41783c87ed22bb363491a77b9f3db3a6baa8f"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 
 [[package]]
 name = "ohos-multi-modal-input-sys"
 version = "0.1.2"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-image-native-sys",
 ]
@@ -603,7 +593,7 @@ dependencies = [
 [[package]]
 name = "ohos-native-buffer-binding"
 version = "0.2.6"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-native-buffer-sys",
  "ohos-native-window-sys",
@@ -612,12 +602,12 @@ dependencies = [
 [[package]]
 name = "ohos-native-buffer-sys"
 version = "0.1.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 
 [[package]]
 name = "ohos-native-drawing-sys"
 version = "0.2.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-image-native-sys",
  "ohos-image-sys",
@@ -626,7 +616,7 @@ dependencies = [
 [[package]]
 name = "ohos-native-window-manager-sys"
 version = "0.1.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-multi-modal-input-sys",
 ]
@@ -634,7 +624,7 @@ dependencies = [
 [[package]]
 name = "ohos-native-window-sys"
 version = "0.1.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-native-buffer-sys",
 ]
@@ -642,7 +632,7 @@ dependencies = [
 [[package]]
 name = "ohos-resource-manager-binding"
 version = "0.3.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "napi-ohos",
  "ohos-resource-manager-sys",
@@ -651,7 +641,7 @@ dependencies = [
 [[package]]
 name = "ohos-resource-manager-sys"
 version = "0.3.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "napi-sys-ohos",
 ]
@@ -659,9 +649,9 @@ dependencies = [
 [[package]]
 name = "ohos-udmf-binding"
 version = "0.0.7"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-image-native-binding",
  "ohos-udmf-sys",
 ]
@@ -669,7 +659,7 @@ dependencies = [
 [[package]]
 name = "ohos-udmf-sys"
 version = "0.0.5"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-image-native-sys",
 ]
@@ -677,24 +667,24 @@ dependencies = [
 [[package]]
 name = "ohos-web-binding"
 version = "0.3.0"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "bitflags 2.13.2",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-web-sys",
 ]
 
 [[package]]
 name = "ohos-web-sys"
 version = "0.1.4"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 
 [[package]]
 name = "ohos-window-manager-binding"
 version = "0.1.1"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-image-native-binding",
  "ohos-multi-modal-input-sys",
  "ohos-native-window-manager-sys",
@@ -703,14 +693,14 @@ dependencies = [
 [[package]]
 name = "ohos-xcomponent-binding"
 version = "0.5.2"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
  "napi-sys-ohos",
  "ohos-accessibility-binding",
  "ohos-arkui-input-binding",
- "ohos-enum-derive 0.1.2 (git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912)",
+ "ohos-enum-derive",
  "ohos-hilog-binding",
  "ohos-xcomponent-sys",
  "raw-window-handle",
@@ -719,7 +709,7 @@ dependencies = [
 [[package]]
 name = "ohos-xcomponent-sys"
 version = "0.1.5"
-source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=842f4d4105b6c34a7c108d29c88d17cb496ed912#842f4d4105b6c34a7c108d29c88d17cb496ed912"
+source = "git+https://github.com/ohos-rs/ohos-native-bindings.git?rev=43aec6c125503a47f7e875c793aaf2462e91ad19#43aec6c125503a47f7e875c793aaf2462e91ad19"
 dependencies = [
  "ohos-accessibility-sys",
  "ohos-arkui-input-sys",
