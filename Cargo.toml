@@ -42,9 +42,9 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "3e0922b7228b0e87e8e50dd13c4e61c957162140" }
-ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "3e0922b7228b0e87e8e50dd13c4e61c957162140", features = ["multi_mode", "accessibility", "api-15"] }
-ohos-udmf-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "3e0922b7228b0e87e8e50dd13c4e61c957162140", features = ["api-13"] }
+ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19", features = ["multi_mode", "accessibility", "api-15"] }
+ohos-udmf-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19", features = ["api-13"] }
 ohos-ime-binding = { version = "0.3.1" }
 ohos-web-binding = { version = "0.2" }
 ohos-display-binding = { version = "0.1" }
