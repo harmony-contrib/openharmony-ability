@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retain native attachment nodes through their shared Rust owners and release those owners
+  as soon as retirement succeeds, even while an attachment wrapper remains alive.
 - **Breaking**: native ArkUI keys are delivered once through the shared input/wake
   FIFO as `ArkUiInputEvent::Key`, with `KeyboardEventData::ime_consumed`; remove
   `KeyPreIme`, `KeyboardEventResponse`, timestamp deduplication and synchronous
