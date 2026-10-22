@@ -44,17 +44,17 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373" }
-ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373", features = ["multi_mode", "accessibility", "api-15"] }
-ohos-udmf-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373", features = ["api-13"] }
+ohos-arkui-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-xcomponent-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19", features = ["multi_mode", "accessibility", "api-15"] }
+ohos-udmf-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19", features = ["api-13"] }
 # Thin IME API; unify the remaining bindings after the native attachment migration.
-ohos-ime-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "c7a41783c87ed22bb363491a77b9f3db3a6baa8f" }
-ohos-web-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373" }
-ohos-display-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373" }
-ohos-resource-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373" }
-ohos-resource-manager-sys = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373" }
-ohos-hilog-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373" }
-ohos-window-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "234b627c237c365d60e9a37553bb676616686373" }
+ohos-ime-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-web-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-display-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-resource-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-resource-manager-sys = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-hilog-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
+ohos-window-manager-binding = { git = "https://github.com/ohos-rs/ohos-native-bindings", rev = "43aec6c125503a47f7e875c793aaf2462e91ad19" }
 
 # Bridge runtime and examples use these without pinning versions in member manifests.
 futures-channel = { version = "0.3" }
