@@ -16,7 +16,12 @@ use crate::{
     BridgeRuntime,
 };
 
+mod attachment_owner;
+mod attachment_state;
+mod content_root;
 mod native_attachment;
+pub use attachment_owner::NativeAttachment;
+pub use content_root::ContentRoot;
 pub use native_attachment::{NativeNodeReady, NativeNodeRetiring, NativeSubtreeReady};
 
 /// Plugin identity shared with the ArkTS built-in surface plugin.

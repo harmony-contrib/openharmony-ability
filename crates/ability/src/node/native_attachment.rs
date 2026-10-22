@@ -1,21 +1,22 @@
-//! Callback-scoped native-node interop. No ArkTS reference leaves decoding.
+//! Callback-scoped native-node interop backed by Ability-owned attachment targets.
+use super::NativeAttachment;
 use crate::{impl_bridge_napi_type, BridgeNapiType};
 use napi_derive_ohos::napi;
 use napi_ohos::{
     bindgen_prelude::{FromNapiValue, Object, Unknown},
     Env, Error, JsValue, Result,
 };
-use ohos_arkui_binding::component::native_attachment::NativeAttachment;
 
 /// Receipt of an inbound `ohos.node.NativeNodeReady { targetId, content }`.
 /// Decoding synchronously consumes the borrowed FrameNode, attaches it to
-/// the UI-thread binding target and keeps only this boolean acknowledgement.
+/// the UI-thread Ability target and keeps only this boolean acknowledgement.
 pub struct NativeNodeReady {
     accepted: bool,
 }
 
 /// Callback-scoped receipt of an ArkTS wrapper and its NodeContent slot.
-/// Only native handles remain after decoding; neither ArkTS object escapes.
+/// The receipt keeps only acceptance; the Ability target retains both platform owners
+/// until native detachment succeeds.
 pub struct NativeSubtreeReady {
     accepted: bool,
 }
@@ -44,8 +45,10 @@ impl BridgeNapiType for NativeSubtreeReady {
             .get("slot")?
             .ok_or_else(|| Error::from_reason("missing slot"))?;
         Ok(Self {
-            // SAFETY: the paired wrapper owner retains its BuilderNode and NodeContent until retirement.
-            accepted: unsafe { NativeAttachment::attach_subtree(&env, id, &content, &slot) }?,
+            accepted: {
+                NativeAttachment::attach_subtree(&env, id, &content, &slot)?;
+                true
+            },
         })
     }
 }
@@ -71,9 +74,10 @@ impl BridgeNapiType for NativeNodeReady {
             .get("content")?
             .ok_or_else(|| Error::from_reason("missing content"))?;
         Ok(Self {
-            // SAFETY: native-embedding plugins retain the BuilderNode and
-            // release it only after synchronous retirement succeeds.
-            accepted: unsafe { NativeAttachment::attach(&env, id, &content) }?,
+            accepted: {
+                NativeAttachment::attach(&env, id, &content)?;
+                true
+            },
         })
     }
 }
