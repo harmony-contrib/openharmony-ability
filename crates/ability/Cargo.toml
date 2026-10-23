@@ -19,6 +19,7 @@ keyboard-focus-recovery = [
     "keyboard-focus",
     "dep:ohos-window-manager-binding",
     "ohos-window-manager-binding/api-26",
+    "ohos-window-manager-binding/input",
 ]
 # API-18 mouse cancellation is opt-in; basic XComponent mouse input remains available.
 mouse = ["ohos-xcomponent-binding/api-18", "ohos-arkui-binding/api-17"]
