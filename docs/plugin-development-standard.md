@@ -24,14 +24,6 @@
 
 每个插件必须满足以下边界：
 
-- 原生能力必须通过 Cargo feature 选择或开启，禁止使用 `libloading`、`dlopen`、`dlsym`
-  等运行时符号探测方式，包括宿主测试。整个 workspace 禁止直接依赖 `*-sys`（含重命名依赖
-  和 `napi-sys-ohos`）；core、插件和示例只能调用 binding 的公开封装，不得本地声明 FFI
-  或通过重导出的原始函数绕过封装。缺少接口时先补充对应的 `ohos-native-bindings`。
-  具名 N-API transport 可以使用 `napi-ohos` 重导出的不透明类型，但不得调用原始 N-API 函数。
-- feature 必须标明最低运行时 API；关闭后不得引用对应原生符号。运行时版本判断不能解决
-  新符号在旧系统上的加载问题。合入前执行 `cargo run -p xtask --locked -- native-boundary`，
-  feature 的具体要求见 [原生能力配置](native-capabilities.md)。
 - Rust crate 位于 `crates/plugin-<name>`，依赖 `openharmony-ability`；需要复用其他插件类型时依赖
   对应的 `plugin-*` crate（如 `plugin-statusbar` 复用 `plugin-menu` 的类型），但不能依赖 ArkTS
   实现或应用页面；对外通过扩展 trait/client 暴露能力。
@@ -212,12 +204,6 @@ export { LoginPlugin };
 
 ### 3.3 既有内置插件的契约基线
 
-The canonical type-name inventory, object layouts and plugin mode/context declarations are
-generated from Rust in [napi-contracts.md](napi-contracts.md). Regenerate it with
-`cargo run -p xtask -- contracts`; CI rejects stale output with `--check`. The overview below
-documents action semantics, not a second exhaustive type inventory. Keep ArkTS aligned with
-the generated declarations; a documentation diff is not a cross-language type checker.
-
 迁移 helper 或新增 action 时，应以现有插件的类型名、模式和 context 作为兼容语义基线；不兼容
 契约必须引入新的 action/typeName，不能修改已有具名 N-API 类型的含义。
 
@@ -226,8 +212,8 @@ the generated declarations; a documentation diff is not a cross-language type ch
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
-| `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `ohos.audio.UpdateResponse { accepted }` | async / `ability`; ArkTS owns an API 10+ `fs.dup` file until player release; source descriptors are private transport data, with no reverse events or playback-log contract |
-| `ohos.clipboard` / native facade | `ClipboardRecord`, `ClipboardMimeContent`, `ClipboardReadMimeResponse`, `ClipboardReadContentResponse` retain named value types; former bridge actions/events are withdrawn | Registration identity remains async / `ability`; native `OH_Pasteboard` is the only data path. Typed UDS text/HTML; opaque general entries for other formats. |
+| `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `ohos.audio.UpdateResponse { accepted }` | async / `ability`；ArkTS 持有 `fs.dup` 独立文件句柄直至播放器释放 |
+| `ohos.clipboard` / 原生 facade | 保留 `ClipboardRecord`、`ClipboardMimeContent`、`ClipboardReadMimeResponse`、`ClipboardReadContentResponse` 具名值类型 | async / `ability` 注册身份保留；数据直接经原生 `OH_Pasteboard` 与 UDMF 读写 |
 | `ohos.window` / `show-prompt` | `ohos.window.PromptRequest { windowId, message, detail?, level, buttons, cancelIndex?, anchor?: PromptAnchor }` → `ohos.window.PromptResponse { index }` | async / `ui-context`；`PromptAnchor { x, y }` 为目标窗口内容局部逻辑坐标，单位 vp，不是物理 px 或屏幕全局坐标；弹窗按实际尺寸限制在窗口可用区域内；原生弹窗取消、调用取消和销毁均释放组件 |
 | `ohos.window` / `get-window-stack` | `ohos.window.StackRequest { displayId, windowIds }` → `ohos.window.StackResponse { windowIds }` | async / `ui-context`；从 SDK 可见窗口顺序中筛选请求的本应用窗口，顶部在前 |
 | `ohos.window` / `set-custom-cursor` | `ohos.window.CustomCursorRequest { windowId, rgba, width, height, hotspotX, hotspotY }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；RGBA8888，尺寸 1–256 px，热点必须位于图像内；PixelMap 在成功、失败和取消后释放 |
@@ -247,18 +233,7 @@ the generated declarations; a documentation diff is not a cross-language type ch
 | `ohos.webview` / 控制器 action | `ohos.webview.ControllerRequest` → `ohos.webview.Acknowledgement` / `StringResponse` / `ScriptResponse` | async / `ui-context` |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` | 入站事件 / `ability` |
 
-D4 clipboard exception: the paired HAR supplies registration identity only. Rust owns
-operation-scoped native C handles, never ArkTS objects or `Env`. Async-shaped methods
-perform synchronous native IPC on the caller's chosen worker, without threads/executors
-or an implicit write queue. Limits remain 512 representations / 1024 UTF-8 bytes per MIME.
-Empty text/HTML uses typed UDS; empty opaque data returns
-`ClipboardError::EmptyBinaryUnsupported` because `OH_UdmfRecord_AddGeneralEntry` rejects
-`count == 0`. No private marker encoding is allowed. Metadata configuration moves to Rust
-`with_metadata_mime_type`; the HAR takes no constructor options.
-`read_authorized_records` explicitly returns `AuthorizationRequired`.
-`revision() -> Result<u32>` pulls the native API-18 counter; zero is unknown, and service
-restart can reset/decrease it. No observer/event bridge remains. Upgrade Rust/HAR from
-the same source revision; see the [clipboard migration](../crates/plugin-clipboard/README.md).
+`clipboard` 仅保留成对 HAR 的注册身份，数据读写直接由 Rust 调用原生 `OH_Pasteboard` 与 UDMF 完成；文本 metadata 由 `ClipboardClient::with_metadata_mime_type` 配置。
 
 `resource` 是纯入站插件：ArkTS wrapper 在 `ability-create` 时经 `invokeNativeSync` 推送平台
 对象，Rust 在 `on_main_thread_event` 解码的同一 N-API callback 内把它转成 native 指针；对象

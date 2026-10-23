@@ -3,6 +3,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 use super::pan::PanTracker;
 
 use napi_ohos::{Env, Error, Result};
+use ohos_arkui_binding::arkui_input_binding::{UIInputSourceType, UIInputToolType};
 use ohos_arkui_binding::component::attribute::{
     ArkUIAttributeBasic, ArkUICommonAttribute, ArkUIEvent, ArkUIGesture,
 };
@@ -14,7 +15,7 @@ use ohos_arkui_binding::{
     api::node_custom_event::IntOffset, common::node::ArkUINode, types::advanced::LengthMetricUnit,
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
-use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
+use ohos_xcomponent_binding::{TouchPointTool, XComponentOffset, XComponentSize};
 
 #[cfg(feature = "keyboard")]
 use crate::KeyboardEventData;
@@ -155,6 +156,10 @@ fn release_gestures(xcomponent: &XComponent, gestures: &mut Vec<Gesture>) {
     }
 }
 
+fn is_mouse_pointer(pointer: &PointerInputData) -> bool {
+    pointer.source_type == UIInputSourceType::Mouse || pointer.tool_type == UIInputToolType::Mouse
+}
+
 fn register_gestures(
     xcomponent: &XComponent,
     render_owner: &str,
@@ -175,6 +180,9 @@ fn register_gestures(
         let Some(pointer) = event.input.map(PointerInputData::from) else {
             return;
         };
+        if is_mouse_pointer(&pointer) {
+            return;
+        }
         dispatch_input(
             &tap_app,
             &tap_owner,
@@ -209,6 +217,9 @@ fn register_gestures(
                 return;
             };
             let pointer = event.input.map(PointerInputData::from);
+            if pointer.as_ref().is_some_and(is_mouse_pointer) {
+                return;
+            }
             let pan_event = if phase == GesturePhase::Cancel {
                 pan_tracker.borrow_mut().cancel(pointer)
             } else {
@@ -258,6 +269,9 @@ fn register_gestures(
             let Some(pointer) = event.input.map(PointerInputData::from) else {
                 return;
             };
+            if is_mouse_pointer(&pointer) {
+                return;
+            }
             let GestureData::Swipe(data) = event.event_action_data else {
                 return;
             };
@@ -485,7 +499,15 @@ pub fn render_for_window(
     if touch_input_delivery.delivers_raw_touch() {
         let on_touch_event_app = app.clone();
         let on_touch_event_owner = render_owner.clone();
-        xcomponent.on_touch_event(move |_, _, data| {
+        xcomponent.on_touch_event(move |_, _, mut data| {
+            if !data.touch_points.is_empty() {
+                data.touch_points
+                    .retain(|point| point.event_tool_type != TouchPointTool::Mouse);
+                data.num_points = data.touch_points.len() as u32;
+                if data.touch_points.is_empty() {
+                    return Ok(());
+                }
+            }
             dispatch_input(
                 &on_touch_event_app,
                 &on_touch_event_owner,
@@ -620,13 +642,14 @@ pub fn render_for_window(
     let pointer_owner = render_owner.clone();
     xcomponent_native.on_touch_event(move |event| {
         if let Some(input) = event.input_event() {
+            let pointer = pointer_snapshot(&input, pointer_node);
+            if is_mouse_pointer(&pointer) {
+                return;
+            }
             dispatch_input(
                 &pointer_app,
                 &pointer_owner,
-                InputEvent::ArkUi(ArkUiInputEvent::Pointer(pointer_snapshot(
-                    &input,
-                    pointer_node,
-                ))),
+                InputEvent::ArkUi(ArkUiInputEvent::Pointer(pointer)),
             );
         }
     });

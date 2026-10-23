@@ -1,4 +1,6 @@
 import window from "@ohos.window";
+import pointer from "@ohos.multimodalInput.pointer";
+import { image } from "@kit.ImageKit";
 import { setWindowIcon } from "./WindowIcon";
 import { parseCustomCursor } from "./CustomCursor";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
@@ -23,7 +25,6 @@ import {
 } from "@ohos-rs/ability";
 
 import { PromptDialogs, WindowPromptRequest } from "./PromptDialogs";
-import { WindowPointer } from "./WindowPointer";
 
 const TAG: string = "WindowPlugin";
 const MOVE_REQUESTED_TYPE = "ohos.window.MoveRequested";
@@ -1186,14 +1187,39 @@ export class WindowPlugin extends AsyncPluginBase {
     if (action === "set-custom-cursor") {
       const request = parseCustomCursor(payload);
       const win = await this.requireWindow(request.windowId, context);
-      await WindowPointer.setCustom(win, request, (): void => this.assertCallActive(context));
+      const bytes = new Uint8Array(request.rgba);
+      const pixelMap = await image.createPixelMap(bytes.buffer, {
+        size: { width: request.width, height: request.height },
+        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        srcPixelFormat: image.PixelMapFormat.RGBA_8888,
+        alphaType: image.AlphaType.UNPREMUL,
+        editable: false,
+      });
+      try {
+        this.assertCallActive(context);
+        const nativeId = win.getWindowProperties().id;
+        await pointer.setCustomCursor(nativeId, pixelMap, request.hotspotX, request.hotspotY);
+        this.assertCallActive(context);
+      } catch (error) {
+        try {
+          await pixelMap.release();
+        } catch (releaseError) {
+          console.warn(`Cursor release failed: ${String(releaseError)}`);
+        }
+        throw error as Error;
+      }
+      await pixelMap.release();
+      this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-cursor-icon") {
       const request = parseCursorIconRequest(payload);
       const win = await this.requireWindow(request.windowId, context);
-      WindowPointer.setStyle(win, request.style);
+      pointer.setPointerStyleSync(
+        win.getWindowProperties().id,
+        request.style as pointer.PointerStyle,
+      );
       this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }

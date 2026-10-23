@@ -1,25 +1,12 @@
-/** One owned native pipeline. State callbacks never revive a replaced source. */
-export interface AudioSource {
-  fd: number;
-  close(): void;
-}
-export interface Playback {
-  state(): string;
-  observe(state: (value: string) => void, error: (message: string) => void): void;
-  source(fd: number): void;
-  prepare(): Promise<void>;
-  volume(value: number): void;
-  rewind(): void;
-  play(): Promise<void>;
-  release(): Promise<void>;
-}
-export interface PlaybackFactory {
-  create(): Promise<Playback>;
-}
+import audio from "@ohos.multimedia.audio";
+import fs from "@ohos.file.fs";
+import media from "@ohos.multimedia.media";
 
+/** One owned native pipeline. State callbacks never revive a replaced source. */
 export class PlayerSession {
-  private player?: Playback;
+  private player?: media.AVPlayer;
   private closed: boolean = false;
+  private sourceClosed: boolean = false;
   private requested: number = 0;
   private applied: number = 0;
   private volume: number = 1;
@@ -27,12 +14,11 @@ export class PlayerSession {
   private flushing: boolean = false;
   private startTask?: Promise<void>;
   private closeTask?: Promise<void>;
-  private source: AudioSource;
-  private factory: PlaybackFactory;
+  private source: fs.File;
   private report: (message: string) => void;
-  constructor(source: AudioSource, factory: PlaybackFactory, report: (message: string) => void) {
+
+  constructor(source: fs.File, report: (message: string) => void) {
     this.source = source;
-    this.factory = factory;
     this.report = report;
   }
 
@@ -57,30 +43,38 @@ export class PlayerSession {
       if (this.closed) {
         return;
       }
-      const player = await this.factory.create();
+      const player = await media.createAVPlayer();
       this.player = player;
       if (this.closed) {
         return;
       }
-      player.observe(
-        (state: string): void => {
+      player.on("stateChange", (state: string): void => {
+        try {
           if (this.closed) {
             return;
           }
-          if (state === "initialized" && !this.preparing) {
-            this.preparing = true;
-            player.prepare().catch((error: Error): void => {
-              this.fail(String(error));
-            });
+          if (state === "initialized") {
+            player.audioRendererInfo = {
+              usage: audio.StreamUsage.STREAM_USAGE_NOTIFICATION,
+              rendererFlags: 0,
+            };
+            if (!this.preparing) {
+              this.preparing = true;
+              player.prepare().catch((error: Error): void => {
+                this.fail(String(error));
+              });
+            }
           } else if (state === "prepared") {
             this.flush();
           }
-        },
-        (message: string): void => {
-          this.fail(message);
-        },
-      );
-      player.source(this.source.fd);
+        } catch (failure) {
+          this.fail(String(failure));
+        }
+      });
+      player.on("error", (failure: Error): void => {
+        this.fail(String(failure));
+      });
+      player.fdSrc = { fd: this.source.fd };
     } catch (error) {
       this.fail(String(error));
     }
@@ -94,12 +88,13 @@ export class PlayerSession {
       });
     }
   }
+
   private flush(): void {
     const player = this.player;
     if (this.closed || player === undefined || this.flushing || this.applied === this.requested) {
       return;
     }
-    const state = player.state();
+    const state = player.state;
     if (
       state !== "prepared" &&
       state !== "playing" &&
@@ -111,8 +106,8 @@ export class PlayerSession {
     this.applied = this.requested;
     this.flushing = true;
     try {
-      player.volume(this.volume);
-      player.rewind();
+      player.setVolume(this.volume);
+      player.seek(0);
       const playing = state === "playing" ? Promise.resolve() : player.play();
       playing
         .catch((error: Error): void => {
@@ -136,6 +131,7 @@ export class PlayerSession {
     this.closeTask = this.dispose();
     return this.closeTask;
   }
+
   private async dispose(): Promise<void> {
     try {
       // Waiting for a pending create also releases its late result and keeps
@@ -147,7 +143,10 @@ export class PlayerSession {
     } catch (error) {
       this.report(`release: ${String(error)}`);
     } finally {
-      this.source.close();
+      if (!this.sourceClosed) {
+        this.sourceClosed = true;
+        fs.closeSync(this.source);
+      }
       this.player = undefined;
     }
   }

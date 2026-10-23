@@ -1,19 +1,12 @@
 # openharmony-ability-plugin-clipboard
 
-Native-only system clipboard access through `OH_Pasteboard` and scoped UDMF owners.
+English | [简体中文](README.zh-CN.md)
+
+Native system clipboard access through `OH_Pasteboard` and scoped UDMF owners.
 The paired HAR retains `ohos.clipboard` / async / `["ability"]` registration identity,
 but transports no clipboard data and installs no observer.
 
 ## Integration
-
-Use the Rust crate and HAR from the **same source revision**. Bindings PR
-[#187](https://github.com/ohos-rs/ohos-native-bindings/pull/187) is pinned until release;
-published pasteboard/UDMF 0.0.7 alone does not contain the required APIs.
-
-During development, clipboard uses UDMF `a5542e29` while Ability's drag path keeps
-UDMF `842f4d41` to match ArkUI's Rust types. These identities must not cross the
-facades. **D5 blocks Ability release** until the bindings release unifies the pins
-and the drag-only override is removed.
 
 ```rust
 use openharmony_ability_plugin_clipboard::{ClipboardBridgePlugin, ClipboardExt};
@@ -101,15 +94,8 @@ Base data operations require API 13. Feature `api-14` enables metadata-only nati
 MIME listing; `api-18` includes it. Without `api-14`, listing uses the native data
 snapshot and therefore needs read access. All feature defaults are off.
 
-## Breaking migration and validation
+## Breaking migration
 
 Remove ArkTS constructor options and `ClipboardPluginOptions`. Move configuration
 to `with_metadata_mime_type`. All old clipboard bridge actions/request-response
 envelopes and `ChangedEvent` are withdrawn; retained value types keep their names.
-Upgrade Rust/HAR together, handle typed errors and choose caller-side permission
-and scheduling policy.
-
-`pnpm test` discovers the real HAR/BridgeHost rejection tests and runs the production
-Rust MIME policy directly with `rustc --test`; no native FFI is faked. ARM64 OHOS
-builds compile the real native adapter. Host policy tests and cross-compilation
-do **not** constitute device clipboard acceptance.

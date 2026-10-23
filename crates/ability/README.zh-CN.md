@@ -46,18 +46,14 @@ openharmony-ability = { version = "1.0.0-beta.3", features = ["mouse"] }
 openharmony-ability = { version = "1.0.0-beta.3", features = ["keyboard"] }
 ```
 
-`keyboard` enables `KeyboardInputDelivery::ArkUi`, `KeyboardEventData`,
-`KeyboardEventResponse` and `ArkUiInputEvent::Key` through API 14/15; it is not a
-default feature. Select ArkUI delivery before rendering. Each physical transition
-arrives once with `ime_consumed`: update held-key state for every key, but never
-execute consumed keys as shortcuts or hardware text. Input and wakes share the
-UI-thread FIFO; remove timestamp deduplication. `api-19` opts into API-19 lock
-snapshots.
-
-The breaking contract removes `KeyPreIme` and `ArkUiWithTextInput`. Configure
-API-26 native key consumption explicitly through `with_ime_for` and `api-26`
-before attachment. `TextInputReadyChanged` reports editor lifetime independently
-of EGL readiness.
+`keyboard` 提供 `KeyboardInputDelivery::ArkUi`、`KeyboardEventData`、
+`KeyboardEventResponse` 和 `ArkUiInputEvent::Key`，转发
+`ohos-arkui-binding/api-15`，不在默认 feature 中。
+默认仍投递原始 XComponent 输入；渲染前调用
+`OpenHarmonyApp::set_keyboard_input_delivery(KeyboardInputDelivery::ArkUi)`，
+即可接收单次按键事件（含 Unicode、按住状态和 `ime_consumed`）。
+`api-19` 可选启用 API 19 键盘锁定状态查询，`api-26` 可选启用 API 26 原生 IME 按键消费。
+运行时低于 API 14 时选择 ArkUI 投递会返回错误。`drag` 不会自动启用 `keyboard`。
 
 原生文件拖放也需显式启用：
 
