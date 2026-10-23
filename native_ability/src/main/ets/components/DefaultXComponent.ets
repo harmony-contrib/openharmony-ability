@@ -73,6 +73,7 @@ interface ComponentAttachment {
   renderOwner: string;
   nativeModule: Module;
   nativeSubWindow: boolean;
+  componentWindow: window.Window;
 }
 
 /**
@@ -146,9 +147,8 @@ export struct DefaultXComponent {
         throw new Error(`Native module '${moduleName}' does not support sub-window rendering`);
       }
       const renderOwner = `${this.bridgeSessionId}:${moduleName}:${nextRenderOwnerId++}`;
-      const nativeWindowId = window
-        .findWindow(this.getUIContext().getWindowName())
-        .getWindowProperties().id;
+      const componentWindow = window.findWindow(this.getUIContext().getWindowName());
+      const nativeWindowId = componentWindow.getWindowProperties().id;
       nativeModule.renderWindow(this.rootSlot, renderOwner, this.windowId, nativeWindowId);
       if (generation !== this.appearanceGeneration) {
         nativeModule.disposeRender(renderOwner);
@@ -160,6 +160,7 @@ export struct DefaultXComponent {
         renderOwner,
         nativeModule,
         nativeSubWindow: true,
+        componentWindow,
       };
       this.attachSurfaceBlur(generation);
       return;
@@ -198,9 +199,8 @@ export struct DefaultXComponent {
     // NativeAbility owns the module/session sinks from ability-create onward. The component only
     // supplies the render surface and UI root; ability-only plugins never depend on appearance.
     const renderOwner = `${sessionId}:${moduleName}:${nextRenderOwnerId++}`;
-    const nativeWindowId = window
-      .findWindow(this.getUIContext().getWindowName())
-      .getWindowProperties().id;
+    const componentWindow = window.findWindow(this.getUIContext().getWindowName());
+    const nativeWindowId = componentWindow.getWindowProperties().id;
     nativeModule.render(this.rootSlot, renderOwner, nativeWindowId);
 
     if (generation !== this.appearanceGeneration) {
@@ -214,6 +214,7 @@ export struct DefaultXComponent {
       renderOwner,
       nativeModule,
       nativeSubWindow: false,
+      componentWindow,
     };
     this.attachment = attachment;
     try {
@@ -311,10 +312,9 @@ export struct DefaultXComponent {
       return;
     }
     try {
-      const componentWindow = window.findWindow(this.getUIContext().getWindowName());
       BridgeHostRegistry.dispatchComponentTouch(attachment.sessionId, attachment.moduleName, {
         windowId: this.windowId,
-        window: componentWindow,
+        window: attachment.componentWindow,
         touch: event,
       });
     } catch (error) {
