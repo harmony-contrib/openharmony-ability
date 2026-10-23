@@ -81,14 +81,19 @@ pub fn create_lifecycle_handle<'a>(
         .build()?;
 
     {
+        let wake = Arc::new(crate::waker::InputWake {
+            queue: app.input_queue.clone(),
+            callback: tsfn,
+        });
+        app.waker
+            .write()
+            .map_err(|_| napi_ohos::Error::from_reason("Failed to write app waker"))?
+            .replace(wake.clone());
         let mut guard = (*WAKER)
             .write()
             .map_err(|_| napi_ohos::Error::from_reason("Failed to write WAKER"))?;
 
-        guard.replace(Arc::new(crate::waker::InputWake {
-            queue: app.input_queue.clone(),
-            callback: tsfn,
-        }));
+        guard.replace(wake);
     }
 
     let on_memory_level_app = app.clone();
