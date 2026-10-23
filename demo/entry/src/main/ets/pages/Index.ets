@@ -8,6 +8,7 @@ import {
   demoAnnounce,
   demoObserveMotion,
   demoStopMotion,
+  demoSetStatusBar,
   createBottomDemoWebview,
   playAudioDemo,
   createComposedDemoWebview,
@@ -54,6 +55,7 @@ struct Index {
   @State urlResult: string = "";
   @State fileDialogResult: string = "";
   @State resourceStatus: string = "";
+  @State statusBarResult: string = "";
 
   private tabs: string[] = ["XComponent", "WebView", "Platform", "Resource"];
 
@@ -83,6 +85,46 @@ struct Index {
   }
 
   // ---------- handlers ----------
+
+  async handleStatusBar(enabled: boolean, lightContent: boolean, background?: number) {
+    this.busyKey = "status-bar";
+    this.statusBarResult = "";
+    try {
+      if (demoWindowStage === null) {
+        throw new Error("WindowStage is not ready");
+      }
+      const win = demoWindowStage.getMainWindowSync();
+      const before = win.getWindowSystemBarProperties();
+      await demoSetStatusBar({ windowId: 0, enabled, lightContent, background, animated: false });
+      const after = win.getWindowSystemBarProperties();
+      if (
+        before.navigationBarColor !== after.navigationBarColor ||
+        before.navigationBarContentColor !== after.navigationBarContentColor ||
+        before.isNavigationBarLightIcon !== after.isNavigationBarLightIcon ||
+        before.enableNavigationBarAnimation !== after.enableNavigationBarAnimation
+      ) {
+        throw new Error("Navigation-bar properties changed");
+      }
+      const expectedContent = lightContent ? "#ffffffff" : "#ff000000";
+      if (after.statusBarContentColor?.toLowerCase() !== expectedContent) {
+        throw new Error(`Unexpected status content: ${after.statusBarContentColor}`);
+      }
+      const expectedBackground =
+        background === undefined
+          ? before.statusBarColor?.toLowerCase()
+          : `#${background.toString(16).padStart(8, "0")}`;
+      if (after.statusBarColor?.toLowerCase() !== expectedBackground) {
+        throw new Error(`Unexpected status background: ${after.statusBarColor}`);
+      }
+      this.statusBarResult = `✓ enabled=${enabled}, ${after.statusBarContentColor}, ${after.statusBarColor}; navigation preserved`;
+      console.info(`[status-bar-acceptance] ${this.statusBarResult}`);
+    } catch (error) {
+      this.statusBarResult = `✗ ${String(error)}`;
+      console.error(`[status-bar-acceptance] ${this.statusBarResult}`);
+    } finally {
+      this.busyKey = "";
+    }
+  }
 
   async handlePermissionDemo() {
     this.busyKey = "permission";
@@ -412,6 +454,27 @@ struct Index {
   XComponentDemo() {
     Scroll() {
       Column({ space: 12 }) {
+        DemoCard({
+          title: "Status bar (API 12)",
+          hint: "Rust → named bridge → main window; verify colors and navigation preservation",
+          statusText: this.statusTextOf("status-bar", this.statusBarResult),
+          statusColor: this.statusColorOf("status-bar", this.statusBarResult),
+          busy: this.busyKey === "status-bar",
+          buttons: [
+            new DemoButton("status bar light", (): void => {
+              this.handleStatusBar(true, true, 0xff202020);
+            }),
+            new DemoButton("status bar dark", (): void => {
+              this.handleStatusBar(true, false, 0xffeeeeee);
+            }),
+            new DemoButton("hide status bar", (): void => {
+              this.handleStatusBar(false, false);
+            }),
+            new DemoButton("transparent status bar", (): void => {
+              this.handleStatusBar(true, true, 0x00000000);
+            }),
+          ],
+        })
         DemoCard({
           title: "Permission",
           hint: "async bridge → ohos.permission plugin",

@@ -42,6 +42,7 @@ Register `WindowBridgePlugin` in Rust and use the matching window facade. See th
 | `execution` | `async` |
 | `requires` | `["ui-context"]` |
 | Queries | `get-avoid-area`, `is-maximized`, `is-minimized` |
+| Status bar | `set-status-bar` → `ohos.window.Acknowledgement`; API12, targeted status-bar presentation |
 | Window actions | `create-os-window`, decorations/background/shadow, focus, move/resize, minimize/maximize/restore/show/destroy |
 
 `get-avoid-area` returns the complete `{ visible, leftRect, topRect, rightRect, bottomRect }`. Creation returns a platform `windowId`; later operations route by that handle, not native-module configuration.
