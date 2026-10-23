@@ -30,6 +30,19 @@ impl InputCallback {
         self.enqueue(self.queue.push(&self.owner, event));
     }
 
+    pub(crate) fn send_on_ui_thread(&self, app: &OpenHarmonyApp, event: InputEvent) {
+        match self.queue.push(&self.owner, event) {
+            Ok(true) => {
+                app.drain_input();
+                if self.queue.has_pending() {
+                    crate::waker::schedule_input(&self.waker, &self.queue);
+                }
+            }
+            Ok(false) => {}
+            Err(error) => crate::warn!("{error}"),
+        }
+    }
+
     fn ime(&self, event: ImeEvent) {
         #[cfg(feature = "keyboard")]
         if !matches!(event, ImeEvent::ImeStatusEvent(_)) {
@@ -233,6 +246,7 @@ impl OpenHarmonyApp {
         if self.event_loop.try_borrow_mut().is_err() {
             return;
         }
+        crate::waker::clear_scheduled(&self.waker, &self.input_queue);
         loop {
             let delivery = match self.input_queue.pop() {
                 Ok(Some(delivery)) => delivery,
