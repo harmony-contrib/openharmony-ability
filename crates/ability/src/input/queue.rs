@@ -123,9 +123,13 @@ impl<T> InputQueue<T> {
         }
         #[cfg(any(feature = "keyboard", test))]
         if let InputKind::Key(disposition) = &kind {
-            state
+            if let Some(previous) = state
                 .current_keys
-                .insert(owner.name.clone(), Arc::downgrade(disposition));
+                .insert(owner.name.clone(), Arc::downgrade(disposition))
+                .and_then(|previous| previous.upgrade())
+            {
+                let _ = previous.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire);
+            }
         }
         state.events.push_back(Entry::Input {
             owner: owner.clone(),
@@ -147,7 +151,7 @@ impl<T> InputQueue<T> {
 
     #[cfg(any(feature = "keyboard", test))]
     fn resolve_key(&self, owner: &InputOwner, resolved: u8) -> Result<(), &'static str> {
-        let state = self
+        let mut state = self
             .state
             .lock()
             .map_err(|_| "Native input queue poisoned")?;
@@ -158,7 +162,11 @@ impl<T> InputQueue<T> {
             .get(&owner.name)
             .is_some_and(|active| Arc::ptr_eq(active, &owner.lifetime))
         {
-            if let Some(disposition) = state.current_keys.get(&owner.name).and_then(Weak::upgrade) {
+            if let Some(disposition) = state
+                .current_keys
+                .remove(&owner.name)
+                .and_then(|current| current.upgrade())
+            {
                 let _ =
                     disposition.compare_exchange(0, resolved, Ordering::AcqRel, Ordering::Acquire);
             }
@@ -175,6 +183,13 @@ impl<T> InputQueue<T> {
         Ok(())
     }
 
+    pub(crate) fn has_pending(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| !state.events.is_empty())
+            .unwrap_or(false)
+    }
+
     pub(crate) fn pop(&self) -> Result<Option<Delivery<T>>, &'static str> {
         let mut state = self
             .state
@@ -188,7 +203,11 @@ impl<T> InputQueue<T> {
                 ime_consumed: match kind {
                     InputKind::Ordinary => None,
                     #[cfg(any(feature = "keyboard", test))]
-                    InputKind::Key(disposition) => Some(disposition.load(Ordering::Acquire) != 1),
+                    InputKind::Key(disposition) => {
+                        let _ =
+                            disposition.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire);
+                        Some(disposition.load(Ordering::Acquire) != 1)
+                    }
                 },
             },
         }))
@@ -252,8 +271,11 @@ mod tests {
     fn consumed_key_without_an_edit_is_still_delivered() {
         let queue = InputQueue::default();
         let owner = queue.activate("main").unwrap();
+        assert!(!queue.has_pending());
         queue.push_key(&owner, "candidate navigation").unwrap();
+        assert!(queue.has_pending());
         assert_eq!(input(queue.pop().unwrap()).2, Some(true));
+        assert!(!queue.has_pending());
         assert!(queue.pop().unwrap().is_none());
     }
 
