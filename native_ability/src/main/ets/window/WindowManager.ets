@@ -1196,13 +1196,7 @@ export class WindowManager {
   async destroyWindow(windowId: number): Promise<void> {
     // 拦截:FLAG_CLOSABLE 为 0 时,不允许关闭(问题四:语义错位修复)
     if (!this.getDecorationFlag(windowId, "closable")) {
-      hilog.warn(
-        DOMAIN,
-        "WindowManager",
-        "destroyWindow blocked: closable flag not set (window %{public}d)",
-        windowId,
-      );
-      return;
+      throw new Error(`Window ${windowId} is not closable`);
     }
     if (this.isUIAbilityMainWindow(windowId)) {
       const context = this.uiAbilityContexts.get(Number(windowId));
@@ -1210,33 +1204,13 @@ export class WindowManager {
         throw new Error(`No Ability context for window ${windowId}`);
       }
       await context.terminateSelf();
-      this.removeWindow(windowId);
-      this.unregisterUIAbilityStage(windowId);
+      if (this.uiAbilityContexts.get(windowId) === context) {
+        this.removeWindow(windowId);
+        this.unregisterUIAbilityStage(windowId);
+      }
       return;
     }
-    const win = this.getWindow(windowId);
-    if (!win) {
-      hilog.warn(DOMAIN, "WindowManager", "destroyWindow: window %{public}d not found", windowId);
-      return;
-    }
-    // Phase 3 (design.md D4): set destroying=true before win.destroyWindow() so
-    // in-flight throttled events are discarded (no consumers left after destroy).
-    const entry = this.windows.get(windowId);
-    if (entry) {
-      entry.destroying = true;
-    }
-    try {
-      await win.destroyWindow();
-    } catch (e) {
-      hilog.warn(
-        DOMAIN,
-        "WindowManager",
-        "destroyWindow failed for %{public}d: %{public}s",
-        windowId,
-        String(e),
-      );
-    }
-    this.removeWindow(windowId);
+    await this.destroyFloatingWindow(windowId);
   }
 
   // Close a window for real (not hide).
@@ -1248,59 +1222,32 @@ export class WindowManager {
   // - Float sub-window: win.destroyWindow() + removeWindow cleanup.
   async closeWindow(windowId: number): Promise<void> {
     if (this.isUIAbilityMainWindow(windowId)) {
-      const ctx = this.uiAbilityContexts.get(Number(windowId));
-      if (ctx) {
-        hilog.info(
-          DOMAIN,
-          "WindowManager",
-          "closeWindow: terminateSelf for UIAbility id=%{public}d",
-          windowId,
-        );
-        try {
-          await ctx.terminateSelf();
-        } catch (e) {
-          hilog.warn(
-            DOMAIN,
-            "WindowManager",
-            "closeWindow: terminateSelf failed for id=%{public}d: %{public}s",
-            windowId,
-            String(e),
-          );
-        }
-      } else {
-        hilog.warn(
-          DOMAIN,
-          "WindowManager",
-          "closeWindow: no context for UIAbility id=%{public}d (not registered?), falling back to hideAbility",
-          windowId,
-        );
-        await this.hideAbility();
+      const context = this.uiAbilityContexts.get(windowId);
+      if (!context) {
+        throw new Error(`No Ability context for window ${windowId}`);
       }
+      await context.terminateSelf();
       return;
     }
-    const win = this.getWindow(windowId);
-    if (!win) {
-      hilog.warn(DOMAIN, "WindowManager", "closeWindow: window %{public}d not found", windowId);
-      return;
-    }
-    // Phase 3 (design.md D4): set destroying=true before win.destroyWindow() (Float path).
+    await this.destroyFloatingWindow(windowId);
+  }
+
+  private async destroyFloatingWindow(windowId: number): Promise<void> {
     const entry = this.windows.get(windowId);
-    if (entry) {
-      entry.destroying = true;
+    if (!entry) {
+      return;
     }
+    entry.destroying = true;
     try {
-      await win.destroyWindow();
-    } catch (e) {
-      hilog.warn(
-        DOMAIN,
-        "WindowManager",
-        "closeWindow destroy failed for %{public}d: %{public}s",
-        windowId,
-        String(e),
-      );
+      await entry.window.destroyWindow();
+    } catch (error) {
+      entry.destroying = false;
+      throw error as Error;
     }
-    // removeWindow handles conditional resetUserInteractionTracking
-    this.removeWindow(windowId);
+    // Native teardown can unregister the window before its Promise settles.
+    if (this.windows.get(windowId) === entry) {
+      this.removeWindow(windowId);
+    }
   }
 
   private logNotFound(op: string, windowId: number): void {
