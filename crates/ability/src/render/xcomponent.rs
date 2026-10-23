@@ -137,8 +137,8 @@ fn pointer_snapshot(
     node: *mut std::ffi::c_void,
 ) -> PointerInputData {
     let mut pointer = PointerInputData::from_arkui_event(input);
-    // This borrowed node view exists only while its native callback is active.
-    if let Some(node) = ArkUINode::from_raw_handle(node.cast()) {
+    // SAFETY: `node` is the non-owning `ArkUI_NodeHandle` borrowed for the duration of this native callback.
+    if let Some(node) = unsafe { ArkUINode::from_raw_handle(node.cast()) } {
         if let Ok(origin) = node.layout_position_in_screen() {
             pointer.display_x = origin.x as f32 + pointer.x;
             pointer.display_y = origin.y as f32 + pointer.y;
@@ -148,7 +148,8 @@ fn pointer_snapshot(
 }
 
 fn content_offset_in_window(node: *mut std::ffi::c_void) -> Option<IntOffset> {
-    ArkUINode::from_raw_handle(node.cast())?
+    // SAFETY: `node` is the non-owning `ArkUI_NodeHandle` of the live XComponent in this callback.
+    unsafe { ArkUINode::from_raw_handle(node.cast()) }?
         .layout_position_in_window()
         .ok()
 }
