@@ -1,6 +1,6 @@
-# Unreleased — D4 native-only clipboard (breaking)
+# Unreleased
 
-- Use only native `OH_Pasteboard` and scoped UDMF owners. Withdraw all ArkTS clipboard
+- Use native `OH_Pasteboard` and scoped UDMF owners. Withdraw ArkTS clipboard
   actions, change events, permission prompts and legacy metadata fallback.
 - Retain `read_records`, `write_records`, `read_mime`, `write_mime` and convenience
   methods as async-shaped synchronous native operations, with typed `ClipboardError`.
@@ -9,11 +9,10 @@
 - Preserve opaque nonempty MIME bytes and multiple encoded images without PixelMap
   conversion. Use typed UDS for plain text/HTML, including empty strings when accepted.
   NUL/non-UTF-8 text is rejected; empty opaque data returns `EmptyBinaryUnsupported`
-  because `OH_UdmfRecord_AddGeneralEntry` rejects `count == 0`. No private encoding.
+  because `OH_UdmfRecord_AddGeneralEntry` rejects `count == 0`.
 - `read_authorized_records` returns `AuthorizationRequired`; callers obtain permission
   explicitly before ordinary reads. `revision() -> Result<u32>` pulls the API-18 native
-  counter; enable `api-18`, handle zero as unknown and allow service-reset decreases.
-- Pin bindings PR #187 until released; Rust and HAR must be upgraded together.
+  counter.
 
 # 1.0.0-beta.3
 

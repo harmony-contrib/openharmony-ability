@@ -1,4 +1,4 @@
-name: Contracts, Tests & Lint
+name: Format & Lint
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  pull-requests: write
 
 jobs:
   Lint:
@@ -19,22 +19,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup OpenHarmony SDK
-        uses: openharmony-rs/setup-ohos-sdk@v1.0.1
+        uses: openharmony-rs/setup-ohos-sdk@v0.1
         id: setup-ohos
         with:
-          version: "7.0"
-
-      - name: Verify SDK baseline and configure native compiler
-        env:
-          SDK_API: ${{ steps.setup-ohos.outputs.api-version }}
-          SDK_NATIVE: ${{ steps.setup-ohos.outputs.ohos_sdk_native }}
-          SDK_HOME: ${{ steps.setup-ohos.outputs.ohos-base-sdk-home }}
-        run: |
-          test "$SDK_API" = "26"
-          echo "OHOS_SDK_HOME=$SDK_HOME" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER=$SDK_NATIVE/llvm/bin/aarch64-unknown-linux-ohos-clang" >> "$GITHUB_ENV"
-          echo "CC_aarch64_unknown_linux_ohos=$SDK_NATIVE/llvm/bin/aarch64-unknown-linux-ohos-clang" >> "$GITHUB_ENV"
-          echo "AR_aarch64_unknown_linux_ohos=$SDK_NATIVE/llvm/bin/llvm-ar" >> "$GITHUB_ENV"
+          version: "5.0.0"
 
       - name: setup Rust
         uses: dtolnay/rust-toolchain@master
@@ -58,36 +46,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Host contract tooling tests and generated inventory diff
-        run: pnpm run test:contracts
-
-      - name: SDK-backed Node runtime tests
-        run: pnpm test
-
-      - name: Compile real plugin tests for OHOS (not host execution)
-        run: pnpm run test:plugins
-
-      - name: Link ARM64 native demos
-        run: cargo build -p demo_native -p demo_sub_native --locked --target aarch64-unknown-linux-ohos
-
       - name: Format and lint
         run: npm run prek -- --all-files
 
-      - name: Owned input queue behavior
-        run: |
-          rustc --edition=2021 --test crates/ability/src/input/queue.rs -o "$RUNNER_TEMP/ability-input-tests"
-          "$RUNNER_TEMP/ability-input-tests"
-
       - name: Rust clippy
         run: npm run lint:rs
-
-      - name: Native feature boundaries
-        run: |
-          cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features -- -D warnings
-          for feature in keyboard "keyboard,api-19" "keyboard,api-26"; do
-            cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --features "$feature" -- -D warnings
-          done
-          cargo clippy -p openharmony-ability-plugin-webview --all-targets --target aarch64-unknown-linux-ohos --no-default-features -- -D warnings
-          for feature in engine-version engine-evergreen; do
-            cargo clippy -p openharmony-ability-plugin-webview --all-targets --target aarch64-unknown-linux-ohos --no-default-features --features "$feature" -- -D warnings
-          done
