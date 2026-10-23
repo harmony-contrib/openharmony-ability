@@ -1273,13 +1273,12 @@ export class WindowPlugin extends AsyncPluginBase {
       manager.cancelDeferredWindowCreation(request.windowId);
       await manager.waitForWindowCreation(request.windowId);
       this.assertCallActive(context);
-      if (manager.isUIAbilityMainWindow(request.windowId)) {
-        // Main windows belong to a UIAbility; destroyWindow is only valid for child windows.
+      const existing = this.windows.get(request.windowId);
+      if (manager.isUIAbilityMainWindow(request.windowId) || existing === undefined) {
         await manager.destroyWindow(request.windowId);
       } else {
-        const existing = this.windows.get(request.windowId) ?? manager.getWindow(request.windowId);
-        if (existing !== undefined) {
-          await existing.destroyWindow();
+        await existing.destroyWindow();
+        if (this.windows.get(request.windowId) === existing) {
           this.windows.delete(request.windowId);
         }
       }
