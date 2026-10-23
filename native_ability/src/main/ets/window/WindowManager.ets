@@ -1154,7 +1154,7 @@ export class WindowManager {
         `[WindowManager] setPointerStyle taoId=${windowId} realId=${realWindowId} style=${style} OK`,
       );
     } catch (err) {
-      console.error(`[WindowManager] setPointerStyle ${windowId} failed: ${JSON.stringify(err)}`);
+      console.error(`[WindowManager] setPointerStyle ${windowId} failed: ${String(err)}`);
     }
   }
 
