@@ -21,9 +21,9 @@ pub use drag::{
 mod keyboard;
 mod text_input;
 pub(crate) use ime::*;
-#[cfg(feature = "keyboard")]
-pub use keyboard::KeyboardEventData;
 pub use keyboard::KeyboardInputDelivery;
+#[cfg(feature = "keyboard")]
+pub use keyboard::{KeyboardEventData, KeyboardEventResponse};
 pub use text_input::*;
 
 #[derive(Clone)]

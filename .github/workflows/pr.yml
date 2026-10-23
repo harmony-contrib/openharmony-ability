@@ -76,7 +76,7 @@ jobs:
       - name: Native input feature boundaries and ARM64 test linking
         run: |
           cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --locked -- -D warnings
-          for feature in keyboard keyboard-lock-state keyboard-text-input; do
+          for feature in keyboard "keyboard,api-19" "keyboard,api-26"; do
             cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --features "$feature" --locked -- -D warnings
           done
           cargo test -p openharmony-ability --lib --all-features --target aarch64-unknown-linux-ohos --no-run --locked

@@ -7,16 +7,16 @@
 - Import `ContentRoot` and `NativeAttachment` from `openharmony_ability`; their platform
   ownership now lives in Ability rather than the ArkUI binding.
 - **Breaking**: native ArkUI keys are delivered once through the shared input/wake
-  FIFO as `ArkUiInputEvent::Key`, with `KeyboardEventData::ime_consumed`; remove
-  `KeyPreIme`, `KeyboardEventResponse`, timestamp deduplication and synchronous
-  foreground-task draining from consumers. Legacy raw keys remain post-IME-only.
+  FIFO as `ArkUiInputEvent::Key`, with `KeyboardEventData::ime_consumed` and
+  `KeyboardEventData::response`; remove `KeyPreIme` and timestamp deduplication
+  from consumers. Legacy raw keys remain post-IME-only.
 - Queue IME edits with per-editor `Arc` owner tokens and report
   `Event::TextInputReadyChanged` independently of render surfaces. Ability owns
   UI-thread attachment transfer and uses the thin native IME binding without
   background attachment workers or a binding session registry.
 - Make render `platformWindowId` optional, with zero selecting main; unavailable
   main-window lookup no longer prevents native rendering.
-- Keep API-14 keyboard snapshots independent of API-19 `keyboard-lock-state`.
+- Keep baseline `keyboard` snapshots independent of API-19 `api-19` lock state.
   Preserve synchronous native drag acceptance without draining foreground tasks.
 - Retain failed editor detachment for retry, guard editor access on the UI thread,
   and preserve readiness transition values when delivery is deferred.
