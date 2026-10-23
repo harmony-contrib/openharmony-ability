@@ -54,12 +54,12 @@ struct WindowControlButton {
     }
     .width(CONTROL_SIZE)
     .height(CONTROL_SIZE)
-    .borderRadius(4)
+    .borderRadius($r("sys.float.corner_radius_level2"))
     .padding(0)
     .backgroundColor(this.buttonBackgroundColor())
     .hoverEffect(HoverEffect.None)
     .enabled(this.available)
-    .opacity(this.available && this.windowFocused ? 1 : 0.4)
+    .opacity(this.available && this.windowFocused ? 1 : $r("sys.float.interactive_disable"))
     .focusable(false)
     .accessibilityText(this.label)
     // Enlarge the hit target into the gaps without overlapping another button
@@ -78,8 +78,7 @@ struct WindowControlButton {
         this.pressed = false;
       }
     })
-    .onClick(() => this.onActivate())
-    .focusable(false);
+    .onClick(() => this.onActivate());
   }
 }
 @Component
@@ -101,10 +100,10 @@ export struct WindowTitleBar {
       Row() {
         if (this.decorations) {
           Text(this.title)
-            .fontSize(16)
+            .fontSize($r("sys.float.Title_S"))
             .fontWeight(FontWeight.Medium)
-            .fontColor($r("sys.color.ohos_id_color_primary"))
-            .opacity(this.windowFocused ? 1 : 0.4)
+            .fontColor($r("sys.color.font_primary"))
+            .opacity(this.windowFocused ? 1 : $r("sys.float.interactive_disable"))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)

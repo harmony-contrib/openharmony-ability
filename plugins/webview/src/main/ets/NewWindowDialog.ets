@@ -27,23 +27,31 @@ export function newWindowDialogBuilder(params: NewWindowDialogParams) {
     // Title bar with close button
     Row() {
       Text(params.url)
-        .fontSize(12)
-        .fontColor("#666666")
+        .fontSize($r("sys.float.Body_S"))
+        .fontColor($r("sys.color.font_secondary"))
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)
-      SymbolGlyph($r("sys.symbol.xmark"))
-        .fontSize(16)
-        .fontColor(["#333333"])
-        .onClick(() => {
-          hilog.info(DOMAIN, "NewWindowDialog", "Close button clicked");
-          closeDialog();
-        })
+      Button({ type: ButtonType.Normal, stateEffect: true }) {
+        SymbolGlyph($r("sys.symbol.xmark"))
+          .fontSize(16)
+          .fontColor([$r("sys.color.icon_primary")])
+      }
+      .width(28)
+      .height(28)
+      .margin({ left: 8 })
+      .borderRadius($r("sys.float.corner_radius_level2"))
+      .backgroundColor(Color.Transparent)
+      .onClick(() => {
+        hilog.info(DOMAIN, "NewWindowDialog", "Close button clicked");
+        closeDialog();
+      })
     }
     .width("100%")
     .height(36)
-    .padding({ left: 12, right: 12 })
-    .backgroundColor("#F5F5F5")
+    .padding({ left: 12, right: 8 })
+    .alignItems(VerticalAlign.Center)
+    .backgroundColor($r("sys.color.comp_background_secondary"))
 
     // Web content — loads the target URL directly. ArkWeb's own popup is
     // cancelled (`setWebController(null)` in onWindowNew) to avoid deadlocking the
@@ -65,8 +73,9 @@ export function newWindowDialogBuilder(params: NewWindowDialogParams) {
   }
   .width("90%")
   .height("80%")
-  .backgroundColor(Color.White)
-  .borderRadius(12)
+  .backgroundColor($r("sys.color.comp_background_primary"))
+  .borderRadius($r("sys.float.corner_radius_level8"))
+  .shadow(ShadowStyle.OUTER_FLOATING_SM)
   .clip(true);
 }
 

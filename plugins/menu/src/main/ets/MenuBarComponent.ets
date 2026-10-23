@@ -268,11 +268,11 @@ export struct MenuBarComponent {
                   .width(160)
                   .height(40)
                   .align(Alignment.Start)
-                  .fontSize(16)
-                  .fontColor($r("sys.color.ohos_id_color_text_primary"))
+                  .fontSize($r("sys.float.Body_L"))
+                  .fontColor($r("sys.color.font_primary"))
                   // Lower alpha values are forced opaque by the security component.
                   .backgroundColor(0x1a808080)
-                  .borderRadius(4)
+                  .borderRadius($r("sys.float.corner_radius_level2"))
                   .padding({ left: 12, right: 12, top: 4, bottom: 4 })
                   .enabled(item.enabled ?? true)
                   .onClick((_event: ClickEvent, result: PasteButtonOnClickResult) => {
@@ -305,8 +305,8 @@ export struct MenuBarComponent {
                     }
                   })
                 Text(item.accelerator ?? "")
-                  .fontSize(16)
-                  .fontColor($r("sys.color.ohos_id_color_text_secondary"))
+                  .fontSize($r("sys.float.Body_L"))
+                  .fontColor($r("sys.color.font_secondary"))
                   .textAlign(TextAlign.End)
               }
               .width(280)
@@ -337,8 +337,17 @@ export struct MenuBarComponent {
                     .width(24)
                     .height(24)
                     .margin({ right: 8 })
-                  Text(item.text ?? "").fontSize(14)
-                }
+                  Text(item.text ?? "")
+                    .fontSize($r("sys.float.Body_M"))
+                    .fontColor($r("sys.color.font_primary"))
+                  if (item.accelerator) {
+                    Blank();
+                    Text(item.accelerator)
+                      .fontSize($r("sys.float.Body_S"))
+                      .fontColor($r("sys.color.font_secondary"))
+                      .margin({ left: 16 });
+                  }
+                }.alignItems(VerticalAlign.Center)
               }
               .enabled(item.enabled ?? true)
               .onClick(() => {
@@ -444,15 +453,20 @@ export struct MenuBarComponent {
                 this.nativeIconResource(this.getMenubarItem(itemId)?.nativeIcon ?? "") as Resource,
               )
                 .fontSize(16)
+                .fontColor([$r("sys.color.icon_primary")])
                 .margin({ right: 4 });
             }
             Text(this.getMenubarItem(itemId)?.text ?? "")
-              .fontSize(14)
+              .fontSize($r("sys.float.Body_M"))
               .fontColor($r("sys.color.font_primary"))
           }
           .padding({ left: 12, right: 12, top: 10, bottom: 10 })
           .enabled(this.getMenubarItem(itemId)?.enabled ?? true)
-          .opacity((this.getMenubarItem(itemId)?.enabled ?? true) ? 1.0 : 0.5)
+          .opacity(
+            (this.getMenubarItem(itemId)?.enabled ?? true)
+              ? 1.0
+              : $r("sys.float.interactive_disable"),
+          )
           .backgroundColor(
             this.activeDropdownId === itemId
               ? $r("sys.color.interactive_pressed")

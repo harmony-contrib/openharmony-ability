@@ -18,7 +18,8 @@ export struct MenuPopup {
           this.isShown = false;
           this.onDisappear?.();
         },
-      });
+      })
+      .focusable(false);
   }
 
   @Builder
@@ -41,10 +42,10 @@ export struct MenuPopup {
           this.itemClick(item);
         });
     } else if (item.type === "check") {
-      MenuItem({ content: item.text ?? "" })
+      MenuItem({ content: item.text ?? "", labelInfo: item.accelerator })
         .enabled(item.enabled ?? true)
-        .type(MenuItemType.Check)
-        .checked(item.checked ?? false)
+        .selectIcon(true)
+        .selected(item.checked ?? false)
         .onChange((checked: boolean) => {
           item.checked = checked;
           this.itemClick(item);
