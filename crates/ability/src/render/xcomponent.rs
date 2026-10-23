@@ -29,17 +29,16 @@ const SWIPE_GESTURE_MIN_SPEED: f64 = 100.0;
 
 #[cfg(feature = "keyboard")]
 pub(crate) fn request_xcomponent_focus(component: &XComponent) -> Result<()> {
-    #[cfg(feature = "keyboard-focus")]
-    {
+    if crate::version::sdk_api_version() >= 15 {
         component
             .raw()
             .request_focus()
             .map_err(|error| Error::from_reason(error.to_string()))
+    } else {
+        component
+            .set_focus_status(true)
+            .map_err(|error| Error::from_reason(error.to_string()))
     }
-    #[cfg(not(feature = "keyboard-focus"))]
-    component
-        .set_focus_status(true)
-        .map_err(|error| Error::from_reason(error.to_string()))
 }
 
 struct RenderOwnerGuard {
@@ -97,7 +96,7 @@ fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
         return;
     }
     if let Some(callback) = app.input_callback(owner) {
-        callback.send(event);
+        callback.send_on_ui_thread(app, event);
     }
 }
 
@@ -106,6 +105,7 @@ fn negotiate_drag(app: &OpenHarmonyApp, owner: &str, event: crate::DragInputData
     if !app.is_render_surface_active(owner) {
         return;
     }
+    app.drain_input();
     // Drop acceptance is an immediate native reply, not deferred foreground work.
     let Ok(mut handler) = app.event_loop.try_borrow_mut() else {
         crate::warn!("Cannot negotiate native drop during a nested application callback");
@@ -122,12 +122,6 @@ fn negotiate_drag(app: &OpenHarmonyApp, owner: &str, event: crate::DragInputData
 }
 
 fn dispatch_focus(app: &OpenHarmonyApp, owner: &str, focused: bool) {
-    #[cfg(feature = "keyboard")]
-    if focused {
-        if let Some(window_id) = app.render_window_id(owner) {
-            app.record_window_focus(window_id, true);
-        }
-    }
     let event = InputEvent::ArkUi(ArkUiInputEvent::FocusChanged(focused));
     dispatch_input(app, owner, event);
 }
@@ -399,15 +393,6 @@ pub fn render_for_window(
         }
 
         created_pan_tracker.borrow_mut().reset();
-        #[cfg(feature = "keyboard-focus-recovery")]
-        if let Err(error) = super::install_keyboard_focus_recovery(
-            &on_surface_created_app,
-            &on_surface_created_owner,
-            window_id,
-            native_window_id,
-        ) {
-            crate::warn!("Cannot install native keyboard focus recovery: {error}");
-        }
         on_surface_created_app
             .initialize_render_input(&on_surface_created_owner, native_window_id)?;
 
@@ -528,18 +513,30 @@ pub fn render_for_window(
         KeyboardInputDelivery::ArkUi => {
             let pre_ime_app = app.clone();
             let pre_ime_owner = render_owner.clone();
+            let pending_response = Rc::new(RefCell::new(None));
+            let pre_ime_response = pending_response.clone();
             xcomponent_native.on_key_pre_ime(move |event| {
                 if let Some(data) = KeyboardEventData::from_node_callback(event) {
                     if let Some(callback) = pre_ime_app.input_callback(&pre_ime_owner) {
+                        *pre_ime_response.borrow_mut() = Some(data.response.clone());
                         callback.key(data);
                     }
                 }
                 None
             });
             xcomponent_native.on_key_event(move |event| {
-                if event.key_event().is_some() {
+                if let Some(input) = event.key_event() {
                     if let Some(callback) = on_key_event_app.input_callback(&on_key_event_owner) {
                         callback.after_ime();
+                        on_key_event_app.drain_input();
+                        if pending_response
+                            .borrow_mut()
+                            .take()
+                            .is_some_and(|response| response.is_consumed())
+                        {
+                            input.set_consumed(true);
+                            input.stop_propagation(true);
+                        }
                     }
                 }
             });
@@ -700,11 +697,11 @@ pub fn render_for_window(
 
     xcomponent.register_callback()?;
 
+    root.mount(xcomponent_native)
+        .map_err(|error| Error::from_reason(error.reason.to_string()))?;
     // Node callbacks and the window ID are usable before native surface creation.
     // Replacing this editor on the first SurfaceCreate would cancel in-flight composition.
     app.initialize_render_input(&render_owner, native_window_id)?;
-    root.mount(xcomponent_native)
-        .map_err(|error| Error::from_reason(error.reason.to_string()))?;
     render_guard.disarm();
 
     Ok(root)
