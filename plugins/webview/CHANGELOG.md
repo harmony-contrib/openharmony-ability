@@ -56,3 +56,13 @@
 - Requires `ui-context`; mounts the WebView `FrameNode` into a business-owned `BridgeNodeHost` slot.
 
 ---
+
+## Unreleased
+
+- Add native-tree WebView embedding with Ability-owned, non-reused target IDs.
+- Remove native controller declarations before guarded target retirement; retain ArkTS
+  owners when retirement fails and await outstanding page tasks before disposal.
+- Defer early SDK controller callbacks until explicit native attachment succeeds and
+  its UI-thread attach guard has returned.
+- Remove the unreleased native generation and unused document-options action (AB6/AB7/AB11).
+- Wire production native-embedding regression tests into pull-request CI.

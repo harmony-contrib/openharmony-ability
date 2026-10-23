@@ -41,7 +41,7 @@ use openharmony_ability_plugin_webview::{
 fn configure_ability(app: OpenHarmonyApp) {
     WebviewProtocol::register("asset", WebviewProtocolOptions::Standard)
         .expect("scheme must be declared before Web engine initialization");
-    app.register_plugin(WebviewBridgePlugin)
+    app.register_plugin(WebviewBridgePlugin::new())
         .expect("webview facade must be registered once");
 }
 ```
@@ -216,6 +216,47 @@ the controller-attached callback that starts the first navigation. Both retain
 the scripts supplied by `keySynthesisScripts`, including the main-window keyboard
 shim; drag callbacks remain on the Web node in direct mode and on the separate
 Stack in overlay mode.
+
+## Native-tree embedding
+
+Register `WebviewBridgePlugin::new()` and obtain `let client = app.webview()?`.
+Declare callbacks with `WebviewCallbacksBuilder::new(id)`, JavaScript proxies with
+`WebviewJavascriptProxyBuilder::new(id, object)`, and protocols with
+`client.custom_protocol(id, scheme, callback)`. These retain the existing module-local
+controller-ID routing and process-unique native-tag validation.
+Call `client.create_native(target_id, CreateRequest, NativeWebviewSettings)` to embed
+in a Rust-owned node tree. `CreateRequest` owns the initial JavaScript, user agent
+and document-start scripts; native settings add scrolling, page-end script and
+inline HTML base URL. `handle.configure_native(settings)` changes only native settings;
+`go_back`, `go_forward` and `stop_loading` operate on the existing controller/history.
+`handle.update_document_options(WebviewDocumentOptionsRequest)` changes JavaScript access
+and document-start scripts on that same controller. Await it before the next
+navigation; omitted fields retain their values and an empty script list clears application
+scripts. User-agent updates continue to use `set_user_agent`.
+
+`NativeWebviewEvents::new(&app, id, target_id, callback)` belongs to that registered
+plugin instance and indexes the callback solely by `target_id`. Its guard removes the
+subscription on Drop without removing a newer replacement. Ability's `NativeAttachment`
+owns the UI-thread dispatch guard, target liveness and retained N-API owners. Target IDs
+are never reused; create a fresh attachment when replacing a retired native WebView.
+The native-ready handler decodes the receipt and explicitly attaches it before
+acknowledging success. A controller observed synchronously during SDK build or mount
+waits until that handshake returns successfully, so its installer cannot dispatch
+against an unattached target or reenter the attachment guard. Attachment installs
+protocol/proxy/callback declarations before first navigation, even without an event
+subscriber. Native creation/removal is serialized per ID. Closing retires native
+edges and controller registrations synchronously; disposal awaits page tasks and
+preserves any owner whose retirement fails. Controller declarations are removed before
+the native target retires, so removal also executes under the Ability dispatch guard.
+
+The plugin now stores only its native subscription routes; registration uses
+`WebviewBridgePlugin::new()` instead of the old unit value. Existing controller,
+callback, protocol and JavaScript-proxy APIs keep their prior semantics.
+
+Host-native route tests execute the production generic route module without N-API
+substitutes. The Node suite executes the production ArkTS surface with SDK test doubles.
+Both are wired into the pull-request workflow. Device rendering and ArkWeb execution
+still require device/emulator validation.
 
 ## License
 
