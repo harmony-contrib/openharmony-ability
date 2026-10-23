@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use napi_ohos::{Error, Result};
 use ohos_ime_binding::{AttachOptions, IME};
 
-use crate::{Event, OpenHarmonyApp};
+use crate::{waker::InputWake, Event, OpenHarmonyApp};
 
 use super::{
     queue::{Delivery, InputOwner, InputQueue},
@@ -15,11 +15,13 @@ pub(crate) struct ImeCallbackSource {
     owner: String,
     platform_window_id: i32,
     input: InputCallback,
+    ready: bool,
 }
 
 #[derive(Clone)]
 pub(crate) struct InputCallback {
     queue: Arc<InputQueue<InputEvent>>,
+    waker: Arc<RwLock<Option<Arc<InputWake>>>>,
     owner: InputOwner,
 }
 
@@ -56,7 +58,7 @@ impl InputCallback {
 
     fn enqueue(&self, result: std::result::Result<bool, &'static str>) {
         match result {
-            Ok(true) => crate::waker::schedule_input(&self.queue),
+            Ok(true) => crate::waker::schedule_input(&self.waker, &self.queue),
             Ok(false) => {}
             Err(error) => crate::warn!("{error}"),
         }
@@ -114,7 +116,8 @@ impl OpenHarmonyApp {
             .borrow()
             .get(&window_id)
             .is_some_and(|source| {
-                self.render_window_id(&source.owner) == Some(window_id)
+                source.ready
+                    && self.render_window_id(&source.owner) == Some(window_id)
                     && if window_id == 0 {
                         self.ime.borrow().is_some()
                     } else {
@@ -141,11 +144,13 @@ impl OpenHarmonyApp {
             platform_window_id,
             input: InputCallback {
                 queue: self.input_queue.clone(),
+                waker: self.waker.clone(),
                 owner: self
                     .input_queue
                     .activate(owner)
                     .map_err(Error::from_reason)?,
             },
+            ready: true,
         };
         let ime = source.create_ime();
         if window_id == 0 {
@@ -163,7 +168,7 @@ impl OpenHarmonyApp {
         self.ime_sources
             .borrow()
             .get(&window_id)
-            .filter(|source| source.owner == owner)
+            .filter(|source| source.ready && source.owner == owner)
             .map(|source| source.input.clone())
     }
 
@@ -171,18 +176,28 @@ impl OpenHarmonyApp {
         if let Err(error) = self.input_queue.discard(owner) {
             crate::warn!("{error}");
         }
-        self.ime_sources.borrow_mut().remove(&window_id);
+        let was_ready = self
+            .ime_sources
+            .borrow_mut()
+            .get_mut(&window_id)
+            .map(|source| std::mem::replace(&mut source.ready, false))
+            .unwrap_or(false);
         if let Err(error) = self.try_detach_ime_for(window_id) {
             crate::warn!("Cannot detach retiring editor for window {window_id}: {error}");
-            self.notify_text_input_ready(window_id, false);
+            if was_ready {
+                self.notify_text_input_ready(window_id, false);
+            }
             return;
         }
+        self.ime_sources.borrow_mut().remove(&window_id);
         if window_id == 0 {
             self.ime.borrow_mut().take();
         } else {
             self.sub_ime.borrow_mut().remove(&window_id);
         }
-        self.notify_text_input_ready(window_id, false);
+        if was_ready {
+            self.notify_text_input_ready(window_id, false);
+        }
     }
 
     /// Reassign an editor without accepting delayed edits from its previous lifetime.
