@@ -6,6 +6,12 @@ mod mime;
 
 pub use mime::{ClipboardError, Result};
 
+impl From<ClipboardError> for napi_ohos::Error {
+    fn from(error: ClipboardError) -> Self {
+        Self::from_reason(error.to_string())
+    }
+}
+
 use mime::{Entry, NativeEntry};
 use napi_derive_ohos::napi;
 use ohos_pasteboard_binding::Pasteboard;
