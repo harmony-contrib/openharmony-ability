@@ -1,4 +1,4 @@
-# Unreleased — D4 native-only clipboard (breaking)
+# Unreleased
 
 - `ClipboardPlugin` is now a no-argument registration/lifecycle identity only.
   Remove `ClipboardPluginOptions` and move metadata configuration to Rust
