@@ -92,10 +92,6 @@ pub struct OpenHarmonyAppInner {
     touch_input_delivery: TouchInputDelivery,
     frame_input_delivery: HashMap<i64, crate::render::FrameDeliveryState>,
     keyboard_input_delivery: KeyboardInputDelivery,
-    #[cfg(feature = "keyboard")]
-    window_keyboard_focus_recovery: bool,
-    #[cfg(feature = "keyboard")]
-    window_focus: HashMap<i64, bool>,
     surface_active: bool,
     sub_surfaces: HashMap<i64, SubRenderSurface>,
 
@@ -209,10 +205,6 @@ impl OpenHarmonyAppInner {
             touch_input_delivery: TouchInputDelivery::default(),
             frame_input_delivery: HashMap::new(),
             keyboard_input_delivery: KeyboardInputDelivery::default(),
-            #[cfg(feature = "keyboard")]
-            window_keyboard_focus_recovery: false,
-            #[cfg(feature = "keyboard")]
-            window_focus: HashMap::new(),
             surface_active: false,
             sub_surfaces: HashMap::new(),
             state: vec![],
@@ -889,11 +881,7 @@ impl OpenHarmonyApp {
     /// Selects the keyboard stream before any main or child render starts.
     pub fn set_keyboard_input_delivery(&self, delivery: KeyboardInputDelivery) -> Result<()> {
         #[cfg(feature = "keyboard")]
-        if delivery == KeyboardInputDelivery::ArkUi && crate::version::sdk_api_version() < 14 {
-            return Err(Error::from_reason(
-                "ArkUI keyboard delivery requires API 14",
-            ));
-        }
+        delivery.validate_runtime(crate::version::sdk_api_version())?;
         let mut inner = self
             .inner
             .write()
@@ -912,64 +900,6 @@ impl OpenHarmonyApp {
             .read()
             .map(|inner| inner.keyboard_input_delivery)
             .unwrap_or_default()
-    }
-
-    /// Enables early key focus recovery when one render surface owns each window's keyboard input.
-    /// Requires `keyboard-focus-recovery` (API 26+) and configuration before rendering.
-    #[cfg(feature = "keyboard")]
-    pub fn set_window_keyboard_focus_recovery(&self, enabled: bool) -> Result<()> {
-        #[cfg(not(feature = "keyboard-focus-recovery"))]
-        if enabled {
-            return Err(Error::from_reason(
-                "Window keyboard focus recovery requires the keyboard-focus-recovery feature (API 26+)",
-            ));
-        }
-        let mut inner = self.inner.write().map_err(|_| {
-            Error::from_reason("Failed to configure window keyboard focus recovery")
-        })?;
-        if inner.render_owner.is_some() || !inner.sub_surfaces.is_empty() {
-            return Err(Error::from_reason(
-                "Window keyboard focus recovery cannot change during an active render",
-            ));
-        }
-        inner.window_keyboard_focus_recovery = enabled;
-        Ok(())
-    }
-
-    #[cfg(feature = "keyboard-focus-recovery")]
-    pub(crate) fn window_keyboard_focus_recovery_enabled(&self) -> bool {
-        match self.inner.read() {
-            Ok(inner) => inner.window_keyboard_focus_recovery,
-            Err(error) => {
-                crate::warn!("Cannot read keyboard focus recovery configuration: {error}");
-                false
-            }
-        }
-    }
-
-    #[cfg(feature = "keyboard")]
-    pub(crate) fn record_window_focus(&self, window_id: i64, focused: bool) {
-        match self.inner.write() {
-            Ok(mut inner) => {
-                if focused {
-                    inner.window_focus.insert(window_id, true);
-                } else {
-                    inner.window_focus.remove(&window_id);
-                }
-            }
-            Err(error) => crate::warn!("Cannot record native window focus: {error}"),
-        }
-    }
-
-    #[cfg(feature = "keyboard-focus-recovery")]
-    pub(crate) fn window_has_focus(&self, window_id: i64) -> bool {
-        match self.inner.read() {
-            Ok(inner) => inner.window_focus.get(&window_id).copied().unwrap_or(false),
-            Err(error) => {
-                crate::warn!("Cannot read native window focus: {error}");
-                false
-            }
-        }
     }
 
     pub(crate) fn begin_render(
@@ -1136,8 +1066,6 @@ impl OpenHarmonyApp {
             })
             .unwrap_or(false);
         if deactivated {
-            #[cfg(feature = "keyboard-focus-recovery")]
-            crate::render::release_keyboard_focus_recovery(self, owner);
             if let Some(window_id) = window_id {
                 if let Ok(mut inner) = self.inner.write() {
                     inner
@@ -1158,8 +1086,6 @@ impl OpenHarmonyApp {
     /// from an old DefaultXComponent cannot clear a replacement component's native state.
     #[doc(hidden)]
     pub fn release_render(&self, owner: &str) {
-        #[cfg(feature = "keyboard-focus-recovery")]
-        crate::render::release_keyboard_focus_recovery(self, owner);
         let released = self.inner.write().ok().and_then(|mut inner| {
             if inner.owns_render(owner) {
                 inner.release_render_owner(owner).map(|active| (0, active))
@@ -1185,8 +1111,6 @@ impl OpenHarmonyApp {
         let Some((window_id, surface_was_active)) = released else {
             return;
         };
-        #[cfg(feature = "keyboard")]
-        self.record_window_focus(window_id, false);
         self.retire_render_input(owner, window_id);
         if surface_was_active {
             if window_id == 0 {
