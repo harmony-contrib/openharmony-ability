@@ -63,13 +63,7 @@ class PromptPalette implements WindowPromptAppearance {
 
   private static resource(resource: Resource): number {
     const color = ColorMetrics.resourceColor(resource);
-    return (
-      ((Math.round(color.alpha * 255) << 24) |
-        (color.red << 16) |
-        (color.green << 8) |
-        color.blue) >>>
-      0
-    );
+    return ((color.alpha << 24) | (color.red << 16) | (color.green << 8) | color.blue) >>> 0;
   }
 
   private static blend(background: number, foreground: number): number {
