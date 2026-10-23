@@ -1,9 +1,14 @@
-#[cfg(all(feature = "keyboard", not(feature = "keyboard-lock-state")))]
+#[cfg(all(feature = "keyboard", not(feature = "api-19")))]
 use ohos_arkui_binding::event::KeyLockState;
 #[cfg(feature = "keyboard")]
 use ohos_arkui_binding::event::{inner_event::Event, KeyEventType};
 #[cfg(feature = "keyboard")]
 use ohos_xcomponent_binding::{Action, EventSource, KeyCode};
+#[cfg(feature = "keyboard")]
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 /// Selects one keyboard stream; the same physical key is never delivered twice.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -59,12 +64,38 @@ pub struct KeyboardEventData {
     pub unicode: u32,
     /// `None` means the system query failed, rather than no keys being held.
     pub pressed_keys: Option<Vec<KeyCode>>,
-    /// Available with `keyboard-lock-state` (API 19+); otherwise unknown.
+    /// Available with `api-19` (API 19+); otherwise unknown.
     pub caps_lock: Option<bool>,
     pub num_lock: Option<bool>,
     /// The transition was handled before post-IME delivery. Update held-key state,
     /// but do not execute a shortcut or insert hardware text for a consumed key.
     pub ime_consumed: bool,
+    /// Consume a post-IME key synchronously before its native callback returns.
+    /// Late changes to this owned reply cannot affect a later native key.
+    pub response: KeyboardEventResponse,
+}
+
+#[cfg(feature = "keyboard")]
+#[derive(Clone, Debug, Default)]
+pub struct KeyboardEventResponse(Arc<AtomicBool>);
+
+#[cfg(feature = "keyboard")]
+impl PartialEq for KeyboardEventResponse {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+#[cfg(feature = "keyboard")]
+impl Eq for KeyboardEventResponse {}
+
+#[cfg(feature = "keyboard")]
+impl KeyboardEventResponse {
+    pub fn consume(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+    pub(crate) fn is_consumed(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 #[cfg(feature = "keyboard")]
@@ -94,9 +125,9 @@ impl KeyboardEventData {
                 _ => {}
             }
         }
-        #[cfg(feature = "keyboard-lock-state")]
+        #[cfg(feature = "api-19")]
         let locks = event.lock_state();
-        #[cfg(not(feature = "keyboard-lock-state"))]
+        #[cfg(not(feature = "api-19"))]
         let locks = KeyLockState::default();
         Some(Self {
             code,
@@ -115,6 +146,7 @@ impl KeyboardEventData {
             caps_lock: locks.caps_lock,
             num_lock: locks.num_lock,
             ime_consumed: false,
+            response: KeyboardEventResponse::default(),
         })
     }
 }

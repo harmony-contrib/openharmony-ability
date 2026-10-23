@@ -84,6 +84,7 @@ pub fn create_lifecycle_handle<'a>(
         let wake = Arc::new(crate::waker::InputWake {
             queue: app.input_queue.clone(),
             callback: tsfn,
+            scheduled: std::sync::atomic::AtomicBool::new(false),
         });
         app.waker
             .write()
