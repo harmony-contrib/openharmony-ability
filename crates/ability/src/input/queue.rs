@@ -195,22 +195,32 @@ impl<T> InputQueue<T> {
             .state
             .lock()
             .map_err(|_| "Native input queue poisoned")?;
-        Ok(state.events.pop_front().map(|entry| match entry {
-            Entry::Wake => Delivery::Wake,
-            Entry::Input { owner, value, kind } => Delivery::Input {
-                owner: owner.name,
-                value,
-                ime_consumed: match kind {
-                    InputKind::Ordinary => None,
-                    #[cfg(any(feature = "keyboard", test))]
-                    InputKind::Key(disposition) => {
-                        let _ =
-                            disposition.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire);
-                        Some(disposition.load(Ordering::Acquire) != 1)
-                    }
+        // IME post callbacks may arrive after a foreground wake. An unresolved
+        // key is not evidence of consumption, and must not stall unrelated wakes.
+        let ready = state.events.iter().position(|entry| match entry {
+            #[cfg(any(feature = "keyboard", test))]
+            Entry::Input {
+                kind: InputKind::Key(disposition),
+                ..
+            } => disposition.load(Ordering::Acquire) != 0,
+            _ => true,
+        });
+        Ok(ready
+            .and_then(|index| state.events.remove(index))
+            .map(|entry| match entry {
+                Entry::Wake => Delivery::Wake,
+                Entry::Input { owner, value, kind } => Delivery::Input {
+                    owner: owner.name,
+                    value,
+                    ime_consumed: match kind {
+                        InputKind::Ordinary => None,
+                        #[cfg(any(feature = "keyboard", test))]
+                        InputKind::Key(disposition) => {
+                            Some(disposition.load(Ordering::Acquire) != 1)
+                        }
+                    },
                 },
-            },
-        }))
+            }))
     }
 }
 
@@ -268,15 +278,47 @@ mod tests {
     }
 
     #[test]
-    fn consumed_key_without_an_edit_is_still_delivered() {
+    fn foreground_wake_does_not_consume_a_key_before_its_post_ime_callback(
+    ) -> Result<(), &'static str> {
+        let queue = InputQueue::default();
+        let owner = queue.activate("main")?;
+        queue.push_key(&owner, "ctrl-w")?;
+        queue.wake()?;
+        assert!(matches!(queue.pop()?, Some(Delivery::Wake)));
+        assert!(queue.pop()?.is_none());
+        queue.after_ime(&owner)?;
+        assert_eq!(input(queue.pop()?), ("main".into(), "ctrl-w", Some(false)));
+        assert!(queue.pop()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn ime_edit_resolves_a_key_after_an_early_foreground_drain() -> Result<(), &'static str> {
+        let queue = InputQueue::default();
+        let owner = queue.activate("main")?;
+        queue.push_key(&owner, "a")?;
+        assert!(queue.pop()?.is_none());
+        queue.ime_edit(&owner)?;
+        queue.push(&owner, "committed text")?;
+        assert_eq!(input(queue.pop()?), ("main".into(), "a", Some(true)));
+        assert_eq!(input(queue.pop()?).1, "committed text");
+        assert!(queue.pop()?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn consumed_key_without_an_edit_is_delivered_before_the_next_key() {
         let queue = InputQueue::default();
         let owner = queue.activate("main").unwrap();
         assert!(!queue.has_pending());
         queue.push_key(&owner, "candidate navigation").unwrap();
         assert!(queue.has_pending());
-        assert_eq!(input(queue.pop().unwrap()).2, Some(true));
-        assert!(!queue.has_pending());
         assert!(queue.pop().unwrap().is_none());
+        queue.push_key(&owner, "next key").unwrap();
+        assert_eq!(input(queue.pop().unwrap()).1, "candidate navigation");
+        queue.after_ime(&owner).unwrap();
+        assert_eq!(input(queue.pop().unwrap()).2, Some(false));
+        assert!(!queue.has_pending());
     }
 
     #[test]
@@ -288,6 +330,8 @@ mod tests {
         queue.push_key(&child, "child").unwrap();
         queue.after_ime(&main).unwrap();
         assert_eq!(input(queue.pop().unwrap()).2, Some(false));
+        assert!(queue.pop().unwrap().is_none());
+        queue.ime_edit(&child).unwrap();
         assert_eq!(input(queue.pop().unwrap()).2, Some(true));
     }
 
