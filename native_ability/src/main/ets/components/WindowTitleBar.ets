@@ -78,7 +78,8 @@ struct WindowControlButton {
         this.pressed = false;
       }
     })
-    .onClick(() => this.onActivate());
+    .onClick(() => this.onActivate())
+    .focusable(false);
   }
 }
 @Component
@@ -106,7 +107,8 @@ export struct WindowTitleBar {
             .opacity(this.windowFocused ? 1 : 0.4)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1);
+            .layoutWeight(1)
+            .focusable(false);
         }
       }
       .layoutWeight(1)
@@ -114,6 +116,7 @@ export struct WindowTitleBar {
       .padding({ left: 20, right: 12 })
       .clip(true)
       .onTouch((event: TouchEvent) => this.onDrag(event))
+      .focusable(false)
 
       if (this.decorations) {
         Row({ space: CONTROL_SPACING }) {
@@ -143,7 +146,8 @@ export struct WindowTitleBar {
           })
         }
         .height("100%")
-        .padding({ left: 12, right: 20 });
+        .padding({ left: 12, right: 20 })
+        .focusable(false);
       }
     }
     .width("100%")
@@ -155,6 +159,7 @@ export struct WindowTitleBar {
           ? $r("sys.color.container_modal_background")
           : $r("sys.color.container_modal_unfocus_background")
         : Color.Transparent,
-    );
+    )
+    .focusable(false);
   }
 }

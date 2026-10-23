@@ -552,7 +552,8 @@ export struct MenuBarComponent {
                 }
               },
             },
-          );
+          )
+          .focusable(false);
         },
         (itemId: string) => itemId,
       )
@@ -560,7 +561,8 @@ export struct MenuBarComponent {
     .width("100%")
     .height(40)
     .backgroundColor($r("sys.color.comp_background_primary"))
-    .alignItems(VerticalAlign.Center);
+    .alignItems(VerticalAlign.Center)
+    .focusable(false);
   }
 
   private switchMenubarOnHover(itemId: string): void {
@@ -859,17 +861,20 @@ export struct MenuBarComponent {
           .width(1)
           .height(1)
           .position({ x: 0, y: 0 })
-          .bindMenu(this.menuShown, this.MenuContent, this.applicationPopupOptions());
+          .bindMenu(this.menuShown, this.MenuContent, this.applicationPopupOptions())
+          .focusable(false);
       } else {
         // Cross-window context menus need bindContextMenu for reliable item clicks.
         Column()
           .width(1)
           .height(1)
           .position({ x: 0, y: 0 })
-          .bindContextMenu(this.menuShown, this.MenuContent, this.popupOptions());
+          .bindContextMenu(this.menuShown, this.MenuContent, this.popupOptions())
+          .focusable(false);
       }
     }
     .width("100%")
-    .height(this.showMenuBar && this.menubarVisible && this.menubarItems.length > 0 ? 40 : 0);
+    .height(this.showMenuBar && this.menubarVisible && this.menubarItems.length > 0 ? 40 : 0)
+    .focusable(false);
   }
 }
