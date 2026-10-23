@@ -3,9 +3,9 @@
 ## Unreleased
 
 - **Breaking**: native ArkUI keys are delivered once through the shared input/wake
-  FIFO as `ArkUiInputEvent::Key`, with `KeyboardEventData::ime_consumed`; remove
-  `KeyPreIme`, `KeyboardEventResponse`, timestamp deduplication and synchronous
-  foreground-task draining from consumers. Legacy raw keys remain post-IME-only.
+  FIFO as `ArkUiInputEvent::Key`, with `KeyboardEventData::ime_consumed` and
+  `KeyboardEventData::response`; remove `KeyPreIme` and timestamp deduplication
+  from consumers. Legacy raw keys remain post-IME-only.
 - Queue IME edits with per-editor `Arc` owner tokens and report
   `Event::TextInputReadyChanged` independently of render surfaces. Ability owns
   UI-thread attachment transfer and uses the thin native IME binding without

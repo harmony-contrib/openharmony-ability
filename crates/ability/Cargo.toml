@@ -10,17 +10,10 @@ default = ["log", "window"]
 log = ["dep:log"]
 window = ["dep:ohos-window-manager-binding"]
 # ArkUI keyboard snapshots and consumption are opt-in; raw XComponent keys remain available.
-keyboard = ["ohos-arkui-binding/api-14"]
+keyboard = ["ohos-arkui-binding/api-15"]
 # These features select linked NDK APIs and raise the application's minimum API.
-keyboard-focus = ["keyboard", "ohos-arkui-binding/api-15"]
-keyboard-lock-state = ["keyboard", "ohos-arkui-binding/api-19"]
-keyboard-text-input = ["keyboard", "ohos-ime-binding/api-26"]
-keyboard-focus-recovery = [
-    "keyboard-focus",
-    "dep:ohos-window-manager-binding",
-    "ohos-window-manager-binding/api-26",
-    "ohos-window-manager-binding/input",
-]
+api-19 = ["ohos-arkui-binding/api-19"]
+api-26 = ["api-19", "ohos-ime-binding/api-26"]
 # API-18 mouse cancellation is opt-in; basic XComponent mouse input remains available.
 mouse = ["ohos-xcomponent-binding/api-18", "ohos-arkui-binding/api-15"]
 stylus = ["ohos-arkui-binding/api-17"]

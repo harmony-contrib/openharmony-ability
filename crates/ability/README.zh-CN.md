@@ -46,18 +46,18 @@ openharmony-ability = { version = "1.0.0-beta.3", features = ["mouse"] }
 openharmony-ability = { version = "1.0.0-beta.3", features = ["keyboard"] }
 ```
 
-`keyboard` enables `KeyboardInputDelivery::ArkUi`, `KeyboardEventData` and
-`ArkUiInputEvent::Key` through API 14; it is not a default feature. Select ArkUI
-delivery before rendering. Each physical transition arrives once with
-`ime_consumed`: update held-key state for every key, but never execute consumed
-keys as shortcuts or hardware text. Input and wakes share the UI-thread FIFO;
-remove timestamp deduplication and synchronous foreground-task draining.
-`keyboard-lock-state` opts into API-19 lock snapshots.
+`keyboard` enables `KeyboardInputDelivery::ArkUi`, `KeyboardEventData`,
+`KeyboardEventResponse` and `ArkUiInputEvent::Key` through API 14/15; it is not a
+default feature. Select ArkUI delivery before rendering. Each physical transition
+arrives once with `ime_consumed`: update held-key state for every key, but never
+execute consumed keys as shortcuts or hardware text. Input and wakes share the
+UI-thread FIFO; remove timestamp deduplication. `api-19` opts into API-19 lock
+snapshots.
 
-The breaking contract removes `KeyPreIme`, `KeyboardEventResponse` and
-`ArkUiWithTextInput`. Configure API-26 native key consumption explicitly through
-`with_ime_for` and `keyboard-text-input` before attachment.
-`TextInputReadyChanged` reports editor lifetime independently of EGL readiness.
+The breaking contract removes `KeyPreIme` and `ArkUiWithTextInput`. Configure
+API-26 native key consumption explicitly through `with_ime_for` and `api-26`
+before attachment. `TextInputReadyChanged` reports editor lifetime independently
+of EGL readiness.
 
 原生文件拖放也需显式启用：
 
