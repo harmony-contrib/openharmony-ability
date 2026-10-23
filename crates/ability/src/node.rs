@@ -16,6 +16,14 @@ use crate::{
     BridgeRuntime,
 };
 
+mod attachment_owner;
+mod attachment_state;
+mod content_root;
+mod native_attachment;
+pub use attachment_owner::NativeAttachment;
+pub use content_root::ContentRoot;
+pub use native_attachment::{NativeNodeReady, NativeNodeRetiring, NativeSubtreeReady};
+
 /// Plugin identity shared with the ArkTS built-in surface plugin.
 pub const NODE_SURFACE_PLUGIN_ID: &str = "ohos.node";
 
@@ -181,6 +189,18 @@ mod tests {
 
     #[test]
     fn node_actions_have_named_napi_contracts() {
+        assert_eq!(
+            <NativeNodeReady as BridgeNapiType>::TYPE_NAME,
+            "ohos.node.NativeNodeReady"
+        );
+        assert_eq!(
+            <NativeSubtreeReady as BridgeNapiType>::TYPE_NAME,
+            "ohos.node.NativeSubtreeReady"
+        );
+        assert_eq!(
+            <NativeNodeRetiring as BridgeNapiType>::TYPE_NAME,
+            "ohos.node.NativeNodeRetiring"
+        );
         assert_eq!(
             <NodeCreateContainerRequest as BridgeNapiType>::TYPE_NAME,
             "ohos.node.CreateContainerRequest"

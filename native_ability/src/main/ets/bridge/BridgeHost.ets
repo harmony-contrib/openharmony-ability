@@ -26,7 +26,8 @@ import {
   BridgePluginHookContext,
 } from "../ability/type";
 import { SerialTaskQueue } from "../runtime/SerialTaskQueue";
-import { CancellableTaskScope, TaskCancellationSignal } from "../runtime/CancellableTaskScope";
+import { CancellableTaskScope } from "../runtime/CancellableTaskScope";
+import type { TaskCancellationSignal } from "../runtime/CancellableTaskScope";
 
 // Upper bound for per-call timeouts (callers opt in via bridgeInvoke's timeoutMs).
 // User-driven dialogs can explicitly use zero to wait for a decision; ordinary calls
@@ -904,6 +905,9 @@ class BridgeHost {
         async (context: BridgePluginHookContext): Promise<void> => {
           await entry.plugin.onLifecycle!(event, context);
         },
+        event.kind === "ui-context-destroy" ||
+          event.kind === "window-stage-destroy" ||
+          event.kind === "ability-destroy",
       );
     } catch (error) {
       this.recordHookFailure(entry, error);
@@ -1044,8 +1048,19 @@ class BridgeHost {
     requestTypeName: string,
     responseTypeName: string,
     value: ESObject,
+    cleanupPermit?: () => boolean,
   ): ESObject {
-    this.assertActive();
+    const entry = this.plugins.get(pluginId);
+    if (cleanupPermit === undefined) {
+      this.assertActive();
+    } else if (
+      !cleanupPermit() ||
+      !this.abilityReady ||
+      this.disposed ||
+      !(entry?.installed || entry?.installAttempted)
+    ) {
+      throw new Error("Plugin cleanup callback is outside its active hook scope");
+    }
     if (
       !isBridgeIdentifier(pluginId) ||
       !isBridgeIdentifier(event) ||
@@ -1061,8 +1076,10 @@ class BridgeHost {
         "Main-thread event sink is unavailable because the native module did not attach its Rust bridge export",
       );
     }
-    const entry = this.plugins.get(pluginId);
-    if (entry?.hookError !== undefined) {
+    if (entry === undefined) {
+      throw new Error(`Bridge plugin '${pluginId}' is not registered`);
+    }
+    if (cleanupPermit === undefined && entry.hookError !== undefined) {
       throw new Error(entry.hookError);
     }
     return sink(pluginId, event, requestTypeName, responseTypeName, value);
@@ -1121,6 +1138,39 @@ class BridgeHost {
         ),
       );
     }
+    // NativeAbility dispatches Rust's destroy synchronously after this method.
+    // Borrowed native edges must retire while that Rust session is still live.
+    for (const entry of Array.from(this.plugins.values())) {
+      if (!(entry.installed || entry.installAttempted) || !entry.plugin.onClosing) {
+        continue;
+      }
+      let running = true;
+      const permit = (): boolean =>
+        running && !this.disposed && this.plugins.get(entry.plugin.id) === entry;
+      const signal: TaskCancellationSignal = {
+        isCancelled: (): boolean => !permit(),
+        onCancel:
+          (_listener: () => void): (() => void) =>
+          (): void => {},
+      };
+      try {
+        const result: ESObject = entry.plugin.onClosing(
+          this.pluginHookContext(entry.plugin.id, signal, permit),
+        ) as ESObject;
+        if (result && typeof result.then === "function") {
+          Promise.resolve(result).catch((error: Error): void => {
+            console.error(
+              `Plugin '${entry.plugin.id}' asynchronous closing failed: ${String(error)}`,
+            );
+          });
+          throw new Error("onClosing must complete synchronously");
+        }
+      } catch (error) {
+        console.error(`Plugin '${entry.plugin.id}' closing failed: ${String(error)}`);
+      } finally {
+        running = false;
+      }
+    }
     this.notifyContextChanged();
   }
 
@@ -1175,6 +1225,7 @@ class BridgeHost {
           async (context: BridgePluginHookContext): Promise<void> => {
             await entry.plugin.onDispose!(context);
           },
+          true,
         );
       }
     } catch (error) {
@@ -1467,8 +1518,25 @@ class BridgeHost {
   private pluginHookContext(
     pluginId: string,
     signal: TaskCancellationSignal,
+    cleanupPermit?: () => boolean,
   ): BridgePluginHookContext {
     const base = this.pluginContext(pluginId);
+    if (cleanupPermit !== undefined) {
+      base.invokeNativeSync = (
+        event: string,
+        requestTypeName: string,
+        responseTypeName: string,
+        value: ESObject,
+      ): ESObject =>
+        this.invokeNativeSync(
+          pluginId,
+          event,
+          requestTypeName,
+          responseTypeName,
+          value,
+          cleanupPermit,
+        );
+    }
     return this.cancellableContext(
       base,
       (): boolean => base.isActive() && !signal.isCancelled(),
@@ -1481,6 +1549,7 @@ class BridgeHost {
     pluginId: string,
     label: string,
     operation: (context: BridgePluginHookContext) => Promise<void>,
+    teardown: boolean = false,
   ): Promise<void> {
     const scope = new CancellableTaskScope(
       `Bridge plugin '${pluginId}' hook '${label}'`,
@@ -1491,9 +1560,14 @@ class BridgeHost {
       scope,
     };
     this.activeHooks.push(activeHook);
+    let running = true;
+    const owner = this.plugins.get(pluginId);
     try {
       await scope.run(async (signal: TaskCancellationSignal): Promise<void> => {
-        await operation(this.pluginHookContext(pluginId, signal));
+        const permit = teardown
+          ? (): boolean => running && !signal.isCancelled() && this.plugins.get(pluginId) === owner
+          : undefined;
+        await operation(this.pluginHookContext(pluginId, signal, permit));
       });
     } catch (error) {
       if (scope.didTimeOut()) {
@@ -1501,6 +1575,7 @@ class BridgeHost {
       }
       throw new Error(String(error));
     } finally {
+      running = false;
       const index = this.activeHooks.indexOf(activeHook);
       if (index >= 0) {
         this.activeHooks.splice(index, 1);
