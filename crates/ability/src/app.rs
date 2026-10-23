@@ -554,6 +554,7 @@ pub struct OpenHarmonyApp {
     pub(crate) event_loop: EventLoop,
     post_input: PostInputQueue,
     pub(crate) input_queue: Arc<crate::input::queue::InputQueue<crate::InputEvent>>,
+    pub(crate) waker: Arc<RwLock<Option<Arc<crate::waker::InputWake>>>>,
     pub(crate) ime_sources: Arc<RefCell<HashMap<i64, crate::input::ImeCallbackSource>>>,
     pub(crate) back_press_interceptor: BackPressInterceptor,
     pub(crate) ime: Arc<RefCell<Option<IME>>>,
@@ -611,6 +612,7 @@ impl OpenHarmonyApp {
             #[allow(clippy::arc_with_non_send_sync)]
             post_input: Arc::new(RefCell::new(Vec::new())),
             input_queue: Arc::default(),
+            waker: Arc::new(RwLock::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
             ime_sources: Arc::default(),
             #[allow(clippy::arc_with_non_send_sync)]
@@ -1390,7 +1392,7 @@ impl OpenHarmonyApp {
         }
     }
     pub fn create_waker(&self) -> OpenHarmonyWaker {
-        self.inner.read().unwrap().create_waker()
+        OpenHarmonyWaker::from_slot(self.waker.clone())
     }
     pub fn config(&self) -> Configuration {
         self.inner.read().unwrap().config()

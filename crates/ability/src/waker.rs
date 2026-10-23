@@ -18,8 +18,8 @@ pub(crate) struct InputWake {
 pub(crate) static WAKER: LazyLock<RwLock<Option<Arc<InputWake>>>> =
     LazyLock::new(|| RwLock::new(None));
 
-fn endpoint() -> Option<Arc<InputWake>> {
-    match WAKER.read() {
+fn endpoint_from(slot: &RwLock<Option<Arc<InputWake>>>) -> Option<Arc<InputWake>> {
+    match slot.read() {
         Ok(endpoint) => endpoint.clone(),
         Err(error) => {
             crate::warn!("Cannot read native input waker: {error}");
@@ -35,8 +35,11 @@ fn schedule(endpoint: &InputWake) {
     }
 }
 
-pub(crate) fn schedule_input(queue: &Arc<InputQueue<InputEvent>>) {
-    if let Some(endpoint) = endpoint() {
+pub(crate) fn schedule_input(
+    slot: &RwLock<Option<Arc<InputWake>>>,
+    queue: &Arc<InputQueue<InputEvent>>,
+) {
+    if let Some(endpoint) = endpoint_from(slot).or_else(|| endpoint_from(&WAKER)) {
         if Arc::ptr_eq(&endpoint.queue, queue) {
             schedule(&endpoint);
         }
@@ -44,15 +47,26 @@ pub(crate) fn schedule_input(queue: &Arc<InputQueue<InputEvent>>) {
 }
 
 #[derive(Clone, Default)]
-pub struct OpenHarmonyWaker;
+pub struct OpenHarmonyWaker {
+    slot: Option<Arc<RwLock<Option<Arc<InputWake>>>>>,
+}
 
 impl OpenHarmonyWaker {
     pub fn new() -> Self {
-        Self
+        Self { slot: None }
+    }
+
+    pub(crate) fn from_slot(slot: Arc<RwLock<Option<Arc<InputWake>>>>) -> Self {
+        Self { slot: Some(slot) }
     }
 
     pub fn wake(&self) {
-        if let Some(endpoint) = endpoint() {
+        let endpoint = self
+            .slot
+            .as_deref()
+            .and_then(endpoint_from)
+            .or_else(|| endpoint_from(&WAKER));
+        if let Some(endpoint) = endpoint {
             match endpoint.queue.wake() {
                 Ok(()) => schedule(&endpoint),
                 Err(error) => crate::warn!("{error}"),
