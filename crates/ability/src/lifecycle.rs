@@ -84,6 +84,7 @@ pub fn create_lifecycle_handle<'a>(
         let wake = Arc::new(crate::waker::InputWake {
             queue: app.input_queue.clone(),
             callback: tsfn,
+            scheduled: std::sync::atomic::AtomicBool::new(false),
         });
         app.waker
             .write()
@@ -230,8 +231,6 @@ pub fn create_lifecycle_handle<'a>(
             let options = ctx.first_arg::<Object>()?;
             let window_id = options.get_named_property::<i64>("windowId")?;
             let focused = options.get_named_property::<bool>("focused")?;
-            #[cfg(feature = "keyboard")]
-            window_focus_app.record_window_focus(window_id, focused);
             if let Some(ref mut handler) = *window_focus_app.event_loop.borrow_mut() {
                 handler(Event::WindowFocusChanged { window_id, focused });
             }

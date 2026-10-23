@@ -84,7 +84,7 @@ jobs:
       - name: Native feature boundaries
         run: |
           cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features -- -D warnings
-          for feature in keyboard keyboard-focus keyboard-lock-state keyboard-text-input keyboard-focus-recovery; do
+          for feature in keyboard "keyboard,api-19" "keyboard,api-26"; do
             cargo clippy -p openharmony-ability --all-targets --target aarch64-unknown-linux-ohos --no-default-features --features "$feature" -- -D warnings
           done
           cargo clippy -p openharmony-ability-plugin-webview --all-targets --target aarch64-unknown-linux-ohos --no-default-features -- -D warnings

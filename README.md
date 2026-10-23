@@ -144,17 +144,18 @@ consumed-result API; hardware IME callback ordering must be verified on supporte
 devices. Long-press/click semantic callbacks are not additional transitions.
 
 Consumers update modifier/held-key state for every transition, but must not execute
-shortcuts or insert hardware text for consumed keys. Remove timestamp deduplication
-and the former `KeyPreIme`/`KeyboardEventResponse` synchronous reply path. Baseline
-`RawXComponent` remains a legacy post-IME-only stream; it cannot observe keys the IME
-does not forward.
+shortcuts or insert hardware text for consumed keys. Unconsumed post-IME keys can call
+`key_event.response.consume()` synchronously in the input handler to mark the native
+key consumed. Remove timestamp deduplication and the former `KeyPreIme` duplicate stream.
+Baseline `RawXComponent` remains a legacy post-IME-only stream; it cannot observe keys
+the IME does not forward.
 
 Use `try_attach_ime_for(window_id)` to attach without opening the keyboard and
 `try_show_keyboard_for(window_id)` to attach/show explicitly. Ability detaches the
 previous editor before switching windows; an error prevents ownership transfer.
 `try_detach_ime_for` releases editor focus, while `hide_keyboard_for` only hides the
 keyboard. Configure API-26 native key consumption explicitly through `with_ime_for`
-with the `keyboard-text-input` feature before attachment; it is not consumer policy
+with the `api-26` feature before attachment; it is not consumer policy
 enabled by default. Native operations are UI-thread-only and never use attachment
 workers or a process-wide binding session registry.
 
