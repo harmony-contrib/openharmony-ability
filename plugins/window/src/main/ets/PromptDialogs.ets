@@ -29,6 +29,7 @@ class PromptPalette implements WindowPromptAppearance {
   readonly mutedForeground: number;
   readonly primary: number;
   readonly primaryForeground: number;
+  readonly secondaryButton: number;
   readonly border: number;
   readonly focus: number;
 
@@ -48,17 +49,30 @@ class PromptPalette implements WindowPromptAppearance {
       this.background,
       4.5,
     );
-    this.primary = PromptPalette.blend(this.background, appearance?.primary ?? this.foreground);
+    this.primary = PromptPalette.blend(
+      this.background,
+      appearance?.primary ?? PromptPalette.resource($r("sys.color.comp_background_emphasize")),
+    );
     this.primaryForeground = PromptPalette.readable(
-      appearance?.primaryForeground ?? this.background,
+      appearance?.primaryForeground ?? PromptPalette.resource($r("sys.color.font_on_primary")),
       this.primary,
       4.5,
+    );
+    this.secondaryButton = PromptPalette.blend(
+      this.background,
+      appearance
+        ? (0x14000000 | (this.foreground & 0x00ffffff)) >>> 0
+        : PromptPalette.resource($r("sys.color.comp_background_tertiary")),
     );
     this.border = PromptPalette.blend(
       this.background,
       appearance?.border ?? PromptPalette.resource($r("sys.color.ohos_id_color_list_separator")),
     );
-    this.focus = PromptPalette.readable(appearance?.focus ?? this.foreground, this.background, 3);
+    this.focus = PromptPalette.readable(
+      appearance?.focus ?? PromptPalette.resource($r("sys.color.interactive_focus")),
+      this.background,
+      3,
+    );
   }
 
   private static resource(resource: Resource): number {
@@ -148,11 +162,30 @@ function promptBuilder(model: PromptModel) {
   Scroll() {
     Column({ space: 16 }) {
       Column({ space: 8 }) {
-        Text(model.request.message)
-          .fontSize($r("sys.float.Subtitle_L"))
-          .fontWeight(600)
-          .fontColor(model.palette.foreground)
-          .width("100%")
+        Row({ space: 12 }) {
+          SymbolGlyph(
+            model.request.level === 0
+              ? $r("sys.symbol.info_circle_fill")
+              : model.request.level === 1
+                ? $r("sys.symbol.exclamationmark_triangle_fill")
+                : $r("sys.symbol.xmark_circle_fill"),
+          )
+            .fontSize(24)
+            .fontColor([
+              model.request.level === 0
+                ? $r("sys.color.brand")
+                : model.request.level === 1
+                  ? $r("sys.color.warning")
+                  : $r("sys.color.alert"),
+            ])
+          Text(model.request.message)
+            .fontSize($r("sys.float.Subtitle_L"))
+            .fontWeight(FontWeight.Medium)
+            .fontColor(model.palette.foreground)
+            .layoutWeight(1)
+        }
+        .width("100%")
+        .alignItems(VerticalAlign.Center)
         if (model.request.detail) {
           Text(model.request.detail)
             .fontSize($r("sys.float.Body_M"))
@@ -185,21 +218,12 @@ function promptBuilder(model: PromptModel) {
           .width(model.stackButtons ? "100%" : undefined)
           .constraintSize({ minHeight: 36, minWidth: 80, maxWidth: model.placement.width - 48 })
           .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+          .borderRadius($r("sys.float.corner_radius_level4"))
           .backgroundColor(
             index === 0 && index !== model.request.cancelIndex
               ? model.palette.primary
-              : model.palette.background,
+              : model.palette.secondaryButton,
           )
-          .border({
-            width: 1,
-            color: model.palette.border,
-            radius: $r("sys.float.corner_radius_level3"),
-          })
-          .focusBox({
-            strokeColor: ColorMetrics.numeric(model.palette.focus),
-            strokeWidth: LengthMetrics.vp(2),
-            margin: LengthMetrics.vp(3),
-          })
           .defaultFocus(index === 0)
           .onClick(() => model.choose(index));
         })
@@ -213,7 +237,12 @@ function promptBuilder(model: PromptModel) {
   .width(model.placement.width)
   .constraintSize({ maxHeight: model.placement.maxHeight })
   .backgroundColor(model.palette.background)
-  .border({ width: 1, color: model.palette.border, radius: $r("sys.float.corner_radius_level4") })
+  .borderRadius($r("sys.float.corner_radius_level8"))
+  .border(
+    model.request.appearance
+      ? { width: 1, color: model.palette.border, radius: $r("sys.float.corner_radius_level8") }
+      : { width: 0, radius: $r("sys.float.corner_radius_level8") },
+  )
   .shadow(ShadowStyle.OUTER_FLOATING_SM)
   .onAreaChange((_oldArea: Area, newArea: Area): void => {
     model.measure(Number(newArea.width), Number(newArea.height));
@@ -257,7 +286,6 @@ class PromptSession {
   private lastOffset?: PromptOffset;
   private positionUpdates: Promise<void> = Promise.resolve();
   private sizeListener?: (size: window.Size) => void;
-  private previousFocusActive?: boolean;
   private disappearing: boolean = false;
   private resolveDisappearance?: () => void;
   private readonly disappearance: Promise<void> = new Promise((resolve) => {
@@ -406,10 +434,7 @@ class PromptSession {
             }
             // ComponentContent can mount after the dialog's initial focus pass.
             try {
-              const controller = this.uiContext.getFocusController();
-              this.previousFocusActive = controller.isActive();
-              controller.activate(true);
-              controller.requestFocus(`${this.focusId}-0`);
+              this.uiContext.getFocusController().requestFocus(`${this.focusId}-0`);
             } catch (error) {
               console.warn(`[WindowPrompt] default focus failed: ${String(error)}`);
             }
@@ -516,13 +541,6 @@ class PromptSession {
     // Returning a choice sooner can open the next system dialog over that scope.
     if ((closeRequested || this.disappearing) && this.context.isActive()) {
       await this.disappearance;
-    }
-    if (this.previousFocusActive !== undefined && this.context.isActive()) {
-      try {
-        this.uiContext.getFocusController().activate(this.previousFocusActive);
-      } catch (error) {
-        console.warn(`[WindowPrompt] focus activation restore failed: ${String(error)}`);
-      }
     }
   }
 

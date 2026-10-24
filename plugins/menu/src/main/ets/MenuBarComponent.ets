@@ -227,7 +227,9 @@ export struct MenuBarComponent {
    */
   private nativeIconSymbol(nativeIcon: string): SymbolGlyphModifier | null {
     const resource = this.nativeIconResource(nativeIcon);
-    return resource ? new SymbolGlyphModifier(resource) : null;
+    return resource
+      ? new SymbolGlyphModifier(resource).fontSize(16).fontColor([$r("sys.color.icon_primary")])
+      : null;
   }
 
   // --- Menu builders ---
@@ -338,16 +340,19 @@ export struct MenuBarComponent {
                     .height(24)
                     .margin({ right: 8 })
                   Text(item.text ?? "")
-                    .fontSize($r("sys.float.Body_M"))
+                    .fontSize($r("sys.float.Body_L"))
                     .fontColor($r("sys.color.font_primary"))
                   if (item.accelerator) {
                     Blank();
                     Text(item.accelerator)
-                      .fontSize($r("sys.float.Body_S"))
+                      .fontSize($r("sys.float.Body_L"))
                       .fontColor($r("sys.color.font_secondary"))
                       .margin({ left: 16 });
                   }
-                }.alignItems(VerticalAlign.Center)
+                }
+                .constraintSize({ minHeight: 40 })
+                .padding({ left: 12, right: 12 })
+                .alignItems(VerticalAlign.Center)
               }
               .enabled(item.enabled ?? true)
               .onClick(() => {
@@ -461,6 +466,7 @@ export struct MenuBarComponent {
               .fontColor($r("sys.color.font_primary"))
           }
           .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+          .borderRadius($r("sys.float.corner_radius_level2"))
           .enabled(this.getMenubarItem(itemId)?.enabled ?? true)
           .opacity(
             (this.getMenubarItem(itemId)?.enabled ?? true)
