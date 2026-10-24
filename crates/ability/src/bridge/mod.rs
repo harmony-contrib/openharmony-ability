@@ -262,6 +262,10 @@ impl<'env> BridgeMainThreadEvent<'env> {
         &self.response_type_name
     }
 
+    pub(crate) fn request_value(&self) -> (&'env Env, Unknown<'env>) {
+        (self.env, self.value)
+    }
+
     /// Decodes the request after verifying its stable named N-API contract.
     pub fn decode<T>(&self) -> Result<T>
     where
