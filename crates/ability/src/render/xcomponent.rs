@@ -606,6 +606,10 @@ pub fn render_for_window(
             pointer: PointerInputData::from_arkui_event(&data),
             delta_x: data.get_scroll_delta_x().unwrap_or_default(),
             delta_y: data.get_scroll_delta_y().unwrap_or_default(),
+            #[cfg(feature = "mouse")]
+            scroll_step: data.axis_scroll_step(),
+            #[cfg(not(feature = "mouse"))]
+            scroll_step: 0,
         };
         dispatch_input(
             &on_axis_event_app,

@@ -1,3 +1,12 @@
+# Unreleased
+
+- Add `AxisEventData::scroll_step` for discrete wheel metadata. Zero means
+  unavailable, not one detent; raw axis deltas retain their existing sign and units.
+- **Breaking:** `AxisEventData` is now non-exhaustive. Consumers must match with
+  `..` and use framework-provided snapshots instead of constructing struct literals.
+- The opt-in `mouse` feature additionally forwards ArkUI `api-17` for wheel-step
+  queries. Its existing XComponent cancellation support still requires API 18.
+
 # 1.0.0-beta.3
 
 - Add window-specific surfaces, redraw, input, resize, focus and close events, with per-window
