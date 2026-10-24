@@ -5,6 +5,9 @@ import {
   demoNativeWebview,
   demoRemoveNativeWebview,
   demoReleaseNativeWebview,
+  demoAnnounce,
+  demoObserveMotion,
+  demoStopMotion,
   createBottomDemoWebview,
   playAudioDemo,
   createComposedDemoWebview,
@@ -695,6 +698,32 @@ struct Index {
       }
       .width(320)
       .height(48)
+      Row({ space: 8 }) {
+        Button("Announce")
+          .onClick(async (): Promise<void> => {
+            try {
+              await demoAnnounce("Native accessibility announcement");
+            } catch (error) {
+              this.webviewStatus = String(error);
+            }
+          })
+        Button("Observe reduced motion (API 23)")
+          .onClick(async (): Promise<void> => {
+            try {
+              await demoObserveMotion();
+            } catch (error) {
+              this.webviewStatus = String(error);
+            }
+          })
+        Button("Stop observation")
+          .onClick(async (): Promise<void> => {
+            try {
+              await demoStopMotion();
+            } catch (error) {
+              this.webviewStatus = String(error);
+            }
+          })
+      }
       if (this.currentDemo === 0) {
         this.XComponentDemo();
       }

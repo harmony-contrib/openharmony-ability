@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod accessibility_demo;
 mod login_bridge;
 mod main_thread_bridge;
 mod native_webview;
@@ -456,6 +457,10 @@ fn openharmony_app(app: OpenHarmonyApp) {
     }
     app.register_plugin(openharmony_ability_plugin_audio::AudioBridgePlugin)
         .expect("demo audio facade must be registered");
+    app.register_plugin(
+        openharmony_ability_plugin_accessibility::AccessibilityBridgePlugin::new(&app),
+    )
+    .expect("demo Accessibility facade must be registered");
     app.register_plugin(PermissionBridgePlugin)
         .expect("demo permission facade must be registered");
     app.register_plugin(AppControlBridgePlugin)

@@ -9,6 +9,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+openharmony-ability-plugin-accessibility.workspace = true
 napi-ohos = { workspace = true, features = ["tokio_rt"] }
 napi-derive-ohos = { workspace = true }
 
