@@ -227,7 +227,29 @@ export struct MenuBarComponent {
    */
   private nativeIconSymbol(nativeIcon: string): SymbolGlyphModifier | null {
     const resource = this.nativeIconResource(nativeIcon);
-    return resource ? new SymbolGlyphModifier(resource) : null;
+    return resource
+      ? new SymbolGlyphModifier(resource).fontSize(16).fontColor([$r("sys.color.icon_primary")])
+      : null;
+  }
+
+  /**
+   * Resolves a surface-matched 0x1a-alpha background color for PasteButton so it
+   * blends into the active light/dark Menu card surface while satisfying
+   * SecurityComponent's minimum alpha (>= 0x1a) and text contrast checks.
+   */
+  private pasteButtonBackgroundColor(): ResourceColor {
+    try {
+      const hostContext = this.getUIContext().getHostContext();
+      if (hostContext) {
+        const cardBg = hostContext.resourceManager.getColorSync(
+          $r("sys.color.ohos_id_color_card_bg").id,
+        );
+        return ((cardBg & 0x00ffffff) | 0x1a000000) >>> 0;
+      }
+    } catch (error) {
+      hilog.warn(0x1999, "MenuBar", "Cannot resolve menu surface color: %{public}s", String(error));
+    }
+    return $r("sys.color.checkbox_container_focus_color_unselected");
   }
 
   // --- Menu builders ---
@@ -262,18 +284,36 @@ export struct MenuBarComponent {
               }).enabled(item.enabled ?? true);
             } else if (item.predefinedType === "paste") {
               // MenuItem is a focus leaf; a nested button cannot receive keyboard authorization.
-              Row() {
+              // Render the accelerator behind a full-width PasteButton so hover/press/focus
+              // states and click authorization cover the entire 280vp menu item row.
+              Stack({ alignContent: Alignment.End }) {
+                if (item.accelerator) {
+                  Text(item.accelerator)
+                    .fontSize($r("sys.float.Body_L"))
+                    .fontWeight(FontWeight.Regular)
+                    .fontColor($r("sys.color.font_secondary"))
+                    .textAlign(TextAlign.End)
+                    .margin({ right: $r("sys.float.padding_level6") })
+                    .opacity((item.enabled ?? true) ? 1.0 : $r("sys.float.interactive_disable"))
+                    .hitTestBehavior(HitTestMode.None);
+                }
                 PasteButton({ text: PasteDescription.PASTE, buttonType: ButtonType.Normal })
                   .id(`native-paste-${this.windowId}-${item.id}`)
-                  .width(160)
-                  .height(40)
+                  .width("100%")
+                  .height($r("sys.float.option_min_height"))
                   .align(Alignment.Start)
-                  .fontSize(16)
-                  .fontColor($r("sys.color.ohos_id_color_text_primary"))
+                  .fontSize($r("sys.float.Body_L"))
+                  .fontWeight(FontWeight.Regular)
+                  .fontColor($r("sys.color.font_primary"))
                   // Lower alpha values are forced opaque by the security component.
-                  .backgroundColor(0x1a808080)
-                  .borderRadius(4)
-                  .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+                  .backgroundColor(this.pasteButtonBackgroundColor())
+                  .borderRadius($r("sys.float.inner_border_radius_token"))
+                  .padding({
+                    left: $r("sys.float.padding_level6"),
+                    right: $r("sys.float.padding_level6"),
+                    top: $r("sys.float.padding_level2"),
+                    bottom: $r("sys.float.padding_level2"),
+                  })
                   .enabled(item.enabled ?? true)
                   .onClick((_event: ClickEvent, result: PasteButtonOnClickResult) => {
                     if (result !== PasteButtonOnClickResult.SUCCESS) {
@@ -304,14 +344,7 @@ export struct MenuBarComponent {
                       handler(item);
                     }
                   })
-                Text(item.accelerator ?? "")
-                  .fontSize(16)
-                  .fontColor($r("sys.color.ohos_id_color_text_secondary"))
-                  .textAlign(TextAlign.End)
-              }
-              .width(280)
-              .padding({ left: 0, right: 12 })
-              .justifyContent(FlexAlign.SpaceBetween);
+              }.width(280);
             } else if (item.type === "check") {
               MenuItem({
                 content: item.text ?? "",
@@ -337,8 +370,25 @@ export struct MenuBarComponent {
                     .width(24)
                     .height(24)
                     .margin({ right: 8 })
-                  Text(item.text ?? "").fontSize(14)
+                  Text(item.text ?? "")
+                    .fontSize($r("sys.float.Body_L"))
+                    .fontWeight(FontWeight.Regular)
+                    .fontColor($r("sys.color.font_primary"))
+                  if (item.accelerator) {
+                    Blank();
+                    Text(item.accelerator)
+                      .fontSize($r("sys.float.Body_L"))
+                      .fontWeight(FontWeight.Regular)
+                      .fontColor($r("sys.color.font_secondary"))
+                      .margin({ left: 16 });
+                  }
                 }
+                .constraintSize({ minHeight: $r("sys.float.option_min_height") })
+                .padding({
+                  left: $r("sys.float.padding_level6"),
+                  right: $r("sys.float.padding_level6"),
+                })
+                .alignItems(VerticalAlign.Center)
               }
               .enabled(item.enabled ?? true)
               .onClick(() => {
@@ -444,15 +494,21 @@ export struct MenuBarComponent {
                 this.nativeIconResource(this.getMenubarItem(itemId)?.nativeIcon ?? "") as Resource,
               )
                 .fontSize(16)
+                .fontColor([$r("sys.color.icon_primary")])
                 .margin({ right: 4 });
             }
             Text(this.getMenubarItem(itemId)?.text ?? "")
-              .fontSize(14)
+              .fontSize($r("sys.float.Body_M"))
               .fontColor($r("sys.color.font_primary"))
           }
           .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+          .borderRadius($r("sys.float.corner_radius_level2"))
           .enabled(this.getMenubarItem(itemId)?.enabled ?? true)
-          .opacity((this.getMenubarItem(itemId)?.enabled ?? true) ? 1.0 : 0.5)
+          .opacity(
+            (this.getMenubarItem(itemId)?.enabled ?? true)
+              ? 1.0
+              : $r("sys.float.interactive_disable"),
+          )
           .backgroundColor(
             this.activeDropdownId === itemId
               ? $r("sys.color.interactive_pressed")
