@@ -4,6 +4,10 @@ import { Module } from "../ability/type";
 export class NativeModuleLoader {
   private static modules: Record<string, Module> = {};
 
+  static getLoadedModule(moduleName: string): Module | undefined {
+    return NativeModuleLoader.modules[moduleName];
+  }
+
   private static isCurrentModule(value: ESObject): boolean {
     return (
       value !== null &&
@@ -37,6 +41,10 @@ export class NativeModuleLoader {
     }
 
     return resolved;
+  }
+
+  static getLoaded(moduleName: string): Module | undefined {
+    return NativeModuleLoader.modules[moduleName.trim()];
   }
 
   static async load(moduleName: string, mode: "async" | "sync" = "async"): Promise<Module> {

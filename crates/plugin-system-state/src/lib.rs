@@ -67,6 +67,7 @@ pub struct DisplaySnapshot {
     pub width: i32,
     pub height: i32,
     pub density_pixels: f64,
+    pub refresh_rate: Option<f64>,
     pub available_area: Option<AvailableArea>,
     pub is_default: bool,
 }

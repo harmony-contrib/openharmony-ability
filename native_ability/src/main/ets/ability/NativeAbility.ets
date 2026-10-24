@@ -46,6 +46,7 @@ export class NativeAbility extends UIAbility {
   public moduleName: string | string[] = "";
   public defaultPage: boolean = true;
   public loadMode: "async" | "sync" = "async";
+  public independentWindowAbility?: string;
   // Subclasses (EntryAbility) override this with the ArkTS BridgePlugin factories
   // matching the Rust-declared plugin ids. BridgeHostRegistry.prepare installs them
   // into every module host for this Ability session.
@@ -172,6 +173,7 @@ export class NativeAbility extends UIAbility {
     // module loading itself is re-done transactionally below via NativeModuleLoader.
     await ProcessInitializer.initialize(context, this.moduleName, this.loadMode, want);
     this.assertInitializationActive(generation);
+    WindowManager.getInstance().setIndependentWindowAbility(this.independentWindowAbility);
 
     const previousSessionId = this.bridgeSessionId;
     if (previousSessionId) {
@@ -564,120 +566,111 @@ export class NativeAbility extends UIAbility {
         hilog.error(DOMAIN, "NativeAbility", "windowStage.on failed: %{public}s", String(e));
       }
 
-      let win: window.Window | null = null;
       try {
-        win = await windowStage.getMainWindow();
-      } catch (e) {
-        hilog.error(DOMAIN, "NativeAbility", "getMainWindow failed: %{public}s", String(e));
-        win = null;
-      }
-
-      if (win) {
+        const win = await windowStage.getMainWindow();
+        win.on("windowSizeChange", (size: window.Size) => {
+          // Phase 3 (design.md D2/D3): wrap with typed interface and route through
+          // per-window(0) throttle (leading+trailing 16ms). windowId=0 = main window.
+          // Double-registration dedup: BridgeHost also registers onSizeChange for the
+          // same windowId=0 — the throttle merges both sources automatically.
+          const wrapped: WindowSizeEventWrap = {
+            windowId: 0,
+            width: size.width,
+            height: size.height,
+          };
+          WindowManager.getInstance().throttledRectDispatch(
+            0,
+            wrapped,
+            (w: object) => {
+              this.forEachLifecycle((lifecycle) =>
+                lifecycle.windowStageEventCallback.onWindowSizeChange(w),
+              );
+            },
+            "size",
+          );
+        });
+        win.on("windowRectChange", (options: window.RectChangeOptions) => {
+          // Phase 3 (design.md D3): RECOVER→menubar logic stays synchronous (UI logic,
+          // not throttled — must respond immediately on fullscreen exit). Delivery
+          // goes through the menu plugin's registered port (MenuBarSlot seam):
+          // core must not reach into the menu package's callback registry.
+          if (options.reason === window.RectChangeReason.RECOVER) {
+            getMenuBarPort(win)?.onMenubarVisibility(MAIN_WINDOW_ID, true);
+          }
+          // Phase 3 (design.md D2/D5): rect dispatch through per-window(0) throttle.
+          // Deep-copy rect fields (not system object ref) per design.md D5.
+          const wrapped: WindowRectEventWrap = {
+            windowId: 0,
+            reason: options.reason,
+            rect: {
+              left: options.rect.left,
+              top: options.rect.top,
+              width: options.rect.width,
+              height: options.rect.height,
+            },
+          };
+          WindowManager.getInstance().throttledRectDispatch(
+            0,
+            wrapped,
+            (w: object) => {
+              this.forEachLifecycle((lifecycle) =>
+                lifecycle.windowStageEventCallback.onWindowRectChange(w),
+              );
+            },
+            "rect",
+          );
+        });
+        win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
+          const wrapped: WindowAvoidAreaEventWrap = {
+            windowId: 0,
+            type: options.type,
+            area: options.area,
+          };
+          this.forEachLifecycle((lifecycle) =>
+            lifecycle.windowStageEventCallback.onAvoidAreaChange(wrapped),
+          );
+        });
+        win.on("keyboardHeightChange", (height) => {
+          this.forEachLifecycle((lifecycle) =>
+            lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
+          );
+        });
+        // 回灌系统窗口状态到 tao 镜像位(问题五 5.3):
+        // 最大化/最小化/全屏/悬浮等系统状态变化经 notifyWindowStatus NAPI 入队,
+        // runtime-wry drain 后用真实 windowId 路由到对应 tao Window 更新镜像位。
+        // API 11+;不支持则静默降级(不比现状差)。详见 doc/OHOS窗口遗留问题.md。
         try {
-          win.on("windowSizeChange", (size: window.Size) => {
-            // Phase 3 (design.md D2/D3): wrap with typed interface and route through
-            // per-window(0) throttle (leading+trailing 16ms). windowId=0 = main window.
-            // Double-registration dedup: BridgeHost also registers onSizeChange for the
-            // same windowId=0 — the throttle merges both sources automatically.
-            const wrapped: WindowSizeEventWrap = {
-              windowId: 0,
-              width: size.width,
-              height: size.height,
-            };
-            WindowManager.getInstance().throttledRectDispatch(
-              0,
-              wrapped,
-              (w: object) => {
-                this.forEachLifecycle((lifecycle) =>
-                  lifecycle.windowStageEventCallback.onWindowSizeChange(w),
-                );
-              },
-              "size",
-            );
-          });
-          win.on("windowRectChange", (options: window.RectChangeOptions) => {
-            // Phase 3 (design.md D3): RECOVER→menubar logic stays synchronous (UI logic,
-            // not throttled — must respond immediately on fullscreen exit). Delivery
-            // goes through the menu plugin's registered port (MenuBarSlot seam):
-            // core must not reach into the menu package's callback registry.
-            if (options.reason === window.RectChangeReason.RECOVER) {
-              getMenuBarPort()?.onMenubarVisibility(MAIN_WINDOW_ID, true);
-            }
-            // Phase 3 (design.md D2/D5): rect dispatch through per-window(0) throttle.
-            // Deep-copy rect fields (not system object ref) per design.md D5.
-            const wrapped: WindowRectEventWrap = {
-              windowId: 0,
-              reason: options.reason,
-              rect: {
-                left: options.rect.left,
-                top: options.rect.top,
-                width: options.rect.width,
-                height: options.rect.height,
-              },
-            };
-            WindowManager.getInstance().throttledRectDispatch(
-              0,
-              wrapped,
-              (w: object) => {
-                this.forEachLifecycle((lifecycle) =>
-                  lifecycle.windowStageEventCallback.onWindowRectChange(w),
-                );
-              },
-              "rect",
-            );
-          });
-          win.on("avoidAreaChange", (options: window.AvoidAreaOptions) => {
-            const wrapped: WindowAvoidAreaEventWrap = {
-              windowId: 0,
-              type: options.type,
-              area: options.area,
-            };
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.windowStageEventCallback.onAvoidAreaChange(wrapped),
-            );
-          });
-          win.on("keyboardHeightChange", (height) => {
-            this.forEachLifecycle((lifecycle) =>
-              lifecycle.keyboardEventCallback.onKeyboardHeightChange(height),
-            );
-          });
-          // 回灌系统窗口状态到 tao 镜像位(问题五 5.3):
-          // 最大化/最小化/全屏/悬浮等系统状态变化经 notifyWindowStatus NAPI 入队,
-          // runtime-wry drain 后用真实 windowId 路由到对应 tao Window 更新镜像位。
-          // API 11+;不支持则静默降级(不比现状差)。详见 doc/OHOS窗口遗留问题.md。
-          try {
-            win.on("windowStatusChange", (statusType: window.WindowStatusType) => {
-              const nativeModule: Module | undefined =
-                AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-              if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
-                // 本地单 UIAbility 架构:主窗口恒为 tao windowId=0(upstream 的
-                // readWindowId() 首实例也返回 0);runtime-wry 按 tao window_id 路由。
-                nativeModule.notifyWindowStatus(0, statusType);
-              }
-            });
-            // seed 初始态(官方 updateWindowInfo 模式),避免漏掉注册前状态。
-            const initialStatus = win.getWindowStatus();
+          win.on("windowStatusChange", (statusType: window.WindowStatusType) => {
             const nativeModule: Module | undefined =
               AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
             if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
-              nativeModule.notifyWindowStatus(0, initialStatus);
+              // 本地单 UIAbility 架构:主窗口恒为 tao windowId=0(upstream 的
+              // readWindowId() 首实例也返回 0);runtime-wry 按 tao window_id 路由。
+              nativeModule.notifyWindowStatus(0, statusType);
             }
-          } catch (e) {
-            hilog.warn(
-              DOMAIN,
-              "NativeAbility",
-              "windowStatusChange registration failed: %{public}s",
-              String(e),
-            );
+          });
+          // seed 初始态(官方 updateWindowInfo 模式),避免漏掉注册前状态。
+          const initialStatus = win.getWindowStatus();
+          const nativeModule: Module | undefined =
+            AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+          if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
+            nativeModule.notifyWindowStatus(0, initialStatus);
           }
         } catch (e) {
-          hilog.error(
+          hilog.warn(
             DOMAIN,
             "NativeAbility",
-            "Window event registration failed: %{public}s",
+            "windowStatusChange registration failed: %{public}s",
             String(e),
           );
         }
+      } catch (e) {
+        hilog.error(
+          DOMAIN,
+          "NativeAbility",
+          "Window event registration failed: %{public}s",
+          String(e),
+        );
       }
 
       // Transparent window background/container color is applied in
@@ -849,6 +842,15 @@ export class NativeAbility extends UIAbility {
         payload: new BridgeMemoryLevelLifecyclePayload(level),
       });
     });
+  }
+
+  onPrepareToTerminate(): boolean {
+    if (!this.acceptingLifecycle || !this.windowStageActive) {
+      return false;
+    }
+    // System shortcuts and dock close requests bypass windowWillClose. Defer
+    // termination to the same native close handler so the app can prompt first.
+    return WindowManager.getInstance().requestWindowClose(MAIN_WINDOW_ID);
   }
 
   onDestroy(): Promise<void> {

@@ -3,11 +3,18 @@
 //! Capabilities: `get-avoid-area` and multi-window operations (create OS sub-windows,
 //! decorations, focus, move/resize/minimize/maximize, background color, blur and destruction).
 
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
+
 use napi_derive_ohos::napi;
-use napi_ohos::{Error, Result};
+use napi_ohos::{bindgen_prelude::Unknown, Error, Result};
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, AvoidArea, AvoidAreaType, BridgeCallOptions,
-    BridgeContextRequirement, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp, Rect,
+    BridgeContextRequirement, BridgeMainThreadEvent, BridgeNapiType, BridgePlugin, BridgeRuntime,
+    OpenHarmonyApp, Rect,
 };
 
 mod cursor;
@@ -17,7 +24,9 @@ mod stack;
 pub use stack::{WindowStackRequest, WindowStackResponse};
 
 mod prompt;
-pub use prompt::{WindowPromptAnchor, WindowPromptRequest, WindowPromptResponse};
+pub use prompt::{
+    WindowPromptAnchor, WindowPromptAppearance, WindowPromptRequest, WindowPromptResponse,
+};
 
 pub struct WindowBridgePlugin;
 
@@ -27,6 +36,150 @@ impl BridgePlugin for WindowBridgePlugin {
     const ID: &'static str = "ohos.window";
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::UiContext];
+
+    fn on_main_thread_event<'env>(
+        &self,
+        event: BridgeMainThreadEvent<'env>,
+    ) -> Result<Unknown<'env>> {
+        match event.name() {
+            "move-requested" => {
+                let request: WindowMoveRequested = event.decode()?;
+                validate_window_id(request.window_id)?;
+                event.respond(WindowMoveResponse {
+                    start_moving: take_window_move_request(request.window_id),
+                })
+            }
+            "close-requested" => {
+                let request: WindowCloseRequested = event.decode()?;
+                if request.window_id < 0 {
+                    return Err(Error::from_reason("window id must not be negative"));
+                }
+                event.respond(WindowCloseResponse {
+                    prevent_close: request_window_close(request.window_id),
+                })
+            }
+            name => Err(Error::from_reason(format!(
+                "Unsupported ohos.window event '{name}'"
+            ))),
+        }
+    }
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowMoveRequested {
+    pub window_id: i64,
+}
+impl_bridge_napi_type!(WindowMoveRequested, "ohos.window.MoveRequested");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowMoveResponse {
+    pub start_moving: bool,
+}
+impl_bridge_napi_type!(WindowMoveResponse, "ohos.window.MoveResponse");
+
+thread_local! {
+    static MOVE_REQUESTS: RefCell<HashMap<i64, Rc<Cell<bool>>>> = RefCell::new(HashMap::new());
+}
+
+/// Defers a move decision only until the enclosing ArkUI touch callback.
+pub struct WindowMoveSubscription {
+    window_id: i64,
+    pending: Rc<Cell<bool>>,
+}
+
+impl WindowMoveSubscription {
+    pub fn new(window_id: i64) -> Self {
+        let pending = Rc::new(Cell::new(false));
+        MOVE_REQUESTS.with(|requests| requests.borrow_mut().insert(window_id, pending.clone()));
+        Self { window_id, pending }
+    }
+
+    pub fn request(&self) {
+        self.pending.set(true);
+    }
+
+    pub fn cancel(&self) {
+        self.pending.set(false);
+    }
+}
+
+impl Drop for WindowMoveSubscription {
+    fn drop(&mut self) {
+        MOVE_REQUESTS.with(|requests| {
+            let mut requests = requests.borrow_mut();
+            if requests
+                .get(&self.window_id)
+                .is_some_and(|pending| Rc::ptr_eq(pending, &self.pending))
+            {
+                requests.remove(&self.window_id);
+            }
+        });
+    }
+}
+
+fn take_window_move_request(window_id: i64) -> bool {
+    MOVE_REQUESTS.with(|requests| {
+        requests
+            .borrow()
+            .get(&window_id)
+            .is_some_and(|pending| pending.replace(false))
+    })
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowCloseRequested {
+    pub window_id: i64,
+}
+impl_bridge_napi_type!(WindowCloseRequested, "ohos.window.CloseRequested");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowCloseResponse {
+    pub prevent_close: bool,
+}
+impl_bridge_napi_type!(WindowCloseResponse, "ohos.window.CloseResponse");
+
+type CloseHandler = Rc<dyn Fn() -> bool>;
+thread_local! {
+    static CLOSE_HANDLERS: RefCell<HashMap<i64, CloseHandler>> = RefCell::new(HashMap::new());
+}
+
+/// Keeps a native close interceptor alive on the UI thread.
+pub struct WindowCloseSubscription {
+    window_id: i64,
+    handler: CloseHandler,
+}
+
+impl Drop for WindowCloseSubscription {
+    fn drop(&mut self) {
+        CLOSE_HANDLERS.with(|handlers| {
+            let mut handlers = handlers.borrow_mut();
+            if handlers
+                .get(&self.window_id)
+                .is_some_and(|handler| Rc::ptr_eq(handler, &self.handler))
+            {
+                handlers.remove(&self.window_id);
+            }
+        });
+    }
+}
+
+/// Return true to defer destruction until the application finishes its close workflow.
+pub fn on_window_close_requested(
+    window_id: i64,
+    handler: impl Fn() -> bool + 'static,
+) -> WindowCloseSubscription {
+    let handler: CloseHandler = Rc::new(handler);
+    CLOSE_HANDLERS.with(|handlers| handlers.borrow_mut().insert(window_id, handler.clone()));
+    WindowCloseSubscription { window_id, handler }
+}
+
+fn request_window_close(window_id: i64) -> bool {
+    let handler = CLOSE_HANDLERS.with(|handlers| handlers.borrow().get(&window_id).cloned());
+    handler.is_some_and(|handler| handler())
 }
 
 #[napi(object)]
@@ -718,6 +871,18 @@ impl WindowClient {
         .ensure()
     }
 
+    /// Returns false when the device cannot control pointer visibility. Other
+    /// platform failures remain errors so callers can retry transient failures.
+    pub async fn try_set_cursor_visible(&self, visible: bool) -> Result<bool> {
+        Ok(self
+            .call::<CursorVisibleRequest, WindowAcknowledgement>(
+                "set-cursor-visible",
+                CursorVisibleRequest { visible },
+            )
+            .await?
+            .accepted)
+    }
+
     /// Applies the decoration flag bit-field (closable=1, maximizable=2,
     /// minimizable=4, resizable=8) that gates the matching window operations
     /// on the ArkTS side.
@@ -775,6 +940,65 @@ impl WindowExt for OpenHarmonyApp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn move_requests_are_one_shot_and_preserve_replacements() {
+        use super::{take_window_move_request, WindowMoveSubscription};
+        let old = WindowMoveSubscription::new(987);
+        old.request();
+        assert!(!take_window_move_request(988));
+        assert!(take_window_move_request(987));
+        assert!(!take_window_move_request(987));
+        old.request();
+        old.cancel();
+        assert!(!take_window_move_request(987));
+        let current = WindowMoveSubscription::new(987);
+        current.request();
+        drop(old);
+        assert!(take_window_move_request(987));
+        current.request();
+        drop(current);
+        assert!(!take_window_move_request(987));
+    }
+
+    #[test]
+    fn move_requests_use_named_contracts() {
+        use super::{WindowMoveRequested, WindowMoveResponse};
+        assert_eq!(WindowMoveRequested::TYPE_NAME, "ohos.window.MoveRequested");
+        assert_eq!(WindowMoveResponse::TYPE_NAME, "ohos.window.MoveResponse");
+    }
+
+    #[test]
+    fn close_requests_preserve_replacements_and_allow_reentrant_removal() {
+        use super::{on_window_close_requested, request_window_close};
+        use std::{cell::RefCell, rc::Rc};
+        assert!(!request_window_close(123));
+        let old = on_window_close_requested(123, || false);
+        let current = on_window_close_requested(123, || true);
+        drop(old);
+        assert!(request_window_close(123));
+        drop(current);
+        assert!(!request_window_close(123));
+
+        let subscription = Rc::new(RefCell::new(None));
+        let callback_subscription = subscription.clone();
+        *subscription.borrow_mut() = Some(on_window_close_requested(123, move || {
+            callback_subscription.borrow_mut().take();
+            true
+        }));
+        assert!(request_window_close(123));
+        assert!(!request_window_close(123));
+    }
+
+    #[test]
+    fn close_requests_use_named_contracts() {
+        use super::{WindowCloseRequested, WindowCloseResponse};
+        assert_eq!(
+            WindowCloseRequested::TYPE_NAME,
+            "ohos.window.CloseRequested"
+        );
+        assert_eq!(WindowCloseResponse::TYPE_NAME, "ohos.window.CloseResponse");
+    }
+
     use super::{
         validate_platform_integer, validate_window_id, AvoidAreaRequest, AvoidAreaResponse,
         RawAvoidArea, RawRect, WindowBridgePlugin, MAX_SAFE_JAVASCRIPT_INTEGER,
@@ -802,6 +1026,24 @@ mod tests {
             <AvoidAreaResponse as BridgeNapiType>::TYPE_NAME,
             "ohos.window.AvoidAreaResponse"
         );
+    }
+
+    #[test]
+    fn cursor_visibility_uses_stable_named_napi_contracts() {
+        assert_eq!(
+            <super::CursorVisibleRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.CursorVisibleRequest"
+        );
+        assert_eq!(
+            <super::WindowAcknowledgement as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.Acknowledgement"
+        );
+        assert!(super::WindowAcknowledgement { accepted: true }
+            .ensure()
+            .is_ok());
+        assert!(super::WindowAcknowledgement { accepted: false }
+            .ensure()
+            .is_err());
     }
 
     #[test]

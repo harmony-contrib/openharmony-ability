@@ -12,6 +12,7 @@ use ohos_xcomponent_binding::{KeyEventData, MouseEventData, TouchEventData};
 #[cfg(feature = "drag")]
 pub(crate) mod drag;
 mod ime;
+pub(crate) mod queue;
 #[cfg(feature = "drag")]
 pub use drag::{
     DragInputData, DragOperation, DragPhase, DragPreview, DragResponse, NativeDragResult,
@@ -19,7 +20,7 @@ pub use drag::{
 };
 mod keyboard;
 mod text_input;
-pub use ime::*;
+pub(crate) use ime::*;
 pub use keyboard::KeyboardInputDelivery;
 #[cfg(feature = "keyboard")]
 pub use keyboard::{KeyboardEventData, KeyboardEventResponse};
@@ -54,13 +55,13 @@ pub enum XComponentInputEvent {
 /// Owned ArkUI input and gesture semantics attached to the XComponent node.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ArkUiInputEvent {
+    /// Keyboard focus of the render node, independent of the containing window.
+    FocusChanged(bool),
     /// Pointer identity only; the existing XComponent callback delivers the input itself.
     Pointer(PointerInputData),
     #[cfg(feature = "drag")]
     Drag(DragInputData),
-    /// State-only snapshot before IME processing; do not dispatch another key press.
-    #[cfg(feature = "keyboard")]
-    KeyPreIme(KeyboardEventData),
+    /// One physical transition, including keys consumed by the IME.
     #[cfg(feature = "keyboard")]
     Key(KeyboardEventData),
     Axis(AxisEventData),
@@ -108,6 +109,8 @@ pub struct PointerInputData {
     pub timestamp: i64,
     pub pointer_count: u32,
     pub pointer_id: Option<i32>,
+    /// Current native mouse button state; absent for non-mouse or unavailable snapshots.
+    pub mouse_buttons_pressed: Option<bool>,
     /// Pen pose copied while the native input event is alive.
     pub stylus: Option<StylusInputData>,
 }
@@ -124,6 +127,24 @@ pub struct StylusInputData {
 impl PointerInputData {
     pub(crate) fn from_arkui_event(event: &ArkUIInputEvent) -> Self {
         let pointer_count = event.pointer_count();
+        #[cfg(feature = "mouse")]
+        let mouse_buttons_pressed = if event.event_type == UIInputEvent::Mouse {
+            let mut buttons = [0; 8];
+            match event.mouse_pressed_buttons(&mut buttons) {
+                Ok(count) => Some(count > 0),
+                Err(error) => {
+                    #[cfg(feature = "log")]
+                    log::warn!("Failed to snapshot pressed mouse buttons: {error:?}");
+                    #[cfg(not(feature = "log"))]
+                    eprintln!("Failed to snapshot pressed mouse buttons: {error:?}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(not(feature = "mouse"))]
+        let mouse_buttons_pressed = None;
         Self {
             event_type: event.event_type,
             action: event.action,
@@ -138,6 +159,7 @@ impl PointerInputData {
             timestamp: event.event_time(),
             pointer_count,
             pointer_id: (pointer_count > 0).then(|| event.pointer_id(0)),
+            mouse_buttons_pressed,
             stylus: (event.tool_type == UIInputToolType::Pen && pointer_count > 0).then(|| {
                 StylusInputData {
                     pressure: event.pointer_pressure(0),
@@ -169,6 +191,7 @@ impl From<GestureInputData> for PointerInputData {
             timestamp: event.timestamp,
             pointer_count: event.pointer_count,
             pointer_id: event.pointer_id,
+            mouse_buttons_pressed: None,
             stylus: None,
         }
     }
@@ -333,6 +356,7 @@ mod tests {
             timestamp: 42,
             pointer_count: 1,
             pointer_id: Some(0),
+            mouse_buttons_pressed: None,
             stylus: None,
         }
     }

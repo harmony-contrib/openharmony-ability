@@ -1,4 +1,5 @@
 import { DefaultXComponent } from "./DefaultXComponent";
+import { window } from "@kit.ArkUI";
 import { Module } from "../ability/type";
 import { getMenuBarPort, MenuBarSlotHost } from "./MenuBarSlot";
 import { hilog } from "@kit.PerformanceAnalysisKit";
@@ -81,7 +82,7 @@ struct MainPage {
         // flags, accelerator dispatch, ESC fullscreen recover — lives in the
         // menu plugin's MenuBarPort implementation (MenuBarSlot.ets seam).
         // Consumed events never reach the synthesizer below.
-        const menuPort = getMenuBarPort();
+        const menuPort = getMenuBarPort(window.findWindow(this.getUIContext().getWindowName()));
         if (menuPort !== null && menuPort.onKeyPreIme(event, this.windowId)) {
           return true;
         }

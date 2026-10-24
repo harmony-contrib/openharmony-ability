@@ -41,6 +41,11 @@ pub struct WindowCreateParams {
     /// Whether to show window decorations (title bar, drag area, close button).
     /// Phase 2: controls FloatPage conditional rendering via LocalStorage.
     pub decorations: bool,
+    /// Allow normal windows to stack independently of their parent on API 26+.
+    pub independent: bool,
+    pub show: bool,
+    pub focus: bool,
+    pub modal: bool,
     /// Whether the window background should be fully transparent.
     /// Phase 3: when true, overrides background_color with 0x00000000.
     pub transparent: bool,
@@ -61,6 +66,10 @@ impl Default for WindowCreateParams {
             y: 100,
             display_id: None,
             decorations: true,
+            independent: false,
+            show: true,
+            focus: true,
+            modal: false,
             transparent: false,
             background_color: None,
         }
@@ -114,6 +123,10 @@ pub fn create_os_window(params: WindowCreateParams) -> napi_ohos::Result<i64> {
             params.y,
             params.display_id,
             params.decorations,
+            params.independent,
+            params.show,
+            params.focus,
+            params.modal,
             params.transparent,
             params.background_color,
         ),
@@ -156,6 +169,10 @@ type CreateSubWindowParams = (
     i32,
     i32,
     Option<i64>,
+    bool,
+    bool,
+    bool,
+    bool,
     bool,
     bool,
     Option<u32>,
@@ -208,6 +225,10 @@ fn build_create_sub_window_args(
         y,
         display_id,
         decorations,
+        independent,
+        show,
+        focus,
+        modal,
         transparent,
         bg_color,
     ) = value;
@@ -227,6 +248,10 @@ fn build_create_sub_window_args(
         config.set("displayId", display_id)?;
     }
     config.set("decorations", decorations)?;
+    config.set("independent", independent)?;
+    config.set("show", show)?;
+    config.set("focus", focus)?;
+    config.set("modal", modal)?;
     config.set("transparent", transparent)?;
     if let Some(color) = bg_color {
         config.set("backgroundColor", color)?;
