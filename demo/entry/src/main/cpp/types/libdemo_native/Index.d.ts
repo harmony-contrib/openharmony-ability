@@ -510,3 +510,5 @@ export interface TerminateRequest {
 export interface TerminateResponse {
   accepted: boolean;
 }
+
+export function playAudioDemo(): Promise<void>;

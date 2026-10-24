@@ -453,6 +453,8 @@ fn openharmony_app(app: OpenHarmonyApp) {
     if let Err(error) = app.register_plugin(raw_bridge::DemoTypedPlugin) {
         hilog_info!(format!("failed to register demo.raw facade: {error}").as_str());
     }
+    app.register_plugin(openharmony_ability_plugin_audio::AudioBridgePlugin)
+        .expect("demo audio facade must be registered");
     app.register_plugin(PermissionBridgePlugin)
         .expect("demo permission facade must be registered");
     app.register_plugin(AppControlBridgePlugin)
@@ -576,4 +578,37 @@ pub async fn demo_file_dialog_save() -> Result<Vec<String>> {
         .filters(vec![FileDialogFilter::new().name("PDF").pattern("pdf")]);
     let response = current_app()?.show_file_dialog(options).await?;
     Ok(response.files)
+}
+
+/// Repeated calls reuse one native player. The file stays borrowed until duplication completes.
+#[napi]
+pub async fn play_audio_demo() -> Result<()> {
+    use openharmony_ability_plugin_audio::{AudioClient, AudioUpdateRequest};
+    use std::{io::Write, os::fd::AsFd, path::PathBuf};
+    let app = current_app()?;
+    let directory = app
+        .base_path()
+        .ok_or_else(|| Error::from_reason("Ability files unavailable"))?;
+    let path = PathBuf::from(directory).join("audio-demo.wav");
+    let mut output =
+        std::fs::File::create(&path).map_err(|error| Error::from_reason(error.to_string()))?;
+    output
+        .write_all(include_bytes!("../../../fixtures/audio/tone.wav"))
+        .map_err(|error| Error::from_reason(error.to_string()))?;
+    drop(output);
+    let file = std::fs::File::open(path).map_err(|error| Error::from_reason(error.to_string()))?;
+    AudioClient::new(&app)?
+        .update(
+            AudioUpdateRequest {
+                player: "demo".into(),
+                replace: true,
+                release: false,
+                play: true,
+                volume: 0.5,
+                report_errors: true,
+                label: "Demo tone".into(),
+            },
+            Some(file.as_fd()),
+        )
+        .await
 }
