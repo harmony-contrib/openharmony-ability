@@ -2,6 +2,9 @@ import { DefaultXComponent, invokeNativeBackPressInterceptor } from "@ohos-rs/ab
 import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/EntryAbility";
 import { SUB_WINDOW_NAME } from "./SubWindowPage";
 import {
+  demoNativeWebview,
+  demoRemoveNativeWebview,
+  demoReleaseNativeWebview,
   createBottomDemoWebview,
   playAudioDemo,
   createComposedDemoWebview,
@@ -32,6 +35,7 @@ const MODULE_NAME = "demo_native";
 @Component
 struct Index {
   @State currentDemo: number = 0;
+  @State nativeWebviewContent: NodeContent = new NodeContent();
   @State busyKey: string = "";
   @State interceptEnabled: boolean = true;
   @State webviewVisible: boolean = true;
@@ -676,6 +680,21 @@ struct Index {
     Column({ space: 12 }) {
       this.Header()
       this.TabBar()
+      Stack() {
+        Button("Native WebView (API 20)")
+          .onClick(() => {
+            this.nativeWebviewContent = demoNativeWebview();
+          })
+        Button("Remove native WebView")
+          .onClick(async () => {
+            await demoRemoveNativeWebview();
+            this.nativeWebviewContent = new NodeContent();
+            demoReleaseNativeWebview();
+          })
+        ContentSlot(this.nativeWebviewContent)
+      }
+      .width(320)
+      .height(48)
       if (this.currentDemo === 0) {
         this.XComponentDemo();
       }

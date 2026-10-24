@@ -1,5 +1,5 @@
 import { WebHeader, window } from "@kit.ArkUI";
-import { BuilderNode } from "@ohos.arkui.node";
+import { BuilderNode, FrameNode } from "@ohos.arkui.node";
 import webview from "@ohos.web.webview";
 import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
@@ -9,6 +9,13 @@ import { BusinessError, deviceInfo, print } from "@kit.BasicServicesKit";
 import { abilityAccessCtrl, common } from "@kit.AbilityKit";
 import { unifiedDataChannel, uniformTypeDescriptor, uniformDataStruct } from "@kit.ArkData";
 import { openNewWindowDialog } from "./NewWindowDialog";
+import {
+  NativeWebviewSettings,
+  NativeWebviewData,
+  nativeEvent,
+  trackNativePageEnd,
+  parseNativeSettings,
+} from "./NativeEmbedding";
 import {
   BridgeCallContext,
   BridgeTypedValue,
@@ -27,6 +34,26 @@ import {
 } from "@ohos-rs/ability";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
+const NATIVE_CREATE_REQUEST_TYPE = "ohos.webview.NativeCreateRequest";
+interface NativeCreatePayload {
+  targetId: number;
+  webview: WebviewCreatePayload;
+  settings: NativeWebviewSettings;
+}
+class NativeNodeReadyPayload {
+  readonly targetId: number;
+  readonly content: FrameNode;
+  constructor(targetId: number, content: FrameNode) {
+    this.targetId = targetId;
+    this.content = content;
+  }
+}
+class NativeNodeRetiringPayload {
+  readonly targetId: number;
+  constructor(targetId: number) {
+    this.targetId = targetId;
+  }
+}
 const CREATE_RESPONSE_TYPE = "ohos.webview.CreateResponse";
 const CONTROLLER_REQUEST_TYPE = "ohos.webview.ControllerRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.webview.Acknowledgement";
@@ -107,6 +134,11 @@ interface WebviewStyle {
   blurRadius?: number | null;
 }
 
+interface NativeControllerEvent {
+  id: string;
+  targetId: number;
+  nativeTag: string;
+}
 interface WebviewInitializationScript {
   script: string;
   scriptRules: string[];
@@ -177,8 +209,10 @@ interface ScriptPayload {
   script: string;
 }
 
-interface ManagedWebview extends WebviewCreatePayload {
+interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
   getHostWindow: () => window.Window;
+  nativeNotify: (phase: string, message?: string, code?: number) => void;
+  nativePageFinished: () => void;
   controller: WebviewController;
   /** Process-unique ArkWeb controller tag; distinct from the module-local public ID. */
   nativeTag: string;
@@ -243,19 +277,30 @@ class WebviewEntry {
   private attaching = false;
   private attached = false;
   private controllerFailure: Error | null = null;
+  private nativeReady: boolean;
+  private controllerObserved = false;
   private readonly controllerWaiters: ControllerWaiter[] = [];
 
   constructor(data: ManagedWebview, node: BuilderNode<[ManagedWebview]>) {
     this.data = data;
     this.node = node;
+    this.nativeReady = data.nativeTarget === null;
   }
 
   beginControllerAttach(): boolean {
-    if (this.attaching || this.attached || this.controllerFailure !== null) {
+    this.controllerObserved = true;
+    if (!this.nativeReady || this.attaching || this.attached || this.controllerFailure !== null) {
       return false;
     }
     this.attaching = true;
     return true;
+  }
+
+  markNativeReady(): void {
+    this.nativeReady = true;
+    if (this.controllerObserved) {
+      handleControllerAttached(this.data);
+    }
   }
 
   markControllerReady(): void {
@@ -626,6 +671,12 @@ class WebviewPickColorResponse {
   }
 }
 
+interface DocumentOptionsRequest {
+  id: string;
+  javascriptEnabled?: boolean | null;
+  initializationScripts?: WebviewInitializationScript[] | null;
+}
+
 interface WebviewUserAgentRequest {
   id: string;
   userAgent: string;
@@ -678,6 +729,61 @@ function ensureWebEngineInitialized(context: BridgePluginContext): void {
     ENGINE_LIFECYCLE_EVENT_TYPE,
     new WebviewEngineLifecycleEvent("engine-initialized", webEngineSchemes) as ESObject,
   );
+}
+
+function validateDocumentOptions(
+  javascriptEnabled: boolean | null | undefined,
+  scripts: WebviewInitializationScript[] | null | undefined,
+): void {
+  if (javascriptEnabled != null && typeof javascriptEnabled !== "boolean") {
+    throw new Error("WebView javascriptEnabled must be a boolean");
+  }
+  if (scripts == null) {
+    return;
+  }
+  if (!Array.isArray(scripts)) {
+    throw new Error("WebView initializationScripts must be an array");
+  }
+  for (const item of scripts) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof item.script !== "string" ||
+      !Array.isArray(item.scriptRules)
+    ) {
+      throw new Error("WebView initialization script requires script and scriptRules");
+    }
+    for (const rule of item.scriptRules) {
+      if (typeof rule !== "string") {
+        throw new Error("WebView initialization script rules must be strings");
+      }
+    }
+  }
+}
+
+function parseDocumentOptions(payload: BridgeTypedValue): DocumentOptionsRequest {
+  if (
+    payload.typeName !== "ohos.webview.DocumentOptionsRequest" ||
+    !payload.value ||
+    typeof payload.value !== "object"
+  ) {
+    throw new Error("update-document-options requires ohos.webview.DocumentOptionsRequest");
+  }
+  const value = payload.value as DocumentOptionsRequest;
+  if (typeof value.id !== "string" || !value.id.trim()) {
+    throw new Error("WebView document options controller id must not be empty");
+  }
+  validateDocumentOptions(value.javascriptEnabled, value.initializationScripts);
+  return {
+    id: value.id,
+    javascriptEnabled: value.javascriptEnabled,
+    initializationScripts: value.initializationScripts?.map(
+      (item: WebviewInitializationScript): WebviewInitializationScript => ({
+        script: item.script,
+        scriptRules: item.scriptRules.slice(),
+      }),
+    ),
+  };
 }
 
 function parseCreatePayload(payload: BridgeTypedValue): WebviewCreatePayload {
@@ -779,6 +885,7 @@ function parseUserAgentRequest(payload: BridgeTypedValue): WebviewUserAgentReque
 }
 
 function ensureCreatePayload(payload: WebviewCreatePayload): WebviewCreatePayload {
+  validateDocumentOptions(payload.javascriptEnabled, payload.initializationScripts);
   if (!payload?.id?.trim()) {
     throw new Error("WebView id must not be empty");
   }
@@ -1347,7 +1454,17 @@ function managedWebviewAttributes(data: ManagedWebview, interceptContext: string
   .onInterceptRequest((event) => {
     return handleWebviewInterceptRequest(data, event as WebInterceptRequestEvent, interceptContext);
   })
-  .onTitleReceive((event) => data.onTitleChange(event.title))
+  .onTitleReceive((event) => {
+    data.onTitleChange(event.title);
+    data.nativeNotify("title");
+  })
+  .onFocus(() => data.nativeNotify("focus"))
+  .onBlur(() => data.nativeNotify("blur"))
+  .onErrorReceive((event) => {
+    if (event.request.isMainFrame()) {
+      data.nativeNotify("error", event.error.getErrorInfo(), event.error.getErrorCode());
+    }
+  })
   .onPageBegin((e) => {
     handleWebviewPageBegin(data, e.url);
   })
@@ -1386,7 +1503,10 @@ function BuildOverlayWebview(data: ManagedWebview) {
     Web({
       src: "",
       controller: data.controller as webview.WebviewController,
-      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+      renderMode:
+        data.nativeTarget !== null || data.transparent === true
+          ? RenderMode.SYNC_RENDER
+          : RenderMode.ASYNC_RENDER,
     })
       .runJavaScriptOnDocumentStart(keySynthesisScripts(data))
       .managedWebviewAttributes(data, "");
@@ -1394,7 +1514,10 @@ function BuildOverlayWebview(data: ManagedWebview) {
     Web({
       src: "",
       controller: data.controller as webview.WebviewController,
-      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+      renderMode:
+        data.nativeTarget !== null || data.transparent === true
+          ? RenderMode.SYNC_RENDER
+          : RenderMode.ASYNC_RENDER,
     })
       .javaScriptOnDocumentStart(keySynthesisScripts(data))
       .managedWebviewAttributes(data, "");
@@ -1407,7 +1530,10 @@ function BuildDirectWebview(data: ManagedWebview) {
     Web({
       src: "",
       controller: data.controller as webview.WebviewController,
-      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+      renderMode:
+        data.nativeTarget !== null || data.transparent === true
+          ? RenderMode.SYNC_RENDER
+          : RenderMode.ASYNC_RENDER,
     })
       .runJavaScriptOnDocumentStart(keySynthesisScripts(data))
       .managedWebviewAttributes(data, "(embedded)")
@@ -1416,7 +1542,10 @@ function BuildDirectWebview(data: ManagedWebview) {
     Web({
       src: "",
       controller: data.controller as webview.WebviewController,
-      renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+      renderMode:
+        data.nativeTarget !== null || data.transparent === true
+          ? RenderMode.SYNC_RENDER
+          : RenderMode.ASYNC_RENDER,
     })
       .javaScriptOnDocumentStart(keySynthesisScripts(data))
       .managedWebviewAttributes(data, "(embedded)")
@@ -1469,7 +1598,7 @@ function BuildWebview(data: ManagedWebview) {
 function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[] {
   const wid = data.windowId ?? 0;
   const base = data.initializationScripts ?? [];
-  if (wid !== 0) {
+  if (wid !== 0 || data.nativeTarget !== null) {
     return base;
   }
   // scriptRules are ArkWeb URL match patterns — an EMPTY array matches no
@@ -1498,6 +1627,9 @@ function handleControllerAttached(data: ManagedWebview): void {
     return;
   }
   try {
+    if (data.nativeSettings !== null) {
+      data.controller.setScrollable(data.nativeSettings.scrollEnabled);
+    }
     if (data.userAgent !== undefined && data.userAgent !== null) {
       data.controller.setCustomUserAgent(data.userAgent);
     }
@@ -1509,7 +1641,9 @@ function handleControllerAttached(data: ManagedWebview): void {
     // into handleControllerAttached). Without this, Tray right-click predefined
     // actions (Copy/Cut/Paste/SelectAll/Undo/Redo) no-op because the executor's
     // controller stays null.
-    notifyPrimaryWebviewController(data.controller as ESObject, data.getHostWindow());
+    if (data.nativeTarget === null) {
+      notifyPrimaryWebviewController(data.controller as ESObject, data.getHostWindow());
+    }
 
     // === §14 fix: register sub-window controller for menu.getTargetController ===
     // Sub-windows only (windowId > 0): main window keeps the one-shot path above.
@@ -1535,7 +1669,9 @@ function handleControllerAttached(data: ManagedWebview): void {
     // ohos-webview-key-synthesis: register the controller (ALL windows incl.
     // main — unlike the sub-window-only WindowManager map above) so
     // MainPage.onKeyPreIme can dispatch synthetic DOM key events into it.
-    notifyKeySynthesisController(wid, data.controller as webview.WebviewController);
+    if (data.nativeTarget === null) {
+      notifyKeySynthesisController(wid, data.controller as webview.WebviewController);
+    }
 
     data.didInitialLoad = true;
     if (data.url) {
@@ -1555,7 +1691,13 @@ function handleControllerAttached(data: ManagedWebview): void {
         "[https-intercept] handleControllerAttached loadData (no url): id=%{public}s",
         String(data.id),
       );
-      data.controller.loadData(data.html!, "text/html", "UTF-8", " ", " ");
+      data.controller.loadData(
+        data.html ?? "",
+        "text/html",
+        "UTF-8",
+        data.nativeTarget !== null ? (data.nativeSettings?.htmlBaseUrl ?? "about:blank") : " ",
+        " ",
+      );
     }
     data.markControllerReady();
   } catch (error) {
@@ -1644,12 +1786,14 @@ function handleWebviewInterceptRequest(
 
 /** pageBegin/pageEnd JS-callback dispatch, gated on the event options. */
 function handleWebviewPageBegin(data: ManagedWebview, url: string): void {
+  data.nativeNotify("start");
   if (data.eventOptions.pageBegin === true) {
     data.onPageBegin(url);
   }
 }
 
 function handleWebviewPageEnd(data: ManagedWebview, url: string): void {
+  data.nativePageFinished();
   if (data.eventOptions.pageEnd === true) {
     data.onPageEnd(url);
   }
@@ -1728,8 +1872,12 @@ const webviewBuilder = wrapBuilder<[ManagedWebview]>(BuildWebview);
  * own: every WebView is mounted either into this module's component root (full-bleed default) or
  * under a caller-provided container handle from the built-in ohos.node plugin.
  */
+// Failed native retirement must retain its external ArkTS owner.
+const failedNativeRetirements: Set<WebviewEntry> = new Set();
+
 class WebviewSurface {
   private readonly entries: Map<string, WebviewEntry> = new Map();
+  private readonly nativeOperations: Map<string, Promise<void>> = new Map();
   private disposed = false;
   private nextMountKey = 1;
   private readonly pluginContext: BridgePluginContext;
@@ -1738,15 +1886,62 @@ class WebviewSurface {
     this.pluginContext = pluginContext;
   }
 
-  async create(payload: WebviewCreatePayload, callContext: BridgeCallContext): Promise<void> {
+  private serializeNative<T>(id: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.nativeOperations.get(id) ?? Promise.resolve();
+    const result = previous.then(task);
+    const settled = result.then(
+      (): void => {},
+      (): void => {},
+    );
+    this.nativeOperations.set(id, settled);
+    settled.then((): void => {
+      if (this.nativeOperations.get(id) === settled) {
+        this.nativeOperations.delete(id);
+      }
+    });
+    return result;
+  }
+
+  async create(
+    payload: WebviewCreatePayload,
+    callContext: BridgeCallContext,
+    nativeTarget: number | null = null,
+    nativeSettings: NativeWebviewSettings | null = null,
+  ): Promise<void> {
+    if (nativeTarget === null) {
+      if (
+        this.nativeOperations.has(payload.id) ||
+        this.entries.get(payload.id)?.data.nativeTarget != null
+      ) {
+        return this.serializeNative(
+          payload.id,
+          (): Promise<void> => this.createEntry(payload, callContext),
+        );
+      }
+      return this.createEntry(payload, callContext);
+    }
+    return this.serializeNative(payload.id, async (): Promise<void> => {
+      await this.createEntry(payload, callContext, nativeTarget, nativeSettings);
+    });
+  }
+
+  private async createEntry(
+    payload: WebviewCreatePayload,
+    callContext: BridgeCallContext,
+    nativeTarget: number | null = null,
+    nativeSettings: NativeWebviewSettings | null = null,
+  ): Promise<void> {
     this.assertActive();
     this.assertCallActive(callContext);
-    this.remove(payload.id);
+    await this.removeEntry(payload.id);
+    this.assertActive();
+    this.assertCallActive(callContext);
     const style = normalizeStyle(payload.style, payload.transparent);
     // Read pending blur radius from WindowManager (set by window set-blur command).
     // Injected at build time here; runtime refresh goes through blurRefreshCallbacks.
     const windowId = payload.windowId ?? 0;
-    const pendingBlur = WindowManager.getInstance().getPendingBlur(windowId);
+    const pendingBlur =
+      nativeTarget === null ? WindowManager.getInstance().getPendingBlur(windowId) : 0;
     hilog.info(
       0x1999,
       "WebviewSurface",
@@ -1760,14 +1955,16 @@ class WebviewSurface {
     // Apply per-window clipboard / zoom-hotkey intercept flags from the create payload.
     // payload values are boolean|null; null → undefined → keep default (true = ArkWeb native).
     // See ohos-webview-flag-clipboard / ohos-webview-flag-zoom-hotkeys specs.
-    WindowManager.getInstance().setWebviewFlags(
-      windowId,
-      payload.clipboard ?? undefined,
-      payload.zoomHotkeys ?? undefined,
-      windowId > 0
-        ? WindowManager.getInstance().getWindow(windowId)
-        : this.pluginContext.getWindow(),
-    );
+    if (nativeTarget === null) {
+      WindowManager.getInstance().setWebviewFlags(
+        windowId,
+        payload.clipboard ?? undefined,
+        payload.zoomHotkeys ?? undefined,
+        windowId > 0
+          ? WindowManager.getInstance().getWindow(windowId)
+          : this.pluginContext.getWindow(),
+      );
+    }
     hilog.info(
       0x1999,
       "WebviewSurface",
@@ -1789,6 +1986,20 @@ class WebviewSurface {
       id: payload.id,
       windowId: payload.windowId ?? null,
       mountParentHandle: parentHandle,
+      nativeTarget,
+      nativeSettings,
+      nativeActive: true,
+      nativeAttached: false,
+      nativeControllerAttached: false,
+      nativeTasks: new Set(),
+      nativeLoading: false,
+      nativeEpoch: 0,
+      nativeNotify: (phase: string, message?: string, code?: number): void => {
+        nativeEvent(this.pluginContext, data, phase, message, code);
+      },
+      nativePageFinished: (): void => {
+        trackNativePageEnd(this.pluginContext, data);
+      },
       mountKey: `ohos.webview.${instanceId}`,
       nativeTag,
       httpsInterceptProtocols: new Set<string>(payload.httpsInterceptProtocolList ?? []),
@@ -2100,6 +2311,26 @@ class WebviewSurface {
     }
     data.beginControllerAttach = (): boolean => entry.beginControllerAttach();
     data.notifyNativeControllerAttached = (): void => {
+      if (nativeTarget !== null) {
+        // Record the attempted receipt before reentrant user callbacks can close
+        // this entry; partial installation must receive the matching removal.
+        data.nativeControllerAttached = true;
+        const receipt: NativeControllerEvent = {
+          id: data.id,
+          targetId: nativeTarget,
+          nativeTag: data.nativeTag,
+        };
+        const response = this.pluginContext.invokeNativeSync(
+          "native-controller-attached",
+          "ohos.webview.NativeControllerEvent",
+          EVENT_ACKNOWLEDGEMENT_TYPE,
+          receipt,
+        ) as BridgeAcknowledgement;
+        if (response?.accepted !== true || !data.nativeActive || !callContext.isActive()) {
+          throw new Error("Native controller attachment was rejected or retired");
+        }
+        return;
+      }
       notifyNative(
         this.pluginContext,
         "controller-attached",
@@ -2111,14 +2342,36 @@ class WebviewSurface {
     data.failControllerAttach = (reason: string): void => entry.failController(reason);
     let registered = false;
     try {
+      // Native attach can synchronously invoke Rust while the SDK builds. Make
+      // this owner visible to onClosing before exposing controller callbacks.
+      if (nativeTarget !== null) {
+        this.entries.set(payload.id, entry);
+        registered = true;
+      }
       node.build(webviewBuilder, data);
+      this.assertActive();
+      this.assertCallActive(callContext);
       this.entries.set(payload.id, entry);
       registered = true;
       const frameNode = node.getFrameNode();
       if (frameNode === null) {
         throw new Error(`Unable to build WebView '${payload.id}': no FrameNode`);
       }
-      if (parentHandle !== null) {
+      if (nativeTarget !== null) {
+        data.nativeAttached = true;
+        const receipt = this.pluginContext.invokeNativeSync(
+          "native-node-ready",
+          "ohos.node.NativeNodeReady",
+          "ohos.node.Acknowledgement",
+          new NativeNodeReadyPayload(nativeTarget, frameNode),
+        ) as BridgeAcknowledgement;
+        if (receipt?.accepted !== true) {
+          throw new Error("Native attachment target rejected WebView");
+        }
+        // SDK build/mount may synchronously announce the controller. Only install
+        // declarations after the ready callback has released the target's attach guard.
+        entry.markNativeReady();
+      } else if (parentHandle !== null) {
         this.pluginContext.getFrameNode(parentHandle).appendChild(frameNode);
         hilog.info(
           0x1999,
@@ -2145,7 +2398,9 @@ class WebviewSurface {
       }
     } catch (error) {
       if (registered) {
-        this.remove(payload.id, entry);
+        await this.removeEntry(payload.id, entry);
+      } else {
+        node.dispose();
       }
       throw new Error(`Unable to attach WebView '${payload.id}': ${String(error)}`);
     }
@@ -2153,7 +2408,7 @@ class WebviewSurface {
       await entry.waitForController(callContext.onCancel);
       this.assertCallActive(callContext);
     } catch (error) {
-      this.remove(payload.id, entry);
+      await this.removeEntry(payload.id, entry);
       throw new Error(`Unable to initialize WebView '${payload.id}': ${String(error)}`);
     }
     // Register runtime blur refresh callback so later set-blur commands update this
@@ -2223,7 +2478,15 @@ class WebviewSurface {
   async loadHtml(id: string, html: string, callContext: BridgeCallContext): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
     try {
-      entry.data.controller.loadData(html, "text/html", "UTF-8", " ", " ");
+      entry.data.controller.loadData(
+        html,
+        "text/html",
+        "UTF-8",
+        entry.data.nativeTarget !== null
+          ? (entry.data.nativeSettings?.htmlBaseUrl ?? "about:blank")
+          : " ",
+        " ",
+      );
     } catch (error) {
       throw new Error(`Unable to load WebView HTML: ${String(error)}`);
     }
@@ -2277,19 +2540,40 @@ class WebviewSurface {
     }
   }
 
-  remove(id: string, expected?: WebviewEntry, detachNode: boolean = true): boolean {
+  async remove(id: string): Promise<boolean> {
+    if (this.nativeOperations.has(id) || this.entries.get(id)?.data.nativeTarget != null) {
+      return this.serializeNative(id, (): Promise<boolean> => this.removeEntry(id));
+    }
+    return this.removeEntry(id);
+  }
+
+  private async removeEntry(
+    id: string,
+    expected?: WebviewEntry,
+    detachNode: boolean = true,
+    cleanup?: BridgePluginHookContext,
+  ): Promise<boolean> {
     const entry = this.entries.get(id);
     if (!entry || (expected !== undefined && entry !== expected)) {
       return false;
     }
-    this.entries.delete(id);
     // Unregister runtime blur refresh callback (sub-window webviews only).
     const wid = entry.data.windowId ?? 0;
     if (wid > 0) {
       WindowManager.getInstance().unregisterBlurRefreshCallback(wid);
     }
     entry.failController(`WebView '${id}' was removed before its controller attached`);
-    if (detachNode) {
+    if (entry.data.nativeTarget !== null) {
+      this.retireNativeEntry(entry, cleanup);
+      await Promise.allSettled(Array.from(entry.data.nativeTasks));
+      try {
+        entry.node.dispose();
+      } catch (error) {
+        failedNativeRetirements.add(entry);
+        throw new Error(String(error));
+      }
+      failedNativeRetirements.delete(entry);
+    } else if (detachNode) {
       const parentHandle = entry.data.mountParentHandle;
       if (parentHandle !== null) {
         const frameNode = entry.node.getFrameNode();
@@ -2305,7 +2589,13 @@ class WebviewSurface {
         this.pluginContext.removeChild(entry.data.mountKey);
       }
     }
+    if (this.entries.get(id) === entry) {
+      this.entries.delete(id);
+    }
     try {
+      if (entry.data.nativeTarget !== null) {
+        return true;
+      }
       notifyNative(
         this.pluginContext,
         "controller-removed",
@@ -2778,13 +3068,155 @@ class WebviewSurface {
     }
   }
 
-  dispose(detachNodes: boolean = true): void {
-    if (this.disposed) {
-      return;
+  private retireNativeEntry(entry: WebviewEntry, cleanup?: BridgePluginHookContext): void {
+    entry.data.nativeActive = false;
+    entry.data.nativeEpoch++;
+    entry.failController("Native WebView retired");
+    if (entry.data.resizeDebounceTimer) {
+      clearTimeout(entry.data.resizeDebounceTimer);
+      entry.data.resizeDebounceTimer = 0;
     }
+    const context = cleanup ?? this.pluginContext;
+    let failure: Error | undefined;
+    // Remove declarations while the Ability target is still live. Retiring the
+    // native edge then closes the dispatch guard and releases the retained owner.
+    if (entry.data.nativeControllerAttached) {
+      try {
+        const receipt: NativeControllerEvent = {
+          id: entry.data.id,
+          targetId: entry.data.nativeTarget!,
+          nativeTag: entry.data.nativeTag,
+        };
+        const response = context.invokeNativeSync(
+          "native-controller-removed",
+          "ohos.webview.NativeControllerEvent",
+          EVENT_ACKNOWLEDGEMENT_TYPE,
+          receipt,
+        ) as BridgeAcknowledgement;
+        if (response?.accepted !== true) {
+          throw new Error("Native controller removal rejected");
+        }
+        entry.data.nativeControllerAttached = false;
+      } catch (error) {
+        failure = new Error(String(error));
+      }
+    }
+    if (!failure && entry.data.nativeAttached) {
+      try {
+        const response = context.invokeNativeSync(
+          "native-node-retiring",
+          "ohos.node.NativeNodeRetiring",
+          "ohos.node.Acknowledgement",
+          new NativeNodeRetiringPayload(entry.data.nativeTarget!),
+        ) as BridgeAcknowledgement;
+        if (response?.accepted !== true) {
+          throw new Error("Native WebView retirement rejected");
+        }
+        entry.data.nativeAttached = false;
+      } catch (error) {
+        failure ??= new Error(String(error));
+      }
+    }
+    if (failure) {
+      failedNativeRetirements.add(entry);
+      throw failure;
+    }
+    try {
+      entry.data.controller.stop();
+    } catch {}
+  }
+
+  retireNative(cleanup: BridgePluginHookContext): void {
     this.disposed = true;
-    for (const id of Array.from(this.entries.keys())) {
-      this.remove(id, undefined, detachNodes);
+    let firstError: Error | undefined;
+    for (const entry of this.entries.values()) {
+      if (entry.data.nativeTarget !== null) {
+        try {
+          this.retireNativeEntry(entry, cleanup);
+        } catch (error) {
+          firstError = firstError ?? new Error(String(error));
+        }
+      }
+    }
+    if (firstError) {
+      throw firstError;
+    }
+  }
+
+  async updateDocumentOptions(
+    options: DocumentOptionsRequest,
+    context: BridgeCallContext,
+  ): Promise<void> {
+    const entry = await this.controllerEntry(options.id, context);
+    this.assertCurrentEntry(options.id, entry, context);
+    const previousJavascript = entry.data.javascriptEnabled;
+    const previousScripts = entry.data.initializationScripts;
+    if (options.javascriptEnabled != null) {
+      entry.data.javascriptEnabled = options.javascriptEnabled;
+    }
+    if (options.initializationScripts != null) {
+      entry.data.initializationScripts = options.initializationScripts;
+    }
+    try {
+      entry.node.update(entry.data);
+    } catch (error) {
+      entry.data.javascriptEnabled = previousJavascript;
+      entry.data.initializationScripts = previousScripts;
+      throw new Error(String(error));
+    }
+    this.assertCurrentEntry(options.id, entry, context);
+  }
+
+  async configureNative(
+    settings: NativeWebviewSettings,
+    context: BridgeCallContext,
+  ): Promise<void> {
+    const entry = await this.controllerEntry(settings.id, context);
+    if (entry.data.nativeTarget === null) {
+      throw new Error("Controller is not natively embedded");
+    }
+    entry.data.nativeSettings = settings;
+    entry.data.controller.setScrollable(settings.scrollEnabled);
+  }
+
+  async navigateNative(id: string, action: string, context: BridgeCallContext): Promise<void> {
+    const entry = await this.controllerEntry(id, context);
+    if (action === "go-back") {
+      if (entry.data.controller.accessBackward()) {
+        entry.data.controller.backward();
+      }
+    } else if (action === "go-forward") {
+      if (entry.data.controller.accessForward()) {
+        entry.data.controller.forward();
+      }
+    } else {
+      entry.data.controller.stop();
+    }
+  }
+
+  async dispose(detachNodes: boolean = true, cleanup?: BridgePluginHookContext): Promise<void> {
+    this.disposed = true;
+    let firstError: Error | undefined;
+    if (cleanup) {
+      try {
+        this.retireNative(cleanup);
+      } catch (error) {
+        firstError = new Error(String(error));
+      }
+    }
+    await Promise.allSettled(Array.from(this.nativeOperations.values()));
+    const results = await Promise.allSettled(
+      Array.from(this.entries.keys()).map((id: string) =>
+        this.removeEntry(id, undefined, detachNodes, cleanup),
+      ),
+    );
+    if (firstError) {
+      throw firstError;
+    }
+    for (const result of results) {
+      if (result.status === "rejected") {
+        throw new Error(String(result.reason));
+      }
     }
   }
 
@@ -2795,14 +3227,30 @@ class WebviewSurface {
   }
 
   private async controllerEntry(id: string, callContext: BridgeCallContext): Promise<WebviewEntry> {
+    this.assertActive();
     this.assertCallActive(callContext);
     const entry = this.entries.get(id);
     if (!entry) {
       throw new Error(`Unknown WebView controller '${id}'`);
     }
     await entry.waitForController(callContext.onCancel);
-    this.assertCallActive(callContext);
+    this.assertCurrentEntry(id, entry, callContext);
     return entry;
+  }
+
+  private assertCurrentEntry(
+    id: string,
+    entry: WebviewEntry,
+    callContext: BridgeCallContext,
+  ): void {
+    this.assertActive();
+    this.assertCallActive(callContext);
+    if (
+      this.entries.get(id) !== entry ||
+      (entry.data.nativeTarget !== null && !entry.data.nativeActive)
+    ) {
+      throw new Error(`WebView controller '${id}' was retired or replaced`);
+    }
   }
 
   private assertCallActive(callContext: BridgeCallContext): void {
@@ -2821,11 +3269,15 @@ export class WebviewPlugin extends AsyncPluginBase {
     this.surface = new WebviewSurface(this.getContext());
   }
 
-  override onLifecycle(event: BridgeLifecycleEvent, _context: BridgePluginHookContext): void {
+  override async onLifecycle(
+    event: BridgeLifecycleEvent,
+    context: BridgePluginHookContext,
+  ): Promise<void> {
     if (event.kind === "ui-context-destroy") {
       // BridgeHost already detached this module's component and owns its node-tree cleanup.
-      this.surface?.dispose(false);
+      const surface = this.surface;
       this.surface = undefined;
+      await surface?.dispose(false, context);
       return;
     }
     if (event.kind === "ui-context-ready" && this.surface === undefined) {
@@ -2842,6 +3294,52 @@ export class WebviewPlugin extends AsyncPluginBase {
       throw new Error("Bridge session is no longer active");
     }
     const surface = this.requireSurface();
+    if (action === "create-native") {
+      if (
+        payload.typeName !== NATIVE_CREATE_REQUEST_TYPE ||
+        !payload.value ||
+        typeof payload.value !== "object"
+      ) {
+        throw new Error("create-native requires ohos.webview.NativeCreateRequest");
+      }
+      const native = payload.value as NativeCreatePayload;
+      if (
+        !Number.isInteger(native.targetId) ||
+        native.targetId <= 0 ||
+        native.targetId > 0xffffffff
+      ) {
+        throw new Error("Invalid native WebView target");
+      }
+      const create = ensureCreatePayload(
+        parseCreatePayload({ typeName: CREATE_REQUEST_TYPE, value: native.webview }),
+      );
+      if (create.parentHandle != null || create.windowId != null) {
+        throw new Error("Native WebView cannot override ArkTS parent/window");
+      }
+      const settings = parseNativeSettings(native.settings);
+      if (settings.id !== create.id) {
+        throw new Error("Native settings controller ID mismatch");
+      }
+      await surface.create(create, context, native.targetId, settings);
+      if (!context.isActive()) {
+        throw new Error("Session closed while creating native WebView");
+      }
+      return { typeName: CREATE_RESPONSE_TYPE, value: new WebviewCreatedResponse(create.id) };
+    }
+    if (action === "update-document-options") {
+      await surface.updateDocumentOptions(parseDocumentOptions(payload), context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
+    }
+    if (action === "configure-native") {
+      if (payload.typeName !== "ohos.webview.NativeSettings") {
+        throw new Error("configure-native requires ohos.webview.NativeSettings");
+      }
+      await surface.configureNative(
+        parseNativeSettings(payload.value as NativeWebviewSettings),
+        context,
+      );
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
+    }
     if (action === "create") {
       const createPayload = ensureCreatePayload(parseCreatePayload(payload));
       await surface.create(createPayload, context);
@@ -3009,6 +3507,9 @@ export class WebviewPlugin extends AsyncPluginBase {
       }
       await surface.setZoom(controllerPayload.id, controllerPayload.zoom, context);
       accepted = true;
+    } else if (action === "go-back" || action === "go-forward" || action === "stop-loading") {
+      await surface.navigateNative(controllerPayload.id, action, context);
+      accepted = true;
     } else if (action === "reload") {
       await surface.reload(controllerPayload.id, context);
       accepted = true;
@@ -3061,17 +3562,21 @@ export class WebviewPlugin extends AsyncPluginBase {
       }
       accepted = surface.setWebDebuggingAccess(controllerPayload.visible);
     } else if (action === "remove") {
-      accepted = surface.remove(controllerPayload.id);
+      accepted = await surface.remove(controllerPayload.id);
     } else {
       throw new Error(`Unsupported ohos.webview action '${action}'`);
     }
     return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(accepted) };
   }
 
-  onDispose(): void {
+  override onClosing(context: BridgePluginHookContext): void {
+    this.surface?.retireNative(context);
+  }
+
+  override async onDispose(context: BridgePluginHookContext): Promise<void> {
     const surface = this.surface;
     this.surface = undefined;
-    surface?.dispose();
+    await surface?.dispose(true, context);
   }
 
   private requireSurface(): WebviewSurface {
