@@ -1,6 +1,6 @@
 import window from "@ohos.window";
-import { image } from "@kit.ImageKit";
 import pointer from "@ohos.multimodalInput.pointer";
+import { image } from "@kit.ImageKit";
 import { setWindowIcon } from "./WindowIcon";
 import { parseCustomCursor } from "./CustomCursor";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
@@ -1197,27 +1197,30 @@ export class WindowPlugin extends AsyncPluginBase {
       });
       try {
         this.assertCallActive(context);
-        await pointer.setCustomCursor(
-          win.getWindowProperties().id,
-          pixelMap,
-          request.hotspotX,
-          request.hotspotY,
-        );
+        const nativeId = win.getWindowProperties().id;
+        await pointer.setCustomCursor(nativeId, pixelMap, request.hotspotX, request.hotspotY);
         this.assertCallActive(context);
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
-      } finally {
-        await pixelMap.release();
+      } catch (error) {
+        try {
+          await pixelMap.release();
+        } catch (releaseError) {
+          console.warn(`Cursor release failed: ${String(releaseError)}`);
+        }
+        throw error as Error;
       }
+      await pixelMap.release();
+      this.assertCallActive(context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-cursor-icon") {
-      // Delegates to WindowManager.setPointerStyle, which resolves the real OHOS
-      // window id internally (pointer.setPointerStyleSync). Fire-and-forget on
-      // the ArkTS side: per-window failures are logged there, the ack only
-      // confirms the request was dispatched (tao's set_cursor_icon is a void
-      // setter).
       const request = parseCursorIconRequest(payload);
-      WindowManager.getInstance().setPointerStyle(request.windowId, request.style);
+      const win = await this.requireWindow(request.windowId, context);
+      pointer.setPointerStyleSync(
+        win.getWindowProperties().id,
+        request.style as pointer.PointerStyle,
+      );
+      this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
