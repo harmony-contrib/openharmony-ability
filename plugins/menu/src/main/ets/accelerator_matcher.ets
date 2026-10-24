@@ -131,7 +131,7 @@ export class AcceleratorMatcher {
       if (item.enabled === false) {
         continue;
       }
-      if (item.accelerator) {
+      if (item.accelerator && item.acceleratorDisplayOnly !== true) {
         const keyCombo = this.normalizeAccelerator(item.accelerator);
         this.accelerators.set(keyCombo, item);
       }
