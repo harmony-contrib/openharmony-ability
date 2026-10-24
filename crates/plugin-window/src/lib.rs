@@ -28,6 +28,9 @@ pub use prompt::{
     WindowPromptAnchor, WindowPromptAppearance, WindowPromptRequest, WindowPromptResponse,
 };
 
+mod system_bars;
+pub use system_bars::WindowStatusBarRequest;
+
 pub struct WindowBridgePlugin;
 
 impl BridgePlugin for WindowBridgePlugin {
