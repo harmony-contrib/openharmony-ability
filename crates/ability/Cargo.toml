@@ -15,7 +15,7 @@ keyboard = ["ohos-arkui-binding/api-15"]
 api-19 = ["ohos-arkui-binding/api-19"]
 api-26 = ["api-19", "ohos-ime-binding/api-26"]
 # API-18 mouse cancellation is opt-in; basic XComponent mouse input remains available.
-mouse = ["ohos-xcomponent-binding/api-18", "ohos-arkui-binding/api-15"]
+mouse = ["ohos-xcomponent-binding/api-18", "ohos-arkui-binding/api-17"]
 stylus = ["ohos-arkui-binding/api-17"]
 # Native file drag/drop is opt-in; ordinary keyboard/pointer input needs no UDMF or preview images.
 drag = ["dep:ohos-udmf-binding", "ohos-arkui-binding/udmf", "ohos-arkui-binding/image"]
