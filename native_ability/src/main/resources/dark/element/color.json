@@ -2,23 +2,23 @@
   "color": [
     {
       "name": "menubar_bg",
-      "value": "#2C2C2C"
+      "value": "#191A1C"
     },
     {
       "name": "menubar_text",
-      "value": "#E0E0E0"
+      "value": "#DBFFFFFF"
     },
     {
       "name": "menubar_text_disabled",
-      "value": "#666666"
+      "value": "#66FFFFFF"
     },
     {
       "name": "menubar_item_hover",
-      "value": "#3C3C3C"
+      "value": "#0CFFFFFF"
     },
     {
       "name": "menubar_item_active",
-      "value": "#4C4C4C"
+      "value": "#19FFFFFF"
     }
   ]
 }

@@ -149,13 +149,13 @@ function promptBuilder(model: PromptModel) {
     Column({ space: 16 }) {
       Column({ space: 8 }) {
         Text(model.request.message)
-          .fontSize(18)
+          .fontSize($r("sys.float.Subtitle_L"))
           .fontWeight(600)
           .fontColor(model.palette.foreground)
           .width("100%")
         if (model.request.detail) {
           Text(model.request.detail)
-            .fontSize(14)
+            .fontSize($r("sys.float.Body_M"))
             .lineHeight(20)
             .fontColor(model.palette.mutedForeground)
             .width("100%");
@@ -173,7 +173,7 @@ function promptBuilder(model: PromptModel) {
         ForEach(model.buttonIndices, (index: number) => {
           Button({ type: ButtonType.Normal }) {
             Text(model.request.buttons[index])
-              .fontSize(14)
+              .fontSize($r("sys.float.Body_M"))
               .fontWeight(FontWeight.Medium)
               .fontColor(
                 index === 0 && index !== model.request.cancelIndex
@@ -190,7 +190,11 @@ function promptBuilder(model: PromptModel) {
               ? model.palette.primary
               : model.palette.background,
           )
-          .border({ width: 1, color: model.palette.border, radius: 6 })
+          .border({
+            width: 1,
+            color: model.palette.border,
+            radius: $r("sys.float.corner_radius_level3"),
+          })
           .focusBox({
             strokeColor: ColorMetrics.numeric(model.palette.focus),
             strokeWidth: LengthMetrics.vp(2),
@@ -209,30 +213,14 @@ function promptBuilder(model: PromptModel) {
   .width(model.placement.width)
   .constraintSize({ maxHeight: model.placement.maxHeight })
   .backgroundColor(model.palette.background)
-  .border({ width: 1, color: model.palette.border, radius: 8 })
-  .shadow({ radius: 16, color: "#1A000000", offsetY: 4 })
+  .border({ width: 1, color: model.palette.border, radius: $r("sys.float.corner_radius_level4") })
+  .shadow(ShadowStyle.OUTER_FLOATING_SM)
   .onAreaChange((_oldArea: Area, newArea: Area): void => {
     model.measure(Number(newArea.width), Number(newArea.height));
   });
 }
 
 /** One dialog lifetime; only ArkTS owns the ComponentContent and UIContext. */
-const PROMPT_DIALOG_TRANSITION: TransitionEffect = TransitionEffect.asymmetric(
-  TransitionEffect.OPACITY.combine(TransitionEffect.scale({ x: 0.9, y: 0.9 })).animation({
-    duration: 200,
-    curve: Curve.Friction,
-  }),
-  TransitionEffect.IDENTITY.animation({ duration: 0 }),
-);
-
-const PROMPT_MASK_TRANSITION: TransitionEffect = TransitionEffect.asymmetric(
-  TransitionEffect.OPACITY.animation({
-    duration: 200,
-    curve: Curve.Friction,
-  }),
-  TransitionEffect.IDENTITY.animation({ duration: 0 }),
-);
-
 class PromptSession {
   private static nextFocusId: number = 0;
   private readonly focusId: string = `native-window-prompt-${PromptSession.nextFocusId++}`;
@@ -389,10 +377,7 @@ class PromptSession {
       } else {
         await this.uiContext.getPromptAction().openCustomDialog(content, {
           isModal: true,
-          maskColor: "#80000000",
-          transition: PROMPT_DIALOG_TRANSITION,
-          dialogTransition: PROMPT_DIALOG_TRANSITION,
-          maskTransition: PROMPT_MASK_TRANSITION,
+          maskColor: $r("sys.color.mask_fourth"),
           autoCancel: this.request.cancelIndex !== undefined && this.request.cancelIndex !== null,
           alignment: this.request.anchor ? DialogAlignment.TopStart : DialogAlignment.Center,
           offset: this.offset(),
@@ -419,7 +404,6 @@ class PromptSession {
           },
           onWillDismiss: (action: DismissDialogAction): void => {
             if (this.completed) {
-              this.disappearing = true;
               action.dismiss();
             } else if (action.reason === DismissReason.TOUCH_OUTSIDE && !this.request.anchor) {
               // Confirmation dialogs require an explicit choice; Escape still cancels.
@@ -428,7 +412,6 @@ class PromptSession {
               this.request.cancelIndex !== undefined &&
               this.request.cancelIndex !== null
             ) {
-              this.disappearing = true;
               action.dismiss();
               void this.choose(this.request.cancelIndex);
             }
@@ -497,15 +480,13 @@ class PromptSession {
   private async closeOpened(content: ComponentContent<PromptModel>): Promise<void> {
     await this.positionUpdates;
     let closeRequested = false;
-    if (!this.disappearing) {
-      try {
-        await this.uiContext.getPromptAction().closeCustomDialog(content);
-        closeRequested = true;
-      } catch (error) {
-        // Auto-dismiss removes the dialog from the SDK registry before its animation ends.
-        if (!this.disappearing) {
-          console.warn(`[WindowPrompt] close failed: ${String(error)}`);
-        }
+    try {
+      await this.uiContext.getPromptAction().closeCustomDialog(content);
+      closeRequested = true;
+    } catch (error) {
+      // Auto-dismiss removes the dialog from the SDK registry before its animation ends.
+      if (!this.disappearing) {
+        console.warn(`[WindowPrompt] close failed: ${String(error)}`);
       }
     }
     // The SDK resolves closeCustomDialog before removing its animated focus scope.
