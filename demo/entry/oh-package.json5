@@ -11,6 +11,7 @@
     "libdemo_sub_native.so": "file:./src/main/cpp/types/libdemo_sub_native",
     "@ohos-rs/ability": "workspace:*",
     "@ohos-rs/ability-plugin-app-control": "workspace:*",
+    "@ohos-rs/ability-plugin-audio": "workspace:*",
     "@ohos-rs/ability-plugin-permission": "workspace:*",
     "@ohos-rs/ability-plugin-resource": "workspace:*",
     "@ohos-rs/ability-plugin-webview": "workspace:*",

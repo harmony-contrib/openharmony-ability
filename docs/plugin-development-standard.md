@@ -212,6 +212,7 @@ export { LoginPlugin };
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
+| `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `ohos.audio.UpdateResponse { accepted }` | async / `ability`；ArkTS 持有 `fs.dup` 独立文件句柄直至播放器释放 |
 | `ohos.clipboard` / 原生 facade | 保留 `ClipboardRecord`、`ClipboardMimeContent`、`ClipboardReadMimeResponse`、`ClipboardReadContentResponse` 具名值类型 | async / `ability` 注册身份保留；数据直接经原生 `OH_Pasteboard` 与 UDMF 读写 |
 | `ohos.window` / `show-prompt` | `ohos.window.PromptRequest { windowId, message, detail?, level, buttons, cancelIndex?, anchor?: PromptAnchor }` → `ohos.window.PromptResponse { index }` | async / `ui-context`；`PromptAnchor { x, y }` 为目标窗口内容局部逻辑坐标，单位 vp，不是物理 px 或屏幕全局坐标；弹窗按实际尺寸限制在窗口可用区域内；原生弹窗取消、调用取消和销毁均释放组件 |
 | `ohos.window` / `get-window-stack` | `ohos.window.StackRequest { displayId, windowIds }` → `ohos.window.StackResponse { windowIds }` | async / `ui-context`；从 SDK 可见窗口顺序中筛选请求的本应用窗口，顶部在前 |
