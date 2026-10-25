@@ -119,5 +119,6 @@ pub use napi_ohos;
 // re-export arkui and avoid the need to import it in the lib.rs
 pub use napi_ohos::Either;
 pub use ohos_arkui_binding as arkui;
+pub use ohos_arkui_binding;
 pub use ohos_ime_binding as ime;
 pub use ohos_xcomponent_binding as xcomponent;

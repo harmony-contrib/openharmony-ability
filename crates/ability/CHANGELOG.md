@@ -1,5 +1,14 @@
 # Unreleased
 
+- Move `NativeAttachment` and `ContentRoot` ownership into Ability; bindings now
+  supplies only node, content and retention primitives. Strong N-API references
+  keep attached FrameNode/NodeContent objects alive until successful retirement.
+- **Breaking:** native ready requests decode without mounting. Main-thread
+  handlers must explicitly call `receipt.attach(&event)`. Use Ability's
+  `NativeAttachment`, key callbacks only by `target_id`, and dispatch them inside
+  `NativeAttachment::dispatch`. Unknown/retired IDs are errors; IDs are never reused.
+- **Breaking:** `NativeAttachment::with_child` returns a `Result`, and retirement
+  permanently closes its target. Create a new target for a new content generation.
 - Add `AxisEventData::scroll_step` for discrete wheel metadata. Zero means
   unavailable, not one detent; raw axis deltas retain their existing sign and units.
 - **Breaking:** `AxisEventData` is now non-exhaustive. Consumers must match with
