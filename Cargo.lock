@@ -100,6 +100,7 @@ dependencies = [
  "ohos-hilog-binding",
  "openharmony-ability",
  "openharmony-ability-derive",
+ "openharmony-ability-plugin-accessibility",
  "openharmony-ability-plugin-app-control",
  "openharmony-ability-plugin-audio",
  "openharmony-ability-plugin-autostart",
@@ -753,7 +754,6 @@ dependencies = [
 name = "openharmony-ability-plugin-accessibility"
 version = "1.0.0-beta.3"
 dependencies = [
- "futures-executor",
  "log",
  "napi-derive-ohos",
  "napi-ohos",
