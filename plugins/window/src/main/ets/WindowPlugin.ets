@@ -918,6 +918,9 @@ export class WindowPlugin extends AsyncPluginBase {
     if (action === "focus") {
       const request = parseWindowIdRequest(payload);
       const manager = WindowManager.getInstance();
+      manager.configureDeferredWindow(request.windowId, (options): void => {
+        options.focus = true;
+      });
       manager.startDeferredWindowCreation(request.windowId);
       const win = await this.requireWindow(request.windowId, context);
       try {

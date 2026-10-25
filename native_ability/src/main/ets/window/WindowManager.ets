@@ -1578,6 +1578,10 @@ export class WindowManager {
       pending.reject(new Error(`Timed out creating Ability window ${opts.windowId}`));
     }, 30000);
     try {
+      const previousFocusedWindowId =
+        this.lastFocusedWindowId >= 0 && this.lastFocusedWindowId !== opts.windowId
+          ? this.lastFocusedWindowId
+          : 0;
       const parameters: Record<string, Object> = {};
       parameters[INDEPENDENT_WINDOW_ID_PARAMETER] = opts.windowId;
       await Promise.all([
@@ -1610,6 +1614,15 @@ export class WindowManager {
       if (pending.canceled) {
         throw new Error(`Ability window ${opts.windowId} creation was canceled`);
       }
+      if (
+        opts.focus === false &&
+        previousFocusedWindowId !== opts.windowId &&
+        (this.lastFocusedWindowId < 0 ||
+          this.lastFocusedWindowId === opts.windowId ||
+          this.lastFocusedWindowId === previousFocusedWindowId)
+      ) {
+        await this.restorePreviousFocusAfterAbilityLaunch(opts.windowId, previousFocusedWindowId);
+      }
       return opts.windowId;
     } catch (error) {
       pending.canceled = true;
@@ -1632,6 +1645,55 @@ export class WindowManager {
     } finally {
       clearTimeout(timeout);
       this.pendingAbilityWindows.delete(opts.windowId);
+    }
+  }
+
+  private async restorePreviousFocusAfterAbilityLaunch(
+    launchedWindowId: number,
+    previousWindowId: number,
+  ): Promise<void> {
+    const previousWindow = this.getWindow(previousWindowId);
+    if (!previousWindow) {
+      return;
+    }
+    try {
+      if (previousWindow.getWindowStatus() === window.WindowStatusType.MINIMIZE) {
+        return;
+      }
+    } catch {
+      // Ignore window status lookup failures and still try focus restoration.
+    }
+    const launchedWindow = this.getWindow(launchedWindowId);
+    if (launchedWindow) {
+      try {
+        const sourceId = launchedWindow.getWindowProperties().id;
+        const targetId = previousWindow.getWindowProperties().id;
+        if (sourceId > 0 && targetId > 0 && sourceId !== targetId) {
+          await window.shiftAppWindowFocus(sourceId, targetId);
+        }
+      } catch (error) {
+        hilog.debug(
+          DOMAIN,
+          "WindowManager",
+          "shiftAppWindowFocus after non-activating launch failed: %{public}s",
+          String(error),
+        );
+      }
+    }
+    try {
+      if (deviceInfo.sdkApiVersion >= 20 && !this.isUIAbilityMainWindow(previousWindowId)) {
+        await previousWindow.showWindow({ focusOnShow: true });
+      } else {
+        await previousWindow.showWindow();
+      }
+    } catch (error) {
+      hilog.warn(
+        DOMAIN,
+        "WindowManager",
+        "Restoring focus to window %{public}d after non-activating launch failed: %{public}s",
+        previousWindowId,
+        String(error),
+      );
     }
   }
 
