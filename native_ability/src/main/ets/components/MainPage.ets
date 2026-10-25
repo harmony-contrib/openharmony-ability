@@ -59,7 +59,9 @@ struct MainPage {
             if (this.resolvedModuleName !== "") {
               DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: this.windowId });
             } else {
-              Text("Loading Main Window...").fontSize(20).fontColor(Color.Gray);
+              Text("Loading Main Window...")
+                .fontSize($r("sys.float.Body_L"))
+                .fontColor($r("sys.color.font_secondary"));
             }
           }.width("100%")
         }
