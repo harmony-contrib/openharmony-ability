@@ -84,6 +84,12 @@ async fn open_tools(app: &OpenHarmonyApp) -> Result<()> {
 - `context.getWindow()` resolves the component's actual window, so main/sub-window components
   receive their own avoid areas.
 
+`WindowClient::set_status_bar(WindowStatusBarRequest)` awaits API12 status-bar
+visibility, light/dark content and optional ARGB background updates. Window ID 0
+routes to the component's actual window; an explicit ID uses the existing window
+resolver. Navigation-bar state is preserved. The SDK applies these settings to
+supported fullscreen or maximized main windows.
+
 See the [plugin development standard](../../docs/plugin-development-standard.md).
 
 ## License
