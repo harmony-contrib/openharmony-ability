@@ -518,3 +518,13 @@ export function demoReleaseNativeWebview(): void;
 export const demoAnnounce: (text: string) => Promise<void>;
 export const demoObserveMotion: () => Promise<void>;
 export const demoStopMotion: () => Promise<void>;
+
+export interface WindowStatusBarRequest {
+  windowId: number;
+  enabled: boolean;
+  lightContent: boolean;
+  background?: number;
+  animated: boolean;
+}
+
+export const demoSetStatusBar: (request: WindowStatusBarRequest) => Promise<void>;

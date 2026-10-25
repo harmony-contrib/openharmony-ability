@@ -42,7 +42,7 @@ use openharmony_ability_plugin_webview::{
     WebviewDownloadStartResponse, WebviewExt, WebviewJavascriptProxyBuilder, WebviewProtocol,
     WebviewProtocolOptions, WebviewStyle,
 };
-use openharmony_ability_plugin_window::WindowBridgePlugin;
+use openharmony_ability_plugin_window::{WindowBridgePlugin, WindowClient, WindowStatusBarRequest};
 
 static INNER_APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
 static PERMISSION_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -73,6 +73,13 @@ fn current_app() -> Result<OpenHarmonyApp> {
         .as_ref()
         .cloned()
         .ok_or_else(|| Error::from_reason("OpenHarmony app not initialized"))
+}
+
+#[napi]
+pub async fn demo_set_status_bar(request: WindowStatusBarRequest) -> Result<()> {
+    WindowClient::new(&current_app()?)?
+        .set_status_bar(request)
+        .await
 }
 
 /// Installs each persistent demo declaration only after that declaration succeeds. The mutex
