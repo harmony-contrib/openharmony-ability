@@ -231,6 +231,13 @@ export { LoginPlugin };
 | `ohos.node`（内置） / `mount-into-root` | `ohos.node.MountIntoRootRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
 | `ohos.node`（内置） / `dispose` | `ohos.node.DisposeRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
 | `ohos.webview` / 控制器 action | `ohos.webview.ControllerRequest` → `ohos.webview.Acknowledgement` / `StringResponse` / `ScriptResponse` | async / `ui-context` |
+| ohos.webview / create-native | NativeCreateRequest { targetId, webview: CreateRequest, settings: NativeSettings } → CreateResponse | async / ui-context; target ID is the non-reused Ability attachment lifetime |
+| ohos.webview / configure-native | NativeSettings { id, scrollEnabled, injectedJavascript?, htmlBaseUrl? } → Acknowledgement | async / ui-context |
+| ohos.webview / update-document-options | DocumentOptionsRequest { id, javascriptEnabled?, initializationScripts? } → Acknowledgement | async / ui-context; updates the existing controller without navigation; await before the next load; omitted fields retain values and an empty script list clears application scripts |
+| ohos.webview / go-back, go-forward, stop-loading | ControllerRequest → Acknowledgement | async / ui-context |
+| ohos.webview / native-event | NativeEvent { id, targetId, phase, url, title, loading, canGoBack, canGoForward, message?, code? } → EventAcknowledgement | scoped main-thread; target-indexed callback under Ability dispatch guard; notification failure only logged |
+| ohos.webview / native-controller-attached, native-controller-removed | NativeControllerEvent { id, targetId, nativeTag } → EventAcknowledgement | Ability target dispatch guard; attach before navigation; remove before synchronous target retirement |
+| ohos.webview / native-node-ready, native-node-retiring | existing ohos.node native receipt types → NodeAcknowledgement | UI-thread callback; decoding is pure, ready explicitly attaches before acknowledgement; retiring requires no context and uses closing hook permit |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` | 入站事件 / `ability` |
 
 `clipboard` 仅保留成对 HAR 的注册身份，数据读写直接由 Rust 调用原生 `OH_Pasteboard` 与 UDMF 完成；文本 metadata 由 `ClipboardClient::with_metadata_mime_type` 配置。

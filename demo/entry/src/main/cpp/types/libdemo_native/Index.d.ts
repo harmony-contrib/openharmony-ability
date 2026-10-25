@@ -512,3 +512,6 @@ export interface TerminateResponse {
 }
 
 export function playAudioDemo(): Promise<void>;
+export function demoNativeWebview(): NodeContent;
+export function demoRemoveNativeWebview(): Promise<void>;
+export function demoReleaseNativeWebview(): void;

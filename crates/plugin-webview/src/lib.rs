@@ -3,6 +3,9 @@
 //! The plugin is intentionally named-N-API-value/controller-ID based. Rust never keeps an ArkTS
 //! `WebviewController` or `ObjectRef`; the ArkTS HAR mounts its own `FrameNode` into the session
 //! root, or under a caller-provided `ohos.node` container handle.
+//! Native-tree embedding uses Ability-owned attachment targets. Register native event
+//! subscriptions before [`WebviewClient::create_native`]; the target ID also identifies
+//! its lifetime, so replacing a retired WebView requires a new attachment.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -16,17 +19,20 @@ pub use napi_ohos::Either;
 use ohos_web_binding::Web;
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeCallOptions, BridgeContextRequirement,
-    BridgeMainThreadEvent, BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
-    PluginLifecycleEvent,
+    BridgeMainThreadEvent, BridgeNapiType, BridgePlugin, BridgeRuntime, NativeAttachment,
+    OpenHarmonyApp, PluginLifecycleEvent,
 };
 
 mod callbacks;
 pub mod controller;
 mod js_proxy;
+mod native;
+mod native_routes;
 mod protocol;
 
 pub use callbacks::WebviewCallbacksBuilder;
 pub use js_proxy::WebviewJavascriptProxyBuilder;
+pub use native::{NativeWebviewEvent, NativeWebviewEvents, NativeWebviewSettings};
 pub use protocol::{
     bind_custom_protocol, bind_custom_protocol_async, WebviewProtocol, WebviewProtocolOptions,
     WebviewProtocolRequest, WebviewProtocolResponder, WebviewProtocolResponse,
@@ -37,7 +43,16 @@ const SEAL_ENGINE_SCHEMES_EVENT: &str = "seal-engine-schemes";
 const ENGINE_INITIALIZED_EVENT: &str = "engine-initialized";
 const CONTROLLER_ATTACHED_EVENT: &str = "controller-attached";
 
-pub struct WebviewBridgePlugin;
+#[derive(Default)]
+pub struct WebviewBridgePlugin {
+    native_events: std::sync::Arc<native_routes::NativeEvents<NativeWebviewEvent>>,
+}
+
+impl WebviewBridgePlugin {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 impl BridgePlugin for WebviewBridgePlugin {
     type Mode = AsyncBridge;
@@ -51,6 +66,7 @@ impl BridgePlugin for WebviewBridgePlugin {
         event_name: &str,
     ) -> &'static [BridgeContextRequirement] {
         match event_name {
+            "native-node-retiring" | "native-controller-removed" => &[],
             SEAL_ENGINE_SCHEMES_EVENT | BEFORE_ENGINE_INIT_EVENT | ENGINE_INITIALIZED_EVENT => {
                 &[BridgeContextRequirement::Ability]
             }
@@ -63,6 +79,42 @@ impl BridgePlugin for WebviewBridgePlugin {
         event: BridgeMainThreadEvent<'env>,
     ) -> Result<Unknown<'env>> {
         match event.name() {
+            "native-node-ready" => {
+                event
+                    .decode::<openharmony_ability::NativeNodeReady>()?
+                    .attach(&event)?;
+                event.respond(openharmony_ability::NodeAcknowledgement { accepted: true })
+            }
+            "native-node-retiring" => {
+                let receipt = event.decode::<openharmony_ability::NativeNodeRetiring>()?;
+                NativeAttachment::retire(receipt.target_id)?;
+                event.respond(openharmony_ability::NodeAcknowledgement { accepted: true })
+            }
+            "native-event" => {
+                let notification = event.decode::<NativeWebviewEvent>()?;
+                NativeAttachment::dispatch(notification.target_id, || {
+                    self.native_events
+                        .dispatch(notification.target_id, notification)
+                })?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "native-controller-attached" | "native-controller-removed" => {
+                let receipt = event.decode::<NativeWebviewControllerEvent>()?;
+                let (id, tag) = controller_identity(WebviewControllerEvent {
+                    id: receipt.id,
+                    native_tag: receipt.native_tag,
+                })?;
+                NativeAttachment::dispatch(receipt.target_id, || {
+                    if event.name() == "native-controller-attached" {
+                        controller::on_attached(&id, &tag)?;
+                        protocol::on_controller_attached(&id, &tag)?;
+                        js_proxy::on_controller_attached(&id, &tag)
+                    } else {
+                        retire_controller(&id, &tag)
+                    }
+                })??;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
             SEAL_ENGINE_SCHEMES_EVENT => {
                 let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
                 expect_engine_phase(&lifecycle, SEAL_ENGINE_SCHEMES_EVENT)?;
@@ -210,6 +262,17 @@ fn clear_attached_webview_state() -> Result<()> {
     first_error.map_or(Ok(()), Err)
 }
 
+fn retire_controller(id: &str, native_tag: &str) -> Result<()> {
+    [
+        protocol::on_controller_removed(id, native_tag),
+        js_proxy::on_controller_removed(id, native_tag),
+        controller::on_removed(id, native_tag),
+    ]
+    .into_iter()
+    .find_map(Result::err)
+    .map_or(Ok(()), Err)
+}
+
 fn expect_engine_phase(event: &WebviewEngineLifecycleEvent, expected: &str) -> Result<()> {
     if event.phase == expected {
         Ok(())
@@ -318,6 +381,19 @@ pub struct WebviewControllerEvent {
 
 impl_bridge_napi_type!(WebviewControllerEvent, "ohos.webview.ControllerEvent");
 
+/// Installs or removes native controller declarations before navigation or target retirement.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct NativeWebviewControllerEvent {
+    pub id: String,
+    pub target_id: u32,
+    pub native_tag: String,
+}
+impl_bridge_napi_type!(
+    NativeWebviewControllerEvent,
+    "ohos.webview.NativeControllerEvent"
+);
+
 /// Event subscriptions derived from Rust callback declarations before a WebView is created.
 ///
 /// This is transport state, not an ArkTS callback reference. The ArkTS host uses it only to bind
@@ -394,6 +470,19 @@ pub struct WebviewCreateRequest {
 }
 
 impl_bridge_napi_type!(WebviewCreateRequest, "ohos.webview.CreateRequest");
+
+/// Creates a WebView under an Ability-owned native attachment target.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewNativeCreateRequest {
+    pub target_id: u32,
+    pub webview: WebviewCreateRequest,
+    pub settings: NativeWebviewSettings,
+}
+impl_bridge_napi_type!(
+    WebviewNativeCreateRequest,
+    "ohos.webview.NativeCreateRequest"
+);
 
 impl WebviewCreateRequest {
     pub fn new(id: impl Into<String>) -> Self {
@@ -817,6 +906,35 @@ pub struct WebviewUserAgentRequest {
 
 impl_bridge_napi_type!(WebviewUserAgentRequest, "ohos.webview.UserAgentRequest");
 
+/// Changes document preferences on an existing controller without navigating.
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct WebviewDocumentOptionsRequest {
+    /// Controller ID; an empty value selects the receiving handle.
+    pub id: String,
+    /// JavaScript access; omitted values preserve the current preference.
+    pub javascript_enabled: Option<bool>,
+    /// Document-start scripts; an empty list clears application scripts.
+    pub initialization_scripts: Option<Vec<WebviewInitializationScript>>,
+}
+
+impl_bridge_napi_type!(
+    WebviewDocumentOptionsRequest,
+    "ohos.webview.DocumentOptionsRequest"
+);
+
+impl WebviewDocumentOptionsRequest {
+    fn for_controller(mut self, id: &str) -> Result<Self> {
+        if !self.id.is_empty() && self.id != id {
+            return Err(Error::from_reason(
+                "document options controller ID mismatch",
+            ));
+        }
+        self.id = id.to_owned();
+        Ok(self)
+    }
+}
+
 // ── drag events ─────────────────────────────────────────────────────────────────
 
 /// Drag enter/over/leave event (no file paths; `getData()` is only valid in onDrop).
@@ -888,6 +1006,46 @@ pub struct WebviewClient {
 }
 
 impl WebviewClient {
+    /// Creates an ArkTS-owned WebView under a live native target.
+    /// The initial request remains the authority for document-start preferences.
+    pub async fn create_native(
+        &self,
+        target_id: u32,
+        mut request: WebviewCreateRequest,
+        settings: NativeWebviewSettings,
+    ) -> Result<WebviewHandle> {
+        if target_id == 0 || request.parent_handle.is_some() || request.window_id.is_some() {
+            return Err(Error::from_reason(
+                "native WebView requires a target and no ArkTS parent/window override",
+            ));
+        }
+        request.validate()?;
+        if request.id != settings.id {
+            return Err(Error::from_reason("native settings controller ID mismatch"));
+        }
+        request.event_options = callbacks::options_for(&request.id)?;
+        let id = request.id.clone();
+        let response: WebviewCreateResponse = self
+            .call(
+                "create-native",
+                WebviewNativeCreateRequest {
+                    target_id,
+                    webview: request,
+                    settings,
+                },
+            )
+            .await?;
+        if response.id != id {
+            return Err(Error::from_reason(
+                "WebView plugin returned a mismatched controller ID",
+            ));
+        }
+        Ok(WebviewHandle {
+            client: self.clone(),
+            id,
+        })
+    }
+
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
@@ -1610,6 +1768,21 @@ impl WebviewHandle {
             .ensure()
     }
 
+    /// Updates document preferences in place; await this before the next navigation.
+    /// Use [`Self::set_user_agent`] to change the user agent independently.
+    pub async fn update_document_options(
+        &self,
+        options: WebviewDocumentOptionsRequest,
+    ) -> Result<()> {
+        self.client
+            .call::<_, WebviewAcknowledgement>(
+                "update-document-options",
+                options.for_controller(&self.id)?,
+            )
+            .await?
+            .ensure()
+    }
+
     /// Evaluates JavaScript in the currently loaded page and returns its string result.
     ///
     /// This is asynchronous because ArkWeb runs `runJavaScript` and its completion callback on
@@ -1723,6 +1896,27 @@ mod tests {
     use openharmony_ability::BridgeNapiType;
 
     #[test]
+    fn native_webview_uses_named_target_contracts() {
+        assert_eq!(
+            WebviewNativeCreateRequest::TYPE_NAME,
+            "ohos.webview.NativeCreateRequest"
+        );
+        assert_eq!(
+            NativeWebviewSettings::TYPE_NAME,
+            "ohos.webview.NativeSettings"
+        );
+        assert_eq!(NativeWebviewEvent::TYPE_NAME, "ohos.webview.NativeEvent");
+        assert_eq!(
+            NativeWebviewControllerEvent::TYPE_NAME,
+            "ohos.webview.NativeControllerEvent"
+        );
+        assert_eq!(
+            WebviewEventAcknowledgement::TYPE_NAME,
+            "ohos.webview.EventAcknowledgement"
+        );
+    }
+
+    #[test]
     fn create_request_retains_optional_value_semantics() {
         let request = WebviewCreateRequest::new("webview")
             .parent_node(7)
@@ -1776,7 +1970,32 @@ mod tests {
     }
 
     #[test]
+    fn document_options_select_only_the_receiving_controller() {
+        assert_eq!(
+            WebviewDocumentOptionsRequest::default()
+                .for_controller("same")
+                .unwrap()
+                .id,
+            "same"
+        );
+        let matching = WebviewDocumentOptionsRequest {
+            id: "same".into(),
+            ..Default::default()
+        };
+        assert!(matching.for_controller("same").is_ok());
+        let conflicting = WebviewDocumentOptionsRequest {
+            id: "other".into(),
+            ..Default::default()
+        };
+        assert!(conflicting.for_controller("same").is_err());
+    }
+
+    #[test]
     fn webview_actions_have_named_napi_contracts() {
+        assert_eq!(
+            WebviewDocumentOptionsRequest::TYPE_NAME,
+            "ohos.webview.DocumentOptionsRequest"
+        );
         assert_eq!(
             <WebviewCreateRequest as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.CreateRequest"
@@ -1897,7 +2116,7 @@ mod tests {
 
     #[test]
     fn engine_events_are_ability_scoped_but_controller_events_require_ui() {
-        let plugin = WebviewBridgePlugin;
+        let plugin = WebviewBridgePlugin::new();
         assert_eq!(
             plugin.required_contexts_for_main_thread_event(SEAL_ENGINE_SCHEMES_EVENT),
             &[BridgeContextRequirement::Ability]
@@ -1914,6 +2133,21 @@ mod tests {
             plugin.required_contexts_for_main_thread_event(CONTROLLER_ATTACHED_EVENT),
             &[BridgeContextRequirement::UiContext]
         );
+        for event in [
+            "native-node-ready",
+            "native-controller-attached",
+            "native-event",
+        ] {
+            assert_eq!(
+                plugin.required_contexts_for_main_thread_event(event),
+                &[BridgeContextRequirement::UiContext]
+            );
+        }
+        for event in ["native-node-retiring", "native-controller-removed"] {
+            assert!(plugin
+                .required_contexts_for_main_thread_event(event)
+                .is_empty());
+        }
     }
 
     // ── expect_engine_phase ───────────────────────────────────────────────
