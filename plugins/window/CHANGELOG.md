@@ -7,6 +7,9 @@
 - Add cancellable prompts positioned in window-content vp coordinates, display-filtered
   stacking queries, RGBA custom cursors and window icons.
 - Await platform mutations and bind operations/listeners to the component's actual window.
+- Keep the existing cursor contracts only: resolve the native window for synchronous style
+  errors, await fixed-size cursor installation and PixelMap release, and preserve the original
+  operation error if cleanup also fails. Canceled calls never acknowledge success after cleanup.
 - Align the package version to `1.0.0-beta.3` and resolve internal HAR dependencies
   through `workspace:*`.
 
