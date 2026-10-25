@@ -9,6 +9,9 @@ export interface MenuItemData {
   text?: string;
   enabled?: boolean;
   accelerator?: string;
+  // Preserve the visible label while the native renderer handles key context,
+  // performability, and protocol fallback. Missing/false keeps native matching.
+  acceleratorDisplayOnly?: boolean;
   predefinedType?: PredefinedType;
   checked?: boolean;
   icon?: string;
