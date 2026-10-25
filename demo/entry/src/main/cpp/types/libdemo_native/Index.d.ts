@@ -515,3 +515,6 @@ export function playAudioDemo(): Promise<void>;
 export function demoNativeWebview(): NodeContent;
 export function demoRemoveNativeWebview(): Promise<void>;
 export function demoReleaseNativeWebview(): void;
+export const demoAnnounce: (text: string) => Promise<void>;
+export const demoObserveMotion: () => Promise<void>;
+export const demoStopMotion: () => Promise<void>;

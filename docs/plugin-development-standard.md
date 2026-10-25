@@ -210,6 +210,11 @@ export { LoginPlugin };
 | 插件 / action | request → response | 模式 / context |
 | --- | --- | --- |
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
+| `ohos.accessibility` / `send-event` | `SendEventRequest { announcement?, elementId? }` → `EventAcknowledgement` | async / ability; exactly one field, API 12 |
+| `ohos.accessibility` / `announce-live` | `LiveAnnouncement { text, assertive }` → `EventAcknowledgement` | async / ability; API 18 |
+| `ohos.accessibility` / `observe-reduce-motion`, `stop-observing-reduce-motion` | `MotionRequest { id }` → `EventAcknowledgement` | async / ability; observation requires API 23 |
+| `ohos.accessibility` / `reduce-motion-changed` | `MotionState { id, enabled }` → `EventAcknowledgement` | scoped main-thread; initial and changed values share one callback |
+| `ohos.accessibility` / `subscriptions-ready` | `ohos.accessibility.SubscriptionsRequest {}` → `ohos.accessibility.Subscriptions { screenReader, motionIds }` | scoped main-thread; ArkTS installation/configuration hooks reconcile the Rust owner's current routes, without threads, blocking futures, or queued replay |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
 | `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `ohos.audio.UpdateResponse { accepted }` | async / `ability`；ArkTS 持有 `fs.dup` 独立文件句柄直至播放器释放 |
@@ -241,6 +246,14 @@ export { LoginPlugin };
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` | 入站事件 / `ability` |
 
 `clipboard` 仅保留成对 HAR 的注册身份，数据读写直接由 Rust 调用原生 `OH_Pasteboard` 与 UDMF 完成；文本 metadata 由 `ClipboardClient::with_metadata_mime_type` 配置。
+
+Accessibility motion routes are Rust-owned RAII registrations. Drop removes local
+delivery only; `close().await` explicitly unsubscribes through the current session.
+The ArkTS instance shares one system listener across its subscribed routes, prunes
+retired IDs when a named motion acknowledgement returns `accepted = false`, and
+unsubscribes its exact callback when no routes remain or the session disposes.
+Ship the matching Rust/HAR pair for the new ready handshake; old motion request
+fields remain unchanged. Animation behavior and announcement policy belong to consumers.
 
 `resource` 是纯入站插件：ArkTS wrapper 在 `ability-create` 时经 `invokeNativeSync` 推送平台
 对象，Rust 在 `on_main_thread_event` 解码的同一 N-API callback 内把它转成 native 指针；对象
