@@ -44,7 +44,7 @@ pub async fn sub_window_keyboard_inset() -> Result<i32> {
 #[ability]
 fn openharmony_app(app: OpenHarmonyApp) {
     APP.write().unwrap().replace(app.clone());
-    app.register_plugin(WebviewBridgePlugin)
+    app.register_plugin(WebviewBridgePlugin::new())
         .expect("sub-window WebView facade must be registered");
     app.register_plugin(WindowBridgePlugin)
         .expect("sub-window Window facade must be registered");
