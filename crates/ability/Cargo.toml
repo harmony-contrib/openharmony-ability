@@ -8,7 +8,7 @@ description = "Binding Rust application on Harmony with Ability"
 [features]
 default = ["log", "window"]
 log = ["dep:log"]
-window = ["dep:ohos-window-manager-binding"]
+window = ["dep:ohos-window-manager-binding", "dep:ohos-image-native-binding"]
 # ArkUI keyboard snapshots and consumption are opt-in; raw XComponent keys remain available.
 keyboard = ["ohos-arkui-binding/api-15"]
 # These features select linked NDK APIs and raise the application's minimum API.
@@ -43,6 +43,8 @@ ohos-ime-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }
 
-# cursor-grab NDK FFI (re-exported from the `window` module); api-22 feature
-# gates OH_WindowManager_LockCursor/UnlockCursor
+# cursor-grab and window-snapshot NDK FFI (re-exported from the `window` module);
+# api-22 feature gates OH_WindowManager_LockCursor/UnlockCursor and api-15 gates
+# OH_WindowManager_Snapshot / OH_WindowManager_GetWindowProperties.
 ohos-window-manager-binding = { workspace = true, optional = true, features = ["api-22"] }
+ohos-image-native-binding = { workspace = true, optional = true }

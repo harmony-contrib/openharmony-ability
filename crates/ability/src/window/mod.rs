@@ -309,4 +309,6 @@ pub fn get_last_ui_ability_window_id() -> i64 {
 // (tao's call path) and the crate-root glob (`pub use window::*`) both keep
 // resolving.
 mod cursor_grab;
+mod snapshot;
 pub use cursor_grab::{set_cursor_grab, CursorGrabError};
+pub use snapshot::{snapshot_window, WindowSnapshot, WindowSnapshotError};
