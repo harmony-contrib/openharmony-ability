@@ -212,9 +212,7 @@ export { LoginPlugin };
 | `ohos.app-control` / `terminate` | `ohos.app_control.TerminateRequest { code }` → `ohos.app_control.TerminateResponse { accepted }` | sync / `ability` |
 | `ohos.permission` / `request` | `ohos.permission.PermissionRequest { permissions }` → `ohos.permission.PermissionResponse { codes }` | async / `ability` |
 | `ohos.url` / `check-scheme` | `ohos.url.SchemeRequest { scheme }` → `ohos.url.SchemeResponse { declared }` | async / `ability`；校验当前 Ability 安装清单中的 `viewData` scheme，无法运行时修改清单 |
-| `ohos.clipboard` / `write-records` | `ohos.clipboard.WriteRecordsRequest { records: Record[] }` → `ohos.clipboard.WriteTextResponse { accepted }` | async / `ability`；1..512 个文本（可带 metadata）、图片或文件 URI 记录，保持顺序 |
-| `ohos.clipboard` / `read-records` | `ohos.clipboard.ReadTextRequest {}` → `ohos.clipboard.ReadRecordsResponse { records: Record[] }` | async / `ability`；`Record { text?, metadata?, encodedImage?, uri? }` 每条仅一种主内容；需要 READ_PASTEBOARD 的 ACL 和运行时授权 |
-| `ohos.clipboard` / 入站 `changed` | `ohos.clipboard.ChangedEvent {}` → `std.bool` | 系统 pasteboard update 使 Rust revision 递增；监听随插件生命周期释放 |
+| `ohos.clipboard` / 原生 facade | 保留 `ClipboardRecord`、`ClipboardMimeContent`、`ClipboardReadMimeResponse`、`ClipboardReadContentResponse` 具名值类型 | async / `ability` 注册身份保留；数据直接经原生 `OH_Pasteboard` 与 UDMF 读写 |
 | `ohos.window` / `show-prompt` | `ohos.window.PromptRequest { windowId, message, detail?, level, buttons, cancelIndex?, anchor?: PromptAnchor }` → `ohos.window.PromptResponse { index }` | async / `ui-context`；`PromptAnchor { x, y }` 为目标窗口内容局部逻辑坐标，单位 vp，不是物理 px 或屏幕全局坐标；弹窗按实际尺寸限制在窗口可用区域内；原生弹窗取消、调用取消和销毁均释放组件 |
 | `ohos.window` / `get-window-stack` | `ohos.window.StackRequest { displayId, windowIds }` → `ohos.window.StackResponse { windowIds }` | async / `ui-context`；从 SDK 可见窗口顺序中筛选请求的本应用窗口，顶部在前 |
 | `ohos.window` / `set-custom-cursor` | `ohos.window.CustomCursorRequest { windowId, rgba, width, height, hotspotX, hotspotY }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；RGBA8888，尺寸 1–256 px，热点必须位于图像内；PixelMap 在成功、失败和取消后释放 |
@@ -233,6 +231,8 @@ export { LoginPlugin };
 | `ohos.node`（内置） / `dispose` | `ohos.node.DisposeRequest { handle }` → `ohos.node.Acknowledgement` | async / `ui-context` |
 | `ohos.webview` / 控制器 action | `ohos.webview.ControllerRequest` → `ohos.webview.Acknowledgement` / `StringResponse` / `ScriptResponse` | async / `ui-context` |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象）→ `ohos.resource.ResourceManagerReadyResponse { accepted }` | 入站事件 / `ability` |
+
+`clipboard` 仅保留成对 HAR 的注册身份，数据读写直接由 Rust 调用原生 `OH_Pasteboard` 与 UDMF 完成；文本 metadata 由 `ClipboardClient::with_metadata_mime_type` 配置。
 
 `resource` 是纯入站插件：ArkTS wrapper 在 `ability-create` 时经 `invokeNativeSync` 推送平台
 对象，Rust 在 `on_main_thread_event` 解码的同一 N-API callback 内把它转成 native 指针；对象
@@ -253,7 +253,6 @@ WebView 的 controller ID 都是既有语义，迁移为插件后不得丢失；
 | 插件 / action | request → response | 生命周期与行为 |
 | --- | --- | --- |
 | `ohos.app-control` / `restart` | `ohos.app_control.RestartRequest` → `ohos.app_control.RestartResponse` | sync / `ability`；重启当前调用 Ability，平台失败向调用者传播 |
-| `ohos.clipboard` / `read-authorized-records` | `ohos.clipboard.ReadAuthorizedRecordsRequest` → `ohos.clipboard.ReadRecordsResponse` | async / `ability`；读取被拒绝时才请求权限，同一次权限请求可共享；会话失效后不得重试 |
 | `ohos.menu` / `popup-menubar` | `ohos.menu.PopupMenubarRequest` → `ohos.menu.Acknowledgement` | async / `ui-context`；保留来源 windowId、内容局部 vp 坐标和可选 restoreFocusId |
 | `ohos.menu` / `popup-commands` | `ohos.menu.PopupCommandsRequest` → `ohos.menu.Acknowledgement` | async / `ui-context`；命令 ID 唯一，点击仍经既有菜单事件分发 |
 | `ohos.window` / 入站 `move-requested` | `ohos.window.MoveRequested` → `ohos.window.MoveResponse` | 在原生 touch 回调栈同步决定是否开始拖窗，不可 await |
