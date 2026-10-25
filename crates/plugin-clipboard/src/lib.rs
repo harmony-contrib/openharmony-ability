@@ -120,6 +120,15 @@ pub struct ClipboardReadTextRequest {}
 impl_bridge_napi_type!(ClipboardReadTextRequest, "ohos.clipboard.ReadTextRequest");
 
 #[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct ClipboardReadAuthorizedRecordsRequest {}
+
+impl_bridge_napi_type!(
+    ClipboardReadAuthorizedRecordsRequest,
+    "ohos.clipboard.ReadAuthorizedRecordsRequest"
+);
+
+#[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardReadTextResponse {
     pub text: Option<String>,
@@ -275,6 +284,24 @@ impl ClipboardClient {
             .call::<ClipboardReadTextRequest, ClipboardReadRecordsResponse>(
                 "read-records",
                 ClipboardReadTextRequest {},
+            )
+            .await?
+            .records)
+    }
+
+    /// Reads records, requesting user permission only if the native read is denied.
+    /// Use `read_records` for background refreshes that must not present a prompt.
+    pub async fn read_authorized_records(&self) -> Result<Vec<ClipboardRecord>> {
+        Ok(self
+            .bridge
+            .call_async::<
+                ClipboardBridgePlugin,
+                ClipboardReadAuthorizedRecordsRequest,
+                ClipboardReadRecordsResponse,
+            >(
+                "read-authorized-records",
+                ClipboardReadAuthorizedRecordsRequest {},
+                BridgeCallOptions::for_user_interaction(),
             )
             .await?
             .records)
@@ -505,6 +532,10 @@ mod tests {
 
     #[test]
     fn clipboard_types_have_stable_named_napi_contracts() {
+        assert_eq!(
+            <ClipboardReadAuthorizedRecordsRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.clipboard.ReadAuthorizedRecordsRequest"
+        );
         assert_eq!(
             <ClipboardReadTextRequest as BridgeNapiType>::TYPE_NAME,
             "ohos.clipboard.ReadTextRequest"

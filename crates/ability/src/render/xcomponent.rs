@@ -2,8 +2,8 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use super::pan::PanTracker;
 
-use napi_ohos::threadsafe_function::ThreadsafeFunctionCallMode::NonBlocking;
 use napi_ohos::{Env, Error, Result};
+use ohos_arkui_binding::arkui_input_binding::{UIInputSourceType, UIInputToolType};
 use ohos_arkui_binding::component::attribute::{
     ArkUIAttributeBasic, ArkUICommonAttribute, ArkUIEvent, ArkUIGesture,
 };
@@ -15,19 +15,32 @@ use ohos_arkui_binding::{
     api::node_custom_event::IntOffset, common::node::ArkUINode, types::advanced::LengthMetricUnit,
 };
 use ohos_arkui_binding::{ArkUIHandle, RootNode, XComponent};
-use ohos_ime_binding::IME;
-use ohos_xcomponent_binding::{XComponentOffset, XComponentSize};
+use ohos_xcomponent_binding::{TouchPointTool, XComponentOffset, XComponentSize};
 
 #[cfg(feature = "keyboard")]
 use crate::KeyboardEventData;
 use crate::{
-    input, set_main_thread_env, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase,
+    set_main_thread_env, ArkUiInputEvent, AxisEventData, Event, GestureEvent, GesturePhase,
     InputEvent, KeyboardInputDelivery, OpenHarmonyApp, PanGestureEvent, PointerInputData, Rect,
     Size, SwipeGestureEvent, TapGestureEvent, XComponentInputEvent,
 };
 
 const PAN_GESTURE_DISTANCE: f64 = 8.0;
 const SWIPE_GESTURE_MIN_SPEED: f64 = 100.0;
+
+#[cfg(feature = "keyboard")]
+pub(crate) fn request_xcomponent_focus(component: &XComponent) -> Result<()> {
+    if crate::version::sdk_api_version() >= 15 {
+        component
+            .raw()
+            .request_focus()
+            .map_err(|error| Error::from_reason(error.to_string()))
+    } else {
+        component
+            .set_focus_status(true)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+}
 
 struct RenderOwnerGuard {
     app: OpenHarmonyApp,
@@ -72,17 +85,46 @@ fn gesture_phase(action: &GestureEventAction) -> Option<GesturePhase> {
 }
 
 fn dispatch_input(app: &OpenHarmonyApp, owner: &str, event: InputEvent) {
+    let requires_surface = match &event {
+        InputEvent::Ime(_) => false,
+        InputEvent::XComponent(XComponentInputEvent::Key(_)) => false,
+        InputEvent::ArkUi(ArkUiInputEvent::FocusChanged(_)) => false,
+        #[cfg(feature = "keyboard")]
+        InputEvent::ArkUi(ArkUiInputEvent::Key(_)) => false,
+        _ => true,
+    };
+    if requires_surface && !app.is_render_surface_active(owner) {
+        return;
+    }
+    if let Some(callback) = app.input_callback(owner) {
+        callback.send_on_ui_thread(app, event);
+    }
+}
+
+#[cfg(feature = "drag")]
+fn negotiate_drag(app: &OpenHarmonyApp, owner: &str, event: crate::DragInputData) {
     if !app.is_render_surface_active(owner) {
         return;
     }
-    if let Some(ref mut handler) = *app.event_loop.borrow_mut() {
+    app.drain_input();
+    // Drop acceptance is an immediate native reply, not deferred foreground work.
+    let Ok(mut handler) = app.event_loop.try_borrow_mut() else {
+        crate::warn!("Cannot negotiate native drop during a nested application callback");
+        return;
+    };
+    if let Some(handler) = handler.as_mut() {
+        let event = InputEvent::ArkUi(ArkUiInputEvent::Drag(event));
         match app.render_window_id(owner) {
             Some(0) => handler(Event::Input(event)),
             Some(window_id) => handler(Event::SubWindowInput { window_id, event }),
             None => {}
         }
     }
-    app.drain_after_input();
+}
+
+fn dispatch_focus(app: &OpenHarmonyApp, owner: &str, focused: bool) {
+    let event = InputEvent::ArkUi(ArkUiInputEvent::FocusChanged(focused));
+    dispatch_input(app, owner, event);
 }
 
 fn pointer_snapshot(
@@ -90,8 +132,8 @@ fn pointer_snapshot(
     node: *mut std::ffi::c_void,
 ) -> PointerInputData {
     let mut pointer = PointerInputData::from_arkui_event(input);
-    // This borrowed node view exists only while its native callback is active.
-    if let Some(node) = ArkUINode::from_raw_handle(node.cast()) {
+    // SAFETY: `node` is the non-owning `ArkUI_NodeHandle` borrowed for the duration of this native callback.
+    if let Some(node) = unsafe { ArkUINode::from_raw_handle(node.cast()) } {
         if let Ok(origin) = node.layout_position_in_screen() {
             pointer.display_x = origin.x as f32 + pointer.x;
             pointer.display_y = origin.y as f32 + pointer.y;
@@ -101,7 +143,8 @@ fn pointer_snapshot(
 }
 
 fn content_offset_in_window(node: *mut std::ffi::c_void) -> Option<IntOffset> {
-    ArkUINode::from_raw_handle(node.cast())?
+    // SAFETY: `node` is the non-owning `ArkUI_NodeHandle` of the live XComponent in this callback.
+    unsafe { ArkUINode::from_raw_handle(node.cast()) }?
         .layout_position_in_window()
         .ok()
 }
@@ -111,6 +154,10 @@ fn release_gestures(xcomponent: &XComponent, gestures: &mut Vec<Gesture>) {
         let _ = xcomponent.remove_gesture(&gesture);
         let _ = gesture.dispose();
     }
+}
+
+fn is_mouse_pointer(pointer: &PointerInputData) -> bool {
+    pointer.source_type == UIInputSourceType::Mouse || pointer.tool_type == UIInputToolType::Mouse
 }
 
 fn register_gestures(
@@ -133,6 +180,9 @@ fn register_gestures(
         let Some(pointer) = event.input.map(PointerInputData::from) else {
             return;
         };
+        if is_mouse_pointer(&pointer) {
+            return;
+        }
         dispatch_input(
             &tap_app,
             &tap_owner,
@@ -167,6 +217,9 @@ fn register_gestures(
                 return;
             };
             let pointer = event.input.map(PointerInputData::from);
+            if pointer.as_ref().is_some_and(is_mouse_pointer) {
+                return;
+            }
             let pan_event = if phase == GesturePhase::Cancel {
                 pan_tracker.borrow_mut().cancel(pointer)
             } else {
@@ -216,6 +269,9 @@ fn register_gestures(
             let Some(pointer) = event.input.map(PointerInputData::from) else {
                 return;
             };
+            if is_mouse_pointer(&pointer) {
+                return;
+            }
             let GestureData::Swipe(data) = event.event_action_data else {
                 return;
             };
@@ -250,8 +306,9 @@ pub fn render(
     slot: ArkUIHandle,
     render_owner: String,
     app: OpenHarmonyApp,
+    native_window_id: i32,
 ) -> Result<RootNode> {
-    render_for_window(env, slot, render_owner, app, 0)
+    render_for_window(env, slot, render_owner, app, 0, native_window_id)
 }
 
 pub fn render_for_window(
@@ -260,7 +317,13 @@ pub fn render_for_window(
     render_owner: String,
     app: OpenHarmonyApp,
     window_id: i64,
+    native_window_id: i32,
 ) -> Result<RootNode> {
+    if native_window_id < 0 {
+        return Err(Error::from_reason(
+            "Native render requires a nonnegative platform Window ID (0 = main)",
+        ));
+    }
     set_main_thread_env(*env);
 
     // All eager `get_helper()` TSFN inits (statusbar tray, vibrancy, clipboard image,
@@ -290,6 +353,11 @@ pub fn render_for_window(
     xcomponent_native
         .set_focusable(true)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
+    // Window activation does not focus a newly mounted native node. Keyboard
+    // shortcuts must reach this surface before the first pointer interaction.
+    xcomponent_native
+        .set_default_focus(true)
+        .map_err(|e| Error::from_reason(e.reason.to_string()))?;
     xcomponent_native
         .set_focus_on_touch(true)
         .map_err(|e| Error::from_reason(e.reason.to_string()))?;
@@ -307,29 +375,6 @@ pub fn render_for_window(
 
     let on_surface_created_app = app.clone();
     let on_surface_created_owner = render_owner.clone();
-
-    let (
-        insert_text_callback_tsfn,
-        on_ime_hide_callback_tsfn,
-        on_backspace_callback_tsfn,
-        on_ime_enter_callback_tsfn,
-        preview_callback_tsfn,
-        finish_callback_tsfn,
-        delete_forward_callback_tsfn,
-        move_cursor_callback_tsfn,
-        selection_callback_tsfn,
-        extend_action_callback_tsfn,
-    ) = input::ime_ts_fn(env, app.clone(), render_owner.clone())?;
-    let insert_text_callback_tsfn = Arc::new(insert_text_callback_tsfn);
-    let on_ime_hide_callback_tsfn = Arc::new(on_ime_hide_callback_tsfn);
-    let on_backspace_callback_tsfn = Arc::new(on_backspace_callback_tsfn);
-    let on_ime_enter_callback_tsfn = Arc::new(on_ime_enter_callback_tsfn);
-    let preview_callback_tsfn = Arc::new(preview_callback_tsfn);
-    let finish_callback_tsfn = Arc::new(finish_callback_tsfn);
-    let delete_forward_callback_tsfn = Arc::new(delete_forward_callback_tsfn);
-    let move_cursor_callback_tsfn = Arc::new(move_cursor_callback_tsfn);
-    let selection_callback_tsfn = Arc::new(selection_callback_tsfn);
-    let extend_action_callback_tsfn = Arc::new(extend_action_callback_tsfn);
 
     xcomponent.on_surface_created(move |xc_raw, win| {
         // NDK callback boundary: a panic here aborts the process (no unwinding
@@ -362,72 +407,8 @@ pub fn render_for_window(
         }
 
         created_pan_tracker.borrow_mut().reset();
-
-        // We need to create IME instance when app is focused.
-        let ime = IME::new(Default::default());
-
-        {
-            let insert_text_callback_tsfn = insert_text_callback_tsfn.clone();
-            let on_ime_hide_callback_tsfn = on_ime_hide_callback_tsfn.clone();
-            let on_backspace_callback_tsfn = on_backspace_callback_tsfn.clone();
-            let on_ime_enter_callback_tsfn = on_ime_enter_callback_tsfn.clone();
-            let preview_callback_tsfn = preview_callback_tsfn.clone();
-            let finish_callback_tsfn = finish_callback_tsfn.clone();
-            let delete_forward_callback_tsfn = delete_forward_callback_tsfn.clone();
-            let move_cursor_callback_tsfn = move_cursor_callback_tsfn.clone();
-            let selection_callback_tsfn = selection_callback_tsfn.clone();
-            let extend_action_callback_tsfn = extend_action_callback_tsfn.clone();
-
-            // // run in other thread
-            ime.insert_text(move |s| {
-                insert_text_callback_tsfn.call(s, NonBlocking);
-            });
-            ime.on_status_change(move |s| {
-                on_ime_hide_callback_tsfn.call(s.into(), NonBlocking);
-            });
-            ime.on_backspace(move |len| {
-                on_backspace_callback_tsfn.call(len, NonBlocking);
-            });
-            ime.on_delete_forward(move |len| {
-                delete_forward_callback_tsfn.call(len, NonBlocking);
-            });
-            ime.on_move_cursor(move |direction| {
-                move_cursor_callback_tsfn.call(u32::from(direction) as i32, NonBlocking);
-            });
-            ime.on_set_selection(move |selection| {
-                selection_callback_tsfn.call(
-                    input::SelectionEventData {
-                        start: selection.start,
-                        end: selection.end,
-                    },
-                    NonBlocking,
-                );
-            });
-            ime.on_extend_action(move |action| {
-                extend_action_callback_tsfn.call(u32::from(action) as i32, NonBlocking);
-            });
-            ime.on_enter(move |key| {
-                on_ime_enter_callback_tsfn.call(u32::from(key) as i32, NonBlocking);
-            });
-            ime.on_preview(move |text, start, end| {
-                preview_callback_tsfn.call(
-                    input::PreviewTextEventData { text, start, end },
-                    NonBlocking,
-                );
-            });
-            ime.on_finish_preview(move || {
-                finish_callback_tsfn.call(true, NonBlocking);
-            });
-        }
-
-        if window_id == 0 {
-            *on_surface_created_app.ime.borrow_mut() = Some(ime);
-        } else {
-            on_surface_created_app
-                .sub_ime
-                .borrow_mut()
-                .insert(window_id, ime);
-        }
+        on_surface_created_app
+            .initialize_render_input(&on_surface_created_owner, native_window_id)?;
 
         {
             if let Some(ref mut h) = *on_surface_created_app.event_loop.borrow_mut() {
@@ -518,7 +499,15 @@ pub fn render_for_window(
     if touch_input_delivery.delivers_raw_touch() {
         let on_touch_event_app = app.clone();
         let on_touch_event_owner = render_owner.clone();
-        xcomponent.on_touch_event(move |_, _, data| {
+        xcomponent.on_touch_event(move |_, _, mut data| {
+            if !data.touch_points.is_empty() {
+                data.touch_points
+                    .retain(|point| point.event_tool_type != TouchPointTool::Mouse);
+                data.num_points = data.touch_points.len() as u32;
+                if data.touch_points.is_empty() {
+                    return Ok(());
+                }
+            }
             dispatch_input(
                 &on_touch_event_app,
                 &on_touch_event_owner,
@@ -528,6 +517,17 @@ pub fn render_for_window(
         });
     }
 
+    let focus_app = app.clone();
+    let focus_owner = render_owner.clone();
+    xcomponent_native.on_focus(move || {
+        dispatch_focus(&focus_app, &focus_owner, true);
+    });
+    let blur_app = app.clone();
+    let blur_owner = render_owner.clone();
+    xcomponent_native.on_blur(move || {
+        dispatch_focus(&blur_app, &blur_owner, false);
+    });
+
     let on_key_event_app = app.clone();
     let on_key_event_owner = render_owner.clone();
     match app.keyboard_input_delivery() {
@@ -535,29 +535,27 @@ pub fn render_for_window(
         KeyboardInputDelivery::ArkUi => {
             let pre_ime_app = app.clone();
             let pre_ime_owner = render_owner.clone();
+            let pending_response = Rc::new(RefCell::new(None));
+            let pre_ime_response = pending_response.clone();
             xcomponent_native.on_key_pre_ime(move |event| {
-                if let Some(input) = event.key_event() {
-                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
-                        dispatch_input(
-                            &pre_ime_app,
-                            &pre_ime_owner,
-                            InputEvent::ArkUi(ArkUiInputEvent::KeyPreIme(data)),
-                        );
+                if let Some(data) = KeyboardEventData::from_node_callback(event) {
+                    if let Some(callback) = pre_ime_app.input_callback(&pre_ime_owner) {
+                        *pre_ime_response.borrow_mut() = Some(data.response.clone());
+                        callback.key(data);
                     }
                 }
-                // Keep system shortcuts and IME processing intact.
                 None
             });
             xcomponent_native.on_key_event(move |event| {
                 if let Some(input) = event.key_event() {
-                    if let Some(data) = KeyboardEventData::from_key_callback(&input) {
-                        let response = data.response.clone();
-                        dispatch_input(
-                            &on_key_event_app,
-                            &on_key_event_owner,
-                            InputEvent::ArkUi(ArkUiInputEvent::Key(data)),
-                        );
-                        if response.is_consumed() {
+                    if let Some(callback) = on_key_event_app.input_callback(&on_key_event_owner) {
+                        callback.after_ime();
+                        on_key_event_app.drain_input();
+                        if pending_response
+                            .borrow_mut()
+                            .take()
+                            .is_some_and(|response| response.is_consumed())
+                        {
                             input.set_consumed(true);
                             input.stop_propagation(true);
                         }
@@ -640,13 +638,14 @@ pub fn render_for_window(
     let pointer_owner = render_owner.clone();
     xcomponent_native.on_touch_event(move |event| {
         if let Some(input) = event.input_event() {
+            let pointer = pointer_snapshot(&input, pointer_node);
+            if is_mouse_pointer(&pointer) {
+                return;
+            }
             dispatch_input(
                 &pointer_app,
                 &pointer_owner,
-                InputEvent::ArkUi(ArkUiInputEvent::Pointer(pointer_snapshot(
-                    &input,
-                    pointer_node,
-                ))),
+                InputEvent::ArkUi(ArkUiInputEvent::Pointer(pointer)),
             );
         }
     });
@@ -659,11 +658,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Enter);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                negotiate_drag(&drag_app, &drag_owner, snapshot);
                 if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
                         crate::warn!("Failed to suggest drop operation: {error}");
@@ -677,11 +672,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Move);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                negotiate_drag(&drag_app, &drag_owner, snapshot);
                 if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
                         crate::warn!("Failed to suggest drop operation: {error}");
@@ -694,11 +685,7 @@ pub fn render_for_window(
         xcomponent_native.on_drag_leave(move |event| {
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Leave);
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                negotiate_drag(&drag_app, &drag_owner, snapshot);
             }
         });
         let drag_app = app.clone();
@@ -707,11 +694,7 @@ pub fn render_for_window(
             if let Some(drag) = event.drag_event() {
                 let snapshot = crate::DragInputData::from_event(&drag, crate::DragPhase::Drop);
                 let response = snapshot.response.clone();
-                dispatch_input(
-                    &drag_app,
-                    &drag_owner,
-                    InputEvent::ArkUi(ArkUiInputEvent::Drag(snapshot)),
-                );
+                negotiate_drag(&drag_app, &drag_owner, snapshot);
                 use ohos_arkui_binding::types::drag::DragResult;
                 let result = if let Some(operation) = response.operation() {
                     if let Err(error) = drag.set_suggested_drop_operation(operation.native()) {
@@ -739,6 +722,9 @@ pub fn render_for_window(
 
     root.mount(xcomponent_native)
         .map_err(|error| Error::from_reason(error.reason.to_string()))?;
+    // Node callbacks and the window ID are usable before native surface creation.
+    // Replacing this editor on the first SurfaceCreate would cancel in-flight composition.
+    app.initialize_render_input(&render_owner, native_window_id)?;
     render_guard.disarm();
 
     Ok(root)

@@ -30,9 +30,8 @@ use napi_ohos::{
 };
 const DEFAULT_TIMEOUT_MS: u32 = 15_000;
 /// Upper bound for per-call timeouts (individual calls opt in via
-/// `BridgeCallOptions::with_timeout_ms`). 5 minutes: interactive flows that put
-/// up system UI (e.g. Huawei account login panel with SMS verification) can
-/// legitimately take minutes; the default 15s stays for non-interactive calls.
+/// `BridgeCallOptions::with_timeout_ms`). User-driven dialogs can instead use
+/// `BridgeCallOptions::for_user_interaction`; ordinary calls retain the 15s default.
 const MAX_TIMEOUT_MS: u32 = 300_000;
 
 mod mode {
@@ -708,6 +707,12 @@ pub struct BridgeCallOptions {
 }
 
 impl BridgeCallOptions {
+    /// Waits for a user decision without a wall-clock deadline. Session teardown still cancels
+    /// the call. Use only for interactive platform UI, never for ordinary platform operations.
+    pub fn for_user_interaction() -> Self {
+        Self { timeout_ms: 0 }
+    }
+
     pub fn with_timeout_ms(mut self, timeout_ms: u32) -> Self {
         self.timeout_ms = timeout_ms.clamp(1, MAX_TIMEOUT_MS);
         self
@@ -1489,6 +1494,7 @@ mod tests {
 
     #[test]
     fn clamps_bridge_timeout() {
+        assert_eq!(BridgeCallOptions::for_user_interaction().timeout_ms(), 0);
         assert_eq!(
             BridgeCallOptions::default().with_timeout_ms(0).timeout_ms(),
             1

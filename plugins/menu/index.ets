@@ -1,4 +1,5 @@
 export { MenuPlugin } from "./src/main/ets/MenuPlugin";
+export type { MenuPluginOptions } from "./src/main/ets/MenuPlugin";
 
 // Menu UI cluster, migrated from the core package (rs<->ets correspondence:
 // crates/plugin-menu ↔ this package). Exported for cross-package consumers

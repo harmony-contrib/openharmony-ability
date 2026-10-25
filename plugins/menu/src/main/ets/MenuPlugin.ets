@@ -1,6 +1,8 @@
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { KeyCode } from "@kit.InputKit";
 import web_webview from "@ohos.web.webview";
+import { window } from "@kit.ArkUI";
+import { common } from "@kit.AbilityKit";
 import {
   AsyncPluginBase,
   BridgeAcknowledgement,
@@ -15,8 +17,9 @@ import {
   isClipboardEnabled,
   isZoomHotkeysEnabled,
   hasWebviewKeyboardPolicy,
-  setMenuBarPort,
-  setMenuBarSlotBuilder,
+  menuKeyForWindow,
+  registerWindowMenuBar,
+  getMenuBarPort,
   setPrimaryWebviewControllerCallback,
   WindowManager,
   type MenuBarPort,
@@ -27,26 +30,42 @@ import {
   MenuBarComponent,
   getMenuClickHandler,
   getMenuDataCallback,
+  type MenuDataCallback,
+  waitForMenuDataCallback,
+  cancelMenuDataWaiters,
   getMenuBarRecoverFn,
   isMenubarVisible,
   setMenuClickHandler,
   setMenuWillOpenHandler,
   setMenuBarRecoverFn,
+  unregisterMenuClickHandler,
+  unregisterMenuBarRecoverFn,
   windowKeyForId,
 } from "./MenuBarComponent";
-import {
-  MenuManager,
-  PredefinedActionExecutor,
-  getPredefinedActionExecutor,
-  setPredefinedActionExecutor,
-} from "./menu";
-import type { AboutMetadataData, PredefinedType } from "./menu_types";
+import { MenuManager, PredefinedActionExecutor, registerWindowMenuExecutor } from "./menu";
+import type { AboutMetadataData, MenuItemData, PredefinedType } from "./menu_types";
 
 const SET_MENUBAR_REQUEST_TYPE = "ohos.menu.SetMenubarRequest";
 const POPUP_REQUEST_TYPE = "ohos.menu.PopupRequest";
+const POPUP_MENUBAR_REQUEST_TYPE = "ohos.menu.PopupMenubarRequest";
+const POPUP_COMMANDS_REQUEST_TYPE = "ohos.menu.PopupCommandsRequest";
 const SET_VISIBLE_REQUEST_TYPE = "ohos.menu.SetVisibleRequest";
 const PREDEFINED_REQUEST_TYPE = "ohos.menu.PredefinedRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.menu.Acknowledgement";
+
+interface MenuCommandItem {
+  id: string;
+  text: string;
+  enabled: boolean;
+}
+
+interface PopupCommandsRequest {
+  windowId: string;
+  items: MenuCommandItem[];
+  x: number;
+  y: number;
+  restoreFocusId?: string;
+}
 
 /**
  * Menubar composition slot: renders MenuBarComponent into the core pages
@@ -57,7 +76,19 @@ const ACKNOWLEDGEMENT_TYPE = "ohos.menu.Acknowledgement";
 function menuBarBuilder(props: MenuBarSlotProps) {
   MenuBarComponent({
     windowId: props.windowId,
-    acceleratorMatcher: getAcceleratorMatcher(props.windowId),
+    menuKey: props.menuKey ?? "",
+    acceleratorMatcher: getAcceleratorMatcher(props.menuKey ?? props.windowId),
+    showMenuBar: true,
+  });
+}
+
+@Builder
+function menuPopupBuilder(props: MenuBarSlotProps) {
+  MenuBarComponent({
+    windowId: props.windowId,
+    menuKey: props.menuKey ?? "",
+    acceleratorMatcher: getAcceleratorMatcher(props.menuKey ?? props.windowId),
+    showMenuBar: false,
   });
 }
 
@@ -68,19 +99,33 @@ function menuBarBuilder(props: MenuBarSlotProps) {
  * getMenuBarPort() into this package's MenuDataCallback registry.
  */
 class CoreMenuBarPort implements MenuBarPort {
+  onHostDisappear?: () => void;
+  private readonly handleKeyboardShortcuts: boolean;
+  private readonly menuKey: string;
+  private readonly win: window.Window;
+
+  constructor(handleKeyboardShortcuts: boolean, menuKey: string, win: window.Window) {
+    this.handleKeyboardShortcuts = handleKeyboardShortcuts;
+    this.menuKey = menuKey;
+    this.win = win;
+  }
+
   onKeyPreIme(event: KeyEvent, windowId: number): boolean {
-    const matcher = getAcceleratorMatcher(windowId);
+    if (!this.handleKeyboardShortcuts) {
+      return false;
+    }
+    const matcher = getAcceleratorMatcher(this.menuKey);
     matcher.trackModifiers(event);
     if (event.type !== KeyType.Down) {
       return false;
     }
     // WebView restrictions precede application accelerators. Native windows
     // have no WebView policy, so their registered clipboard actions work too.
-    if (hasWebviewKeyboardPolicy(windowId)) {
-      if (matcher.matchesClipboardShortcut(event) && !isClipboardEnabled(windowId)) {
+    if (hasWebviewKeyboardPolicy(windowId, this.win)) {
+      if (matcher.matchesClipboardShortcut(event) && !isClipboardEnabled(windowId, this.win)) {
         return true;
       }
-      if (matcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(windowId)) {
+      if (matcher.matchesZoomShortcut(event) && !isZoomHotkeysEnabled(windowId, this.win)) {
         return true;
       }
       // Let ArkWeb handle ordinary editing shortcuts, including undo/redo.
@@ -91,7 +136,7 @@ class CoreMenuBarPort implements MenuBarPort {
     if (matcher.matches(event)) {
       const matchedItem = matcher.getMatchedItem();
       if (matchedItem) {
-        const handler = getMenuClickHandler(windowId);
+        const handler = getMenuClickHandler(this.menuKey);
         if (handler) {
           handler(matchedItem);
         }
@@ -102,8 +147,8 @@ class CoreMenuBarPort implements MenuBarPort {
     // (window-API set_fullscreen AND predefined menu fullscreen) hide the
     // menubar via WindowManager.setFullscreen (macOS semantics), so the
     // menubar-invisible condition alone covers every case.
-    if (event.keyCode === KeyCode.KEYCODE_ESCAPE && !isMenubarVisible(windowId)) {
-      const recoverFn = getMenuBarRecoverFn(windowId);
+    if (event.keyCode === KeyCode.KEYCODE_ESCAPE && !isMenubarVisible(this.menuKey)) {
+      const recoverFn = getMenuBarRecoverFn(this.menuKey);
       if (recoverFn) {
         recoverFn();
       }
@@ -113,23 +158,38 @@ class CoreMenuBarPort implements MenuBarPort {
   }
 
   onMenubarVisibility(windowId: number, visible: boolean): void {
-    const cb = getMenuDataCallback(windowKeyForId(windowId));
+    const cb = getMenuDataCallback(this.menuKey);
     cb?.onMenubarVisible?.(visible);
   }
 
   onMenuShown(windowId: number, shown: boolean): void {
-    const cb = getMenuDataCallback(windowKeyForId(windowId));
+    const cb = getMenuDataCallback(this.menuKey);
     cb?.onMenuShown?.(shown);
   }
 
   onWindowFocusLost(windowId: number): void {
-    resetAcceleratorModifiers(windowId);
+    resetAcceleratorModifiers(this.menuKey);
   }
 }
 
 interface SetMenubarRequest {
   jsonData: string;
   windowId: string;
+}
+
+export interface MenuPluginOptions {
+  /** Disable when the native renderer resolves shortcuts using its own focus context. */
+  handleKeyboardShortcuts?: boolean;
+  /** Hide the menu row when the application provides its own native-menu trigger. */
+  showMenuBar?: boolean;
+}
+
+interface PopupMenubarRequest {
+  windowId: string;
+  menuName?: string;
+  x: number;
+  y: number;
+  restoreFocusId?: string;
 }
 
 interface PopupRequest {
@@ -149,78 +209,115 @@ interface PredefinedRequest {
   windowId?: string;
 }
 
-/**
- * Menu bridge plugin for ArkTS.
- *
- * Routes menu bar and popup operations from the Rust `MenuClient` facade to
- * the existing MenuBarComponent callback registry and PredefinedActionExecutor
- * singleton. Replaces the legacy `onMenuRequest` callback path in
- * NativeAbility.setupMenuPopup.
- *
- * Beyond the bridge actions, this plugin owns the core-facing seams
- * (rs<->ets correspondence: `crates/plugin-menu` ↔ this package):
- *   - onInstall registers the menubar composition slot + notification port
- *     (see components/MenuBarSlot.ets in the core package).
- *   - onLifecycle("window-stage-create") runs the wiring that used to live in
- *     NativeAbility.setupMenuPopup (executor, MenuManager, click/recover
- *     handlers, about dialog, primary webview controller callback). It fires
- *     after BridgeHost.setWindowStage (context.getWindowStage() resolves) and
- *     before the pages load, matching the old ordering.
- *
- * Plugin ID: `ohos.menu`
- * Required contexts: ui-context (for popup positioning within the window)
- */
+interface WindowMenuBinding {
+  key: string;
+  window: window.Window;
+  port: MenuBarPort;
+  release: () => boolean;
+  executor: PredefinedActionExecutor;
+  releaseExecutor: () => void;
+  releaseController: () => void;
+}
+
+/** Window-owned menu UI and instance-scoped native callbacks. */
 export class MenuPlugin extends AsyncPluginBase {
   readonly id = "ohos.menu";
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
-  private menuManager: MenuManager | null = null;
+  private readonly bindings: Map<string, WindowMenuBinding> = new Map();
+  private readonly options: MenuPluginOptions;
+  private ownerContext?: BridgePluginContext;
 
-  onInstall(_context: BridgePluginHookContext): void {
-    setMenuBarSlotBuilder(wrapBuilder(menuBarBuilder));
-    setMenuBarPort(new CoreMenuBarPort());
+  constructor(options: MenuPluginOptions = {}) {
+    super();
+    this.options = {
+      showMenuBar: options.showMenuBar ?? true,
+      handleKeyboardShortcuts: options.handleKeyboardShortcuts ?? true,
+    };
+  }
+
+  onInstall(context: BridgePluginHookContext): void {
+    this.ownerContext = context;
+    this.bindWindow(0, context.getWindow(), context);
   }
 
   onDispose(): void {
-    setMenuWillOpenHandler(null);
+    for (const binding of this.bindings.values()) {
+      this.releaseBinding(binding);
+    }
+    this.bindings.clear();
+    this.ownerContext = undefined;
+  }
+
+  private releaseBinding(binding: WindowMenuBinding): void {
+    binding.releaseController();
+    binding.releaseExecutor();
+    if (binding.release()) {
+      cancelMenuDataWaiters(binding.key);
+      setMenuWillOpenHandler(null, binding.key);
+      unregisterMenuClickHandler(binding.key);
+      unregisterMenuBarRecoverFn(binding.key);
+    }
+    if (this.bindings.get(binding.key) === binding) this.bindings.delete(binding.key);
   }
 
   onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
-    if (event.kind !== "window-stage-create") {
-      return;
-    }
-    try {
-      this.setupMenuWiring(context);
-    } catch (e) {
-      hilog.error(DOMAIN, "MenuPlugin", "setupMenuWiring threw: %{public}s", String(e));
+    if (event.kind === "ui-context-destroy" || event.kind === "window-stage-destroy") {
+      this.onDispose();
+    } else if (event.kind === "ui-context-ready") {
+      this.ownerContext = context;
+      this.bindWindow(0, context.getWindow(), context);
     }
   }
 
-  /**
-   * Menu wiring migrated verbatim from NativeAbility.setupMenuPopup. The
-   * desktop probe + `__openharmony_ability_is_desktop__` AppStorage flag stay
-   * in NativeAbility (they probe the native module, not the menu domain).
-   */
-  private setupMenuWiring(context: BridgePluginContext): void {
-    setMenuWillOpenHandler((windowId: number): void => {
+  private resolveWindow(windowId: string, context: BridgePluginContext): window.Window {
+    if (windowId === "main" || windowId === "0") return context.getWindow();
+    const id = Number(windowId);
+    const win =
+      Number.isSafeInteger(id) && id > 0 ? WindowManager.getInstance().getWindow(id) : undefined;
+    if (!win) throw new Error(`No menu window '${windowId}'`);
+    return win;
+  }
+
+  private async menuCallback(
+    windowId: string,
+    context: BridgeCallContext,
+  ): Promise<MenuDataCallback> {
+    const win = this.resolveWindow(windowId, context);
+    const binding = this.bindWindow(
+      windowId === "main" ? 0 : Number(windowId),
+      win,
+      this.ownerContext ?? context,
+    );
+    const callback = await waitForMenuDataCallback(binding.key, context);
+    if (!context.isActive() || context.isCancelled())
+      throw new Error("Menu attachment was cancelled");
+    if (getMenuBarPort(win) !== binding.port)
+      throw new Error("Menu ownership changed before attachment");
+    return callback;
+  }
+
+  private bindWindow(
+    windowId: number,
+    mainWindow: window.Window,
+    context: BridgePluginContext,
+  ): WindowMenuBinding {
+    const key = menuKeyForWindow(mainWindow);
+    const existing = this.bindings.get(key);
+    if (existing?.window === mainWindow && getMenuBarPort(mainWindow) === existing.port)
+      return existing;
+    if (existing) this.releaseBinding(existing);
+    setMenuWillOpenHandler((): void => {
       if (!context.isActive()) {
         return;
       }
       try {
-        context.invokeNativeSyncProcessWide("menu-open", "ohos.menu.MenuOpenEvent", "std.bool", {
+        context.invokeNativeSync("menu-open", "ohos.menu.MenuOpenEvent", "std.bool", {
           windowId: windowId === 0 ? "main" : String(windowId),
         });
       } catch (error) {
         hilog.warn(DOMAIN, "MenuPlugin", "menu-open forward failed: %{public}s", String(error));
       }
-    });
-    // Forward menubar item clicks / accelerator key presses to the Rust-side
-    // plugin-menu bridge `menu-click` main-thread event (process-wide broadcast).
-    // plugin-menu decodes MenuClickEvent (typeName "ohos.menu.MenuClickEvent"),
-    // forwards over its MENU_EVENT_SENDER (registered by the menu backend) → the menu backend's
-    // MENU_EVENT_CHANNEL → MenuEvent::send → frontend onEvent callback.
-    // Previously this was `primaryModule.emitMenuEvent` — a legacy NAPI fn that
-    // wrote to a dead sink (openharmony-ability's own MENU_EVENT_CHANNEL with no
-    // consumer), so menubar clicks and accelerator fires silently dropped.
+    }, key);
     const emitMenuEventFn: (menuId: string, windowId?: string) => void = (menuId, windowId) => {
       hilog.info(
         DOMAIN,
@@ -230,10 +327,7 @@ export class MenuPlugin extends AsyncPluginBase {
         windowId ?? "main",
       );
       try {
-        // The context method injects this plugin's own id ("ohos.menu") —
-        // identical to the BridgeHostRegistry.invokeNativeSyncProcessWide call
-        // this replaced in NativeAbility.setupMenuPopup.
-        context.invokeNativeSyncProcessWide("menu-click", "ohos.menu.MenuClickEvent", "std.bool", {
+        context.invokeNativeSync("menu-click", "ohos.menu.MenuClickEvent", "std.bool", {
           menuId,
           windowId: windowId ?? "main",
         });
@@ -246,10 +340,8 @@ export class MenuPlugin extends AsyncPluginBase {
     const executor = new PredefinedActionExecutor((code: number) => {
       context.abilityContext.terminateSelf();
     });
-    const mainWindow = context.getWindowStage().getMainWindowSync();
     executor.setWindow(mainWindow);
-    executor.setContext(context.abilityContext);
-    setPredefinedActionExecutor(executor);
+    executor.setContext(mainWindow.getUIContext().getHostContext() as common.UIAbilityContext);
     executor.setShowAboutFn((metadata: AboutMetadataData) => {
       const appName = metadata.name ?? "";
       const appVersion = metadata.version ?? "";
@@ -285,9 +377,8 @@ export class MenuPlugin extends AsyncPluginBase {
     });
 
     const menuManager = new MenuManager(executor, emitMenuEventFn);
-    this.menuManager = menuManager;
 
-    setMenuClickHandler(0, (item) => {
+    setMenuClickHandler(key, (item) => {
       hilog.info(
         DOMAIN,
         "MenuPlugin",
@@ -295,27 +386,44 @@ export class MenuPlugin extends AsyncPluginBase {
         item.id,
         item.type,
       );
-      menuManager.handleItemClick(item, "main");
+      if (context.isActive()) menuManager.handleItemClick(item, windowKeyForId(windowId));
     });
 
-    setMenuBarRecoverFn(0, () => {
+    setMenuBarRecoverFn(key, () => {
       // Esc exit from predefined fullscreen: dual-path exit so the title bar /
       // Dock hover hidden on entry (WindowManager.setFullscreen desktop path)
       // are restored too. The internal recover() triggers
       // windowRectChange(RECOVER) → menubar restore (see on("windowRectChange")
       // in NativeAbility, which notifies this plugin's port).
-      WindowManager.getInstance().setFullscreen(0, false);
+      WindowManager.getInstance()
+        .setFullscreenAsync(windowId, false, { window: mainWindow })
+        .catch((error: Error): void => {
+          hilog.warn(DOMAIN, "MenuPlugin", "Menu recover failed: %{public}s", String(error));
+        });
     });
 
-    setPrimaryWebviewControllerCallback((controller: ESObject) => {
+    const releaseController = setPrimaryWebviewControllerCallback((controller: ESObject) => {
       executor.setController(controller as web_webview.WebviewController);
-    });
+    }, mainWindow);
 
-    // NOTE (issue #87 major-4): the legacy `primaryModule.onMenuRequest(...)`
-    // registration that used to live in setupMenuPopup never executed — the Rust-side
-    // on_menu_request stub discarded the callback (`let _ = callback`). All three
-    // of its branches (menubar visibility / popup / menubar json) are served by
-    // the MenuPlugin bridge actions set-menubar / popup / set-menubar-visible.
+    const port = new CoreMenuBarPort(this.options.handleKeyboardShortcuts ?? true, key, mainWindow);
+    const binding: WindowMenuBinding = {
+      key,
+      window: mainWindow,
+      port,
+      executor,
+      releaseController,
+      releaseExecutor: registerWindowMenuExecutor(mainWindow, executor),
+      release: registerWindowMenuBar(
+        mainWindow,
+        this.options.showMenuBar ? wrapBuilder(menuBarBuilder) : wrapBuilder(menuPopupBuilder),
+        port,
+        windowId,
+      ),
+    };
+    port.onHostDisappear = (): void => this.releaseBinding(binding);
+    this.bindings.set(key, binding);
+    return binding;
   }
 
   async invokeAsync(
@@ -340,25 +448,99 @@ export class MenuPlugin extends AsyncPluginBase {
       if (typeof request.windowId !== "string") {
         throw new Error("set-menubar.windowId must be a string");
       }
-      const cb = getMenuDataCallback(request.windowId);
-      if (!cb) {
-        // No MenuBarComponent mounted for this window (e.g. a FloatPage
-        // sub-window) or the menubar has not attached yet. Rejecting lets the
-        // Rust MenuClient surface the failure instead of caching
-        // MENU_HAS_CONTENT as success.
+      const cb = await this.menuCallback(request.windowId, context);
+      cb.onMenubarJson?.(request.jsonData);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
+    if (action === "popup-menubar") {
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        POPUP_MENUBAR_REQUEST_TYPE,
+      ) as PopupMenubarRequest;
+      if (
+        typeof request.windowId !== "string" ||
+        request.windowId.length === 0 ||
+        (request.menuName !== undefined && typeof request.menuName !== "string") ||
+        (request.restoreFocusId !== undefined &&
+          (typeof request.restoreFocusId !== "string" ||
+            request.restoreFocusId.trim().length === 0)) ||
+        typeof request.x !== "number" ||
+        !Number.isFinite(request.x) ||
+        typeof request.y !== "number" ||
+        !Number.isFinite(request.y)
+      ) {
+        throw new Error("popup-menubar requires a window, optional menu name and finite position");
+      }
+      const callback = (await this.menuCallback(request.windowId, context)).onApplicationMenu;
+      if (!callback) {
         throw new Error(
-          `set-menubar: no menu callback registered for window '${request.windowId}'`,
+          `popup-menubar: no menu callback registered for window '${request.windowId}'`,
         );
       }
-      cb.onMenubarJson?.(request.jsonData);
-      if (request.windowId !== "main") {
-        const windowId = Number(request.windowId);
-        if (Number.isSafeInteger(windowId) && windowId > 0) {
-          setMenuClickHandler(windowId, (item) => {
-            this.menuManager?.handleItemClick(item, request.windowId);
-          });
-        }
+      callback(request.menuName, request.x, request.y, request.restoreFocusId);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
+    if (action === "popup-commands") {
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        POPUP_COMMANDS_REQUEST_TYPE,
+      ) as PopupCommandsRequest;
+      const identifiers: Set<string> = new Set();
+      if (
+        !request ||
+        typeof request.windowId !== "string" ||
+        request.windowId.length === 0 ||
+        (request.restoreFocusId !== undefined &&
+          (typeof request.restoreFocusId !== "string" ||
+            request.restoreFocusId.trim().length === 0)) ||
+        typeof request.x !== "number" ||
+        !Number.isFinite(request.x) ||
+        request.x < 0 ||
+        typeof request.y !== "number" ||
+        !Number.isFinite(request.y) ||
+        request.y < 0 ||
+        !Array.isArray(request.items) ||
+        request.items.length === 0 ||
+        request.items.length > 128 ||
+        request.items.some((item: MenuCommandItem): boolean => {
+          if (
+            !item ||
+            typeof item.id !== "string" ||
+            item.id.trim().length === 0 ||
+            typeof item.text !== "string" ||
+            item.text.trim().length === 0 ||
+            typeof item.enabled !== "boolean" ||
+            identifiers.has(item.id)
+          ) {
+            return true;
+          }
+          identifiers.add(item.id);
+          return false;
+        })
+      ) {
+        throw new Error("Invalid command menu window, items or position");
       }
+      const callback = (await this.menuCallback(request.windowId, context)).onMenuCommands;
+      if (!callback) {
+        throw new Error(
+          `popup-commands: no menu callback registered for window '${request.windowId}'`,
+        );
+      }
+      const items = request.items.map(
+        (item: MenuCommandItem): MenuItemData => ({
+          id: item.id,
+          type: "item",
+          text: item.text,
+          enabled: item.enabled,
+        }),
+      );
+      callback(items, request.x, request.y, request.restoreFocusId);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -386,10 +568,7 @@ export class MenuPlugin extends AsyncPluginBase {
       }
       const x = request.x ?? 0;
       const y = request.y ?? 0;
-      const cb = getMenuDataCallback(request.windowId);
-      if (!cb) {
-        throw new Error(`popup: no menu callback registered for window '${request.windowId}'`);
-      }
+      const cb = await this.menuCallback(request.windowId, context);
       cb.onMenuPopup?.(request.jsonData, x, y);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
@@ -407,12 +586,7 @@ export class MenuPlugin extends AsyncPluginBase {
       if (typeof request.windowId !== "string") {
         throw new Error("set-menubar-visible.windowId must be a string");
       }
-      const cb = getMenuDataCallback(request.windowId);
-      if (!cb) {
-        throw new Error(
-          `set-menubar-visible: no menu callback registered for window '${request.windowId}'`,
-        );
-      }
+      const cb = await this.menuCallback(request.windowId, context);
       cb.onMenubarVisible?.(request.visible);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
@@ -427,30 +601,14 @@ export class MenuPlugin extends AsyncPluginBase {
       if (typeof request.action !== "string" || !request.action) {
         throw new Error("execute-predefined.action must be a non-empty string");
       }
-      const executor = getPredefinedActionExecutor();
-      if (!executor) {
-        hilog.warn(
-          DOMAIN,
-          "MenuPlugin",
-          "execute-predefined: PredefinedActionExecutor not initialized, action: %{public}s",
-          request.action,
-        );
-        throw new Error("PredefinedActionExecutor not initialized");
-      }
+      const windowId = request.windowId ?? "main";
+      const executor = this.bindWindow(
+        windowId === "main" ? 0 : Number(windowId),
+        this.resolveWindow(windowId, context),
+        this.ownerContext ?? context,
+      ).executor;
       const actionType = request.action as PredefinedType;
-      // Window operations (minimize/hide/close) are deferred via WindowManager to
-      // avoid racing with system foreground transitions, matching the legacy
-      // ArkHelper.executePredefinedAction behavior.
-      const WINDOW_OPERATIONS: PredefinedType[] = ["minimize", "hide", "close"];
-      if (WINDOW_OPERATIONS.includes(actionType)) {
-        hilog.info(DOMAIN, "MenuPlugin", "Deferring window operation '%{public}s'", request.action);
-        const wm = WindowManager.getInstance();
-        wm.setPendingAction(() => {
-          executor.execute(actionType);
-        });
-      } else {
-        executor.execute(actionType);
-      }
+      await executor.execute(actionType, undefined, windowId === "main" ? 0 : Number(windowId));
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 

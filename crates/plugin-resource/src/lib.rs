@@ -16,9 +16,8 @@ use std::{
 };
 
 use napi_derive_ohos::napi;
-use napi_ohos::{bindgen_prelude::Unknown, Env, Error, JsValue, Result};
+use napi_ohos::{bindgen_prelude::Unknown, Env, Error, Result};
 use ohos_resource_manager_binding::ResourceManager as NativeResourceManager;
-use ohos_resource_manager_sys::OH_ResourceManager_InitNativeResourceManager;
 use openharmony_ability::{
     impl_bridge_napi_type, AsyncBridge, BridgeContextRequirement, BridgeMainThreadEvent,
     BridgeNapiType, BridgePlugin, OpenHarmonyApp, PluginLifecycleEvent,
@@ -145,15 +144,8 @@ impl BridgeNapiType for ResourceManagerRef {
     }
 
     fn from_bridge_value(value: Unknown<'_>) -> Result<Self> {
-        let raw = value.value();
-        let native = unsafe { OH_ResourceManager_InitNativeResourceManager(raw.env, raw.value) };
-        if native.is_null() {
-            return Err(Error::from_reason(
-                "Failed to initialize the native resource manager from the ArkTS object",
-            ));
-        }
         Ok(Self(ResourceManager::from_native(
-            NativeResourceManager::from_raw(native),
+            NativeResourceManager::from_napi_value(value)?,
         )))
     }
 }

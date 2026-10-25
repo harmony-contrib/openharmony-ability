@@ -134,7 +134,7 @@ impl PermissionExt for OpenHarmonyApp {
                 >(
                     "request",
                     payload?,
-                    BridgeCallOptions::default().with_timeout_ms(60_000),
+                    BridgeCallOptions::for_user_interaction(),
                 )
                 .await?;
             let codes = response.codes;

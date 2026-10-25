@@ -1,82 +1,94 @@
-//! Event-loop waker for the OHOS runtime integration layer.
-//!
-//! This module provides the `OpenHarmonyWaker` — a `ThreadsafeFunction` wrapper
-//! that, when called from any thread, schedules a no-op callback on the NAPI
-//! main thread, waking the event loop. The `WAKER` global stores the TSFN
-//! singleton, initialized once during ability lifecycle setup (`lifecycle.rs`)
-//! and read live by `OpenHarmonyWaker::wake()` whenever the embedding runtime's
-//! event-loop proxy needs to wake the main thread.
-//!
-//! Role: runtime integration layer infrastructure. The event loop proxy needs
-//! a cross-thread wake mechanism; OHOS NAPI TSFN is the only available primitive.
-//! All access is main-thread-only; the global is accepted as a persistent
-//! integration seam.
-//!
-//! # Why `wake()` reads `WAKER` live (not a construction-time snapshot)
-//!
-//! `WAKER` is populated by `create_lifecycle_handle` (lifecycle.rs), which runs
-//! *after* the embedding runtime's entry point that constructs the event-loop proxy (and thus
-//! calls `create_waker`) during the `#[ability]` `init` sequence. A snapshot
-//! captured at construction time would therefore be `None` permanently — `wake()`
-//! would be a silent no-op, the runtime's user-event variant would never fire, and async
-//! plugin command responses (resolved on tokio worker threads →
-//! `send_user_message` non-main-thread branch → `proxy.send_event` + `wake()`)
-//! would never be drained on the main thread → JS Promises never settle →
-//! 5000ms test timeouts. Reading `WAKER` live at `wake()` time sidesteps the
-//! ordering: by the time any worker-thread command resolves, lifecycle setup
-//! has long since populated `WAKER`.
+//! Input and user wakes share one owned FIFO and one main-thread scheduling callback.
+//! Resolve the endpoint at wake time: application proxies can predate lifecycle setup.
 
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, LazyLock, RwLock,
+};
 
 use napi_ohos::{
-    threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
+    threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode::NonBlocking},
     Status,
 };
 
-// callee_handled = false, matching every other TSFN in this crate (window/mod.rs,
-// ime.rs, bridge/mod.rs) — issue #87 minor-1. The waker closure provably always
-// returns Ok(()), so the error-first null argument the `true` variant passes is
-// never observed by anyone.
-type WakerType = LazyLock<RwLock<Option<Arc<ThreadsafeFunction<(), (), (), Status, false>>>>>;
+use crate::{input::queue::InputQueue, InputEvent};
 
-pub(crate) static WAKER: WakerType = LazyLock::new(|| RwLock::new(None));
+pub(crate) struct InputWake {
+    pub(crate) queue: Arc<InputQueue<InputEvent>>,
+    pub(crate) callback: ThreadsafeFunction<(), (), (), Status, false>,
+    pub(crate) scheduled: AtomicBool,
+}
 
-#[derive(Clone)]
-pub struct OpenHarmonyWaker;
+pub(crate) static WAKER: LazyLock<RwLock<Option<Arc<InputWake>>>> =
+    LazyLock::new(|| RwLock::new(None));
 
-// Safety: `OpenHarmonyWaker` carries no data; its only operation reads the
-// `Sync` `WAKER` global and calls a `ThreadsafeFunction` (callable from any
-// thread by construction).
-unsafe impl Send for OpenHarmonyWaker {}
-unsafe impl Sync for OpenHarmonyWaker {}
-
-impl Default for OpenHarmonyWaker {
-    fn default() -> Self {
-        Self::new()
+fn endpoint_from(slot: &RwLock<Option<Arc<InputWake>>>) -> Option<Arc<InputWake>> {
+    match slot.read() {
+        Ok(endpoint) => endpoint.clone(),
+        Err(error) => {
+            crate::warn!("Cannot read native input waker: {error}");
+            None
+        }
     }
+}
+
+fn schedule(endpoint: &InputWake) {
+    if endpoint.scheduled.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let status = endpoint.callback.call((), NonBlocking);
+    if status != Status::Ok {
+        endpoint.scheduled.store(false, Ordering::Release);
+        crate::warn!("Cannot schedule native input queue: {status:?}");
+    }
+}
+
+pub(crate) fn clear_scheduled(
+    slot: &RwLock<Option<Arc<InputWake>>>,
+    queue: &Arc<InputQueue<InputEvent>>,
+) {
+    if let Some(endpoint) = endpoint_from(slot).or_else(|| endpoint_from(&WAKER)) {
+        if Arc::ptr_eq(&endpoint.queue, queue) {
+            endpoint.scheduled.store(false, Ordering::Release);
+        }
+    }
+}
+
+pub(crate) fn schedule_input(
+    slot: &RwLock<Option<Arc<InputWake>>>,
+    queue: &Arc<InputQueue<InputEvent>>,
+) {
+    if let Some(endpoint) = endpoint_from(slot).or_else(|| endpoint_from(&WAKER)) {
+        if Arc::ptr_eq(&endpoint.queue, queue) {
+            schedule(&endpoint);
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct OpenHarmonyWaker {
+    slot: Option<Arc<RwLock<Option<Arc<InputWake>>>>>,
 }
 
 impl OpenHarmonyWaker {
     pub fn new() -> Self {
-        Self
+        Self { slot: None }
+    }
+
+    pub(crate) fn from_slot(slot: Arc<RwLock<Option<Arc<InputWake>>>>) -> Self {
+        Self { slot: Some(slot) }
     }
 
     pub fn wake(&self) {
-        // Read `WAKER` live rather than using a construction-time snapshot.
-        // Clone the `Arc<TSFN>` out and drop the read guard before calling, so
-        // we never hold the lock across the (non-blocking) TSFN call.
-        let tsfn = (*WAKER).read().ok().and_then(|guard| guard.clone());
-        match tsfn {
-            Some(waker) => {
-                // callee_handled=false call(): the raw value, no Result wrapper
-                // (see the WakerType note above).
-                waker.call((), ThreadsafeFunctionCallMode::NonBlocking);
-            }
-            None => {
-                // `WAKER` not yet populated (lifecycle setup incomplete) or the
-                // lock is poisoned. No-op — the caller's event stays queued in
-                // the `user_events_sender` mpsc and will be drained once a
-                // subsequent wake (with `WAKER` populated) fires.
+        let endpoint = self
+            .slot
+            .as_deref()
+            .and_then(endpoint_from)
+            .or_else(|| endpoint_from(&WAKER));
+        if let Some(endpoint) = endpoint {
+            match endpoint.queue.wake() {
+                Ok(()) => schedule(&endpoint),
+                Err(error) => crate::warn!("{error}"),
             }
         }
     }

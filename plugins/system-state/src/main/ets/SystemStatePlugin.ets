@@ -50,6 +50,7 @@ class DisplaySnapshot {
   readonly width: number;
   readonly height: number;
   readonly densityPixels: number;
+  readonly refreshRate?: number;
   readonly availableArea?: display.Rect;
   readonly isDefault: boolean;
 
@@ -58,6 +59,7 @@ class DisplaySnapshot {
     this.width = info.width;
     this.height = info.height;
     this.densityPixels = info.densityPixels;
+    this.refreshRate = info.refreshRate;
     this.availableArea = availableArea;
     this.isDefault = isDefault;
   }

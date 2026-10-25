@@ -1,4 +1,5 @@
 export { NativeAbility } from "./src/main/ets/ability/NativeAbility";
+export { NativeWindowAbility } from "./src/main/ets/ability/NativeWindowAbility";
 export {
   AsyncPluginBase,
   LazyPlugin,
@@ -13,6 +14,7 @@ export type {
   AsyncBridgePlugin,
   BridgeBindings,
   BridgeCallContext,
+  BridgeComponentTouchEvent,
   BridgeContextRequirement,
   BridgeDispatchHook,
   BridgeLifecycleEvent,
@@ -43,6 +45,8 @@ export { WindowManager } from "./src/main/ets/window/WindowManager";
 export {
   setMenuBarSlotBuilder,
   getMenuBarSlotBuilder,
+  menuKeyForWindow,
+  registerWindowMenuBar,
   setMenuBarPort,
   getMenuBarPort,
 } from "./src/main/ets/components/MenuBarSlot";

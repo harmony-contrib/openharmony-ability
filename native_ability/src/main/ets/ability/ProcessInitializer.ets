@@ -1,6 +1,5 @@
 import { AbilityConstant, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
-import webview from "@ohos.web.webview";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { deviceInfo } from "@kit.BasicServicesKit";
 import { Module, AbilityInitContext } from "./type";
@@ -96,7 +95,10 @@ export class ProcessInitializer {
 
     // 3. Web engine initialization
     if (webEngineRequired) {
-      webview.WebviewController.initializeWebEngine();
+      // Loading ArkWeb blocks native-only applications before Ability startup.
+      // Keep its native module outside that path as well as engine initialization.
+      const webview = await import("@ohos.web.webview");
+      webview.default.WebviewController.initializeWebEngine();
     }
 
     // 4. Register WindowManager.createSubWindow as TSFN for legacy create_os_window path.

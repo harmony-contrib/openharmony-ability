@@ -11,11 +11,24 @@ import {
   DOMAIN,
   NATIVE_MODULE_STORAGE_KEY,
   MAIN_WINDOW_ID,
+  menuKeyForWindow,
 } from "@ohos-rs/ability";
 import { getMenuDataCallback } from "./MenuBarComponent";
 
-// Global executor singleton — shared by Menu and Tray execution paths
+// Legacy explicit fallback. Built-in menus register an executor per actual window.
 let globalExecutor: PredefinedActionExecutor | null = null;
+const windowExecutors: Map<string, PredefinedActionExecutor> = new Map();
+
+export function registerWindowMenuExecutor(
+  win: window.Window,
+  executor: PredefinedActionExecutor,
+): () => void {
+  const key = menuKeyForWindow(win);
+  windowExecutors.set(key, executor);
+  return (): void => {
+    if (windowExecutors.get(key) === executor) windowExecutors.delete(key);
+  };
+}
 
 interface TargetWindow {
   win: window.Window | null;
@@ -27,7 +40,12 @@ export function setPredefinedActionExecutor(executor: PredefinedActionExecutor):
 }
 
 export function getPredefinedActionExecutor(): PredefinedActionExecutor | null {
-  return globalExecutor;
+  const manager = WindowManager.getInstance();
+  const target =
+    manager.getUserInteractedWindow() ??
+    manager.getFocusedWindow() ??
+    manager.getWindow(MAIN_WINDOW_ID);
+  return (target ? windowExecutors.get(menuKeyForWindow(target)) : undefined) ?? globalExecutor;
 }
 
 export class PredefinedActionExecutor {
@@ -57,13 +75,14 @@ export class PredefinedActionExecutor {
     this.showAboutFn = fn;
   }
 
-  /**
-   * Hide the entire Ability (app) to background.
-   * Equivalent to macOS Cmd+H (hide:) — all windows become invisible, process stays alive.
-   * This is an app-level operation, does not depend on window focus.
-   */
+  /** Hide the target window's owning Ability; other Abilities retain their state. */
   private async hideAbility(): Promise<void> {
-    await WindowManager.getInstance().hideAbility();
+    const manager = WindowManager.getInstance();
+    if (manager.getWindow(MAIN_WINDOW_ID) === this.win) {
+      await manager.hideAbility();
+    } else {
+      await this.context?.hideAbility();
+    }
   }
 
   /**
@@ -134,6 +153,9 @@ export class PredefinedActionExecutor {
   private getTargetWindow(targetWindowId?: number): TargetWindow {
     const wm = WindowManager.getInstance();
 
+    if (targetWindowId === MAIN_WINDOW_ID) {
+      return { win: this.win, windowId: MAIN_WINDOW_ID };
+    }
     // Strategy 1: Use targetWindowId if provided (Window Menu Bar path)
     if (targetWindowId !== undefined && targetWindowId > 0) {
       const win = wm.getWindow(targetWindowId);
@@ -188,10 +210,14 @@ export class PredefinedActionExecutor {
       return;
     }
 
-    // WindowManager.minimizeWindow is fire-and-forget (void + internal .catch),
-    // so no await/try-catch here — awaiting a void would resolve immediately and
-    // mask the async failure path that is now handled inside WindowManager.
-    WindowManager.getInstance().minimizeWindow(windowId);
+    // Registered windows retain the manager's focus-restoration guard. Component
+    // windows using a local zero alias must operate on their actual Window.
+    const manager = WindowManager.getInstance();
+    if (manager.getWindow(windowId) === win) {
+      manager.minimizeWindow(windowId);
+    } else {
+      await win.minimize();
+    }
   }
 
   /**
@@ -365,7 +391,7 @@ export class PredefinedActionExecutor {
           await this.minimizeWindow(targetWindowId);
           break;
         case "hide":
-          // Hide entire Ability (app) to background — equivalent to macOS Cmd+H (app-level)
+          // Hide this menu's owning Ability.
           await this.hideAbility();
           break;
         case "close":
@@ -386,7 +412,10 @@ export class PredefinedActionExecutor {
           // WindowManager.setFullscreen). The previous inline version only did
           // a bare immersive maximize on desktop — the system title bar / Dock
           // stayed visible, diverging from set_fullscreen().
-          WindowManager.getInstance().setFullscreen(resolvedWindowId, true);
+          if (!win) throw new Error("Fullscreen target window is unavailable");
+          await WindowManager.getInstance().setFullscreenAsync(resolvedWindowId, true, {
+            window: win,
+          });
           break;
         }
         case "recover": {
@@ -395,7 +424,10 @@ export class PredefinedActionExecutor {
           // bars; menubar restored via MW-5 callbacks). Harmless when the
           // window is not fullscreen — the desktop recover() also serves the
           // plain un-maximize case.
-          WindowManager.getInstance().setFullscreen(resolvedWindowId, false);
+          if (!win) throw new Error("Recover target window is unavailable");
+          await WindowManager.getInstance().setFullscreenAsync(resolvedWindowId, false, {
+            window: win,
+          });
           break;
         }
         case "quit":

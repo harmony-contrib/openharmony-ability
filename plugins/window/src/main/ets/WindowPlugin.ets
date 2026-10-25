@@ -12,7 +12,10 @@ import { notificationManager } from "@kit.NotificationKit";
 import { inputMethod } from "@kit.IMEKit";
 import {
   BridgeAcknowledgement,
+  BridgeLifecycleEvent,
   BridgeCallContext,
+  BridgeComponentTouchEvent,
+  BridgePluginContext,
   BridgePluginHookContext,
   BridgeTypedValue,
   BridgeContextRequirement,
@@ -24,6 +27,14 @@ import {
 import { PromptDialogs, WindowPromptRequest } from "./PromptDialogs";
 
 const TAG: string = "WindowPlugin";
+const MOVE_REQUESTED_TYPE = "ohos.window.MoveRequested";
+const MOVE_RESPONSE_TYPE = "ohos.window.MoveResponse";
+const CLOSE_REQUESTED_TYPE = "ohos.window.CloseRequested";
+const CLOSE_RESPONSE_TYPE = "ohos.window.CloseResponse";
+
+interface WindowCloseResponse {
+  preventClose: boolean;
+}
 
 const AVOID_AREA_REQUEST_TYPE = "ohos.window.AvoidAreaRequest";
 const AVOID_AREA_RESPONSE_TYPE = "ohos.window.AvoidAreaResponse";
@@ -540,12 +551,72 @@ function parseDecorationFlagsRequest(payload: BridgeTypedValue): DecorationFlags
   return request;
 }
 
+interface WindowMoveResponse {
+  startMoving: boolean;
+}
+
 /** One host-scoped implementation. Repeated calls are isolated by the platform window id. */
 export class WindowPlugin extends AsyncPluginBase {
   readonly id = "ohos.window";
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
   private readonly prompts: PromptDialogs = new PromptDialogs();
   private readonly windows: Map<number, window.Window> = new Map();
+  private removeCloseInterceptor?: () => void;
+
+  onComponentTouch(event: BridgeComponentTouchEvent, context: BridgePluginContext): void {
+    if (
+      !context.isActive() ||
+      (event.touch.type !== TouchType.Down && event.touch.type !== TouchType.Move)
+    ) {
+      return;
+    }
+    const response = context.invokeNativeSync(
+      "move-requested",
+      MOVE_REQUESTED_TYPE,
+      MOVE_RESPONSE_TYPE,
+      { windowId: event.windowId },
+    ) as WindowMoveResponse;
+    if (typeof response?.startMoving !== "boolean") {
+      throw new Error("Invalid window move response");
+    }
+    if (response.startMoving) {
+      // The platform needs the current pointer callback to capture subsequent movement.
+      event.window.startMoving().catch((error: Error) => {
+        hilog.error(DOMAIN, TAG, "Window move failed: %{public}s", String(error));
+      });
+    }
+  }
+
+  override onLifecycle(event: BridgeLifecycleEvent, context: BridgePluginHookContext): void {
+    if (event.kind === "window-stage-create") {
+      this.removeCloseInterceptor?.();
+      this.removeCloseInterceptor = WindowManager.getInstance().registerCloseRequestInterceptor(
+        (windowId: number): boolean => {
+          if (!context.isActive()) {
+            return false;
+          }
+          try {
+            const response = context.invokeNativeSync(
+              "close-requested",
+              CLOSE_REQUESTED_TYPE,
+              CLOSE_RESPONSE_TYPE,
+              { windowId },
+            ) as WindowCloseResponse;
+            if (typeof response?.preventClose !== "boolean") {
+              throw new Error("Invalid window close response");
+            }
+            return response.preventClose;
+          } catch (error) {
+            hilog.error(DOMAIN, TAG, "Window close request failed: %{public}s", String(error));
+            return true;
+          }
+        },
+      );
+    } else if (event.kind === "window-stage-destroy") {
+      this.removeCloseInterceptor?.();
+      this.removeCloseInterceptor = undefined;
+    }
+  }
 
   async invokeAsync(
     action: string,
@@ -567,8 +638,12 @@ export class WindowPlugin extends AsyncPluginBase {
       }
       const aliases: Map<number, number> = new Map();
       for (const id of request.windowIds) {
+        if (WindowManager.getInstance().isWindowCreationDeferred(id)) {
+          continue;
+        }
         try {
-          aliases.set(this.requireWindow(id, context).getWindowProperties().id, id);
+          const nativeWindow = await this.requireWindow(id, context);
+          aliases.set(nativeWindow.getWindowProperties().id, id);
         } catch (error) {
           hilog.warn(
             DOMAIN,
@@ -604,7 +679,7 @@ export class WindowPlugin extends AsyncPluginBase {
         throw new Error("Invalid prompt window");
       }
       const index = await this.prompts.show(
-        this.requireWindow(request.windowId, context),
+        await this.requireWindow(request.windowId, context),
         request,
         context,
       );
@@ -703,9 +778,22 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-decorations") {
       const request = parseDecorationsRequest(payload);
-      const win = this.requireWindow(request.windowId, context);
+      const win = await this.requireWindow(request.windowId, context);
       try {
-        win.setWindowDecorVisible(request.decorations);
+        const manager = WindowManager.getInstance();
+        if (manager.isUIAbilityMainWindow(request.windowId) || this.windows.has(request.windowId)) {
+          win.setWindowDecorVisible(request.decorations);
+          if (manager.isUIAbilityMainWindow(request.windowId) && deviceInfo.sdkApiVersion >= 14) {
+            // The main window can retain its three-button overlay after its title bar is hidden.
+            win.setWindowTitleButtonVisible(
+              request.decorations,
+              request.decorations,
+              request.decorations,
+            );
+          }
+        } else {
+          manager.setDecorations(request.windowId, request.decorations);
+        }
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
       } catch (error) {
         throw new Error(`set-decorations failed: ${String(error)}`);
@@ -714,20 +802,26 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-fullscreen") {
       const request = parseFullscreenRequest(payload);
-      // Delegate to WindowManager.setFullscreen: dual-path by form factor —
-      // desktop/2in1 uses maximize(ENTER_IMMERSIVE) + setTitleAndDockHoverShown,
-      // mobile uses setWindowLayoutFullScreen + setWindowSystemBarEnable, with
-      // per-window serialization (rapid on/off races). The inline
-      // setWindowLayoutFullScreen calls below were the pluginize-era migration
-      // of the legacy NAPI path and only implemented the mobile path — a silent
-      // visual no-op on desktop (ack OK, no window change).
-      WindowManager.getInstance().setFullscreen(request.windowId, request.on);
+      const win = await this.requireWindow(request.windowId, context);
+      await WindowManager.getInstance().setFullscreenAsync(request.windowId, request.on, {
+        window: win,
+        beforeRun: (): void => this.assertCallActive(context),
+      });
+      this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-background-color") {
       const request = parseColorRequest(payload);
-      const win = this.requireWindow(request.windowId, context);
+      if (
+        WindowManager.getInstance().configureDeferredWindow(request.windowId, (options): void => {
+          options.transparent = false;
+          options.backgroundColor = request.color;
+        })
+      ) {
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
+      const win = await this.requireWindow(request.windowId, context);
       try {
         const color = this.colorString(request.color);
         win.setWindowBackgroundColor(color);
@@ -761,7 +855,7 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-blur") {
       const request = parseBlurRequest(payload);
-      this.requireWindow(request.windowId, context);
+      await this.requireWindow(request.windowId, context);
       hilog.info(
         DOMAIN,
         TAG,
@@ -777,8 +871,9 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "focus") {
       const request = parseWindowIdRequest(payload);
-      const win = this.requireWindow(request.windowId, context);
       const manager = WindowManager.getInstance();
+      manager.startDeferredWindowCreation(request.windowId);
+      const win = await this.requireWindow(request.windowId, context);
       try {
         if (manager.isUIAbilityMainWindow(request.windowId)) {
           await manager.restoreWindow(request.windowId, {
@@ -788,14 +883,20 @@ export class WindowPlugin extends AsyncPluginBase {
             beforeRun: (): void => this.assertCallActive(context),
           });
         } else {
-          await manager.serializeOp(request.windowId, async (): Promise<void> => {
-            this.assertCallActive(context);
-            const dynamic: ESObject = this.dynamic(win);
-            if (typeof dynamic.raiseToAppTop !== "function") {
-              throw new Error("raiseToAppTop is unavailable on this API level");
-            }
-            await (dynamic.raiseToAppTop() as Promise<void>);
-          });
+          await manager.serializeOp(
+            request.windowId,
+            async (): Promise<void> => {
+              this.assertCallActive(context);
+              // showWindow also raises independent child windows and restores hidden ones.
+              // raiseToAppTop does not change their stacking when the parent constraint is loosened.
+              if (deviceInfo.sdkApiVersion >= 20) {
+                await win.showWindow({ focusOnShow: true });
+              } else {
+                await win.showWindow();
+              }
+            },
+            win,
+          );
         }
         this.assertCallActive(context);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -806,7 +907,7 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-focusable") {
       const request = parseFocusableRequest(payload);
-      const win = this.requireWindow(request.windowId, context);
+      const win = await this.requireWindow(request.windowId, context);
       try {
         await win.setFocusable(request.focusable);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -817,7 +918,7 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-touchable") {
       const request = parseTouchableRequest(payload);
-      const win = this.requireWindow(request.windowId, context);
+      const win = await this.requireWindow(request.windowId, context);
       try {
         await win.setWindowTouchable(request.touchable);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -828,7 +929,15 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "move-to") {
       const request = parseMoveRequest(payload);
-      const win = this.requireWindow(request.windowId, context);
+      if (
+        WindowManager.getInstance().configureDeferredWindow(request.windowId, (options): void => {
+          options.x = request.x;
+          options.y = request.y;
+        })
+      ) {
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
+      const win = await this.requireWindow(request.windowId, context);
       try {
         await win.moveWindowTo(request.x, request.y);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -839,7 +948,15 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "resize") {
       const request = parseResizeRequest(payload);
-      const win = this.requireWindow(request.windowId, context);
+      if (
+        WindowManager.getInstance().configureDeferredWindow(request.windowId, (options): void => {
+          options.width = request.width;
+          options.height = request.height;
+        })
+      ) {
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
+      const win = await this.requireWindow(request.windowId, context);
       try {
         await win.resize(request.width, request.height);
         return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -1069,7 +1186,7 @@ export class WindowPlugin extends AsyncPluginBase {
     }
     if (action === "set-custom-cursor") {
       const request = parseCustomCursor(payload);
-      const win = this.requireWindow(request.windowId, context);
+      const win = await this.requireWindow(request.windowId, context);
       const bytes = new Uint8Array(request.rgba);
       const pixelMap = await image.createPixelMap(bytes.buffer, {
         size: { width: request.width, height: request.height },
@@ -1105,13 +1222,20 @@ export class WindowPlugin extends AsyncPluginBase {
     }
 
     if (action === "set-cursor-visible") {
-      // Delegates to WindowManager.setPointerVisible (pointer.setPointerVisible).
-      // GLOBAL visibility — OHOS has no per-window variant, so this request
-      // carries no windowId (multi-window caveat documented as 遗留问题六).
-      // Fire-and-forget: failures are logged in WindowManager.
       const request = parseCursorVisibleRequest(payload);
-      WindowManager.getInstance().setPointerVisible(request.visible);
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      // The caller serializes visibility changes using this acknowledgement.
+      // Returning before native completion can restore a cursor after newer input.
+      let accepted = true;
+      try {
+        await WindowManager.getInstance().setPointerVisible(request.visible);
+      } catch (error) {
+        if ((error as BusinessError).code !== 801) {
+          throw error as Error;
+        }
+        accepted = false;
+      }
+      this.assertCallActive(context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(accepted) };
     }
 
     if (action === "set-decoration-flags") {
@@ -1145,20 +1269,30 @@ export class WindowPlugin extends AsyncPluginBase {
       if (request.windowId === 0) {
         throw new Error("Cannot destroy the main Ability window (id 0)");
       }
-      const existing =
-        this.windows.get(request.windowId) ??
-        WindowManager.getInstance().getWindow(request.windowId);
-      if (existing !== undefined) {
+      const manager = WindowManager.getInstance();
+      manager.cancelDeferredWindowCreation(request.windowId);
+      await manager.waitForWindowCreation(request.windowId);
+      this.assertCallActive(context);
+      const existing = this.windows.get(request.windowId);
+      if (manager.isUIAbilityMainWindow(request.windowId) || existing === undefined) {
+        await manager.destroyWindow(request.windowId);
+      } else {
         await existing.destroyWindow();
-        this.windows.delete(request.windowId);
+        if (this.windows.get(request.windowId) === existing) {
+          this.windows.delete(request.windowId);
+        }
       }
+      this.assertCallActive(context);
       // else: already destroyed — idempotent success
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
-    const win = this.requireWindow(request.windowId, context);
+    const manager = WindowManager.getInstance();
+    if (action === "show" || action === "restore") {
+      manager.startDeferredWindowCreation(request.windowId);
+    }
+    const win = await this.requireWindow(request.windowId, context);
     try {
-      const manager = WindowManager.getInstance();
       if (
         action === "restore" ||
         (action === "show" && manager.isUIAbilityMainWindow(request.windowId))
@@ -1169,38 +1303,47 @@ export class WindowPlugin extends AsyncPluginBase {
           beforeRun: (): void => this.assertCallActive(context),
         });
       } else {
-        await manager.serializeOp(request.windowId, async (): Promise<void> => {
-          this.assertCallActive(context);
-          const dynamic: ESObject = this.dynamic(win);
-          if (action === "minimize") {
-            await (dynamic.minimize() as Promise<void>);
-          } else if (action === "maximize") {
-            // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
-            // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
-            // layout gap (white bar at bottom) after recover().
-            // Snapshot the floating rect first: WMS recover() re-anchors the floating
-            // position to the pointer (GetFullScreenToFloatingRect), so the paired
-            // recover below must moveTo() back — see WindowManager.preMaximizeRects.
-            // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
-            // losing this bridge's await-completion semantics (callers immediately
-            // query is-maximized afterwards).
-            manager.snapshotPreMaximizeRect(request.windowId, win);
-            await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
-          } else if (action === "recover") {
-            await (dynamic.recover() as Promise<void>);
-            // Restore the pre-maximize position snapshotted above (WMS recover()
-            // pointer-anchors the floating rect). Best-effort — recover already
-            // succeeded.
-            await manager.restorePreMaximizeRect(request.windowId, win);
-            // NOTE: Do NOT call showWindow() after recover() — recover() already makes
-            // the window visible, and showWindow() resets the window position to centered
-            // state, causing the window to jump to the center of the screen.
-          } else if (action === "show") {
-            const previousRect = win.getWindowProperties().windowRect;
-            await win.showWindow();
-            await win.moveWindowTo(previousRect.left, previousRect.top);
-          }
-        });
+        await manager.serializeOp(
+          request.windowId,
+          async (): Promise<void> => {
+            this.assertCallActive(context);
+            const dynamic: ESObject = this.dynamic(win);
+            if (action === "minimize") {
+              await (dynamic.minimize() as Promise<void>);
+            } else if (action === "maximize") {
+              // Use FOLLOW_APP_IMMERSIVE_SETTING (not the default ENTER_IMMERSIVE) to
+              // preserve the existing fullscreen layout mode. ENTER_IMMERSIVE causes a
+              // layout gap (white bar at bottom) after recover().
+              // Snapshot the floating rect first: WMS recover() re-anchors the floating
+              // position to the pointer (GetFullScreenToFloatingRect), so the paired
+              // recover below must moveTo() back — see WindowManager.preMaximizeRects.
+              // Cannot delegate to WindowManager.maximizeWindow (fire-and-forget) without
+              // losing this bridge's await-completion semantics (callers immediately
+              // query is-maximized afterwards).
+              manager.snapshotPreMaximizeRect(request.windowId, win);
+              await win.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
+            } else if (action === "recover") {
+              await (dynamic.recover() as Promise<void>);
+              // Restore the pre-maximize position snapshotted above (WMS recover()
+              // pointer-anchors the floating rect). Best-effort — recover already
+              // succeeded.
+              await manager.restorePreMaximizeRect(request.windowId, win);
+              // NOTE: Do NOT call showWindow() after recover() — recover() already makes
+              // the window visible, and showWindow() resets the window position to centered
+              // state, causing the window to jump to the center of the screen.
+            } else if (action === "show") {
+              // A hidden window can still report its pre-placement rectangle. The
+              // OS applies its pending move on show; replaying that snapshot loses it.
+              const focusOnShow = manager.focusOnShow(request.windowId);
+              if (deviceInfo.sdkApiVersion >= 20 && focusOnShow !== undefined) {
+                await win.showWindow({ focusOnShow });
+              } else {
+                await win.showWindow();
+              }
+            }
+          },
+          win,
+        );
       }
       this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
@@ -1209,13 +1352,13 @@ export class WindowPlugin extends AsyncPluginBase {
     }
   }
 
-  private windowState(
+  private async windowState(
     action: string,
     payload: BridgeTypedValue,
     context: BridgeCallContext,
-  ): BridgeTypedValue {
+  ): Promise<BridgeTypedValue> {
     const request = parseWindowIdRequest(payload);
-    const win = this.requireWindow(request.windowId, context);
+    const win = await this.requireWindow(request.windowId, context);
     try {
       const status = win.getWindowStatus();
       const value: boolean =
@@ -1228,32 +1371,24 @@ export class WindowPlugin extends AsyncPluginBase {
     }
   }
 
-  private requireWindow(windowId: number, context: BridgeCallContext): window.Window {
-    // Plugin-created sub-windows live in the `windows` Map (populated by create-os-window).
-    // The main UIAbility window (logical id 0) and Float sub-windows created via the legacy
-    // core `create_os_window` path are NOT in this Map — they live in the process-wide
-    // WindowManager registry. p1-ohos-window-ops migrated window *operations* to this plugin
-    // but left window *creation* on the old path, so the two registries never synced.
-    // Resolve the gap by falling back to WindowManager (which knows about main + Float windows)
-    // when the plugin Map misses. For id=0 prefer context.getWindow() (the host component's own
-    // window) — fastest, matches the get-avoid-area path and avoids assuming which host received
-    // the call.
-    let win = this.windows.get(windowId);
+  private async requireWindow(
+    windowId: number,
+    context: BridgeCallContext,
+  ): Promise<window.Window> {
+    this.assertCallActive(context);
+    if (windowId === 0) {
+      const hostWindow = context.getWindow?.();
+      if (hostWindow !== undefined) {
+        return hostWindow;
+      }
+    }
+    const manager = WindowManager.getInstance();
+    // Rust can enqueue operations while createSubWindow is awaiting ArkUI content loading.
+    await manager.waitForWindowCreation(windowId);
+    this.assertCallActive(context);
+    const win = this.windows.get(windowId) ?? manager.getWindow(windowId);
     if (win === undefined) {
-      if (windowId === 0) {
-        try {
-          win = context.getWindow();
-        } catch (error) {
-          // context.getWindow() may fail on a non-main host; fall through to WindowManager.
-        }
-      }
-      if (win === undefined) {
-        const fallback = WindowManager.getInstance().getWindow(windowId);
-        if (fallback === undefined) {
-          throw new Error(`Unknown OS sub-window '${windowId}' for this plugin instance`);
-        }
-        win = fallback;
-      }
+      throw new Error(`Unknown OS window '${windowId}' for this plugin instance`);
     }
     return win;
   }
@@ -1268,7 +1403,9 @@ export class WindowPlugin extends AsyncPluginBase {
     return `#${(color >>> 0).toString(16).padStart(8, "0")}`;
   }
 
-  override async onDispose(_context: BridgePluginHookContext): Promise<void> {
+  override async onDispose(): Promise<void> {
+    this.removeCloseInterceptor?.();
+    this.removeCloseInterceptor = undefined;
     await this.prompts.dispose();
     const windows = Array.from(this.windows.values());
     this.windows.clear();
