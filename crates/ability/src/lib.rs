@@ -120,5 +120,8 @@ pub use napi_ohos;
 pub use napi_ohos::Either;
 pub use ohos_arkui_binding as arkui;
 pub use ohos_arkui_binding;
+pub use ohos_display_binding as display;
 pub use ohos_ime_binding as ime;
+#[cfg(feature = "window")]
+pub use ohos_window_manager_binding as window_manager;
 pub use ohos_xcomponent_binding as xcomponent;
