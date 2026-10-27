@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-permission-v1.0.0-beta.3...openharmony-ability-plugin-permission-v1.0.0-beta.4) - 2026-10-27
+
+### Other
+- release plz ci ([#112](https://github.com/harmony-contrib/openharmony-ability/pull/112))
+- Fix desktop window, menu and input lifecycles ([#93](https://github.com/harmony-contrib/openharmony-ability/pull/93))
+
 ## [1.0.0-beta.3]
 
 - Align the existing `PermissionExt` facade with the unified workspace release; no action or

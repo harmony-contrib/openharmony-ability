@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-accessibility-v1.0.0-beta.3...openharmony-ability-plugin-accessibility-v1.0.0-beta.4) - 2026-10-27
+
+### Added
+- *(accessibility)* add typed events and thread-free motion routes ([#105](https://github.com/harmony-contrib/openharmony-ability/pull/105)) ([#105](https://github.com/harmony-contrib/openharmony-ability/issues/105) [#105](https://github.com/harmony-contrib/openharmony-ability/issues/105) )
+
+### Other
+- release plz ci ([#112](https://github.com/harmony-contrib/openharmony-ability/pull/112))
+
 - Keep `send_event` (API 12) and `announce_live` (API 18) as owned, named N-API
   requests with explicit platform failures and no consumer policy (AB2/AB3).
 - Replace reduced-motion workers, blocking futures, cleanup jobs, and replay with

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-webview-v1.0.0-beta.3...openharmony-ability-plugin-webview-v1.0.0-beta.4) - 2026-10-27
+
+### Added
+- *(webview)* add native attachment target and document options ([#103](https://github.com/harmony-contrib/openharmony-ability/pull/103)) ([#103](https://github.com/harmony-contrib/openharmony-ability/issues/103) [#103](https://github.com/harmony-contrib/openharmony-ability/issues/103) )
+
+### Fixed
+- *(webview)* preserve document-start script order on API 15+ ([#85](https://github.com/harmony-contrib/openharmony-ability/pull/85)) ([#85](https://github.com/harmony-contrib/openharmony-ability/issues/85) [#85](https://github.com/harmony-contrib/openharmony-ability/issues/85) )
+
+### Other
+- release plz ci ([#112](https://github.com/harmony-contrib/openharmony-ability/pull/112))
+- Fix desktop window, menu and input lifecycles ([#93](https://github.com/harmony-contrib/openharmony-ability/pull/93))
+
 - Add native-tree WebView embedding with Ability-owned attachment targets and guarded
   synchronous retirement. Native subscription routes use target IDs and RAII cleanup.
 - **Breaking:** register `WebviewBridgePlugin::new()` instead of the former unit value;

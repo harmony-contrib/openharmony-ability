@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-url-v1.0.0-beta.3...openharmony-ability-plugin-url-v1.0.0-beta.4) - 2026-10-27
+
+### Other
+- release plz ci ([#112](https://github.com/harmony-contrib/openharmony-ability/pull/112))
+
 ## [1.0.0-beta.3]
 
 - Add `check_url_scheme` to verify schemes declared for this Ability in the installed manifest;
