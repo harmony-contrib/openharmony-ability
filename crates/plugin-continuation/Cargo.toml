@@ -1,6 +1,6 @@
 [package]
 name = "openharmony-ability-plugin-continuation"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 edition.workspace = true
 license.workspace = true
 description = "App continuation facade for openharmony-ability"

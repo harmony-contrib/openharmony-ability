@@ -1,6 +1,6 @@
 [package]
 name = "openharmony-ability-plugin-resource"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 edition.workspace = true
 license.workspace = true
 description = "Resource manager bridge plugin facade for openharmony-ability"

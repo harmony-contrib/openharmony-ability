@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.0.0-beta.4] - 2026-10-27
+
 - `ClipboardPlugin` is now a no-argument registration/lifecycle identity only.
   Remove `ClipboardPluginOptions` and move metadata configuration to Rust
   `ClipboardClient::with_metadata_mime_type`.

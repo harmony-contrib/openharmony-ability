@@ -1,6 +1,6 @@
 [package]
 name = "openharmony-ability-derive"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 edition.workspace = true
 license.workspace = true
 description = "Binding Rust application macro on Harmony with Ability"

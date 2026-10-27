@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.0.0-beta.4] - 2026-10-27
+
+- fix(ability,menu,webview,window): align UI components with HarmonyOS system design tokens (#109)
+- feat(menu): support renderer-owned accelerator hints (#95)
+- Fix desktop window, menu and input lifecycles (#93)
+- fix(menu): toggle dropdowns and switch open menus on hover (#92)
+
 ## [1.0.0-beta.3]
 
 - Introduce the `ohos.menu` async plugin for window menu bars, popup menus, visibility and

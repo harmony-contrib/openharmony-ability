@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.0.0-beta.4] - 2026-10-27
+
 - Add native-tree WebView embedding with Ability-owned, non-reused target IDs.
 - Remove native controller declarations before guarded target retirement; retain ArkTS
   owners when retirement fails and await outstanding page tasks before disposal.

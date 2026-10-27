@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-window-v1.0.0-beta.3...openharmony-ability-plugin-window-v1.0.0-beta.4) - 2026-10-27
+
+### Added
+- *(window)* add status bar visibility and style control ([#106](https://github.com/harmony-contrib/openharmony-ability/pull/106)) ([#106](https://github.com/harmony-contrib/openharmony-ability/issues/106) [#106](https://github.com/harmony-contrib/openharmony-ability/issues/106) )
+
+### Other
+- release plz ci ([#112](https://github.com/harmony-contrib/openharmony-ability/pull/112))
+- Fix desktop window, menu and input lifecycles ([#93](https://github.com/harmony-contrib/openharmony-ability/pull/93))
+
 - Add API 12 status-bar visibility, content color and optional ARGB background through
   `WindowClient::set_status_bar`, separate from desktop tray APIs.
 - Run the status-bar bridge regression suite in PR CI, including cancellation and
