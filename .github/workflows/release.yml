@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -33,20 +34,22 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Install ohpm-rs
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        run: cargo install ohpm-cli --version 0.3.0 --locked
+        run: |
+          cargo install ohpm-cli --version 0.4.0 --locked
+          ohpm-rs config set registry https://repo.harmonyos.com/ohpm/
+          ohpm-rs config set publish_registry https://ohpm.openharmony.cn/ohpm
 
       - name: Publish HAR packages with ohpm-rs
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
         env:
-          OHPM_TOKEN: ${{ secrets.OHPM_TOKEN }}
-          OHPM_ACCESS_TOKEN: ${{ secrets.OHPM_TOKEN }}
+          OHPM_PUBLISH_ID: ${{ secrets.OHPM_PUBLISH_ID }}
+          OHPM_KEY_CONTENT: ${{ secrets.OHPM_KEY_CONTENT }}
+          OHPM_KEY_PASSPHRASE: ${{ secrets.OHPM_KEY_PASSPHRASE }}
         run: |
-          if [ -z "${OHPM_TOKEN}" ]; then
-            echo "::error::OHPM_TOKEN secret is required to publish HAR packages with ohpm-rs"
+          if [ -z "${OHPM_PUBLISH_ID}" ] || [ -z "${OHPM_KEY_CONTENT}" ] || [ -z "${OHPM_KEY_PASSPHRASE}" ]; then
+            echo "::error::OHPM_PUBLISH_ID, OHPM_KEY_CONTENT, and OHPM_KEY_PASSPHRASE secrets are required to publish HAR packages with ohpm-rs"
             exit 1
           fi
-          ohpm-rs publish --workspace
+          ohpm-rs publish --workspace --publish_registry https://ohpm.openharmony.cn/ohpm
 
   release-plz-pr:
     name: Release-plz PR
