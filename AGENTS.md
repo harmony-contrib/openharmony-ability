@@ -64,6 +64,7 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 | `crates/plugin-resource` | `ohos.resource` — inbound-only: ArkTS pushes `resourceManager` from Ability-scoped `onInstall`; no outbound actions |
 | `crates/plugin-fault-injection` | `ohos.fault-injection` — coverage-testing fault injection through the generic `BridgeHost` dispatch-hook seam (`registerDispatchHook`) |
 | `crates/plugin-account` | `ohos.account` — Huawei Account one-tap login (login / silentLogin / logout) |
+| `crates/plugin-audio` | `ohos.audio` — reusable `AVPlayer` media-file playback with borrowed descriptor duplication |
 | `crates/plugin-process` | `ohos.process` — app process control (`appRecovery.restartApp`) |
 | `crates/plugin-updater` | `ohos.updater` — AppGallery update check and download+install |
 

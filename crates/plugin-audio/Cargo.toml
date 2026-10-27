@@ -1,11 +1,12 @@
 [package]
 name = "openharmony-ability-plugin-audio"
-version.workspace = true
+version = "1.0.0-beta.3"
 edition.workspace = true
 license.workspace = true
-description = "Owned, reusable media-file playback through the Ability bridge"
+repository.workspace = true
+description = "Audio playback bridge plugin facade for openharmony-ability"
 
 [dependencies]
-openharmony-ability.workspace = true
-napi-ohos.workspace = true
-napi-derive-ohos.workspace = true
+openharmony-ability = { workspace = true }
+napi-ohos = { workspace = true }
+napi-derive-ohos = { workspace = true }
