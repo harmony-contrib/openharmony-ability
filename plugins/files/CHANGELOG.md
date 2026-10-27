@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.0.0-beta.4] - 2026-10-27
+
+- Fix desktop window, menu and input lifecycles (#93)
+
 ## [1.0.0-beta.3]
 
 - Add optional `suggestedName` to save-dialog requests and map it to the platform's suggested

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-v1.0.0-beta.3...openharmony-ability-v1.0.0-beta.4) - 2026-10-27
+
+### Added
+- *(window,display)* add native window snapshot wrapper and re-export display/window_manager bindings ([#110](https://github.com/harmony-contrib/openharmony-ability/pull/110)) ([#110](https://github.com/harmony-contrib/openharmony-ability/issues/110) [#110](https://github.com/harmony-contrib/openharmony-ability/issues/110) )
+- *(ability)* add retained native attachment and content root ownership ([#99](https://github.com/harmony-contrib/openharmony-ability/pull/99)) ([#99](https://github.com/harmony-contrib/openharmony-ability/issues/99) [#99](https://github.com/harmony-contrib/openharmony-ability/issues/99) )
+- *(input)* preserve native discrete wheel step metadata ([#98](https://github.com/harmony-contrib/openharmony-ability/pull/98)) ([#98](https://github.com/harmony-contrib/openharmony-ability/issues/98) [#98](https://github.com/harmony-contrib/openharmony-ability/issues/98) )
+
+### Other
+- release plz ci ([#112](https://github.com/harmony-contrib/openharmony-ability/pull/112))
+- Fix desktop window, menu and input lifecycles ([#93](https://github.com/harmony-contrib/openharmony-ability/pull/93))
+
 - Move `NativeAttachment` and `ContentRoot` ownership into Ability; bindings now
   supplies only node, content and retention primitives. Strong N-API references
   keep attached FrameNode/NodeContent objects alive until successful retirement.

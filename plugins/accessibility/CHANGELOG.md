@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.0.0-beta.4] - 2026-10-27
+
 - Implement named announcement/focus and live-region requests (API 12/18), keeping
   interruption policy caller-owned and reporting system/session errors (AB2/AB3).
 - Share one API-23 reduce-motion listener across instance-owned subscriptions;

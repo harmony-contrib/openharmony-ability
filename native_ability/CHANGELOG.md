@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [1.0.0-beta.4] - 2026-10-27
+
 - Align Float-window title bars with native window dimensions, control icons and system theme
   colors, including focus, hover, pressed and disabled states. Hide the title with decorations
   disabled and disable custom resize handles while maximized.
