@@ -102,6 +102,17 @@ impl AudioClient {
     }
 }
 
+pub trait AudioExt {
+    /// Reusable audio playback handle. Requires an active `NativeAbility` session.
+    fn audio(&self) -> Result<AudioClient>;
+}
+
+impl AudioExt for OpenHarmonyApp {
+    fn audio(&self) -> Result<AudioClient> {
+        AudioClient::new(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

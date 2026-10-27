@@ -1,0 +1,108 @@
+name: Release-plz
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+  packages: write
+
+jobs:
+  release-plz-release:
+    name: Release-plz release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run release-plz release
+        id: release-plz
+        uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Install ohpm-rs
+        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        run: cargo install ohpm-cli --version 0.3.0 --locked
+
+      - name: Publish HAR packages with ohpm-rs
+        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
+        env:
+          OHPM_TOKEN: ${{ secrets.OHPM_TOKEN }}
+          OHPM_ACCESS_TOKEN: ${{ secrets.OHPM_TOKEN }}
+        run: |
+          if [ -z "${OHPM_TOKEN}" ]; then
+            echo "::error::OHPM_TOKEN secret is required to publish HAR packages with ohpm-rs"
+            exit 1
+          fi
+          ohpm-rs publish --workspace
+
+  release-plz-pr:
+    name: Release-plz PR
+    runs-on: ubuntu-latest
+    needs: release-plz-release
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.22.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run release-plz release-pr
+        id: release-pr
+        uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Sync OHPM HAR versions and changelogs to release PR
+        if: ${{ steps.release-pr.outputs.pr != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          PR_JSON: ${{ steps.release-pr.outputs.pr }}
+        run: |
+          BRANCH_NAME=$(node -e 'const pr = JSON.parse(process.env.PR_JSON); console.log(pr.head_branch);')
+          git fetch origin "${BRANCH_NAME}"
+          git checkout "${BRANCH_NAME}"
+          pnpm run release:sync
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit --amend --no-edit
+            git push --force-with-lease origin "${BRANCH_NAME}"
+          fi

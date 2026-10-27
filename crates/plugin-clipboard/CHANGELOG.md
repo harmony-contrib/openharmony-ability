@@ -1,4 +1,11 @@
-# Unreleased
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
 
 - Use native `OH_Pasteboard` and scoped UDMF owners. Withdraw ArkTS clipboard
   actions, change events, permission prompts and legacy metadata fallback.
@@ -14,7 +21,7 @@
   explicitly before ordinary reads. `revision() -> Result<u32>` pulls the API-18 native
   counter.
 
-# 1.0.0-beta.3
+## [1.0.0-beta.3]
 
 - Introduce the `ohos.clipboard` async facade for text, HTML, RGBA/encoded images, URI lists,
   ordered clipboard records and clearing clipboard contents.

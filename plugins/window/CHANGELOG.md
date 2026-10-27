@@ -1,4 +1,11 @@
-# Unreleased
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
 
 - Add the named `set-status-bar` action for API 12, preserving navigation-bar settings
   and awaiting native completion before acknowledgement.
@@ -7,7 +14,7 @@
 - Add demo controls for light/dark content, omitted background and transparency with
   native status/navigation color checks.
 
-# 1.0.0-beta.3
+## [1.0.0-beta.3]
 
 - Expand window creation/control for desktop and mobile, including display selection,
   decoration/transparency, geometry/limits, fullscreen, focus, visibility and window state.
@@ -22,9 +29,7 @@
 - Align the package version to `1.0.0-beta.3` and resolve internal HAR dependencies
   through `workspace:*`.
 
----
-
-# 1.0.0-beta.1
+## [1.0.0-beta.1]
 
 - **Breaking**: all window actions now use the async bridge so Promise-based platform window
   operations are awaited before Rust observes completion.
@@ -35,12 +40,8 @@
 - **Breaking**: remove the numeric plugin version and module filters; each host now selects the
   factory by ID and validates execution mode and required contexts against its Rust registry.
 
----
-
-# 1.0.0-beta.0
+## [1.0.0-beta.0]
 
 - Initial release: typed `ohos.window` plugin for window avoid-area queries.
 - Main-thread sync `get-avoid-area` action returning the complete avoid area.
 - Requires `window-stage` context; callable from the active N-API `Env` via `with_main_thread_bridge(...).call_sync`.
-
----

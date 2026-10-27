@@ -1,6 +1,6 @@
 [package]
 name = "openharmony-ability-plugin-menu"
-version.workspace = true
+version = "1.0.0-beta.3"
 edition.workspace = true
 license.workspace = true
 description = "Menu bridge plugin facade for openharmony-ability"
