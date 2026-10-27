@@ -196,22 +196,6 @@ function hasFunctionalHarChanges(harDir, baseCommit) {
     .some((filePath) => !ignoredBasenames.has(path.basename(filePath)));
 }
 
-function hasFunctionalCrateChanges(crateDir, baseCommit) {
-  if (!crateDir) {
-    return false;
-  }
-  const diffOutput = git(["diff", "--name-only", `${baseCommit}..HEAD`, "--", crateDir], true);
-  if (!diffOutput) {
-    return false;
-  }
-  const ignoredBasenames = new Set(["CHANGELOG.md", "Cargo.toml"]);
-  return diffOutput
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .some((filePath) => !ignoredBasenames.has(path.basename(filePath)));
-}
-
 function resolveReleaseDate(crateDir, version) {
   if (crateDir) {
     const crateChangelog = path.join(rootDir, crateDir, "CHANGELOG.md");
@@ -347,8 +331,130 @@ function discoverHarPackages() {
   ];
 }
 
+function extractVersionSection(changelogPath, version) {
+  if (!fs.existsSync(changelogPath)) {
+    return "";
+  }
+  const content = fs.readFileSync(changelogPath, "utf8");
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const headerRegex = new RegExp(
+    `^## \\[${escaped}\\](?:\\([^)]*\\))?(?: - \\d{4}-\\d{2}-\\d{2})?\\s*$`,
+    "m",
+  );
+  const match = headerRegex.exec(content);
+  if (!match) {
+    return "";
+  }
+  const start = match.index;
+  const afterHeader = match.index + match[0].length;
+  const rest = content.slice(afterHeader);
+  const nextSection = rest.search(/^## \[/m);
+  const end = nextSection === -1 ? content.length : afterHeader + nextSection;
+  return content.slice(start, end).trim();
+}
+
+function renderReleasePrBodyWithHars(originalBody, harReleases) {
+  if (!originalBody || harReleases.length === 0) {
+    return originalBody;
+  }
+
+  // Strip any previously injected @ohos-rs/* bullet lines and changelog sections for idempotency.
+  let body = originalBody.replace(/^\* `@ohos-rs\/[^`]+`:.*(?:\r?\n)?/gm, "");
+  body = body.replace(/\n*## `@ohos-rs\/[^`]+`\s*\n\s*<blockquote>[\s\S]*?<\/blockquote>/g, "");
+
+  const sortedHars = [...harReleases].sort((a, b) => a.harName.localeCompare(b.harName));
+  const harBullets = sortedHars
+    .map((item) =>
+      item.isInitialRelease
+        ? `* \`${item.harName}\`: ${item.newVersion}`
+        : `* \`${item.harName}\`: ${item.oldVersion} -> ${item.newVersion}`,
+    )
+    .join("\n");
+
+  const detailsMarker = "<details><summary><i><b>Changelog</b></i></summary><p>";
+  const detailsIdx = body.indexOf(detailsMarker);
+  if (detailsIdx !== -1) {
+    const beforeDetails = body.slice(0, detailsIdx).trimEnd();
+    const afterDetails = body.slice(detailsIdx);
+    body = `${beforeDetails}\n${harBullets}\n\n${afterDetails}`;
+  } else {
+    body = `${body.trimEnd()}\n${harBullets}\n`;
+  }
+
+  const changelogBlocks = sortedHars
+    .map((item) => {
+      const changelogPath = path.join(rootDir, item.harDir, "CHANGELOG.md");
+      const section =
+        extractVersionSection(changelogPath, item.newVersion) || `## [${item.newVersion}]`;
+      return `## \`${item.harName}\`\n\n<blockquote>\n\n${section}\n</blockquote>`;
+    })
+    .join("\n\n");
+
+  const closeDetailsMarker = "</p></details>";
+  const closeDetailsIdx = body.lastIndexOf(closeDetailsMarker);
+  if (closeDetailsIdx !== -1) {
+    const beforeClose = body.slice(0, closeDetailsIdx).trimEnd();
+    const afterClose = body.slice(closeDetailsIdx);
+    body = `${beforeClose}\n\n${changelogBlocks}\n\n\n${afterClose}`;
+  }
+
+  return body;
+}
+
+function updateReleasePrDescription(harReleases) {
+  if (!process.env.PR_JSON || harReleases.length === 0) {
+    return;
+  }
+  let prNumber;
+  try {
+    const pr = JSON.parse(process.env.PR_JSON);
+    prNumber = pr?.number;
+  } catch (error) {
+    console.warn(`Failed to parse PR_JSON: ${error.message}`);
+    return;
+  }
+  if (!prNumber) {
+    return;
+  }
+
+  const currentBody = execFileSync(
+    "gh",
+    ["pr", "view", String(prNumber), "--json", "body", "--jq", ".body"],
+    {
+      cwd: rootDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+  const updatedBody = renderReleasePrBodyWithHars(currentBody, harReleases);
+  if (updatedBody === currentBody) {
+    return;
+  }
+  if (dryRun) {
+    console.log(
+      `[dry-run] Would update PR #${prNumber} description with ${harReleases.length} HAR release(s).`,
+    );
+    return;
+  }
+  const os = require("node:os");
+  const tmpFile = path.join(os.tmpdir(), `release-pr-${prNumber}-body.md`);
+  try {
+    fs.writeFileSync(tmpFile, updatedBody, "utf8");
+    execFileSync("gh", ["pr", "edit", String(prNumber), "--body-file", tmpFile], {
+      cwd: rootDir,
+      stdio: "inherit",
+    });
+    console.log(`Updated PR #${prNumber} description with ${harReleases.length} HAR release(s).`);
+  } finally {
+    if (fs.existsSync(tmpFile)) {
+      fs.unlinkSync(tmpFile);
+    }
+  }
+}
+
 const packages = discoverHarPackages();
 const pendingBumps = [];
+const initialReleases = [];
 
 for (const pkg of packages) {
   const har = readHarManifest(pkg.harDir);
@@ -356,33 +462,29 @@ for (const pkg of packages) {
   const baseCommit = findHarReleaseBaseCommit(pkg.harDir, har.name, har.version, crate?.name);
 
   if (!baseCommit) {
-    // Package has never been released at its current version. Only bump if its
-    // paired crate was explicitly bumped ahead of the HAR's initial version.
-    if (crate && compareSemver(crate.version, har.version) > 0) {
-      pendingBumps.push({
-        ...pkg,
-        harName: har.name,
-        oldVersion: har.version,
-        newVersion: crate.version,
-        baseCommit: null,
-      });
-    } else {
-      console.log(
-        `[skip] ${har.name}@${har.version} (new unpublished package; keeping initial version)`,
-      );
-    }
+    // First-time release: keep the initial version from oh-package.json5 without bumping,
+    // matching release-plz's behavior for unpublished crates.
+    console.log(
+      `[release] ${har.name}@${har.version} (initial unpublished package; keeping initial version)`,
+    );
+    initialReleases.push({
+      ...pkg,
+      harName: har.name,
+      oldVersion: null,
+      newVersion: har.version,
+      baseCommit: null,
+      isInitialRelease: true,
+    });
     continue;
   }
 
   const harChanged = hasFunctionalHarChanges(pkg.harDir, baseCommit);
-  const crateChanged = hasFunctionalCrateChanges(pkg.crateDir, baseCommit);
-  const crateBumped = crate ? compareSemver(crate.version, har.version) > 0 : false;
-
-  if (!harChanged && !(crateChanged && crateBumped)) {
+  if (!harChanged) {
     console.log(`[skip] ${har.name}@${har.version} (no changes since ${baseCommit.slice(0, 7)})`);
     continue;
   }
 
+  const crateBumped = crate ? compareSemver(crate.version, har.version) > 0 : false;
   const newVersion = crateBumped ? crate.version : incrementVersion(har.version);
   pendingBumps.push({
     ...pkg,
@@ -390,11 +492,12 @@ for (const pkg of packages) {
     oldVersion: har.version,
     newVersion,
     baseCommit,
+    isInitialRelease: false,
   });
 }
 
-if (pendingBumps.length === 0) {
-  console.log("No HAR packages require a version bump.");
+if (pendingBumps.length === 0 && initialReleases.length === 0) {
+  console.log("No HAR packages require a release or version bump.");
   process.exit(0);
 }
 
@@ -434,9 +537,13 @@ for (const [targetVersion, items] of byVersion.entries()) {
   }
 }
 
-if (!dryRun) {
+if (!dryRun && pendingBumps.length > 0) {
   execFileSync("pnpm", ["exec", "oxk", "format", "**/*.{ets,js,ts,json5}", "-t=10"], {
     cwd: rootDir,
     stdio: "inherit",
   });
+}
+
+if (!versionOnly) {
+  updateReleasePrDescription([...initialReleases, ...pendingBumps]);
 }
