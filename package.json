@@ -13,6 +13,7 @@
     "prek": "prek run",
     "prepare": "prek install",
     "pack": "ohpm-rs pack --workspace --output dist",
+    "release:sync": "node scripts/sync-release.js",
     "postinstall": "cargo install ohpm-cli --version 0.3.0 --locked && pnpm run install:ohpm"
   },
   "devDependencies": {

@@ -1,0 +1,161 @@
+[workspace]
+release_always = false
+changelog_update = true
+dependencies_update = false
+git_tag_name = "{{ package }}-v{{ version }}"
+git_release_name = "{{ package }} v{{ version }}"
+repo_url = "https://github.com/harmony-contrib/openharmony-ability"
+semver_check = false
+publish_timeout = "30m"
+
+[changelog]
+header = """# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+"""
+
+body = """
+
+## [{{ version }}]{%- if release_link -%}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+{%- if commit.scope -%}
+- *({{commit.scope}})* {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}{%- if commit.links %} ({% for link in commit.links %}[{{link.text}}]({{link.href}}) {% endfor -%}){% endif %}
+{% else -%}
+- {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{% endif -%}
+{% endfor -%}
+{% endfor -%}
+"""
+
+trim = true
+
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^changed", group = "Changed" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^.*", group = "Other" },
+]
+
+link_parsers = [
+  { pattern = "#(\\d+)", href = "https://github.com/harmony-contrib/openharmony-ability/issues/$1" },
+  { pattern = "RFC(\\d+)", text = "ietf-rfc$1", href = "https://datatracker.ietf.org/doc/html/rfc$1" },
+]
+
+[[package]]
+name = "demo_native"
+release = false
+publish = false
+changelog_update = false
+
+[[package]]
+name = "demo_sub_native"
+release = false
+publish = false
+changelog_update = false
+
+[[package]]
+name = "openharmony-ability-derive"
+changelog_path = "crates/derive/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability"
+changelog_path = "crates/ability/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-accessibility"
+changelog_path = "crates/plugin-accessibility/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-account"
+changelog_path = "crates/plugin-account/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-app-control"
+changelog_path = "crates/plugin-app-control/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-audio"
+changelog_path = "crates/plugin-audio/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-autostart"
+changelog_path = "crates/plugin-autostart/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-clipboard"
+changelog_path = "crates/plugin-clipboard/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-continuation"
+changelog_path = "crates/plugin-continuation/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-deep-link"
+changelog_path = "crates/plugin-deep-link/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-fault-injection"
+changelog_path = "crates/plugin-fault-injection/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-files"
+changelog_path = "crates/plugin-files/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-global-shortcut"
+changelog_path = "crates/plugin-global-shortcut/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-menu"
+changelog_path = "crates/plugin-menu/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-notification"
+changelog_path = "crates/plugin-notification/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-permission"
+changelog_path = "crates/plugin-permission/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-process"
+changelog_path = "crates/plugin-process/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-resource"
+changelog_path = "crates/plugin-resource/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-screenshot"
+changelog_path = "crates/plugin-screenshot/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-statusbar"
+changelog_path = "crates/plugin-statusbar/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-system-state"
+changelog_path = "crates/plugin-system-state/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-updater"
+changelog_path = "crates/plugin-updater/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-url"
+changelog_path = "crates/plugin-url/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-webview"
+changelog_path = "crates/plugin-webview/CHANGELOG.md"
+
+[[package]]
+name = "openharmony-ability-plugin-window"
+changelog_path = "crates/plugin-window/CHANGELOG.md"
