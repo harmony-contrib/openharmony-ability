@@ -1,4 +1,11 @@
-# Unreleased
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
 
 - Move `NativeAttachment` and `ContentRoot` ownership into Ability; bindings now
   supplies only node, content and retention primitives. Strong N-API references
@@ -16,7 +23,7 @@
 - The opt-in `mouse` feature additionally forwards ArkUI `api-17` for wheel-step
   queries. Its existing XComponent cancellation support still requires API 18.
 
-# 1.0.0-beta.3
+## [1.0.0-beta.3]
 
 - Add window-specific surfaces, redraw, input, resize, focus and close events, with per-window
   native handles, geometry, avoid areas, IME state and wake/redraw routing.

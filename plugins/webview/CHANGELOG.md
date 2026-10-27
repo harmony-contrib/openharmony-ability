@@ -1,4 +1,21 @@
-# 1.0.0-beta.3
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+- Add native-tree WebView embedding with Ability-owned, non-reused target IDs.
+- Remove native controller declarations before guarded target retirement; retain ArkTS
+  owners when retirement fails and await outstanding page tasks before disposal.
+- Defer early SDK controller callbacks until explicit native attachment succeeds and
+  its UI-thread attach guard has returned.
+- Remove the unreleased native generation and unused document-options action (AB6/AB7/AB11).
+- Wire production native-embedding regression tests into pull-request CI.
+
+## [1.0.0-beta.3]
 
 - Add optional `domStorageAccess` to the named `ohos.webview.CreateRequest` contract and apply it
   when constructing ArkWeb content; DOM storage remains disabled when the option is omitted.
@@ -13,9 +30,7 @@
 - Align the package version to `1.0.0-beta.3` and resolve internal HAR dependencies
   through `workspace:*`.
 
----
-
-# 1.0.0-beta.2
+## [1.0.0-beta.2]
 
 - **Breaking**: the bridge contract removes `windowKey`; each native module owns one
   `DefaultXComponent`, while multiple WebViews coexist by controller ID. Multiple windows use
@@ -32,9 +47,7 @@
 - **Breaking**: remove numeric plugin versions and module filters; each host now selects the
   factory by ID and validates execution mode and required contexts against its Rust registry.
 
----
-
-# 1.0.0-beta.1
+## [1.0.0-beta.1]
 
 - **Breaking**: normalized node mounting — the named-slot model (`BridgeNodeSlot` /
   `BridgeNodeHost` / `slotId`) is gone. WebView `FrameNode`s mount into the module root tree
@@ -46,23 +59,9 @@
 - The module root exists before `ui-context-ready`; controller creation is event-driven.
 - Business layering is page `Stack` declaration order; `underlay`/`foreground` hosts are gone.
 
----
-
-# 1.0.0-beta.0
+## [1.0.0-beta.0]
 
 - Initial release: typed `ohos.webview` plugin for embedded WebView (create, controller actions, evaluate script).
 - Custom URL schemes via `WebviewProtocol::register` (declared before engine initialization) and page JavaScript proxies.
 - Synchronous inbound events for navigation intercept, download start/end and title change, delivered through `on_main_thread_event`.
 - Requires `ui-context`; mounts the WebView `FrameNode` into a business-owned `BridgeNodeHost` slot.
-
----
-
-## Unreleased
-
-- Add native-tree WebView embedding with Ability-owned, non-reused target IDs.
-- Remove native controller declarations before guarded target retirement; retain ArkTS
-  owners when retirement fails and await outstanding page tasks before disposal.
-- Defer early SDK controller callbacks until explicit native attachment succeeds and
-  its UI-thread attach guard has returned.
-- Remove the unreleased native generation and unused document-options action (AB6/AB7/AB11).
-- Wire production native-embedding regression tests into pull-request CI.

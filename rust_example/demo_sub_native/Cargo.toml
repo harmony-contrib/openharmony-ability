@@ -1,6 +1,6 @@
 [package]
 name = "demo_sub_native"
-version.workspace = true
+version = "1.0.0-beta.3"
 edition.workspace = true
 license.workspace = true
 publish = false

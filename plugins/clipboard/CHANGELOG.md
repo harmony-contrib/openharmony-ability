@@ -1,4 +1,11 @@
-# Unreleased
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
 
 - `ClipboardPlugin` is now a no-argument registration/lifecycle identity only.
   Remove `ClipboardPluginOptions` and move metadata configuration to Rust
@@ -10,7 +17,7 @@
 - Empty opaque representations return `ClipboardError::EmptyBinaryUnsupported`;
   empty plain text/HTML use typed native UDS. There is no private empty-value encoding.
 
-# 1.0.0-beta.3
+## [1.0.0-beta.3]
 
 - Introduce the `ohos.clipboard` async plugin for text, HTML, images, URI lists and ordered
   multi-record clipboard content, with lifecycle-scoped change notifications.

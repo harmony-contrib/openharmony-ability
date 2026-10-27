@@ -1,6 +1,6 @@
 [package]
 name = "openharmony-ability-plugin-fault-injection"
-version.workspace = true
+version = "1.0.0-beta.3"
 edition.workspace = true
 license.workspace = true
 description = "Coverage-testing fault injection bridge plugin (pairs with plugins/faultinjection)"

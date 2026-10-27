@@ -1,12 +1,18 @@
 # Changelog
 
-## Unreleased
+All notable changes to this project will be documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+- Add the `ohos.audio` plugin pair (`openharmony-ability-plugin-audio` and `@ohos-rs/ability-plugin-audio`) for reusable `AVPlayer` media-file playback with borrowed file-descriptor duplication.
 - Match native styling for sub-window title bars, with system theme colors, focus feedback
   and decoration-button availability.
 - Fix the Float-window restore button for apps targeting API 12/13.
 
-## 1.0.0-beta.3
+## [1.0.0-beta.3]
 
 All 24 Rust crates and 21 ArkTS HAR packages now share `1.0.0-beta.3`.
 Package changelogs below contain capability-specific notes and existing release history.
@@ -84,6 +90,7 @@ Package changelogs below contain capability-specific notes and existing release 
 | accessibility | [crate](crates/plugin-accessibility/CHANGELOG.md) | [HAR](plugins/accessibility/CHANGELOG.md) |
 | account | [crate](crates/plugin-account/CHANGELOG.md) | [HAR](plugins/account/CHANGELOG.md) |
 | app-control | [crate](crates/plugin-app-control/CHANGELOG.md) | [HAR](plugins/app-control/CHANGELOG.md) |
+| audio | [crate](crates/plugin-audio/CHANGELOG.md) | [HAR](plugins/audio/CHANGELOG.md) |
 | autostart | [crate](crates/plugin-autostart/CHANGELOG.md) | [HAR](plugins/autostart/CHANGELOG.md) |
 | clipboard | [crate](crates/plugin-clipboard/CHANGELOG.md) | [HAR](plugins/clipboard/CHANGELOG.md) |
 | continuation | [crate](crates/plugin-continuation/CHANGELOG.md) | Core lifecycle facade |
