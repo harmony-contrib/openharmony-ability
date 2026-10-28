@@ -1,14 +1,14 @@
-import { MenuItemData, PredefinedType, AboutMetadataData } from './menu_types';
-import web_webview from '@ohos.web.webview';
-import window from '@ohos.window';
-import common from '@ohos.app.ability.common';
-import { Want } from '@kit.AbilityKit';
-import { pasteboard } from '@kit.BasicServicesKit';
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { WindowManager } from '../window/WindowManager';
-import { Module } from '../ability/type';
-import { getMenuDataCallback } from '../components/MenuBarComponent';
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from './constants';
+import { MenuItemData, PredefinedType, AboutMetadataData } from "./menu_types";
+import web_webview from "@ohos.web.webview";
+import window from "@ohos.window";
+import common from "@ohos.app.ability.common";
+import { Want } from "@kit.AbilityKit";
+import { pasteboard } from "@kit.BasicServicesKit";
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { WindowManager } from "../window/WindowManager";
+import { Module } from "../ability/type";
+import { getMenuDataCallback } from "../components/MenuBarComponent";
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY, MAIN_WINDOW_ID } from "./constants";
 
 // Global executor singleton — shared by Menu and Tray execution paths
 let globalExecutor: PredefinedActionExecutor | null = null;
@@ -72,7 +72,7 @@ export class PredefinedActionExecutor {
    */
   async showAbility(): Promise<void> {
     if (!this.context) {
-      hilog.warn(DOMAIN, 'Menu', 'showAbility: context not set');
+      hilog.warn(DOMAIN, "Menu", "showAbility: context not set");
       return;
     }
     try {
@@ -81,7 +81,7 @@ export class PredefinedActionExecutor {
       const want: Want = { bundleName, abilityName };
       await this.context.startAbility(want);
     } catch (e) {
-      hilog.warn(DOMAIN, 'Menu', 'showAbility failed: %{public}s', String(e));
+      hilog.warn(DOMAIN, "Menu", "showAbility failed: %{public}s", String(e));
     }
   }
 
@@ -103,12 +103,18 @@ export class PredefinedActionExecutor {
           try {
             await w.showWindow();
           } catch (e) {
-            hilog.warn(DOMAIN, 'Menu', 'showWindow failed for window %{public}d: %{public}s', id, String(e));
+            hilog.warn(
+              DOMAIN,
+              "Menu",
+              "showWindow failed for window %{public}d: %{public}s",
+              id,
+              String(e),
+            );
           }
         }
       }
     } catch (e) {
-      hilog.warn(DOMAIN, 'Menu', 'restoreAll window iteration failed: %{public}s', String(e));
+      hilog.warn(DOMAIN, "Menu", "restoreAll window iteration failed: %{public}s", String(e));
     }
   }
 
@@ -124,14 +130,17 @@ export class PredefinedActionExecutor {
    * 2. WindowManager.getUserInteractedWindow() — last physically touched window (Tray path)
    * 3. Main window (this.win) — final fallback
    */
-  private getTargetWindow(targetWindowId?: number): { win: window.Window | null, windowId: number } {
+  private getTargetWindow(targetWindowId?: number): {
+    win: window.Window | null;
+    windowId: number;
+  } {
     const wm = WindowManager.getInstance();
 
     // Strategy 1: Use targetWindowId if provided (Window Menu Bar path)
     if (targetWindowId !== undefined && targetWindowId > 0) {
       const win = wm.getWindow(targetWindowId);
       if (win) {
-        hilog.info(DOMAIN, 'Menu', 'Using targetWindowId: %{public}d', targetWindowId);
+        hilog.info(DOMAIN, "Menu", "Using targetWindowId: %{public}d", targetWindowId);
         return { win, windowId: targetWindowId };
       }
     }
@@ -141,12 +150,12 @@ export class PredefinedActionExecutor {
     const lastInteracted = wm.getUserInteractedWindow();
     if (lastInteracted) {
       const lastInteractedId = wm.getUserInteractedWindowId();
-      hilog.info(DOMAIN, 'Menu', 'Using lastUserInteractedWindow: id=%{public}d', lastInteractedId);
+      hilog.info(DOMAIN, "Menu", "Using lastUserInteractedWindow: id=%{public}d", lastInteractedId);
       return { win: lastInteracted, windowId: lastInteractedId };
     }
 
     // Strategy 3: Fallback to main window
-    hilog.info(DOMAIN, 'Menu', 'Using main window fallback');
+    hilog.info(DOMAIN, "Menu", "Using main window fallback");
     return { win: this.win, windowId: MAIN_WINDOW_ID };
   }
 
@@ -157,9 +166,14 @@ export class PredefinedActionExecutor {
     // executor.controller (captured from the first main-window attach).
     const fromWm = wm.getWebviewController(windowId);
     const wmHit = fromWm !== undefined;
-    hilog.info(DOMAIN, 'Menu',
-      '[TrayCopyDiag] T2 getTargetController windowId=%{public}d wmHit=%{public}s fallbackToExecutor=%{public}s',
-      windowId, wmHit ? 'true' : 'false', !wmHit ? 'true' : 'false');
+    hilog.info(
+      DOMAIN,
+      "Menu",
+      "[TrayCopyDiag] T2 getTargetController windowId=%{public}d wmHit=%{public}s fallbackToExecutor=%{public}s",
+      windowId,
+      wmHit ? "true" : "false",
+      !wmHit ? "true" : "false",
+    );
     return fromWm ?? this.controller;
   }
 
@@ -205,7 +219,7 @@ export class PredefinedActionExecutor {
       // instances terminateSelf via their registered context
       try {
         const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-        if (nativeModule && typeof nativeModule.notifyWindowClose === 'function') {
+        if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
           nativeModule.notifyWindowClose(windowId);
         }
         await WindowManager.getInstance().closeWindow(windowId);
@@ -218,29 +232,41 @@ export class PredefinedActionExecutor {
     }
   }
 
-  async execute(type: PredefinedType, aboutMetadata?: AboutMetadataData, targetWindowId?: number): Promise<void> {
+  async execute(
+    type: PredefinedType,
+    aboutMetadata?: AboutMetadataData,
+    targetWindowId?: number,
+  ): Promise<void> {
     try {
       // Resolve target window for window operations
       // getTargetWindow() handles both Menu Bar (targetWindowId provided) and Tray (undefined → lastUserInteractedWindow)
       const { win, windowId: resolvedWindowId } = this.getTargetWindow(targetWindowId);
 
-      hilog.info(DOMAIN, 'Menu',
-        '[TrayCopyDiag] T1 execute type=%{public}s targetWindowIdParam=%{public}s resolvedWindowId=%{public}d',
+      hilog.info(
+        DOMAIN,
+        "Menu",
+        "[TrayCopyDiag] T1 execute type=%{public}s targetWindowIdParam=%{public}s resolvedWindowId=%{public}d",
         String(type),
-        targetWindowId === undefined ? 'undefined(tray)' : String(targetWindowId),
-        resolvedWindowId);
+        targetWindowId === undefined ? "undefined(tray)" : String(targetWindowId),
+        resolvedWindowId,
+      );
 
       // Get target window's webview controller for clipboard/edit operations (fallback to this.controller)
       const targetController = this.getTargetController(resolvedWindowId);
 
       switch (type) {
-        case 'copy': {
+        case "copy": {
           try {
-            const raw = await targetController?.runJavaScript('window.getSelection().toString()');
+            const raw = await targetController?.runJavaScript("window.getSelection().toString()");
             const rawDefined = raw !== undefined && raw !== null;
             const rawLen = rawDefined ? String(raw).length : -1;
-            hilog.info(DOMAIN, 'Menu',
-              '[TrayCopyDiag] T4a copy rawDefined=%{public}s rawLen=%{public}d', rawDefined ? 'true' : 'false', rawLen);
+            hilog.info(
+              DOMAIN,
+              "Menu",
+              "[TrayCopyDiag] T4a copy rawDefined=%{public}s rawLen=%{public}d",
+              rawDefined ? "true" : "false",
+              rawLen,
+            );
             if (raw) {
               // runJavaScript returns a JSON-encoded string; parse to unwrap quotes.
               // Fallback to raw if parse fails (defensive against non-JSON returns).
@@ -250,26 +276,36 @@ export class PredefinedActionExecutor {
               } catch {
                 text = raw as string;
               }
-              hilog.info(DOMAIN, 'Menu',
-                '[TrayCopyDiag] T4b copy textLen=%{public}d', text !== undefined && text !== null ? text.length : -1);
+              hilog.info(
+                DOMAIN,
+                "Menu",
+                "[TrayCopyDiag] T4b copy textLen=%{public}d",
+                text !== undefined && text !== null ? text.length : -1,
+              );
               if (text) {
-                const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text as string);
+                const pasteData = pasteboard.createData(
+                  pasteboard.MIMETYPE_TEXT_PLAIN,
+                  text as string,
+                );
                 const sysPasteboard = pasteboard.getSystemPasteboard();
                 await sysPasteboard.setData(pasteData);
               }
             }
           } catch (e) {
-            hilog.warn(DOMAIN, 'Menu', 'Clipboard copy failed: %{public}s', String(e));
+            hilog.warn(DOMAIN, "Menu", "Clipboard copy failed: %{public}s", String(e));
           }
           break;
         }
-        case 'cut': {
+        case "cut": {
           try {
-            const raw = await targetController?.runJavaScript('window.getSelection().toString()');
-            hilog.info(DOMAIN, 'Menu',
-              '[TrayCopyDiag] T5cut rawDefined=%{public}s rawLen=%{public}d',
-              raw !== undefined && raw !== null ? 'true' : 'false',
-              raw !== undefined && raw !== null ? String(raw).length : -1);
+            const raw = await targetController?.runJavaScript("window.getSelection().toString()");
+            hilog.info(
+              DOMAIN,
+              "Menu",
+              "[TrayCopyDiag] T5cut rawDefined=%{public}s rawLen=%{public}d",
+              raw !== undefined && raw !== null ? "true" : "false",
+              raw !== undefined && raw !== null ? String(raw).length : -1,
+            );
             if (raw) {
               let text: string;
               try {
@@ -278,63 +314,70 @@ export class PredefinedActionExecutor {
                 text = raw as string;
               }
               if (text) {
-                const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text as string);
+                const pasteData = pasteboard.createData(
+                  pasteboard.MIMETYPE_TEXT_PLAIN,
+                  text as string,
+                );
                 const sysPasteboard = pasteboard.getSystemPasteboard();
                 await sysPasteboard.setData(pasteData);
                 await targetController?.runJavaScript('document.execCommand("delete")');
               }
             }
           } catch (e) {
-            hilog.warn(DOMAIN, 'Menu', 'Clipboard cut failed: %{public}s', String(e));
+            hilog.warn(DOMAIN, "Menu", "Clipboard cut failed: %{public}s", String(e));
           }
           break;
         }
-        case 'paste': {
+        case "paste": {
           try {
             const sysPasteboard = pasteboard.getSystemPasteboard();
             const pasteData = await sysPasteboard.getData();
             const text = pasteData.getPrimaryText();
-            hilog.info(DOMAIN, 'Menu',
-              '[TrayCopyDiag] T5paste textLen=%{public}d', text !== undefined && text !== null ? text.length : -1);
+            hilog.info(
+              DOMAIN,
+              "Menu",
+              "[TrayCopyDiag] T5paste textLen=%{public}d",
+              text !== undefined && text !== null ? text.length : -1,
+            );
             if (text) {
               // Use JSON.stringify for safe JS string escaping (prevents JS injection)
               const safeText = JSON.stringify(text);
               await targetController?.runJavaScript(
-                `document.execCommand("insertText", false, ${safeText})`
+                `document.execCommand("insertText", false, ${safeText})`,
               );
             }
           } catch (e) {
-            hilog.warn(DOMAIN, 'Menu', 'Clipboard paste failed: %{public}s', String(e));
+            hilog.warn(DOMAIN, "Menu", "Clipboard paste failed: %{public}s", String(e));
           }
           break;
         }
-        case 'selectAll':
-          hilog.info(DOMAIN, 'Menu', '[TrayCopyDiag] T5selAll invoked');
+        case "selectAll":
+          hilog.info(DOMAIN, "Menu", "[TrayCopyDiag] T5selAll invoked");
           await targetController?.runJavaScript('document.execCommand("selectAll")');
           break;
-        case 'undo':
+        case "undo":
           await targetController?.runJavaScript('document.execCommand("undo")');
           break;
-        case 'redo':
+        case "redo":
           await targetController?.runJavaScript('document.execCommand("redo")');
           break;
-        case 'minimize':
+        case "minimize":
           await this.minimizeWindow(targetWindowId);
           break;
-        case 'hide':
+        case "hide":
           // Hide entire Ability (app) to background — equivalent to macOS Cmd+H (app-level)
           await this.hideAbility();
           break;
-        case 'close':
+        case "close":
           // Close the target window — equivalent to macOS Cmd+W (window-level)
           await this.closeWindow(targetWindowId);
           break;
-        case 'maximize':
+        case "maximize":
           // Use FOLLOW_APP_IMMERSIVE_SETTING to preserve existing fullscreen layout (avoid white bar).
           // ENTER_IMMERSIVE explicitly enters/exits fullscreen on maximize/recover, causing a layout gap.
           await win?.maximize(window.MaximizePresentation.FOLLOW_APP_IMMERSIVE_SETTING);
           break;
-        case 'fullscreen': {
+        case "fullscreen": {
           // Delegate to WindowManager.setFullscreen so predefined fullscreen
           // matches the window-API (WindowPlugin set-fullscreen) behaviour:
           // desktop maximize(ENTER_IMMERSIVE) + hide title bar/Dock hover,
@@ -370,23 +413,39 @@ export class PredefinedActionExecutor {
             });
           break;
         }
-        case 'quit':
+        case "quit":
           this.exitFn(0);
           break;
-        case 'hideOthers':
+        case "hideOthers":
+        case "services":
+          // macOS-only semantics (hideOtherApplications: / the services menu)
+          // with no OHOS counterpart — muda still serializes these on
+          // cross-platform menus, and upstream Windows no-ops them on click
+          // too. Warn so the dead click leaves a trace in hilog instead of
+          // vanishing (the item is rendered and clickable).
+          hilog.warn(
+            DOMAIN,
+            "Menu",
+            "predefined action '%{public}s' is macOS-only with no OHOS counterpart; click ignored",
+            String(type),
+          );
           break;
-        case 'showAll':
-        case 'bringAllToFront':
+        case "showAll":
+        case "bringAllToFront":
           await this.restoreAll();
           break;
-        case 'about':
-          this.showAboutFn?.(aboutMetadata ?? {} as AboutMetadataData);
-          break;
-        case 'restore':
+        case "about":
+          this.showAboutFn?.(aboutMetadata ?? ({} as AboutMetadataData));
           break;
       }
     } catch (e) {
-      hilog.warn(DOMAIN, 'Menu', 'execute(%{public}s) unhandled error: %{public}s', String(type), String(e));
+      hilog.warn(
+        DOMAIN,
+        "Menu",
+        "execute(%{public}s) unhandled error: %{public}s",
+        String(type),
+        String(e),
+      );
     }
   }
 }
@@ -397,7 +456,10 @@ export class MenuManager {
   private currentWindowId: string = "main";
   private currentWindowIdNumeric: number = MAIN_WINDOW_ID;
 
-  constructor(executor: PredefinedActionExecutor, emitMenuEventFn: (menuId: string, windowId?: string) => void) {
+  constructor(
+    executor: PredefinedActionExecutor,
+    emitMenuEventFn: (menuId: string, windowId?: string) => void,
+  ) {
     this.executor = executor;
     this.emitMenuEventFn = emitMenuEventFn;
   }
@@ -416,14 +478,20 @@ export class MenuManager {
         console.error(`[Menu] No callback registered for window "${wid}"`);
       }
     } catch (e) {
-      console.error('[Menu] Failed to popup menu:', e);
+      console.error("[Menu] Failed to popup menu:", e);
     }
   }
 
   handleItemClick(item: MenuItemData): void {
-    hilog.info(DOMAIN, 'Menu', 'handleItemClick ENTER id=%{public}s type=%{public}s predefinedType=%{public}s',
-      item.id, item.type, item.predefinedType ?? 'none');
-    if (item.type === 'predefined' && item.predefinedType) {
+    hilog.info(
+      DOMAIN,
+      "Menu",
+      "handleItemClick ENTER id=%{public}s type=%{public}s predefinedType=%{public}s",
+      item.id,
+      item.type,
+      item.predefinedType ?? "none",
+    );
+    if (item.type === "predefined" && item.predefinedType) {
       this.executor.execute(item.predefinedType, item.aboutMetadata, this.currentWindowIdNumeric);
     } else {
       this.emitMenuEventFn(item.id, this.currentWindowId);

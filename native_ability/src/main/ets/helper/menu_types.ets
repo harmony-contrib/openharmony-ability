@@ -1,11 +1,11 @@
 /**
  * Menu module type definitions
  */
-import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { SymbolGlyphModifier } from "@kit.ArkUI";
 
 export interface MenuItemData {
   id: string;
-  type: 'item' | 'separator' | 'submenu' | 'predefined' | 'check' | 'icon';
+  type: "item" | "separator" | "submenu" | "predefined" | "check" | "icon";
   text?: string;
   enabled?: boolean;
   accelerator?: string;
@@ -29,16 +29,39 @@ export interface AboutMetadataData {
 }
 
 /**
- * Predefined menu item types, which will be translated to system default menu items with 
+ * Predefined menu item types, which will be translated to system default menu items with
  * corresponding actions.
+ *
+ * Mirrors muda's PredefinedMenuItemType serialization (the to_menu_item_data
+ * mapping in muda/src/platform_impl/ohos/mod.rs) — the only producer of the
+ * menu JSON's `predefinedType` field — plus the execute-predefined bridge
+ * action strings tray-icon's event.rs dispatches. muda's enum has no
+ * recover/restore/destroyWindow variants, so nothing ever emits them
+ * (issue #203): 'restore'/'destroyWindow' are removed; 'recover' is kept
+ * (its executor arm is retained per upstream #219) as an unreachable member
+ * for switch-case comparability.
  */
 export type PredefinedType =
-  | 'separator'
-  | 'copy' | 'cut' | 'paste' | 'selectAll'
-  | 'undo' | 'redo'
-  | 'minimize' | 'maximize' | 'fullscreen' | 'recover' | 'restore' | 'destroyWindow' | 'close'
-  | 'quit' | 'about' | 'hide' | 'hideOthers' | 'showAll'
-  | 'services' | 'bringAllToFront' | 'none';
+  | "separator"
+  | "copy"
+  | "cut"
+  | "paste"
+  | "selectAll"
+  | "undo"
+  | "redo"
+  | "minimize"
+  | "maximize"
+  | "fullscreen"
+  | "recover"
+  | "close"
+  | "quit"
+  | "about"
+  | "hide"
+  | "hideOthers"
+  | "showAll"
+  | "services"
+  | "bringAllToFront"
+  | "none";
 
 export interface MenuCreateOptions {
   id?: string;
