@@ -1,5 +1,6 @@
 import { MenuItemData } from "../helper/menu_types";
 import { AcceleratorMatcher, clearAllTrackedModifiers } from "../helper/accelerator_matcher";
+import { stripMnemonics } from "../helper/mnemonic";
 import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
 import { SymbolGlyphModifier } from "@kit.ArkUI";
@@ -112,6 +113,10 @@ const NATIVE_ICON_FONT_COLOR: Map<string, string> = new Map([
   ["sys.symbol.circle_lefthalf_inset_filled", "#FFCC00"],
   ["sys.symbol.xmark_circle", "#FF3B30"],
 ]);
+
+// Mnemonic stripping lives in helper/mnemonic.ets (shared with MenuPopup);
+// see its contract comment for the single-stripping-point design.
+
 @Component
 export struct MenuBarComponent {
   @Prop windowId: number = 0;
@@ -405,7 +410,7 @@ export struct MenuBarComponent {
             (item: MenuItemData) => {
               if (item.type === "submenu") {
                 MenuItem({
-                  content: item.text ?? "",
+                  content: stripMnemonics(item.text ?? ""),
                   builder: (): void => this.SubmenuContent(item.submenuItems ?? []),
                   symbolStartIcon: item.nativeIcon
                     ? this.nativeIconSymbol(item.nativeIcon)
@@ -413,7 +418,7 @@ export struct MenuBarComponent {
                 });
               } else if (item.type === "check") {
                 MenuItem({
-                  content: item.text ?? "",
+                  content: stripMnemonics(item.text ?? ""),
                   labelInfo: item.accelerator,
                   symbolStartIcon: item.nativeIcon
                     ? this.nativeIconSymbol(item.nativeIcon)
@@ -438,7 +443,7 @@ export struct MenuBarComponent {
                       .width(24)
                       .height(24)
                       .margin({ right: 8 })
-                    Text(item.text ?? "").fontSize(14)
+                    Text(stripMnemonics(item.text ?? "")).fontSize(14)
                   }
                 }
                 .enabled(item.enabled ?? true)
@@ -450,7 +455,7 @@ export struct MenuBarComponent {
                 });
               } else {
                 MenuItem({
-                  content: item.text ?? item.predefinedType ?? "",
+                  content: stripMnemonics(item.text ?? item.predefinedType ?? ""),
                   labelInfo: item.accelerator,
                   symbolStartIcon: item.nativeIcon
                     ? this.nativeIconSymbol(item.nativeIcon)
@@ -599,7 +604,7 @@ export struct MenuBarComponent {
                   .margin({ right: 4 });
               }
             }
-            Text(item.text ?? "")
+            Text(stripMnemonics(item.text ?? ""))
               .fontSize(14)
               .fontColor((item.enabled ?? true) ? "#333333" : "#999999")
           }
