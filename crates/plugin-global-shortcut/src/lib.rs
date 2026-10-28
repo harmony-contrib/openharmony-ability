@@ -192,7 +192,9 @@ impl ShortcutAcknowledgement {
 pub struct ShortcutTriggeredEvent {
     /// Registration id of the triggered shortcut.
     pub id: u32,
-    /// `"Pressed"` or `"Released"`.
+    /// Always `"Pressed"` on OHOS: inputConsumer only reports key-down and a
+    /// real key-up is unobservable for arbitrary shortcuts, so no `Released`
+    /// is ever synthesized (issue C71).
     pub state: String,
 }
 
@@ -335,8 +337,9 @@ impl GlobalShortcutClient {
 
     /// Returns the crossbeam receiver for shortcut trigger events.
     ///
-    /// Each triggered shortcut produces a `ShortcutTriggeredEvent` with `state: "Pressed"`
-    /// followed by a synthesized `state: "Released"` event.
+    /// Each triggered shortcut produces a single `ShortcutTriggeredEvent`
+    /// with `state: "Pressed"` — OHOS cannot observe a real key-up, so no
+    /// `Released` event is ever emitted (issue C71).
     pub fn event_receiver(&self) -> &'static Receiver<ShortcutTriggeredEvent> {
         &shortcut_event_channel().1
     }
