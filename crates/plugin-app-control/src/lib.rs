@@ -370,6 +370,17 @@ impl AppControlExt for OpenHarmonyApp {
 /// `ConfigurationConstant.ColorMode` via a switch/default and defers the actual
 /// `setColorMode` call with `setTimeout(…, 0)` to avoid re-entrant
 /// `onConfigurationUpdate` deadlocks (see ohos-constraints 4.3).
+///
+/// `accepted` therefore means "queued", not "executed": a deferred execution
+/// failure (e.g. 16000011 teardown race) can no longer reach the synchronous
+/// `!accepted` leg — it is surfaced through the notify channel instead, where
+/// the ArkTS deferred catch calls `notify_set_color_mode_failed` and the
+/// latest failure is readable via
+/// `openharmony_ability::take_color_mode_failure()` (issue #222 / C85). No
+/// polling is wired in tao/tauri yet — the visible failure surface today is
+/// the error log (ArkTS console.error + the ability crate's error!); the slot
+/// API is there for an embedder that wants programmatic access. The sync
+/// `Err` paths here only cover bridge/payload failures.
 pub trait ColorModeExt {
     /// Sets the system color mode (`0 = Dark`, `1 = Light`, `2 = NoSet`).
     ///

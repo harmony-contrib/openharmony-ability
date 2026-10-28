@@ -129,6 +129,8 @@ export interface AbilityInitContext {
   prefPath?: string;
   preferredLocales?: string;
   moduleName?: string;
+  /** HAP module name from `currentHapModuleInfo.name` (e.g. `entry_desktop`) — NOT the .so library name carried by `moduleName`. */
+  hapModuleName?: string;
   resourceManager?: resourceManager.ResourceManager;
   sdkApiVersion?: number;
   distributionOSApiVersion?: number;
@@ -224,9 +226,7 @@ export interface Module {
    *  action: 0 = Down, 1 = Up. */
   notifyKeyEvent?: (keyCode: number, action: number, deviceId: number) => void;
   /** `register_create_sub_window_tsfn` — legacy create_os_window path hookup. */
-  registerCreateSubWindowTsfn?: (
-    createSubWindow: (config: ESObject) => Promise<number>,
-  ) => void;
+  registerCreateSubWindowTsfn?: (createSubWindow: (config: ESObject) => Promise<number>) => void;
   /** `notify_float_window_registered` — Float creation-chain settle signal (success or
    *  failure); drains the Rust-side ops queued against the pre-registration race window
    *  (doc/OHOS窗口遗留问题.md issue-7 addendum). */
@@ -240,6 +240,13 @@ export interface Module {
    *  returned accepted; drops the pending D7 handshake entry and the label→id
    *  pairing so a rejected spawn cannot strand them (review G15). */
   notifyUiAbilityStartFailed?: (windowId: number) => void;
+  /** `notify_set_color_mode_failed` — set-color-mode deferred-catch failure
+   *  surfacing (AppControlPlugin): setColorMode runs on a later tick than the
+   *  bridge response (deadlock avoidance, ohos-constraints 4.3), so an
+   *  execution failure (e.g. 16000011 context-gone teardown race) arrives
+   *  after accepted=true already returned; this notify records it on the
+   *  Rust side instead of swallowing it (issue Eulogizethesun/tauri#222). */
+  notifySetColorModeFailed?: (code: number, message: string) => void;
   /** `enable_ui_ability_pending_tracking` — UIAbility spawn pending-registry
    *  capability handshake (mirrors enableFloatPendingTracking); arms the Rust-side
    *  gate only when present, so a stale HAR keeps the pre-registry fire-and-forget
