@@ -538,6 +538,13 @@ for (const [targetVersion, items] of byVersion.entries()) {
 }
 
 if (!dryRun && pendingBumps.length > 0) {
+  // Regenerate the committed ohpm lockfiles so they record the bumped versions.
+  // The pnpm postinstall runs the same install, so stale locks would otherwise
+  // dirty the working tree and make release-plz abort on the next run.
+  execFileSync(process.execPath, [path.join(__dirname, "install-ohpm.js")], {
+    cwd: rootDir,
+    stdio: "inherit",
+  });
   execFileSync("pnpm", ["exec", "oxk", "format", "**/*.{ets,js,ts,json5}", "-t=10"], {
     cwd: rootDir,
     stdio: "inherit",
