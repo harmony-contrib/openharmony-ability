@@ -1,12 +1,12 @@
 import { AbilityConstant, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import webview from "@ohos.web.webview";
-import { hilog } from '@kit.PerformanceAnalysisKit';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { hilog } from "@kit.PerformanceAnalysisKit";
+import { deviceInfo } from "@kit.BasicServicesKit";
 import { Module, AbilityInitContext, ApplicationLifecycle, WindowConfig } from "./type";
 import { Loadable } from "../helper/loadable";
 import { WindowManager } from "../window/WindowManager";
-import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from '../helper/constants';
+import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
 
 /**
  * ProcessInitializer — process-level initialization, executed only once.
@@ -67,12 +67,16 @@ export class ProcessInitializer {
     return this.lifecycleByModule;
   }
 
-  static createInitContext(context: common.UIAbilityContext, moduleName: string): AbilityInitContext {
+  static createInitContext(
+    context: common.UIAbilityContext,
+    moduleName: string,
+  ): AbilityInitContext {
     return {
       basePath: context?.filesDir ?? "",
       prefPath: context?.filesDir ?? "",
       preferredLocales: context?.config?.language ?? "",
       moduleName,
+      hapModuleName: context?.currentHapModuleInfo?.name ?? "",
       resourceManager: context?.resourceManager,
       sdkApiVersion: deviceInfo.sdkApiVersion,
       distributionOSApiVersion: deviceInfo.distributionOSApiVersion,
@@ -90,7 +94,7 @@ export class ProcessInitializer {
     want: Want,
   ): Promise<void> {
     if (this.initialized) {
-      hilog.info(DOMAIN, 'ProcessInitializer', 'Already initialized, skipping');
+      hilog.info(DOMAIN, "ProcessInitializer", "Already initialized, skipping");
       return;
     }
 
@@ -140,31 +144,30 @@ export class ProcessInitializer {
             module.notifyFloatWindowRegistered(windowId, registered);
           }
         };
-        module.registerCreateSubWindowTsfn(
-          (config: ESObject): Promise<number> => {
-            const windowId: number = (config as WindowConfig).windowId;
-            return wm.createSubWindow(config)
-              .then((id: number): number => {
-                // Settle signal: the creation chain finished (window registered
-                // in WindowManager.windows, SubWindowPage UI loaded). Rust drains
-                // the ops queued against the pre-registration window. Attached
-                // at promise END on purpose — an earlier notify would let
-                // replayed ops race the chain's trailing
-                // resize/moveWindowTo/showWindow (review V10).
-                notifySettled(windowId, true);
-                return id;
-              })
-              .catch((err: ESObject) => {
-                // Failure settles identically: Rust drains the queue; the
-                // replayed ops then fail loudly at the ArkTS registry
-                // (today's "Unknown OS sub-window" warn) instead of being
-                // held forever.
-                notifySettled(windowId, false);
-                throw err;
-              });
-          }
-        );
-        hilog.info(DOMAIN, 'ProcessInitializer', 'Registered createSubWindow TSFN');
+        module.registerCreateSubWindowTsfn((config: ESObject): Promise<number> => {
+          const windowId: number = (config as WindowConfig).windowId;
+          return wm
+            .createSubWindow(config)
+            .then((id: number): number => {
+              // Settle signal: the creation chain finished (window registered
+              // in WindowManager.windows, SubWindowPage UI loaded). Rust drains
+              // the ops queued against the pre-registration window. Attached
+              // at promise END on purpose — an earlier notify would let
+              // replayed ops race the chain's trailing
+              // resize/moveWindowTo/showWindow (review V10).
+              notifySettled(windowId, true);
+              return id;
+            })
+            .catch((err: ESObject) => {
+              // Failure settles identically: Rust drains the queue; the
+              // replayed ops then fail loudly at the ArkTS registry
+              // (today's "Unknown OS sub-window" warn) instead of being
+              // held forever.
+              notifySettled(windowId, false);
+              throw err;
+            });
+        });
+        hilog.info(DOMAIN, "ProcessInitializer", "Registered createSubWindow TSFN");
         break;
       }
     }
@@ -195,6 +198,6 @@ export class ProcessInitializer {
     }
 
     this.initialized = true;
-    hilog.info(DOMAIN, 'ProcessInitializer', 'Process initialization complete');
+    hilog.info(DOMAIN, "ProcessInitializer", "Process initialization complete");
   }
 }
