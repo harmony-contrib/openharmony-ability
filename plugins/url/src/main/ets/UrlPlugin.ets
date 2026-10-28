@@ -65,10 +65,7 @@ const TOP_DIR_TO_VIRTUAL: ReadonlyArray<PublicDirEntry> = [
 // App-sandbox path markers: the file manager can never open these (platform
 // limitation), so they are rejected with a documented error instead of a
 // silent fallback to the notepad handler.
-const SANDBOX_MARKERS: ReadonlyArray<string> = [
-  "/data/storage/",
-  "/data/app/",
-];
+const SANDBOX_MARKERS: ReadonlyArray<string> = ["/data/storage/", "/data/app/"];
 
 class UrlOpenResponse {
   readonly accepted: boolean;
@@ -125,7 +122,7 @@ function mapToVirtualUri(realPath: string): string {
     throw new Error(
       `[reveal-in-dir] OHOS file manager cannot open app-sandbox paths (${realPath}). ` +
         `Reveal only works for public directories (e.g. /storage/media/100/local/files/Docs/...). ` +
-        `This is a platform limitation.`
+        `This is a platform limitation.`,
     );
   }
 
@@ -141,7 +138,7 @@ function mapToVirtualUri(realPath: string): string {
       `[reveal-in-dir] path is not under a mappable public directory (${realPath}). ` +
         `Mappable bases: ${PUBLIC_BASE_PREFIXES.join(", ")} followed by a known top-level ` +
         `directory (docs, desktop, download, pictures, music, videos). ` +
-        `Only Docs→Documents is verified on 2in1 desktop; others are unverified.`
+        `Only Docs→Documents is verified on 2in1 desktop; others are unverified.`,
     );
   }
 
@@ -157,15 +154,13 @@ function mapToVirtualUri(realPath: string): string {
     throw new Error(
       `[reveal-in-dir] top-level directory "${topSegment}" has no file-manager virtual ` +
         `name mapping (${realPath}). Known top-level names: docs, desktop, download, ` +
-        `pictures, music, videos. Only Docs→Documents is verified on 2in1 desktop.`
+        `pictures, music, videos. Only Docs→Documents is verified on 2in1 desktop.`,
     );
   }
 
   // The sub-path keeps the original casing; slice indices align because `lower`
   // differs from `trimmedPath` only by case.
-  const subPath = trimmedPath
-    .slice(base.length + topSegment.length)
-    .replace(/^\/+/, "");
+  const subPath = trimmedPath.slice(base.length + topSegment.length).replace(/^\/+/, "");
   return subPath.length > 0
     ? `file://docs/storage/Users/currentUser/${matched.virtualName}/${subPath}`
     : `file://docs/storage/Users/currentUser/${matched.virtualName}`;
@@ -202,6 +197,12 @@ export class UrlPlugin extends AsyncPluginBase {
       // types and silently falls back to the notepad handler.
       // Sandbox/unmappable-prefix paths throw before startAbility, so they can
       // never fall through to a wrong handler.
+      // No fallback is attempted: on systems without the Huawei file manager
+      // (non-Huawei environments, or a package rename) startAbility throws and
+      // the error below is propagated to the caller. The OHOS SDK (checked
+      // against 6.1.1 / API 24) exposes no system-generic "reveal in folder"
+      // API — the HMS filePreview kit is content preview only — so this
+      // explicit Want is the only workable form.
       //
       // ⚠️ Want parameter placement (2026-08-28 device experiment): FM MainAbility
       // reads the target from `want.parameters.fileUri` + `want.parameters.external_storage_uuid`,
