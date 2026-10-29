@@ -4,6 +4,7 @@ const { join, resolve } = require("node:path");
 
 const repoRoot = resolve(__dirname, "..");
 const command = process.platform === "win32" ? "ohpm-rs.exe" : "ohpm-rs";
+const lockfileOnly = process.argv.includes("--lockfile-only");
 const packages = [
   join(repoRoot, "native_ability"),
   ...readdirSync(join(repoRoot, "plugins"))
@@ -14,7 +15,9 @@ const packages = [
 
 for (const packageDir of packages) {
   if (!existsSync(join(packageDir, "oh-package.json5"))) continue;
-  const result = spawnSync(command, ["install", "--all", "--prefix", packageDir], {
+  const args = ["install", "--all", "--prefix", packageDir];
+  if (lockfileOnly) args.push("--lockfile-only");
+  const result = spawnSync(command, args, {
     cwd: repoRoot,
     stdio: "inherit",
   });

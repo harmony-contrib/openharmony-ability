@@ -32,12 +32,12 @@ OpenHarmony 应用由回调驱动，需要遵守两项约束：
 pnpm install
 ```
 
-这会从 `ohpm-cli` 0.3.0 安装 `ohpm-rs`，再安装 workspace 包和 demo 的 ArkTS 依赖。
+这会从 `ohpm-cli` 0.5.0 安装 `ohpm-rs`，再安装 workspace 包和 demo 的 ArkTS 依赖。
 内部 ArkTS 依赖使用 `workspace:*`，解析到 `ohpm-workspace.yaml` 中的源码包。
 修改清单后运行 `pnpm run install:ohpm` 重新安装 ArkTS 依赖。
 
-仓库命令使用 Node 和 Rust 工具，支持 Linux 与 macOS。当前固定的 `ohpm-cli` 0.3.0
-依赖链接实现仅支持 Unix，因此 Windows 需使用 WSL 下的 Linux 工具和 SDK，直到固定的 CLI 版本支持 Windows。
+仓库命令使用 Node 和 Rust 工具，支持 Linux 与 macOS。原生 Windows 尚未在本仓库验证，
+请使用 WSL 下的 Linux 工具和 SDK。
 
 运行 `npm run pack`，为每个 workspace 包生成 HAR 到 `dist/`。
 

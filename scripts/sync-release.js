@@ -538,6 +538,14 @@ for (const [targetVersion, items] of byVersion.entries()) {
 }
 
 if (!dryRun && pendingBumps.length > 0) {
+  // Regenerate the committed ohpm lockfiles so they record the bumped versions.
+  // `--lockfile-only` resolves without touching oh_modules or manifests; a full
+  // install here would also download packages and dirty the working tree that
+  // release-plz requires to be clean.
+  execFileSync(process.execPath, [path.join(__dirname, "install-ohpm.js"), "--lockfile-only"], {
+    cwd: rootDir,
+    stdio: "inherit",
+  });
   execFileSync("pnpm", ["exec", "oxk", "format", "**/*.{ets,js,ts,json5}", "-t=10"], {
     cwd: rootDir,
     stdio: "inherit",
