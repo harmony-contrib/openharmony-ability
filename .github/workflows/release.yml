@@ -34,7 +34,7 @@ jobs:
 
       - name: Install ohpm-rs
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
-        run: cargo install ohpm-cli --version 0.3.0 --locked
+        run: node scripts/ensure-ohpm.js
 
       - name: Publish HAR packages with ohpm-rs
         if: ${{ steps.release-plz.outputs.releases_created == 'true' }}

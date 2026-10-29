@@ -32,14 +32,13 @@ OpenHarmony applications are driven by callbacks, so there are two important con
 pnpm install
 ```
 
-This installs the `ohpm-rs` CLI from `ohpm-cli` 0.3.0 and installs ArkTS dependencies
+This installs the `ohpm-rs` CLI from `ohpm-cli` 0.5.0 and installs ArkTS dependencies
 for the workspace packages and demo. Internal ArkTS dependencies use `workspace:*`
 and resolve to the source packages listed in `ohpm-workspace.yaml`.
 Run `pnpm run install:ohpm` to reinstall ArkTS dependencies after changing a manifest.
 
 The repository commands use Node and Rust tools on Linux and macOS. Native Windows
-is currently blocked by `ohpm-cli` 0.3.0's Unix-only dependency-link implementation;
-use WSL with Linux tools and SDK until the CLI supports Windows.
+has not been validated by this repository; use WSL with Linux tools and SDK.
 
 Run `npm run pack` to create one HAR per workspace package in `dist/`.
 
