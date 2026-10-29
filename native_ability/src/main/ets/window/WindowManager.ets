@@ -1969,6 +1969,20 @@ export class WindowManager {
       try {
         win.setWindowDecorVisible(decorations);
         hilog.info(DOMAIN, 'WindowManager', 'setDecorations %{public}d setWindowDecorVisible(%{public}s) OK', windowId, String(decorations));
+        // Decor visibility changes the drawable area WITHOUT changing the
+        // window rect, so the system fires no windowRectChange here
+        // (device-probed 2026-10-12,
+        // faultlogs/tao27-f2-decor-toggle-probe-20261012.md): the Rust
+        // inner-rect cache went stale and no Resized fired. Push synthetic
+        // rect changes — a fresh getWindowProperties() pair through the same
+        // throttled channel the real handler uses (same wrap shape as the
+        // Float sub-window post-load seed in createSubWindow); the Rust-side
+        // rect dedup makes a push with not-yet-settled (stale) properties a
+        // no-op. Immediate push covers the synchronous-property case; the
+        // delayed one lands after the ArkUI layout settles (~11-18ms
+        // observed on HAD-W32).
+        this.pushSyntheticRectChange(windowId);
+        setTimeout(() => this.pushSyntheticRectChange(windowId), 100);
         return true;
       } catch (err) {
         // 801: device not supported (phones); 1300002: abnormal window state. Does not affect other logic.
@@ -1979,6 +1993,38 @@ export class WindowManager {
     // Unknown window kind (never created through WindowManager).
     hilog.warn(DOMAIN, 'WindowManager', 'setDecorations: unknown window %{public}d', windowId);
     return false;
+  }
+
+  /** Synthetic rect-change push after a decor visibility change: reads a
+   *  fresh windowRect+drawableRect snapshot pair and dispatches it through
+   *  the same throttled rect channel the real windowRectChange handler uses
+   *  (the rectChangeCallback fan-out registered by NativeAbility). The Rust
+   *  window_rect_change closure updates the inner-rect cache from the pair
+   *  and the ContentRectChange dedup suppresses unchanged rects, so a
+   *  redundant or not-yet-settled push is a no-op. */
+  private pushSyntheticRectChange(windowId: number): void {
+    const win = this.getWindow(windowId);
+    if (!win) {
+      return;
+    }
+    try {
+      const snapshot = WindowManager.readWindowRectSnapshot(win);
+      if (!snapshot) {
+        return;
+      }
+      const wrapped: WindowRectEventWrap = {
+        windowId,
+        reason: window.RectChangeReason.UNDEFINED,
+        rect: snapshot.rect,
+        drawable: snapshot.drawable,
+      };
+      this.throttledRectDispatch(windowId, wrapped, (w: object) => {
+        this.rectChangeCallback?.(w as WindowRectEventWrap);
+      }, 'rect');
+      hilog.info(DOMAIN, 'WindowManager', 'pushSyntheticRectChange %{public}d drawable=%{public}s', windowId, JSON.stringify(snapshot.drawable));
+    } catch (e) {
+      hilog.warn(DOMAIN, 'WindowManager', 'pushSyntheticRectChange %{public}d failed: %{public}s', windowId, String(e));
+    }
   }
 
   setWindowBackgroundColor(windowId: number, color: number): void {
