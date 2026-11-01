@@ -112,6 +112,19 @@ export interface WebViewStyle {
   backgroundColor?: string | Color | number;
 }
 
+export interface NormalizedConfiguration {
+  language: string;
+  colorMode: number;
+  direction: number;
+  screenDensity: number;
+  displayId: number;
+  hasPointerDevice: boolean;
+  fontSizeScale: number;
+  fontWeightScale: number;
+  mcc: string;
+  mnc: string;
+}
+
 export interface AbilityInitContext {
   basePath?: string;
   prefPath?: string;
@@ -120,6 +133,7 @@ export interface AbilityInitContext {
   resourceManager?: resourceManager.ResourceManager;
   sdkApiVersion?: number;
   distributionOSApiVersion?: number;
+  configuration?: NormalizedConfiguration;
 }
 
 /**

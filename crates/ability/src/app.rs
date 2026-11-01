@@ -22,10 +22,10 @@ use ohos_ime_binding::{EnterKey, InputType, Rect as ImeCursorRect, TextState, IM
 use ohos_xcomponent_binding::RawWindow;
 
 use crate::{
-    bridge::MainThreadBridgeEndpoint, AvoidArea, AvoidAreaType, BridgeMainThread,
-    BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration, BridgePluginRegistry,
-    BridgeRuntime, Configuration, Event, KeyboardInputDelivery, MainThreadScheduler,
-    OpenHarmonyWaker, PluginLifecycleEvent, Rect, TouchInputDelivery,
+    bridge::MainThreadBridgeEndpoint, AbilityInitConfiguration, AvoidArea, AvoidAreaType,
+    BridgeMainThread, BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration,
+    BridgePluginRegistry, BridgeRuntime, Configuration, Event, KeyboardInputDelivery,
+    MainThreadScheduler, OpenHarmonyWaker, PluginLifecycleEvent, Rect, TouchInputDelivery,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
@@ -62,6 +62,7 @@ pub struct AbilityInitContext {
     pub sdk_api_version: Option<i32>,
     #[napi(js_name = "distributionOSApiVersion")]
     pub distribution_api_version: Option<i32>,
+    pub configuration: Option<AbilityInitConfiguration>,
 }
 
 impl AbilityInitContext {
@@ -69,6 +70,10 @@ impl AbilityInitContext {
         let Some(context) = context else {
             return Ok(Self::default());
         };
+        let configuration = context
+            .get::<Object>("configuration")?
+            .map(|raw| AbilityInitConfiguration::from_object(&raw))
+            .transpose()?;
 
         Ok(Self {
             base_path: context.get("basePath")?,
@@ -77,6 +82,7 @@ impl AbilityInitContext {
             module_name: context.get("moduleName")?,
             sdk_api_version: context.get("sdkApiVersion")?,
             distribution_api_version: context.get("distributionOSApiVersion")?,
+            configuration,
         })
     }
 }
@@ -660,7 +666,21 @@ impl OpenHarmonyApp {
 
     #[doc(hidden)]
     pub fn set_init_context(&self, context: AbilityInitContext) {
-        self.inner.write().unwrap().set_init_context(context);
+        // Seed `inner.configuration` synchronously during cold-start `module.init`, before the
+        // user `#[ability]` entrypoint runs and registers its event loop (`app.config()` must
+        // already observe the real `color_mode`, `language`, `display_id`, etc. during window /
+        // event-loop creation). On subsequent Ability sessions in the same process (`event_loop`
+        // already installed), leave `inner.configuration` untouched here so the post-`AbilityCreate`
+        // `onConfigurationUpdated` callback can diff against the previous session's configuration
+        // and emit `Event::ConfigChanged` while the bridge session is active.
+        let seed_configuration = self.event_loop.borrow().is_none();
+        let mut inner = self.inner.write().unwrap();
+        if seed_configuration {
+            if let Some(configuration) = &context.configuration {
+                inner.configuration = configuration.apply_to(&inner.configuration);
+            }
+        }
+        inner.set_init_context(context);
     }
 
     pub fn init_context(&self) -> AbilityInitContext {
@@ -2366,5 +2386,40 @@ mod tests {
             1,
             "one-shot listener must be removed"
         );
+    }
+
+    #[test]
+    fn set_init_context_seeds_configuration_before_event_loop_registration() {
+        let app = OpenHarmonyApp::new();
+        assert_eq!(app.config().color_mode, crate::ColorMode::NoSet);
+
+        app.set_init_context(super::AbilityInitContext {
+            preferred_locales: Some("zh-Hans".to_string()),
+            configuration: Some(super::AbilityInitConfiguration {
+                language: Some("zh-Hans".to_string()),
+                color_mode: Some(1),
+                display_id: Some(3),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+        let seeded = app.config();
+        assert_eq!(seeded.language, "zh-Hans");
+        assert_eq!(seeded.color_mode, crate::ColorMode::Light);
+        assert_eq!(seeded.display_id, 3);
+
+        // Once an event-loop handler is installed (subsequent Ability session in the same
+        // process), `set_init_context` must keep the previous `configuration` snapshot so
+        // `on_configuration_updated` can diff and emit `Event::ConfigChanged`.
+        *app.event_loop.borrow_mut() = Some(Box::new(|_| {}));
+        app.set_init_context(super::AbilityInitContext {
+            configuration: Some(super::AbilityInitConfiguration {
+                color_mode: Some(0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert_eq!(app.config().color_mode, crate::ColorMode::Light);
     }
 }
