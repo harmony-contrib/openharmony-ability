@@ -3,6 +3,8 @@ import { SerialTaskQueue } from "../main/ets/runtime/SerialTaskQueue";
 import { AbilityStateCodec } from "../main/ets/runtime/AbilityStateCodec";
 import { CancellableTaskScope } from "../main/ets/runtime/CancellableTaskScope";
 import { NativeModuleLoader } from "../main/ets/runtime/NativeModuleLoader";
+import { ProcessInitializer } from "../main/ets/ability/ProcessInitializer";
+import { Configuration, ConfigurationConstant } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import window from "@ohos.window";
 import { FrameNode } from "@ohos.arkui.node";
@@ -707,6 +709,64 @@ export default function localUnitTest() {
 
       BridgeHostRegistry.beginClosing(sessionId);
       await BridgeHostRegistry.dispose(sessionId);
+    });
+    it("normalizeConfigurationFillsDefaultsAndMergesPartialUpdates", 0, () => {
+      const defaults = ProcessInitializer.normalizeConfiguration();
+      expect(defaults.language).assertEqual("");
+      expect(defaults.colorMode).assertEqual(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+      expect(defaults.direction).assertEqual(ConfigurationConstant.Direction.DIRECTION_NOT_SET);
+      expect(defaults.screenDensity).assertEqual(
+        ConfigurationConstant.ScreenDensity.SCREEN_DENSITY_NOT_SET,
+      );
+      expect(defaults.displayId).assertEqual(0);
+      expect(defaults.hasPointerDevice).assertEqual(false);
+      expect(defaults.fontSizeScale).assertEqual(1);
+      expect(defaults.fontWeightScale).assertEqual(1);
+      expect(defaults.mcc).assertEqual("");
+      expect(defaults.mnc).assertEqual("");
+
+      const fallback: Configuration = {
+        language: "zh-Hans",
+        colorMode: ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT,
+        direction: ConfigurationConstant.Direction.DIRECTION_HORIZONTAL,
+        screenDensity: ConfigurationConstant.ScreenDensity.SCREEN_DENSITY_XXLDPI,
+        displayId: 2,
+        hasPointerDevice: true,
+        fontSizeScale: 1.15,
+        fontWeightScale: 1.0,
+      };
+      // Partial update carrying explicit falsy values (0 / false) must override fallback,
+      // while omitted properties fall back to the context configuration and then defaults.
+      const delta: Configuration = {
+        colorMode: ConfigurationConstant.ColorMode.COLOR_MODE_DARK,
+        displayId: 0,
+        hasPointerDevice: false,
+      };
+      const merged = ProcessInitializer.normalizeConfiguration(delta, fallback);
+      expect(merged.language).assertEqual("zh-Hans");
+      expect(merged.colorMode).assertEqual(ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+      expect(merged.direction).assertEqual(ConfigurationConstant.Direction.DIRECTION_HORIZONTAL);
+      expect(merged.screenDensity).assertEqual(
+        ConfigurationConstant.ScreenDensity.SCREEN_DENSITY_XXLDPI,
+      );
+      expect(merged.displayId).assertEqual(0);
+      expect(merged.hasPointerDevice).assertEqual(false);
+      expect(merged.fontSizeScale).assertEqual(1.15);
+      expect(merged.mcc).assertEqual("");
+      expect(merged.mnc).assertEqual("");
+
+      const initContext = ProcessInitializer.createInitContext(
+        {
+          filesDir: "/data/storage/el2/base/files",
+          config: fallback,
+        } as common.UIAbilityContext,
+        "entry",
+      );
+      expect(initContext.preferredLocales).assertEqual("zh-Hans");
+      expect(initContext.configuration?.colorMode).assertEqual(
+        ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT,
+      );
+      expect(initContext.configuration?.displayId).assertEqual(2);
     });
   });
 }

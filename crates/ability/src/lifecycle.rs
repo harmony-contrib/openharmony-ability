@@ -112,41 +112,25 @@ pub fn create_lifecycle_handle<'a>(
     let configuration_updated_app = app.clone();
     let on_configuration_updated =
         env.create_function_from_closure("configuration_updated", move |ctx| {
-            let configuration = ctx.first_arg::<Object>()?;
-            let language = configuration.get_named_property::<String>("language")?;
-            let color_mode = configuration.get_named_property::<i32>("colorMode")?;
-            let direction = configuration.get_named_property::<i32>("direction")?;
-            let screen_density = configuration.get_named_property::<i32>("screenDensity")?;
-            let display_id = configuration.get_named_property::<i32>("displayId")?;
-            let has_pointer_device =
-                configuration.get_named_property::<bool>("hasPointerDevice")?;
-            let font_size_scale = configuration.get_named_property::<f64>("fontSizeScale")?;
-            let font_weight_scale = configuration.get_named_property::<f64>("fontWeightScale")?;
-            let mcc = configuration.get_named_property::<String>("mcc")?;
-            let mnc = configuration.get_named_property::<String>("mnc")?;
-
-            let configuration = crate::Configuration {
-                language,
-                color_mode: color_mode.into(),
-                direction: direction.into(),
-                screen_density: screen_density.into(),
-                display_id,
-                has_pointer_device,
-                font_size_scale,
-                font_weight_scale,
-                mcc,
-                mnc,
+            let raw = ctx.first_arg::<Object>()?;
+            let update = crate::AbilityInitConfiguration::from_object(&raw)?;
+            let (configuration, changed) = {
+                let mut inner = configuration_updated_app.inner.write().map_err(|_| {
+                    napi_ohos::Error::from_reason("Failed to write app configuration")
+                })?;
+                let next = update.apply_to(&inner.configuration);
+                let changed = inner.configuration != next;
+                if changed {
+                    inner.configuration = next.clone();
+                }
+                (next, changed)
             };
-            configuration_updated_app
-                .inner
-                .write()
-                .unwrap()
-                .configuration = configuration.clone();
-            let _ = configuration_updated_app
-                .dispatch_plugin_lifecycle(PluginLifecycleEvent::ConfigurationUpdated);
-            let conf = configuration.clone();
-            if let Some(ref mut h) = *configuration_updated_app.event_loop.borrow_mut() {
-                h(Event::ConfigChanged(conf))
+            if changed {
+                let _ = configuration_updated_app
+                    .dispatch_plugin_lifecycle(PluginLifecycleEvent::ConfigurationUpdated);
+                if let Some(ref mut h) = *configuration_updated_app.event_loop.borrow_mut() {
+                    h(Event::ConfigChanged(configuration))
+                }
             }
             Ok(())
         })?;

@@ -18,6 +18,7 @@ import {
   BridgePluginFactory,
   BridgeWindowStageEventLifecyclePayload,
   Module,
+  NormalizedConfiguration,
 } from "./type";
 import { getMenuBarPort } from "../components/MenuBarSlot";
 import {
@@ -40,6 +41,7 @@ interface LoadedNativeModule {
 interface NativeModuleRuntime extends LoadedNativeModule {
   lifecycle: ApplicationLifecycle;
   bridgeOwner: string;
+  initialConfiguration: NormalizedConfiguration;
 }
 
 export class NativeAbility extends UIAbility {
@@ -222,16 +224,20 @@ export class NativeAbility extends UIAbility {
 
       for (const loaded of loadedModules) {
         const bridgeOwner = `${sessionId}:${loaded.moduleName}`;
+        const initContext = this.createInitContext(loaded.moduleName);
+        const initialConfiguration =
+          initContext.configuration ?? ProcessInitializer.normalizeConfiguration(context?.config);
         const lifecycle = loaded.module.init(
           this.createBridgeBindings(sessionId, loaded.moduleName),
           bridgeOwner,
-          this.createInitContext(loaded.moduleName),
+          initContext,
         );
         const runtime: NativeModuleRuntime = {
           moduleName: loaded.moduleName,
           module: loaded.module,
           lifecycle,
           bridgeOwner,
+          initialConfiguration,
         };
         initializedRuntimes.push(runtime);
         BridgeHostRegistry.configurePlugins(sessionId, loaded.moduleName, lifecycle.bridgePlugins);
@@ -289,6 +295,19 @@ export class NativeAbility extends UIAbility {
             DOMAIN,
             "NativeAbility",
             "onAbilityCreateWithWant failed for %{public}s: %{public}s",
+            runtime.moduleName,
+            String(e),
+          );
+        }
+        try {
+          runtime.lifecycle.environmentCallback.onConfigurationUpdated(
+            runtime.initialConfiguration,
+          );
+        } catch (e) {
+          hilog.error(
+            DOMAIN,
+            "NativeAbility",
+            "initial onConfigurationUpdated failed for %{public}s: %{public}s",
             runtime.moduleName,
             String(e),
           );
@@ -999,9 +1018,13 @@ export class NativeAbility extends UIAbility {
     if (!this.acceptingLifecycle) {
       return;
     }
+    const normalizedConfig = ProcessInitializer.normalizeConfiguration(
+      newConfig,
+      (this.context as common.UIAbilityContext)?.config,
+    );
     void this.enqueueLifecycleOperation("configuration-updated", async (): Promise<void> => {
       this.forEachLifecycle((lifecycle) =>
-        lifecycle.environmentCallback.onConfigurationUpdated(newConfig),
+        lifecycle.environmentCallback.onConfigurationUpdated(normalizedConfig),
       );
       await this.notifyBridgeLifecycle({
         kind: "configuration-updated",

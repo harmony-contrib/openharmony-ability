@@ -1,8 +1,8 @@
-import { AbilityConstant, Want } from "@kit.AbilityKit";
+import { AbilityConstant, Configuration, ConfigurationConstant, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { deviceInfo } from "@kit.BasicServicesKit";
-import { Module, AbilityInitContext } from "./type";
+import { Module, AbilityInitContext, NormalizedConfiguration } from "./type";
 import { Loadable } from "../helper/loadable";
 import { WindowManager } from "../window/WindowManager";
 import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
@@ -42,18 +42,47 @@ export class ProcessInitializer {
     return ProcessInitializer.loadedModuleNames;
   }
 
+  static normalizeConfiguration(
+    primary?: Configuration,
+    fallback?: Configuration,
+  ): NormalizedConfiguration {
+    return {
+      language: primary?.language ?? fallback?.language ?? "",
+      colorMode:
+        primary?.colorMode ??
+        fallback?.colorMode ??
+        ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET,
+      direction:
+        primary?.direction ??
+        fallback?.direction ??
+        ConfigurationConstant.Direction.DIRECTION_NOT_SET,
+      screenDensity:
+        primary?.screenDensity ??
+        fallback?.screenDensity ??
+        ConfigurationConstant.ScreenDensity.SCREEN_DENSITY_NOT_SET,
+      displayId: primary?.displayId ?? fallback?.displayId ?? 0,
+      hasPointerDevice: primary?.hasPointerDevice ?? fallback?.hasPointerDevice ?? false,
+      fontSizeScale: primary?.fontSizeScale ?? fallback?.fontSizeScale ?? 1,
+      fontWeightScale: primary?.fontWeightScale ?? fallback?.fontWeightScale ?? 1,
+      mcc: primary?.mcc ?? fallback?.mcc ?? "",
+      mnc: primary?.mnc ?? fallback?.mnc ?? "",
+    };
+  }
+
   static createInitContext(
     context: common.UIAbilityContext,
     moduleName: string,
   ): AbilityInitContext {
+    const configuration = ProcessInitializer.normalizeConfiguration(context?.config);
     return {
       basePath: context?.filesDir ?? "",
       prefPath: context?.filesDir ?? "",
-      preferredLocales: context?.config?.language ?? "",
+      preferredLocales: configuration.language,
       moduleName,
       resourceManager: context?.resourceManager,
       sdkApiVersion: deviceInfo.sdkApiVersion,
       distributionOSApiVersion: deviceInfo.distributionOSApiVersion,
+      configuration,
     };
   }
 
