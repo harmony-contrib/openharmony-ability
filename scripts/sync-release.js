@@ -48,6 +48,22 @@ function fileExistsAtCommit(rev, relPath) {
   }
 }
 
+function extractManifestDependencies(content) {
+  const deps = new Set();
+  const sectionRegex =
+    /"(?:dependencies|devDependencies|dynamicDependencies|peerDependencies)"\s*:\s*\{([^}]*)\}/g;
+  let sectionMatch;
+  while ((sectionMatch = sectionRegex.exec(content)) !== null) {
+    const body = sectionMatch[1];
+    const entryRegex = /"([^"]+)"\s*:\s*"([^"]+)"/g;
+    let entryMatch;
+    while ((entryMatch = entryRegex.exec(body)) !== null) {
+      deps.add(entryMatch[1]);
+    }
+  }
+  return [...deps];
+}
+
 function readHarManifest(harDir) {
   const manifestPath = path.join(rootDir, harDir, "oh-package.json5");
   const content = fs.readFileSync(manifestPath, "utf8");
@@ -59,7 +75,20 @@ function readHarManifest(harDir) {
   return {
     name: nameMatch[1],
     version: versionMatch[1],
+    dependencies: extractManifestDependencies(content),
   };
+}
+
+function readHarVersionAtCommit(rev, harDir) {
+  if (!commitExists(rev)) {
+    return null;
+  }
+  const content = git(["show", `${rev}:${harDir}/oh-package.json5`], true);
+  if (!content) {
+    return null;
+  }
+  const versionMatch = content.match(/^  "version"\s*:\s*"([^"]+)"/m);
+  return versionMatch ? versionMatch[1] : null;
 }
 
 function readCrateManifest(crateDir) {
@@ -452,14 +481,24 @@ function updateReleasePrDescription(harReleases) {
   }
 }
 
-const packages = discoverHarPackages();
-const pendingBumps = [];
-const initialReleases = [];
-
-for (const pkg of packages) {
+const packages = discoverHarPackages().map((pkg) => {
   const har = readHarManifest(pkg.harDir);
   const crate = readCrateManifest(pkg.crateDir);
   const baseCommit = findHarReleaseBaseCommit(pkg.harDir, har.name, har.version, crate?.name);
+  return {
+    ...pkg,
+    har,
+    crate,
+    baseCommit,
+  };
+});
+
+const workspaceByHarName = new Map(packages.map((pkg) => [pkg.har.name, pkg]));
+const pendingByHarName = new Map();
+const initialByHarName = new Map();
+
+for (const pkg of packages) {
+  const { har, crate, baseCommit } = pkg;
 
   if (!baseCommit) {
     // First-time release: keep the initial version from oh-package.json5 without bumping,
@@ -467,8 +506,9 @@ for (const pkg of packages) {
     console.log(
       `[release] ${har.name}@${har.version} (initial unpublished package; keeping initial version)`,
     );
-    initialReleases.push({
-      ...pkg,
+    initialByHarName.set(har.name, {
+      harDir: pkg.harDir,
+      crateDir: pkg.crateDir,
       harName: har.name,
       oldVersion: null,
       newVersion: har.version,
@@ -478,23 +518,74 @@ for (const pkg of packages) {
     continue;
   }
 
-  const harChanged = hasFunctionalHarChanges(pkg.harDir, baseCommit);
-  if (!harChanged) {
-    console.log(`[skip] ${har.name}@${har.version} (no changes since ${baseCommit.slice(0, 7)})`);
-    continue;
+  if (hasFunctionalHarChanges(pkg.harDir, baseCommit)) {
+    const crateBumped = crate ? compareSemver(crate.version, har.version) > 0 : false;
+    const newVersion = crateBumped ? crate.version : incrementVersion(har.version);
+    pendingByHarName.set(har.name, {
+      harDir: pkg.harDir,
+      crateDir: pkg.crateDir,
+      harName: har.name,
+      oldVersion: har.version,
+      newVersion,
+      baseCommit,
+      isInitialRelease: false,
+    });
   }
-
-  const crateBumped = crate ? compareSemver(crate.version, har.version) > 0 : false;
-  const newVersion = crateBumped ? crate.version : incrementVersion(har.version);
-  pendingBumps.push({
-    ...pkg,
-    harName: har.name,
-    oldVersion: har.version,
-    newVersion,
-    baseCommit,
-    isInitialRelease: false,
-  });
 }
+
+// Propagate version bumps transitively across internal workspace HAR dependencies.
+let propagated = true;
+while (propagated) {
+  propagated = false;
+  for (const pkg of packages) {
+    const { har, crate, baseCommit } = pkg;
+    if (!baseCommit || pendingByHarName.has(har.name) || initialByHarName.has(har.name)) {
+      continue;
+    }
+
+    const updatedDeps = har.dependencies.filter((depName) => {
+      const depPkg = workspaceByHarName.get(depName);
+      if (!depPkg) {
+        return false;
+      }
+      if (pendingByHarName.has(depName) || initialByHarName.has(depName)) {
+        return true;
+      }
+      const depVersionAtBase = readHarVersionAtCommit(baseCommit, depPkg.harDir);
+      const depTargetVersion = pendingByHarName.get(depName)?.newVersion ?? depPkg.har.version;
+      return Boolean(depVersionAtBase && compareSemver(depTargetVersion, depVersionAtBase) > 0);
+    });
+    if (updatedDeps.length === 0) {
+      continue;
+    }
+
+    const crateBumped = crate ? compareSemver(crate.version, har.version) > 0 : false;
+    const newVersion = crateBumped ? crate.version : incrementVersion(har.version);
+    console.log(
+      `[propagate] ${har.name}: ${har.version} -> ${newVersion} (workspace dependency updated: ${updatedDeps.join(", ")})`,
+    );
+    pendingByHarName.set(har.name, {
+      harDir: pkg.harDir,
+      crateDir: pkg.crateDir,
+      harName: har.name,
+      oldVersion: har.version,
+      newVersion,
+      baseCommit,
+      isInitialRelease: false,
+    });
+    propagated = true;
+  }
+}
+
+for (const pkg of packages) {
+  const { har, baseCommit } = pkg;
+  if (baseCommit && !pendingByHarName.has(har.name) && !initialByHarName.has(har.name)) {
+    console.log(`[skip] ${har.name}@${har.version} (no changes since ${baseCommit.slice(0, 7)})`);
+  }
+}
+
+const pendingBumps = packages.map((pkg) => pendingByHarName.get(pkg.har.name)).filter(Boolean);
+const initialReleases = packages.map((pkg) => initialByHarName.get(pkg.har.name)).filter(Boolean);
 
 if (pendingBumps.length === 0 && initialReleases.length === 0) {
   console.log("No HAR packages require a release or version bump.");
