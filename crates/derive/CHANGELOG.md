@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.5](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-derive-v1.0.0-beta.4...openharmony-ability-derive-v1.0.0-beta.5) - 2026-11-02
+
+### Other
+- *(ability)* query SDK version, device type, and SysCap via native C NDK ([#120](https://github.com/harmony-contrib/openharmony-ability/pull/120)) ([#120](https://github.com/harmony-contrib/openharmony-ability/issues/120) [#120](https://github.com/harmony-contrib/openharmony-ability/issues/120) )
+
 ## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-derive-v1.0.0-beta.3...openharmony-ability-derive-v1.0.0-beta.4) - 2026-10-27
 
 ### Other
