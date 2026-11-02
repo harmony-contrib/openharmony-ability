@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.5](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-account-v1.0.0-beta.4...openharmony-ability-plugin-account-v1.0.0-beta.5) - 2026-11-02
+
+### Other
+- updated the following local packages: openharmony-ability
+
 ## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-account-v1.0.0-beta.3...openharmony-ability-plugin-account-v1.0.0-beta.4) - 2026-10-27
 
 ### Other

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.4](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-audio-v1.0.0-beta.3...openharmony-ability-plugin-audio-v1.0.0-beta.4) - 2026-11-02
+
+### Other
+- updated the following local packages: openharmony-ability
+
 ## [1.0.0-beta.3]
 
 - Introduce the `ohos.audio` facade (`AudioBridgePlugin`, `AudioClient`, `AudioExt`, `AudioUpdateRequest`) for reusable media-file playback with borrowed file-descriptor duplication across the bridge.

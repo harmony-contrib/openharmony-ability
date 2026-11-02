@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+
+## [1.0.0-beta.5] - 2026-11-02
+
+- perf(ability): query SDK version, device type, and SysCap via native C NDK (#120)
+- fix(ability): synchronize initial Configuration and merge partial updates (#118)
+
 ## [1.0.0-beta.4] - 2026-10-27
 
 - Align Float-window title bars with native window dimensions, control icons and system theme

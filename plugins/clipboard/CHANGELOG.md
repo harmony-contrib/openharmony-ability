@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+
+## [1.0.0-beta.5] - 2026-11-02
+
+- fix(release): keep ohpm lockfiles in sync with manifest versions (#116)
+- fix(clipboard): document ohpm install command in HAR README (#115)
+
 ## [1.0.0-beta.4] - 2026-10-27
 
 - `ClipboardPlugin` is now a no-argument registration/lifecycle identity only.
