@@ -1,7 +1,6 @@
 import { AbilityConstant, Configuration, ConfigurationConstant, Want } from "@kit.AbilityKit";
 import common from "@ohos.app.ability.common";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { deviceInfo } from "@kit.BasicServicesKit";
 import { Module, AbilityInitContext, NormalizedConfiguration } from "./type";
 import { Loadable } from "../helper/loadable";
 import { WindowManager } from "../window/WindowManager";
@@ -80,8 +79,6 @@ export class ProcessInitializer {
       preferredLocales: configuration.language,
       moduleName,
       resourceManager: context?.resourceManager,
-      sdkApiVersion: deviceInfo.sdkApiVersion,
-      distributionOSApiVersion: deviceInfo.distributionOSApiVersion,
       configuration,
     };
   }

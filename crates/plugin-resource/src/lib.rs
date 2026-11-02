@@ -49,6 +49,17 @@ impl ResourceManager {
     pub fn inner(&self) -> &NativeResourceManager {
         self.0.as_ref()
     }
+
+    /// Opens a raw file at `path` and reads up to `buf.len()` bytes directly into `buf`
+    /// without allocating an intermediate `Vec<u8>`.
+    pub fn read_raw_file_into(
+        &self,
+        path: &str,
+        buf: &mut [u8],
+    ) -> std::result::Result<usize, RawFileError> {
+        let raw_file = self.0.open_raw_file(path)?;
+        raw_file.read_into(buf)
+    }
 }
 
 impl Deref for ResourceManager {

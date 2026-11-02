@@ -410,9 +410,9 @@ dependencies = [
 
 [[package]]
 name = "ohos-arkui-binding"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a49defc5e7da2bb4b825ae37f11c830dc325b52e128f844b3ac88daf3966d301"
+checksum = "4241627ee00d934cdf393ccb2926798ac3ff75bd2b3d166438798d4700b720db"
 dependencies = [
  "bitflags 2.13.2",
  "log",
@@ -460,6 +460,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohos-device-binding"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1e79e623b0d9eacee56d9968b66b4f586477201fd5fb234cccf05b5d6979baa"
+dependencies = [
+ "ohos-device-sys",
+]
+
+[[package]]
+name = "ohos-device-sys"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be3125873f2c81c78eccc7b2f2a32e37943e1d2a35132848173ad783d5320b14"
+
+[[package]]
 name = "ohos-display-binding"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -477,9 +492,9 @@ checksum = "fa6cca5bbc6612f386af26a41f458913aa6b9a06b90bcff36fb8a436f6996e7c"
 
 [[package]]
 name = "ohos-drawing-binding"
-version = "0.2.5"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b61e494deaee2eb8a83e76c549a30cebbbbf4e3e91d11cf62b545dce7455c288"
+checksum = "878fac5f31c29350c8b5b82b743400f6259e280e3cc64251cda4ca9d86424d14"
 dependencies = [
  "ohos-enum-derive",
  "ohos-native-drawing-sys",
@@ -575,6 +590,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ohos-init-binding"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4196292a03732a0e6451f0bdf2e11452187b0030cf3a9d30d86e9b420a6b811a"
+dependencies = [
+ "ohos-init-sys",
+]
+
+[[package]]
+name = "ohos-init-sys"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2268ec3fe2db7f5a1b5a226aa5ae5376e7f540ee27b1f397211149df6ae83fb3"
+
+[[package]]
 name = "ohos-input-method-sys"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -654,9 +684,9 @@ dependencies = [
 
 [[package]]
 name = "ohos-resource-manager-binding"
-version = "0.3.5"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8853ee3b8130a816464b5c5c0c17d348911d4f10b966fa1841c4910c430cdc67"
+checksum = "0491b4fa994dba391abe08ceee407285a023de53bed0a43752314b0be1336c84"
 dependencies = [
  "napi-ohos",
  "ohos-resource-manager-sys",
@@ -763,9 +793,11 @@ dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
  "ohos-arkui-binding",
+ "ohos-device-binding",
  "ohos-display-binding",
  "ohos-image-native-binding",
  "ohos-ime-binding",
+ "ohos-init-binding",
  "ohos-resource-manager-binding",
  "ohos-udmf-binding",
  "ohos-window-manager-binding",

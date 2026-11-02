@@ -1,15 +1,18 @@
-//! OHOS API version detection and capability checking.
+//! OHOS API version, device form-factor, and SystemCapability detection.
 //!
-//! This module provides runtime API version information for OpenHarmony/HarmonyOS,
-//! enabling version-based feature detection and graceful degradation.
+//! This module queries the OpenHarmony C NDK directly (`ohos-device-binding` and
+//! `ohos-init-binding`), so version checks, device-type inspection, and `canIUse`
+//! probes work synchronously on any thread without waiting for ArkTS initialization.
 //!
 //! # Version Types
 //!
 //! - `sdk_api_version`: OpenHarmony base API Level (e.g., 12, 14, 20)
+//!   - Queries `OH_GetSdkApiVersion` (`@since 10`)
 //!   - Corresponds to `since N` annotations in API documentation
 //!   - Use for OpenHarmony base APIs (module path: `openharmony/`)
 //!
 //! - `distribution_api_version`: HarmonyOS distribution API version
+//!   - Queries `OH_GetDistributionOSApiVersion` (`@since 10`)
 //!   - Calculated as `M × 10000 + S × 100 + F`
 //!   - Example: HarmonyOS 5.0.1 → 50001
 //!   - Corresponds to `since M.S.F(N)` annotations in API documentation
@@ -30,33 +33,16 @@
 //! if version::distribution_api_version() >= 50001 {
 //!     // Use HarmonyOS 5.0.1+ feature
 //! }
+//!
+//! // Probe a SystemCapability synchronously via NDK canIUse
+//! if version::can_i_use("SystemCapability.Multimedia.Media.AVScreenCapture") {
+//!     // Use screen capture capability
+//! }
 //! ```
-//!
-//! # System capabilities
-//!
-//! `can_i_use` was removed (2026-09): it depended on the `GLOBAL_HELPER`
-//! infrastructure that has had zero initialization points since the
-//! `#[ability]` derive refactor, so it could only ever return `false`.
-//! When syscap querying is actually needed, add a `can-i-use` bridge
-//! action (see the fault-injection plugin for the pattern).
 
-use std::sync::OnceLock;
-
-static SDK_API_VERSION: OnceLock<i32> = OnceLock::new();
-static DISTRIBUTION_API_VERSION: OnceLock<i32> = OnceLock::new();
-
-/// Initialize version information from ArkTS side.
+/// Get the OpenHarmony SDK API version (`OH_GetSdkApiVersion`).
 ///
-/// This function is called internally during ability initialization.
-/// It should only be called once; subsequent calls are no-ops.
-pub fn init(sdk_version: i32, dist_version: i32) {
-    let _ = SDK_API_VERSION.set(sdk_version);
-    let _ = DISTRIBUTION_API_VERSION.set(dist_version);
-}
-
-/// Get the OpenHarmony SDK API version.
-///
-/// Returns the API Level (e.g., 12, 14, 20) or 0 if not initialized.
+/// Returns the API Level (e.g., 12, 14, 20).
 ///
 /// This corresponds to `since N` annotations in OpenHarmony API documentation.
 /// Use this for OpenHarmony base APIs (module path: `openharmony/`).
@@ -64,18 +50,19 @@ pub fn init(sdk_version: i32, dist_version: i32) {
 /// # Example
 ///
 /// ```rust
+/// use openharmony_ability::version;
+///
 /// if version::sdk_api_version() >= 14 {
 ///     // Use API 14+ feature
 /// }
 /// ```
 pub fn sdk_api_version() -> i32 {
-    SDK_API_VERSION.get().copied().unwrap_or(0)
+    ohos_device_binding::sdk_api_version() as i32
 }
 
-/// Get the HarmonyOS distribution API version.
+/// Get the HarmonyOS distribution API version (`OH_GetDistributionOSApiVersion`).
 ///
-/// Returns the version number calculated as `M × 10000 + S × 100 + F`,
-/// or 0 if not initialized.
+/// Returns the version number calculated as `M × 10000 + S × 100 + F`.
 ///
 /// This corresponds to `since M.S.F(N)` annotations in HarmonyOS API documentation.
 /// Use this for HarmonyOS-specific APIs (module path: `hms/`).
@@ -91,17 +78,45 @@ pub fn sdk_api_version() -> i32 {
 /// # Example
 ///
 /// ```rust
+/// use openharmony_ability::version;
+///
 /// // Check for HarmonyOS 5.0.1 (50001)
 /// if version::distribution_api_version() >= 50001 {
 ///     // Use HarmonyOS 5.0.1+ feature
 /// }
 /// ```
 pub fn distribution_api_version() -> i32 {
-    DISTRIBUTION_API_VERSION.get().copied().unwrap_or(0)
+    ohos_device_binding::distribution_os_api_version() as i32
+}
+
+/// Get the first API version reported by the device (`OH_GetFirstApiVersion`).
+pub fn first_api_version() -> i32 {
+    ohos_device_binding::first_api_version() as i32
+}
+
+/// Get the runtime device type (`OH_GetDeviceType`), such as `"phone"`, `"tablet"`,
+/// `"2in1"`, `"wearable"`, `"liteWearable"`, `"tv"`, or `"car"`.
+pub fn device_type() -> Option<&'static str> {
+    ohos_device_binding::device_type()
+}
+
+/// Synchronously query whether a `SystemCapability.*` identifier is supported
+/// by the current device (`canIUse` NDK symbol, API 8+).
+///
+/// Returns `false` if `syscap` is empty or contains an interior NUL byte.
+pub fn can_i_use(syscap: &str) -> bool {
+    if syscap.is_empty() || syscap.contains('\0') {
+        return false;
+    }
+    ohos_init_binding::canIUse(syscap)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        can_i_use, device_type, distribution_api_version, first_api_version, sdk_api_version,
+    };
+
     #[test]
     fn test_version_calculation() {
         // Test the version calculation formula: M * 10000 + S * 100 + F
@@ -115,7 +130,6 @@ mod tests {
 
     #[test]
     fn test_version_comparison() {
-        // Test version comparison logic
         let v50001 = 50001; // HarmonyOS 5.0.1
         let v60000 = 60000; // HarmonyOS 6.0.0
 
@@ -131,16 +145,18 @@ mod tests {
         assert!(sdk_v12 < 14);
     }
 
-    // Version initialization uses OnceLock and does not require initialized device state.
-    // Run via ohos-rust-ut skill:
-    //   PACKAGE=openharmony-ability bash .claude/skills/ohos-rust-ut/scripts/run-ut.sh version::
+    #[test]
+    fn rejects_empty_or_nul_syscap_without_panicking() {
+        assert!(!can_i_use(""));
+        assert!(!can_i_use("SystemCapability.Window\0.SessionManager"));
+    }
+
     mod ohos_device_tests {
-        use crate::{distribution_api_version, init, sdk_api_version};
+        use super::{device_type, distribution_api_version, first_api_version, sdk_api_version};
 
         #[test]
         fn test_sdk_api_version_returns_value() {
             let v = sdk_api_version();
-            // Returns 0 before init(), or the initialized value after
             assert!(v >= 0);
         }
 
@@ -151,50 +167,15 @@ mod tests {
         }
 
         #[test]
-        fn test_init_stores_values() {
-            // init() stores version numbers; subsequent calls are no-ops (OnceLock)
-            init(20, 60000);
-            // OnceLock may already be set by a prior test or init call.
-            // If this test runs first, values should be exactly what we set.
-            // If a prior test already called init(), values are whatever was set first.
-            // Either way, the returned values should be > 0 since init() was called.
-            let sdk = sdk_api_version();
-            let dist = distribution_api_version();
-            assert!(
-                sdk > 0,
-                "sdk_api_version should be > 0 after init, got {sdk}"
-            );
-            assert!(
-                dist > 0,
-                "distribution_api_version should be > 0 after init, got {dist}"
-            );
-        }
-
-        #[test]
-        fn test_init_is_idempotent() {
-            // OnceLock: second init() is a no-op
-            init(14, 50001);
-            let sdk_before = sdk_api_version();
-            let dist_before = distribution_api_version();
-
-            // Second call with different values — should NOT overwrite
-            init(99, 99999);
-            assert_eq!(
-                sdk_api_version(),
-                sdk_before,
-                "OnceLock: sdk_api_version should not change on second init"
-            );
-            assert_eq!(
-                distribution_api_version(),
-                dist_before,
-                "OnceLock: distribution_api_version should not change on second init"
-            );
+        fn test_first_api_version_and_device_type() {
+            assert!(first_api_version() >= 0);
+            if let Some(kind) = device_type() {
+                assert!(!kind.is_empty());
+            }
         }
 
         #[test]
         fn test_sdk_api_version_from_worker_thread() {
-            // Version getters from worker thread should still work
-            // (they read from OnceLock, no NAPI dependency)
             let handle = std::thread::spawn(|| {
                 let sdk = sdk_api_version();
                 let dist = distribution_api_version();

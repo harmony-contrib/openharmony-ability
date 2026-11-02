@@ -42,14 +42,16 @@ syn = { version = "2", features = ["fold", "full", "extra-traits"] }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 
-ohos-arkui-binding = { version = "0.5.0" }
+ohos-arkui-binding = { version = "0.6.0" }
 ohos-xcomponent-binding = { version = "0.6.0", features = ["multi_mode", "accessibility", "api-15"] }
 ohos-udmf-binding = { version = "0.0.8", features = ["api-13"] }
 ohos-pasteboard-binding = { version = "0.0.8", features = ["api-13"] }
 ohos-ime-binding = { version = "0.4.0" }
 ohos-web-binding = { version = "0.3.1" }
+ohos-device-binding = { version = "0.1.0" }
 ohos-display-binding = { version = "0.1.5", features = ["api-20"] }
-ohos-resource-manager-binding = { version = "0.3.5" }
+ohos-init-binding = { version = "0.1.4" }
+ohos-resource-manager-binding = { version = "0.3.6" }
 ohos-hilog-binding = { version = "0.2.5" }
 ohos-window-manager-binding = { version = "0.1.2" }
 ohos-image-native-binding = { version = "0.0.8", features = ["api-15"] }
