@@ -33,17 +33,22 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Install ohpm-rs
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
         run: node scripts/ensure-ohpm.js
 
       - name: Publish HAR packages with ohpm-rs
-        if: ${{ steps.release-plz.outputs.releases_created == 'true' }}
         env:
+          OHPM_PUBLISH_REGISTRY: https://ohpm.openharmony.cn/ohpm/
+          OHPM_PUBLISH_ID: ${{ secrets.OHPM_PUBLISH_ID }}
+          OHPM_KEY_CONTENT: ${{ secrets.OHPM_KEY_CONTENT }}
+          OHPM_KEY_PASSPHRASE: ${{ secrets.OHPM_KEY_PASSPHRASE }}
           OHPM_TOKEN: ${{ secrets.OHPM_TOKEN }}
-          OHPM_ACCESS_TOKEN: ${{ secrets.OHPM_TOKEN }}
         run: |
-          if [ -z "${OHPM_TOKEN}" ]; then
-            echo "::error::OHPM_TOKEN secret is required to publish HAR packages with ohpm-rs"
+          if [ -n "${OHPM_PUBLISH_ID}" ] && [ -n "${OHPM_KEY_CONTENT}" ]; then
+            unset OHPM_ACCESS_TOKEN
+          elif [ -n "${OHPM_TOKEN}" ]; then
+            export OHPM_ACCESS_TOKEN="${OHPM_TOKEN}"
+          else
+            echo "::error::Either (OHPM_PUBLISH_ID + OHPM_KEY_CONTENT) or OHPM_TOKEN secret is required to publish HAR packages with ohpm-rs"
             exit 1
           fi
           ohpm-rs publish --workspace
