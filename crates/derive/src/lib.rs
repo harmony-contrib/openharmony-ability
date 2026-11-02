@@ -181,13 +181,6 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                 context: Option<napi_ohos::bindgen_prelude::Object<'a>>,
             ) -> napi_ohos::Result<::openharmony_ability::ApplicationLifecycle<'a>> {
                 let init_context = ::openharmony_ability::AbilityInitContext::from_object(context.as_ref())?;
-                // Initialize version info from ArkTS side (restored from upstream baseline;
-                // dropped during the BridgeSessionInitGuard refactor — without this, every
-                // version gate reads 0 and short-circuits: global-shortcut/autostart).
-                ::openharmony_ability::version::init(
-                    init_context.sdk_api_version.unwrap_or(0),
-                    init_context.distribution_api_version.unwrap_or(0),
-                );
                 ::log::info!(
                     "OHOS version: sdk_api={}, distribution_api={}",
                     ::openharmony_ability::version::sdk_api_version(),

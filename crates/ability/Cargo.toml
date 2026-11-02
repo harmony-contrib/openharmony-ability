@@ -40,7 +40,9 @@ ohos-arkui-binding = { workspace = true, features = ["napi"] }
 ohos-xcomponent-binding = { workspace = true }
 ohos-udmf-binding = { workspace = true, optional = true }
 ohos-ime-binding = { workspace = true }
+ohos-device-binding = { workspace = true }
 ohos-display-binding = { workspace = true }
+ohos-init-binding = { workspace = true }
 ohos-resource-manager-binding = { workspace = true }
 
 # cursor-grab and window-snapshot NDK FFI (re-exported from the `window` module);

@@ -11,9 +11,9 @@
 //! gate: below API 22 the system does not export the symbols, and calling
 //! them would abort at PLT resolution instead of returning an error — the
 //! gate is what keeps `compatibleSdkVersion` 12 builds degrading gracefully
-//! (`NotSupported`) on older devices. `version::init()` runs during ability
-//! initialization, before any bridge command — hence before any cursor-grab
-//! call — can arrive, so the gate is authoritative on the real call path.
+//! (`NotSupported`) on older devices. `version::sdk_api_version()` queries
+//! `OH_GetSdkApiVersion` synchronously via NDK, so the gate is authoritative
+//! on any thread without waiting for ArkTS initialization.
 //!
 //! Ported from upstream PR#45 (50d3f00). Unlike upstream, this port takes the
 //! REAL OHOS window id directly. Upstream resolved the tao window id → real id

@@ -120,6 +120,7 @@ pub use napi_ohos;
 pub use napi_ohos::Either;
 pub use ohos_arkui_binding as arkui;
 pub use ohos_arkui_binding;
+pub use ohos_device_binding as device;
 pub use ohos_display_binding as display;
 pub use ohos_ime_binding as ime;
 #[cfg(feature = "window")]

@@ -383,10 +383,8 @@ export class NativeAbility extends UIAbility {
     return AbilityStateCodec.encode(stateMap);
   }
 
-  // Delegates to ProcessInitializer so the sdkApiVersion/distributionOSApiVersion fields
-  // survive: the #[ability] derive feeds them into version::init and every API-level
-  // gate on the Rust side. The base main-line context (basePath/prefPath/locales/
-  // resourceManager) is built there too, so there is exactly one construction site.
+  // Delegates to ProcessInitializer so the base main-line context (basePath/prefPath/
+  // locales/resourceManager/configuration) has a single construction site.
   protected createInitContext(moduleName: string): AbilityInitContext {
     return ProcessInitializer.createInitContext(
       this.context as common.UIAbilityContext,

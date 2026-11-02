@@ -131,8 +131,6 @@ export interface AbilityInitContext {
   preferredLocales?: string;
   moduleName?: string;
   resourceManager?: resourceManager.ResourceManager;
-  sdkApiVersion?: number;
-  distributionOSApiVersion?: number;
   configuration?: NormalizedConfiguration;
 }
 
