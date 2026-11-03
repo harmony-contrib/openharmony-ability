@@ -580,7 +580,7 @@ export class WindowPlugin extends AsyncPluginBase {
           ? "#00000000"
           : this.colorString(request.backgroundColor ?? 0xffffffff);
         created.setWindowBackgroundColor(backgroundColor);
-        // Float sub-windows also have a window container layer. Without making
+        // Sub-windows also have a window container layer. Without making
         // it transparent, an opaque container sits between the window background
         // and ArkUI content — blocking backgroundBlurStyle from sampling through
         // the transparent window (vibrancy/frosted glass effect invisible).
@@ -627,14 +627,15 @@ export class WindowPlugin extends AsyncPluginBase {
       this.requireWindow(request.windowId, context);
       // Delegate to WindowManager.setDecorations: dual-path by window kind —
       // UIAbility main windows call setWindowDecorVisible (system title bar),
-      // Float sub-windows write LocalStorage('decorations') so FloatPage's
-      // @LocalStorageProp reactively shows/hides its self-drawn title bar.
+      // SubWindow-kind sub-windows write LocalStorage('decorations') so
+      // SubWindowPage's @LocalStorageProp reactively shows/hides its
+      // self-drawn title bar.
       // The inline win.setWindowDecorVisible call below was the pluginize-era
       // migration of the legacy NAPI path and only implemented the UIAbility
-      // half: Float sub-windows are created with decorEnabled:false (system
+      // half: sub-windows are created with decorEnabled:false (system
       // decoration permanently off), so the direct call was a silent no-op and
-      // the FloatPage title bar never reacted to setDecorations().
-      // setDecorations returns whether the window kind was handled (Float
+      // the SubWindowPage title bar never reacted to setDecorations().
+      // setDecorations returns whether the window kind was handled (SubWindow
       // LocalStorage write / UIAbility setWindowDecorVisible); false means the
       // window is unknown or the system call threw — surface it to the Rust
       // caller instead of acking success (the pre-pluginize handler threw on
@@ -654,7 +655,14 @@ export class WindowPlugin extends AsyncPluginBase {
       // setWindowLayoutFullScreen calls below were the pluginize-era migration
       // of the legacy NAPI path and only implemented the mobile path — a silent
       // visual no-op on desktop (ack OK, no window change).
-      WindowManager.getInstance().setFullscreen(request.windowId, request.on);
+      // #219: the full multi-step chain is now awaited (serializeOpTracked) --
+      // a failed maximize/recover/system-bar step rejects the invoke instead of
+      // acking success.
+      try {
+        await WindowManager.getInstance().setFullscreen(request.windowId, request.on);
+      } catch (error) {
+        throw new Error(`set-fullscreen failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -693,7 +701,7 @@ export class WindowPlugin extends AsyncPluginBase {
         // no-effect for the main window. Use window.shiftAppWindowFocus
         // (API 11+) — intra-app focus transfer between main/sub windows.
         // Source window: the one the user last interacted with (typically the
-        // Float sub-window holding focus); falls back to the main window
+        // sub-window holding focus); falls back to the main window
         // itself when untracked.
         try {
           const manager = WindowManager.getInstance();
@@ -834,18 +842,25 @@ export class WindowPlugin extends AsyncPluginBase {
           // Main window (tao windowId 0) with an unreadable/degenerate
           // drawableRect (content not loaded yet, abnormal state) — no precise
           // value: explicit failure, never resize to a guessed size.
-          // NOTE: the Float-subwindow branch below is keyed on windowId, not
-          // WindowProperties.type — this app's Float sub-windows are created
-          // via createSubWindow(WithOptions), which the framework reports as
-          // an APP SUB window (not TYPE_FLOAT), so a type check would never
-          // match (issue #97 review finding).
+          // NOTE: the non-main window branch below is keyed on windowId, not
+          // WindowProperties.type — windowId is the only discriminator for
+          // the two families that branch covers: this app's sub-windows are
+          // created via createSubWindow(WithOptions), which the framework
+          // reports as an APP SUB window (not TYPE_FLOAT), so a type check
+          // would never match them, and spawned UIAbility instances are not
+          // sub-windows at all, so a type check would not discriminate them
+          // either (issue #97 review finding).
           throw new Error(
             `no precise decor available (outer=${outer.width}x${outer.height}, drawable=${drawable.width}x${drawable.height} — content not loaded / window state abnormal)`,
           );
         }
-        // else: Float sub-window (tao windowId > 0) with degenerate drawableRect
-        // — sub-windows are created with decorEnabled:false, so chrome 0 is
-        // exact BY CONSTRUCTION (not an estimate): outer = inner directly.
+        // else: non-main window (tao windowId > 0 — sub-window or spawned
+        // UIAbility instance) with degenerate drawableRect — sub-windows are
+        // created with decorEnabled:false, so chrome 0 is exact BY
+        // CONSTRUCTION (not an estimate): outer = inner directly. Spawned
+        // UIAbility instances carry OS-managed chrome, so chrome-0 here is a
+        // silent off-by-chrome approximation for them (the main window's
+        // parallel branch throws instead).
         // Positive evidence for issue #97 verification: the exact chrome used.
         hilog.info(
           DOMAIN,
@@ -912,15 +927,28 @@ export class WindowPlugin extends AsyncPluginBase {
     if (action === "set-topmost") {
       // Delegates to WindowManager.setWindowTopmost (API14 guard + WINDOW_TOPMOST
       // permission handling live there, ported from upstream PR#45).
+      // #219: the platform promise is awaited -- a failed setWindowTopmost
+      // (801 non-freeform / 1300002 abnormal state / unknown window) rejects
+      // the invoke (Rust Err -> tao warn) instead of acking success.
       const request = parseTopmostRequest(payload);
-      WindowManager.getInstance().setWindowTopmost(request.windowId, request.topmost);
+      try {
+        await WindowManager.getInstance().setWindowTopmost(request.windowId, request.topmost);
+      } catch (error) {
+        throw new Error(`set-topmost failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-title") {
-      // Delegates to WindowManager.setWindowTitle (API9+, main window + Float sub-windows).
+      // Delegates to WindowManager.setWindowTitle (API9+, main window + sub-windows).
+      // #219: the platform promise is awaited -- a failed setWindowTitle (or an
+      // unknown/destroyed window) rejects the invoke instead of acking success.
       const request = parseTitleRequest(payload);
-      WindowManager.getInstance().setWindowTitle(request.windowId, request.title);
+      try {
+        await WindowManager.getInstance().setWindowTitle(request.windowId, request.title);
+      } catch (error) {
+        throw new Error(`set-title failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -957,11 +985,15 @@ export class WindowPlugin extends AsyncPluginBase {
             );
           }
         } else if (request.windowId > 0) {
-          // Float sub-window (tao windowId > 0) with an unreadable/degenerate
-          // drawableRect — sub-windows are created with decorEnabled:false,
-          // so chrome 0 is exact BY CONSTRUCTION (same reasoning as the
-          // resize-inner branch above; keyed on windowId, not
-          // WindowProperties.type, per the issue #97 review finding).
+          // Non-main window (tao windowId > 0 — sub-window or spawned
+          // UIAbility instance) with an unreadable/degenerate drawableRect —
+          // sub-windows are created with decorEnabled:false, so chrome 0 is
+          // exact BY CONSTRUCTION (same reasoning as the resize-inner branch
+          // above; keyed on windowId, not WindowProperties.type, per the
+          // issue #97 review finding). (a spawned UIAbility instance's chrome
+          // is OS-managed and nonzero, so its chrome-0 use is a silent
+          // approximation; the main window's parallel arm below degrades with
+          // a WARN — this arm is silent)
         } else {
           // Main window with an unreadable drawableRect (content not loaded /
           // abnormal state — e.g. the builder-time limits dispatch races
@@ -1155,11 +1187,25 @@ export class WindowPlugin extends AsyncPluginBase {
     if (action === "set-resize-by-drag") {
       // The real "resizable" switch (issue Eulogizethesun/tauri#104), distinct
       // from the decoration-flag bit that only toggles title-bar button
-      // visibility. Routed by window kind:
-      // - Main (UIAbility) window: setResizeByDragEnabled (API 14+) — only
+      // visibility. Routed by windowId, not by window kind (T28-5: id 0 is
+      // the main window). A non-zero id covers TWO families, and both take
+      // the enableDrag arm below: true sub-windows (WindowKind.SubWindow)
+      // and spawned UIAbility instances, which register under their non-zero
+      // tauri_window_id as WindowKind.UIAbility (WindowManager
+      // registerUIAbilityStage / windowKinds; NativeAbility.onCreate reads
+      // the id from want.parameters). For spawned instances the API20+ guard
+      // below rejects the call on API 14-19; on API20+ devices enableDrag is
+      // invoked on them, the same arm as sub-windows (routing disclosed in
+      // the tao 920fc181 commit body).
+      // Capability face (each arm guards the API level and throws an explicit
+      // Error before the platform call, so nothing is silently skipped):
+      // - Main window (id 0): setResizeByDragEnabled (API 14+) - only
       //   effective in free-window state on PC/2in1 (silently ignored
       //   otherwise, no error per official docs).
-      // - Float sub-window: enableDrag (API 20+, same as set-draggable).
+      // - Non-zero id (sub-window or spawned UIAbility instance): enableDrag
+      //   (API 20+, same capability as set-draggable). On API 14-19 the call
+      //   is rejected by the explicit API20+ guard below, before enableDrag
+      //   is reached.
       const request = parseDraggableRequest(payload);
       const win = WindowManager.getInstance().getWindow(request.windowId);
       if (!win) {
@@ -1182,13 +1228,13 @@ export class WindowPlugin extends AsyncPluginBase {
         } else {
           if (deviceInfo.sdkApiVersion < 20) {
             throw new Error(
-              `enableDrag requires API20+ for sub-windows, current ${deviceInfo.sdkApiVersion}`,
+              `enableDrag requires API20+ for non-main windows (sub-window or spawned UIAbility instance), current ${deviceInfo.sdkApiVersion}`,
             );
           }
           hilog.info(
             DOMAIN,
             TAG,
-            "set-resize-by-drag: sub-window enableDrag=%{public}s",
+            "set-resize-by-drag: non-main window enableDrag=%{public}s",
             String(request.enable),
           );
           await win.enableDrag(request.enable);
@@ -1213,12 +1259,16 @@ export class WindowPlugin extends AsyncPluginBase {
 
     if (action === "set-cursor-icon") {
       // Delegates to WindowManager.setPointerStyle, which resolves the real OHOS
-      // window id internally (pointer.setPointerStyleSync). Fire-and-forget on
-      // the ArkTS side: per-window failures are logged there, the ack only
-      // confirms the request was dispatched (tao's set_cursor_icon is a void
-      // setter).
+      // window id internally (pointer.setPointerStyleSync). #219: failures
+      // propagate from the setPointerStyle chain (unknown window / sync throw)
+      // and reject the invoke -- the ack only lands when the style actually
+      // applied.
       const request = parseCursorIconRequest(payload);
-      WindowManager.getInstance().setPointerStyle(request.windowId, request.style);
+      try {
+        WindowManager.getInstance().setPointerStyle(request.windowId, request.style);
+      } catch (error) {
+        throw new Error(`set-cursor-icon failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -1226,19 +1276,30 @@ export class WindowPlugin extends AsyncPluginBase {
       // Delegates to WindowManager.setPointerVisible (pointer.setPointerVisible).
       // GLOBAL visibility — OHOS has no per-window variant, so this request
       // carries no windowId (multi-window caveat documented as 遗留问题六).
-      // Fire-and-forget: failures are logged in WindowManager.
+      // #219: a failed visibility flip rejects the invoke instead of acking
+      // success.
       const request = parseCursorVisibleRequest(payload);
-      WindowManager.getInstance().setPointerVisible(request.visible);
+      try {
+        WindowManager.getInstance().setPointerVisible(request.visible);
+      } catch (error) {
+        throw new Error(`set-cursor-visible failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "set-decoration-flags") {
       // Applies the decoration flag bit-field (closable/maximizable/minimizable/
-      // resizable) to a Float sub-window's LocalStorage. The UIAbility main
-      // window is a no-op (its decorations are system-managed) — WindowManager
-      // logs and returns, still acknowledged.
+      // resizable) to a sub-window's LocalStorage. The UIAbility main window
+      // throws per #238 (platform cannot honor per-button flags; the bridge arm
+      // rejects the invoke) - sub-windows honor the flags via LocalStorage.
+      // #219: an unknown/destroyed window throws out of WindowManager and
+      // rejects the invoke.
       const request = parseDecorationFlagsRequest(payload);
-      WindowManager.getInstance().setDecorationFlags(request.windowId, request.flags);
+      try {
+        WindowManager.getInstance().setDecorationFlags(request.windowId, request.flags);
+      } catch (error) {
+        throw new Error(`set-decoration-flags failed: ${String(error)}`);
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
@@ -1253,7 +1314,7 @@ export class WindowPlugin extends AsyncPluginBase {
     const request = parseWindowIdRequest(payload);
 
     // destroy-window is idempotent: a window closed via the notify_window_close
-    // path (FloatPage ✕ button: removeWindow + destroyWindow; or system X:
+    // path (SubWindowPage close button: removeWindow + destroyWindow; or system X:
     // aboutToDisappear) is already destroyed by the time the Rust drain's
     // on_window_close spawns its safety destroy_window bridge call. requireWindow
     // would throw "Unknown OS sub-window" for those — instead soft-lookup and
@@ -1306,8 +1367,11 @@ export class WindowPlugin extends AsyncPluginBase {
         // A minimized UIAbility main window cannot be brought back by
         // showWindow() — only restore() can (upstream PR#45). Delegate to
         // WindowManager.showWindowMethod, which picks restore() for a minimized
-        // main window and showWindow() for sub-windows.
-        WindowManager.getInstance().showWindowMethod(request.windowId);
+        // main window and showWindow() for sub-windows. #219: the promise is
+        // awaited -- a failed restore/show (or an unknown window, thrown by
+        // showWindowMethod itself) rejects into the ack chain instead of a
+        // fake success ack.
+        await WindowManager.getInstance().showWindowMethod(request.windowId);
       }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     } catch (error) {
@@ -1336,11 +1400,11 @@ export class WindowPlugin extends AsyncPluginBase {
 
   private requireWindow(windowId: number, context: BridgeCallContext): window.Window {
     // Plugin-created sub-windows live in the `windows` Map (populated by create-os-window).
-    // The main UIAbility window (logical id 0) and Float sub-windows created via the legacy
+    // The main UIAbility window (logical id 0) and sub-windows created via the legacy
     // core `create_os_window` path are NOT in this Map — they live in the process-wide
     // WindowManager registry. p1-ohos-window-ops migrated window *operations* to this plugin
     // but left window *creation* on the old path, so the two registries never synced.
-    // Resolve the gap by falling back to WindowManager (which knows about main + Float windows)
+    // Resolve the gap by falling back to WindowManager (which knows about main + sub windows)
     // when the plugin Map misses. For id=0 prefer context.getWindow() (the host component's own
     // window) — fastest, matches the get-avoid-area path and avoids assuming which host received
     // the call.

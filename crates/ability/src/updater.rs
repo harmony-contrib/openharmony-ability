@@ -62,11 +62,15 @@ impl_bridge_napi_type!(UpdaterCheckRequest, "ohos.updater.CheckRequest");
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct UpdaterCheckResponse {
+    /// `true` when AppGallery reports an applicable update.
     pub update_available: bool,
+    /// Version string currently installed on the device.
     pub current_version: String,
     /// `None` when the device API level is below 20 (`versionName` unavailable).
     pub version: Option<String>,
+    /// Update description body from AppGallery, when present.
     pub body: Option<String>,
+    /// Human-readable release date of the update, when present.
     pub date: Option<String>,
 }
 
@@ -89,14 +93,11 @@ impl BridgeNapiType for UpdaterCheckResponse {
         <Self as napi_ohos::bindgen_prelude::ToNapiValue>::into_unknown(self, env)
     }
 
-    fn from_bridge_value(
-        value: napi_ohos::bindgen_prelude::Unknown<'_>,
-    ) -> Result<Self> {
+    fn from_bridge_value(value: napi_ohos::bindgen_prelude::Unknown<'_>) -> Result<Self> {
         use napi_ohos::bindgen_prelude::{FromNapiValue, Object};
         let obj = Object::from_unknown(value)?;
-        let missing = |name: &'static str| {
-            Error::new(Status::InvalidArg, format!("Missing field `{name}`"))
-        };
+        let missing =
+            |name: &'static str| Error::new(Status::InvalidArg, format!("Missing field `{name}`"));
         let update_available: bool = obj
             .get("updateAvailable")?
             .ok_or_else(|| missing("updateAvailable"))?;
@@ -129,9 +130,11 @@ impl_bridge_napi_type!(
     "ohos.updater.DownloadAndInstallRequest"
 );
 
+/// `download-and-install` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct UpdaterDownloadAndInstallResponse {
+    /// `true` when the ArkTS side accepted the download-and-install request.
     pub accepted: bool,
 }
 
@@ -152,10 +155,13 @@ impl_bridge_napi_type!(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckResult {
+    /// Version string currently installed on the device.
     pub current_version: String,
     /// `None` when the device API level is below 20 (`versionName` unavailable).
     pub version: Option<String>,
+    /// Update description body from AppGallery, when present.
     pub body: Option<String>,
+    /// Human-readable release date of the update, when present.
     pub date: Option<String>,
 }
 

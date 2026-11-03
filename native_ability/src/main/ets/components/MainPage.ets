@@ -15,6 +15,7 @@ import {
 import { KeyCode } from "@kit.InputKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { DOMAIN, MAIN_WINDOW_ID } from "../helper/constants";
+import { feedCursorFromMouse } from "../helper/cursor_feed";
 import { synthesizeDomKeyEvent, isWebFocused } from "../helper/key_synthesis";
 import { WindowManager } from "../window/WindowManager";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
@@ -225,15 +226,15 @@ struct MainPage {
     // Track mouse cursor position for cursor_position() API.
     // NDK DispatchMouseEvent doesn't fire when cursor is over WebView,
     // so we use ArkTS onMouse which bubbles from all children.
+    // ohos-cursor-passthrough 3.2: the feed goes through the shared helper
+    // (single source of truth for the screen-global coordinate extraction
+    // and guards -- D2). The module reference passed here is this page's OWN
+    // `this.nativeModule` (declared :42, loaded :62) -- deliberately NOT an
+    // AppStorage read: AppStorage is a process-global single value a spawned
+    // instance would overwrite mid-attachment (admonition at :35-36).
     .onMouse((event: MouseEvent) => {
       if (event.action === MouseAction.Move || event.action === MouseAction.Press) {
-        try {
-          if (typeof this.nativeModule?.updateCursorPosition === "function") {
-            this.nativeModule.updateCursorPosition(event.x, event.y);
-          }
-        } catch (e) {
-          // Silently ignore — cursor tracking is best-effort
-        }
+        feedCursorFromMouse(this.nativeModule, event);
       }
     });
   }

@@ -11,6 +11,12 @@ const FETCH_COOKIES_RESPONSE_TYPE = "ohos.webview.CookieFetchResponse";
 
 interface FetchCookiesRequest {
   url: string;
+  /**
+   * #188: optional store selector -- the sync request is id-less, so the
+   * caller (wry) forwards its creation-time incognito flag. Absent -> the
+   * default non-incognito store (previous behavior, wire-compatible).
+   */
+  incognito?: boolean | null;
 }
 
 class FetchCookiesResponse {
@@ -59,7 +65,10 @@ export class WebviewCookiePlugin extends SyncPluginBase {
     if (action === "fetch-cookies") {
       const request = parseFetchCookiesRequest(payload);
       try {
-        const cookies = webview.WebCookieManager.fetchCookieSync(request.url);
+        // #188: second param selects the store -- absent/false = the default
+        // non-incognito store (local SDK @ohos.web.webview.d.ts:1642).
+        const cookies =
+          webview.WebCookieManager.fetchCookieSync(request.url, request.incognito === true);
         return {
           typeName: FETCH_COOKIES_RESPONSE_TYPE,
           value: new FetchCookiesResponse(cookies),

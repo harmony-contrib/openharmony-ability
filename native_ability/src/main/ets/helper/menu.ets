@@ -182,7 +182,9 @@ export class PredefinedActionExecutor {
 
   /**
    * Close the target window (macOS-like: window-level operation).
-   * - Sub-window (id > 0): notify Rust + destroyWindow via WindowManager
+   * - Non-main window (id > 0 — sub-window or spawned UIAbility instance):
+   *   notify Rust + WindowManager.closeWindow() — sub-windows are destroyed
+   *   via destroyWindow, spawned UIAbility instances terminateSelf
    * - Main window (id = 0): hideAbility() — cannot destroy main window (WindowStage becomes invalid)
    *
    * Target determination:
@@ -195,10 +197,12 @@ export class PredefinedActionExecutor {
       return;
     }
 
-    const isSubWindow = windowId > 0;
+    const isNonMainWindow = windowId > 0;
 
-    if (isSubWindow) {
-      // Sub-window: notify Rust + use WindowManager.closeWindow()
+    if (isNonMainWindow) {
+      // Non-main window: notify Rust + use WindowManager.closeWindow() —
+      // sub-windows are destroyed via destroyWindow, spawned UIAbility
+      // instances terminateSelf via their registered context
       try {
         const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
         if (nativeModule && typeof nativeModule.notifyWindowClose === 'function') {
@@ -206,7 +210,7 @@ export class PredefinedActionExecutor {
         }
         await WindowManager.getInstance().closeWindow(windowId);
       } catch (e) {
-        hilog.warn(DOMAIN, 'Menu', 'Close sub-window failed: %{public}s', String(e));
+        hilog.warn(DOMAIN, 'Menu', 'Close non-main window failed: %{public}s', String(e));
       }
     } else {
       // Main window: hideAbility (cannot destroyWindow as WindowStage becomes invalid)
@@ -339,7 +343,15 @@ export class PredefinedActionExecutor {
           // WindowManager.setFullscreen). The previous inline version only did
           // a bare immersive maximize on desktop — the system title bar / Dock
           // stayed visible, diverging from set_fullscreen().
-          WindowManager.getInstance().setFullscreen(resolvedWindowId, true);
+          WindowManager
+            .getInstance()
+            .setFullscreen(resolvedWindowId, true)
+            // #219: setFullscreen is tracked now -- this predefined-menu caller
+            // is fire-and-forget; keep the rejection handled (log) instead of
+            // an unhandled rejection.
+            .catch((err: ESObject) => {
+              hilog.warn(DOMAIN, 'Menu', "predefined fullscreen failed: %{public}s", String(err));
+            });
           break;
         }
         case 'recover': {
@@ -348,7 +360,14 @@ export class PredefinedActionExecutor {
           // bars; menubar restored via MW-5 callbacks). Harmless when the
           // window is not fullscreen — the desktop recover() also serves the
           // plain un-maximize case.
-          WindowManager.getInstance().setFullscreen(resolvedWindowId, false);
+          WindowManager
+            .getInstance()
+            .setFullscreen(resolvedWindowId, false)
+            // #219: tracked fullscreen -- fire-and-forget caller keeps the
+            // rejection handled (log).
+            .catch((err: ESObject) => {
+              hilog.warn(DOMAIN, 'Menu', "predefined recover failed: %{public}s", String(err));
+            });
           break;
         }
         case 'quit':

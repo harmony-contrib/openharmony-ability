@@ -17,6 +17,8 @@ use openharmony_ability::{
 /// Minimum API level for `ApplicationContext.restartApp()`.
 const MIN_RESTART_API_VERSION: i32 = 12;
 
+/// Rust facade marker for the built-in `ohos.app-control` plugin
+/// (main-thread-synchronous; requires the Ability context).
 pub struct AppControlBridgePlugin;
 
 impl BridgePlugin for AppControlBridgePlugin {
@@ -27,17 +29,21 @@ impl BridgePlugin for AppControlBridgePlugin {
         &[BridgeContextRequirement::Ability];
 }
 
+/// Request to terminate the application gracefully.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct TerminateRequest {
+    /// Advisory exit code (OHOS ability termination has no exit-code channel).
     pub code: i32,
 }
 
 impl_bridge_napi_type!(TerminateRequest, "ohos.app_control.TerminateRequest");
 
+/// Acknowledgement for `terminate`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct TerminateResponse {
+    /// `true` when the ArkTS side accepted the termination request.
     pub accepted: bool,
 }
 
@@ -56,9 +62,11 @@ pub struct RestartRequest {}
 
 impl_bridge_napi_type!(RestartRequest, "ohos.app_control.RestartRequest");
 
+/// Acknowledgement for `restart`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct RestartResponse {
+    /// `true` when the ArkTS side accepted the restart request.
     pub accepted: bool,
 }
 
@@ -73,9 +81,11 @@ pub struct HideAbilityRequest {}
 
 impl_bridge_napi_type!(HideAbilityRequest, "ohos.app_control.HideAbilityRequest");
 
+/// Acknowledgement for `hide-ability`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct HideAbilityResponse {
+    /// `true` when the ArkTS side accepted the hide request.
     pub accepted: bool,
 }
 
@@ -90,14 +100,17 @@ pub struct ShowAbilityRequest {}
 
 impl_bridge_napi_type!(ShowAbilityRequest, "ohos.app_control.ShowAbilityRequest");
 
+/// Acknowledgement for `show-ability`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ShowAbilityResponse {
+    /// `true` when the ArkTS side accepted the show request.
     pub accepted: bool,
 }
 
 impl_bridge_napi_type!(ShowAbilityResponse, "ohos.app_control.ShowAbilityResponse");
 
+/// Request to change the system color mode.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct SetColorModeRequest {
@@ -107,9 +120,11 @@ pub struct SetColorModeRequest {
 
 impl_bridge_napi_type!(SetColorModeRequest, "ohos.app_control.SetColorModeRequest");
 
+/// Acknowledgement for `set-color-mode`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct SetColorModeResponse {
+    /// `true` when the ArkTS side accepted the color mode change.
     pub accepted: bool,
 }
 
@@ -155,9 +170,13 @@ impl_bridge_napi_type!(
     "ohos.app_control.StartUiAbilityRequest"
 );
 
+/// Acknowledgement for `start-ui-ability`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct StartUiAbilityResponse {
+    /// `true` when the ArkTS handler validated the payload and queued
+    /// `startAbility` (the spawn result itself is only observable through
+    /// the D7 handshake registry).
     pub accepted: bool,
 }
 
@@ -260,7 +279,17 @@ pub trait AppControlExt {
     /// The system only honours the request while the app is in the foreground
     /// with focus.
     fn restart(&self, env: &Env) -> Result<()>;
+    /// Hides the application's UIAbility (moves it to the background).
+    ///
+    /// # Errors
+    /// Fails when the bridge rejects the request or the app has no active
+    /// bridge session.
     fn hide_ability(&self, env: &Env) -> Result<()>;
+    /// Restores a hidden UIAbility to the foreground.
+    ///
+    /// # Errors
+    /// Fails when the bridge rejects the request or the app has no active
+    /// bridge session.
     fn show_ability(&self, env: &Env) -> Result<()>;
 }
 
@@ -342,6 +371,13 @@ impl AppControlExt for OpenHarmonyApp {
 /// `setColorMode` call with `setTimeout(…, 0)` to avoid re-entrant
 /// `onConfigurationUpdate` deadlocks (see ohos-constraints 4.3).
 pub trait ColorModeExt {
+    /// Sets the system color mode (`0 = Dark`, `1 = Light`, `2 = NoSet`).
+    ///
+    /// Must be called from an exported N-API callback (synchronous bridge);
+    /// see the trait-level docs for the ArkTS-side deferral rationale.
+    ///
+    /// # Errors
+    /// Fails when the bridge rejects the color mode change.
     fn set_color_mode(&self, env: &Env, color_mode: i32) -> Result<()>;
 }
 
@@ -382,7 +418,7 @@ mod tests {
             <TerminateResponse as BridgeNapiType>::TYPE_NAME,
             "ohos.app_control.TerminateResponse"
         );
-        assert_eq!(TerminateRequest { code: -1 }.code, -1);
+        assert_eq!(TerminateRequest { code: -1 }.code, -1_i32);
         assert!(TerminateResponse { accepted: true }.accepted);
     }
 
@@ -409,7 +445,7 @@ mod tests {
             <SetColorModeResponse as BridgeNapiType>::TYPE_NAME,
             "ohos.app_control.SetColorModeResponse"
         );
-        assert_eq!(SetColorModeRequest { color_mode: 0 }.color_mode, 0);
+        assert_eq!(SetColorModeRequest { color_mode: 0 }.color_mode, 0_i32);
         assert!(SetColorModeResponse { accepted: true }.accepted);
     }
 
@@ -458,19 +494,19 @@ mod tests {
             label: "uiability-1".into(),
             url: String::new(),
             transparent: false,
-            width: Some(700),
-            height: Some(500),
-            left: Some(90),
-            top: Some(70),
+            width: Some(700_i32),
+            height: Some(500_i32),
+            left: Some(90_i32),
+            top: Some(70_i32),
         };
         assert_eq!(request.window_id, 1);
         assert_eq!(request.label, "uiability-1");
         assert!(request.url.is_empty());
         assert!(!request.transparent);
-        assert_eq!(request.width, Some(700));
-        assert_eq!(request.height, Some(500));
-        assert_eq!(request.left, Some(90));
-        assert_eq!(request.top, Some(70));
+        assert_eq!(request.width, Some(700_i32));
+        assert_eq!(request.height, Some(500_i32));
+        assert_eq!(request.left, Some(90_i32));
+        assert_eq!(request.top, Some(70_i32));
         let unset = StartUiAbilityRequest {
             window_id: 2,
             label: "uiability-2".into(),

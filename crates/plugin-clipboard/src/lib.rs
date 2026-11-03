@@ -11,6 +11,7 @@ use openharmony_ability::{
     BridgeNapiType, BridgePlugin, BridgeRuntime, OpenHarmonyApp,
 };
 
+/// Bridge plugin exposing the `ohos.clipboard` actions.
 pub struct ClipboardBridgePlugin;
 
 impl BridgePlugin for ClipboardBridgePlugin {
@@ -23,15 +24,18 @@ impl BridgePlugin for ClipboardBridgePlugin {
 
 // ── read-text ───────────────────────────────────────────────────────────────────
 
+/// `read-text` request payload (empty).
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct ClipboardReadTextRequest {}
 
 impl_bridge_napi_type!(ClipboardReadTextRequest, "ohos.clipboard.ReadTextRequest");
 
+/// `read-text` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardReadTextResponse {
+    /// Clipboard text content, or `None` when the clipboard holds no text.
     pub text: Option<String>,
 }
 
@@ -39,17 +43,21 @@ impl_bridge_napi_type!(ClipboardReadTextResponse, "ohos.clipboard.ReadTextRespon
 
 // ── write-text ──────────────────────────────────────────────────────────────────
 
+/// `write-text` request payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardWriteTextRequest {
+    /// Text to place on the clipboard (replaces all existing content).
     pub text: String,
 }
 
 impl_bridge_napi_type!(ClipboardWriteTextRequest, "ohos.clipboard.WriteTextRequest");
 
+/// `write-text` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardWriteTextResponse {
+    /// `true` when the ArkTS side accepted the write.
     pub accepted: bool,
 }
 
@@ -60,11 +68,15 @@ impl_bridge_napi_type!(
 
 // ── write-image ─────────────────────────────────────────────────────────────────
 
+/// `write-image` request payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardWriteImageRequest {
+    /// RGBA8 pixel data, row-major top-to-bottom (`width * height * 4` bytes).
     pub rgba: Vec<u8>,
+    /// Image width in pixels.
     pub width: u32,
+    /// Image height in pixels.
     pub height: u32,
 }
 
@@ -73,9 +85,11 @@ impl_bridge_napi_type!(
     "ohos.clipboard.WriteImageRequest"
 );
 
+/// `write-image` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardWriteImageResponse {
+    /// `true` when the ArkTS side accepted the write.
     pub accepted: bool,
 }
 
@@ -86,21 +100,25 @@ impl_bridge_napi_type!(
 
 // ── read-image ───────────────────────────────────────────────────────────────────
 
+/// `read-image` request payload (empty).
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct ClipboardReadImageRequest {}
 
 impl_bridge_napi_type!(ClipboardReadImageRequest, "ohos.clipboard.ReadImageRequest");
 
-/// The ArkTS side packs the clipboard PixelMap as a base64 PNG — a `Vec<u8>`
+/// The ArkTS side packs the clipboard PixelMap as a base64 PNG - a `Vec<u8>`
 /// napi object would cross the bridge as `Array<number>`, inflating a
 /// multi-hundred-KB PNG ~8x in memory (same contract as plugin-webview's
 /// capture response).
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardReadImageResponse {
+    /// Base64-encoded PNG of the clipboard image.
     pub png_base64: String,
+    /// Image width in pixels.
     pub width: u32,
+    /// Image height in pixels.
     pub height: u32,
 }
 
@@ -112,24 +130,31 @@ impl_bridge_napi_type!(
 /// A clipboard image decoded to RGBA8 (row-major, top to bottom).
 #[derive(Clone, Debug)]
 pub struct ClipboardImage {
+    /// RGBA8 pixel buffer (`width * height * 4` bytes).
     pub rgba: Vec<u8>,
+    /// Image width in pixels.
     pub width: u32,
+    /// Image height in pixels.
     pub height: u32,
 }
 
 // ── write-html ───────────────────────────────────────────────────────────────────
 
+/// `write-html` request payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardWriteHtmlRequest {
+    /// HTML markup to place on the clipboard.
     pub html: String,
 }
 
 impl_bridge_napi_type!(ClipboardWriteHtmlRequest, "ohos.clipboard.WriteHtmlRequest");
 
+/// `write-html` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardWriteHtmlResponse {
+    /// `true` when the ArkTS side accepted the write.
     pub accepted: bool,
 }
 
@@ -140,15 +165,18 @@ impl_bridge_napi_type!(
 
 // ── clear ────────────────────────────────────────────────────────────────────────
 
+/// `clear` request payload (empty).
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct ClipboardClearRequest {}
 
 impl_bridge_napi_type!(ClipboardClearRequest, "ohos.clipboard.ClearRequest");
 
+/// `clear` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ClipboardClearResponse {
+    /// `true` when the ArkTS side accepted the clear.
     pub accepted: bool,
 }
 
@@ -161,6 +189,10 @@ pub struct ClipboardClient {
 }
 
 impl ClipboardClient {
+    /// Creates a client bound to the app's bridge runtime.
+    ///
+    /// # Errors
+    /// Returns an error when the app has no bridge runtime installed yet.
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
@@ -233,7 +265,7 @@ impl ClipboardClient {
     ///
     /// Errors when the clipboard holds no image or the PNG round-trip fails.
     /// A permission-gated read (READ_PASTEBOARD denied) observes an empty
-    /// pasteboard and surfaces as the no-image error — same degradation as
+    /// pasteboard and surfaces as the no-image error - same degradation as
     /// `read_text` returning `None`.
     pub async fn read_image(&self) -> Result<ClipboardImage> {
         let response = self
@@ -276,7 +308,12 @@ impl ClipboardClient {
     }
 }
 
+/// Extension trait providing the `clipboard()` client on `OpenHarmonyApp`.
 pub trait ClipboardExt {
+    /// Returns a worker-safe [`ClipboardClient`] for this app.
+    ///
+    /// # Errors
+    /// Returns an error when the app has no bridge runtime installed yet.
     fn clipboard(&self) -> Result<ClipboardClient>;
 }
 
@@ -308,7 +345,7 @@ fn validate_image_dimensions(rgba: &[u8], width: u32, height: u32) -> Result<()>
 ///
 /// The output buffer is sized straight from the PNG header
 /// (`reader.output_buffer_size()`), so a lying IHDR can request an arbitrary
-/// allocation before any pixel data is validated — a ~45-byte CRC-valid
+/// allocation before any pixel data is validated - a ~45-byte CRC-valid
 /// file claiming 65535x65535 RGBA asks for a ~16 GiB zeroed buffer. Capping
 /// at 1<<26 px bounds that allocation to 256 MiB (RGBA8) while leaving
 /// headroom for every realistic clipboard image: the pasteboard itself is
@@ -323,7 +360,7 @@ const MAX_DECODE_PIXELS: u64 = 1 << 26;
 /// `width`/`height` come from the ArkTS PixelMap info and are cross-checked
 /// against the decoded PNG (the PNG is the source of truth for the payload;
 /// a mismatch means the packer produced different dimensions than it
-/// reported — treated as corruption).
+/// reported - treated as corruption).
 fn decode_png_base64(png_base64: &str, width: u32, height: u32) -> Result<ClipboardImage> {
     use base64::Engine as _;
 
@@ -339,7 +376,7 @@ fn decode_png_base64(png_base64: &str, width: u32, height: u32) -> Result<Clipbo
     let mut reader = decoder
         .read_info()
         .map_err(|e| reason(format!("PNG decode failed: {e}")))?;
-    // The IHDR is untrusted until the pixel data decodes — enforce the size
+    // The IHDR is untrusted until the pixel data decodes - enforce the size
     // cap before it drives the output-buffer allocation.
     let (header_w, header_h) = (reader.info().width, reader.info().height);
     let pixels = header_w as u64 * header_h as u64;
@@ -382,7 +419,7 @@ fn decode_png_base64(png_base64: &str, width: u32, height: u32) -> Result<Clipbo
             out
         }
         // Unreachable with normalize_to_color8 (EXPAND maps Indexed → Rgb in
-        // the output color type) — kept as a defensive arm.
+        // the output color type) - kept as a defensive arm.
         png::ColorType::Indexed => {
             return Err(reason(
                 "unexpected indexed output after normalize_to_color8".into(),
@@ -499,17 +536,17 @@ mod tests {
     }
 
     /// Minimal CRC-32 (IEEE 802.3, as the PNG spec requires) for the
-    /// hand-built PNG headers below — the png crate checks chunk CRCs during
+    /// hand-built PNG headers below - the png crate checks chunk CRCs during
     /// `read_info`, so the forged IHDR/IDAT must be self-consistent.
     fn crc32(bytes: &[u8]) -> u32 {
         let mut crc = !0u32;
         for &byte in bytes {
             crc ^= byte as u32;
-            for _ in 0..8 {
+            for _ in 0_i32..8_i32 {
                 crc = if crc & 1 != 0 {
-                    (crc >> 1) ^ 0xEDB8_8320
+                    (crc >> 1_i32) ^ 0xEDB8_8320
                 } else {
-                    crc >> 1
+                    crc >> 1_i32
                 };
             }
         }
@@ -527,8 +564,8 @@ mod tests {
     }
 
     /// Builds a base64 PNG whose IHDR claims `width`x`height` 8-bit RGBA but
-    /// carries no pixel data (empty IDAT). `read_info` succeeds on this — it
-    /// only needs to reach the first IDAT chunk — so the decode path runs
+    /// carries no pixel data (empty IDAT). `read_info` succeeds on this - it
+    /// only needs to reach the first IDAT chunk - so the decode path runs
     /// the pre-allocation pixel check against a lying header.
     fn lying_header_png_base64(width: u32, height: u32) -> String {
         use base64::Engine as _;
@@ -564,7 +601,7 @@ mod tests {
             .reason
             .contains("image too large"));
         // ...while a small lying header passes the cap and only fails later
-        // at decode (empty IDAT) — proving the check gates the allocation,
+        // at decode (empty IDAT) - proving the check gates the allocation,
         // not decoding itself.
         let small = lying_header_png_base64(2, 1);
         let err = decode_png_base64(&small, 2, 1).expect_err("empty IDAT fails decode");

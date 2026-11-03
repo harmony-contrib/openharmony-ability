@@ -104,6 +104,7 @@ pub struct WebviewCallbacksBuilder {
 }
 
 impl WebviewCallbacksBuilder {
+    /// Creates a callback builder scoped to the given module-local WebView id.
     pub fn new(webview_id: impl Into<String>) -> Self {
         Self {
             webview_id: webview_id.into(),
@@ -242,6 +243,10 @@ impl WebviewCallbacksBuilder {
         self
     }
 
+    /// Registers all staged callbacks for this WebView id with the bridge.
+    ///
+    /// # Errors
+    /// Fails when the id is empty or no callback was staged.
     pub fn build(self) -> Result<()> {
         if self.webview_id.trim().is_empty() {
             return Err(Error::from_reason("WebView callback id must not be empty"));
@@ -627,21 +632,23 @@ mod tests {
         assert!(!empty_opts.page_begin);
         assert!(!empty_opts.page_end);
 
-        let mut full = WebviewCallbacks::default();
-        full.navigation = Some(Arc::new(|_| true));
-        full.download_start = Some(Arc::new(|_| {
-            crate::WebviewDownloadStartResponse::allow(None)
-        }));
-        full.drag_enter = Some(Arc::new(|_| ()));
-        full.new_window = Some(Arc::new(|_| false));
-        full.page_begin = Some(Arc::new(|_| ()));
-        full.page_end = Some(Arc::new(|_| ()));
-        full.title_change = Some(Arc::new(|_| ()));
-        full.download_end = Some(Arc::new(|_| ()));
-        full.close_window = Some(Arc::new(|| ()));
-        full.https_intercept = Some(Arc::new(|_| {
-            crate::WebviewHttpsInterceptResponse::passthrough()
-        }));
+        let full = WebviewCallbacks {
+            navigation: Some(Arc::new(|_| true)),
+            download_start: Some(Arc::new(|_| {
+                crate::WebviewDownloadStartResponse::allow(None)
+            })),
+            drag_enter: Some(Arc::new(|_| ())),
+            new_window: Some(Arc::new(|_| false)),
+            page_begin: Some(Arc::new(|_| ())),
+            page_end: Some(Arc::new(|_| ())),
+            title_change: Some(Arc::new(|_| ())),
+            download_end: Some(Arc::new(|_| ())),
+            close_window: Some(Arc::new(|| ())),
+            https_intercept: Some(Arc::new(|_| {
+                crate::WebviewHttpsInterceptResponse::passthrough()
+            })),
+            ..Default::default()
+        };
         assert!(!full.is_empty());
         let opts = full.options();
         assert!(opts.navigation_intercept);
@@ -668,6 +675,9 @@ mod tests {
             id: "https-decision-test".to_owned(),
             native_tag: "native-old".to_owned(),
             url: "https://stale.example".to_owned(),
+            method: None,
+            header_names: None,
+            header_values: None,
         })
         .unwrap();
         assert!(!stale.handled);
@@ -677,6 +687,9 @@ mod tests {
             id: "https-decision-test".to_owned(),
             native_tag: "native-h1".to_owned(),
             url: "https://current.example".to_owned(),
+            method: None,
+            header_names: None,
+            header_values: None,
         })
         .unwrap();
         assert!(!no_callback.handled);
@@ -695,6 +708,8 @@ mod tests {
                 status: 200,
                 mime_type: "text/html".to_owned(),
                 body: b"<html>".to_vec(),
+                header_names: None,
+                header_values: None,
             })
             .build()
             .unwrap();
@@ -704,6 +719,9 @@ mod tests {
             id: "https-handle-test".to_owned(),
             native_tag: "native-h2".to_owned(),
             url: "https://handled.example".to_owned(),
+            method: None,
+            header_names: None,
+            header_values: None,
         })
         .unwrap();
         assert!(handled.handled);
@@ -711,6 +729,35 @@ mod tests {
         assert_eq!(handled.mime_type, "text/html");
 
         controller::on_removed("https-handle-test", "native-h2").unwrap();
+    }
+
+    #[test]
+    fn https_intercept_response_wire_shape_keeps_headerless_default() {
+        // #186 (fix-variant M1): the response wire gained optional parallel
+        // header arrays. A headerless response keeps the pre-M1 shape
+        // (None/None) and passthrough stays handled=false with empty payload.
+        let pt = crate::WebviewHttpsInterceptResponse::passthrough();
+        assert!(!pt.handled);
+        assert_eq!(pt.status, 0);
+        assert!(pt.body.is_empty());
+        assert!(pt.header_names.is_none() && pt.header_values.is_none());
+
+        let explicit = crate::WebviewHttpsInterceptResponse {
+            handled: true,
+            status: 200,
+            mime_type: "text/html".to_owned(),
+            body: Vec::new(),
+            header_names: Some(vec!["Access-Control-Allow-Origin".to_owned()]),
+            header_values: Some(vec!["*".to_owned()]),
+        };
+        assert_eq!(
+            explicit.header_names.as_deref(),
+            Some(&["Access-Control-Allow-Origin".to_owned()][..])
+        );
+        assert_eq!(
+            explicit.header_values.as_deref(),
+            Some(&["*".to_owned()][..])
+        );
     }
 
     #[test]

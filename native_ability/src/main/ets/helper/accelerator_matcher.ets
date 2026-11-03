@@ -1,4 +1,12 @@
+import { hilog } from "@kit.PerformanceAnalysisKit";
+
+import { DOMAIN } from "./constants";
 import { MenuItemData } from "./menu_types";
+
+// #231: these lookup traces fire on EVERY keystroke while a menu is open --
+// info level flooded the log band. Demoted to hilog.debug; message text is
+// preserved verbatim (accel-inject-diag.sh greps `Accelerator|combo=`).
+const TAG = "AcceleratorMatcher";
 
 const SPECIAL_KEY_MAP: Map<string, string> = new Map([
   ["Escape", "Esc"],
@@ -172,7 +180,10 @@ export class AcceleratorMatcher {
     if (CLIPBOARD_ACCELERATORS.has(combo)) {
       return false;
     }
-    console.info(
+    hilog.debug(
+      DOMAIN,
+      TAG,
+      "%{public}s",
       `[Accelerator] combo="${combo}", available=[${Array.from(this.accelerators.keys()).join(",")}]`,
     );
     const candidate = this.accelerators.get(combo);
@@ -189,7 +200,10 @@ export class AcceleratorMatcher {
     // key, so it falls through to the webview / DOM-synthesis path — same as
     // TranslateAccelerator returning 0 for a grayed item on Windows.
     if (candidate.enabled === false) {
-      console.info(
+      hilog.debug(
+        DOMAIN,
+        TAG,
+        "%{public}s",
         `[Accelerator] combo="${combo}" matches disabled item id=${candidate.id} — ignored`,
       );
       return false;
@@ -224,7 +238,7 @@ export class AcceleratorMatcher {
       } catch (e) {
         // Parameter rejection / API variance across builds: treat as
         // "cannot ask" — the tracked set above stays authoritative.
-        console.info(`[Accelerator] getModifierKeyState(${modifier}) rejected: ${e}`);
+        hilog.debug(DOMAIN, TAG, "%{public}s", `[Accelerator] getModifierKeyState(${modifier}) rejected: ${e}`);
       }
     }
     return false;

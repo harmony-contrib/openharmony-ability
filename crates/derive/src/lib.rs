@@ -1,3 +1,10 @@
+//! Proc-macro crate for OpenHarmony native ability modules.
+//!
+//! [`macro@ability`] turns a plain Rust function into the full N-API module
+//! entry: app registration, bridge session attachment, render/component
+//! wiring and ArkTS platform callbacks, following the contracts documented
+//! in the `openharmony_ability` crate.
+
 use proc_macro::TokenStream;
 
 use syn::ItemFn;

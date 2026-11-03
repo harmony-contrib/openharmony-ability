@@ -52,6 +52,7 @@ pub struct WebviewJavascriptProxyBuilder {
 }
 
 impl WebviewJavascriptProxyBuilder {
+    /// Creates a JavaScript proxy builder for `object_name` on the given WebView.
     pub fn new(webview_id: impl Into<String>, object_name: impl Into<String>) -> Self {
         Self {
             webview_id: webview_id.into(),

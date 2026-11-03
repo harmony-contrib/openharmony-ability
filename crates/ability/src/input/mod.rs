@@ -11,11 +11,17 @@ pub use mouse_event::*;
 pub use text_input::*;
 
 #[derive(Clone)]
+/// An input event delivered from the ArkTS/XComponent layer.
 pub enum InputEvent {
+    /// Physical key press/release (XComponent key event data).
     KeyEvent(KeyEventData),
+    /// Mouse press/release/move/hover (synthesized from the NDK mouse event).
     MouseEvent(MouseEventData),
+    /// Touch press/move/release on the XComponent surface.
     TouchEvent(TouchEventData),
+    /// Axis scroll event (wheel/touchpad).
     AxisEvent(AxisEventData),
+    /// IME composition/keyboard-status event.
     ImeEvent(ImeEvent),
 }
 
@@ -32,10 +38,15 @@ impl Debug for InputEvent {
 }
 
 #[derive(Clone)]
+/// An IME (input method) event forwarded from the OHOS input method framework.
 pub enum ImeEvent {
+    /// Text input notification (inserted/committed text payload).
     TextInputEvent(TextInputEventData),
+    /// Backspace pressed; carries the deletion length.
     BackspaceEvent(i32),
+    /// Keyboard show/hide status changed; carries the new `KeyboardStatus`.
     ImeStatusEvent(KeyboardStatus),
+    /// Enter key pressed; carries the enter key code.
     EnterEvent(i32),
 }
 

@@ -200,18 +200,25 @@ export interface Module {
   // optional: pre-pluginize legacy modules lack them, so callers keep their
   // typeof-probes before invoking. These used to be duck-typed via `as ESObject`.
   /** `is_desktop_device` — desktop form-factor probe (setupMenuPopup guard,
-   *  FloatPage `__openharmony_ability_is_desktop__`). */
+   *  SubWindowPage `__openharmony_ability_is_desktop__`). */
   isDesktopDevice?: () => boolean;
-  /** `notify_window_close` — Float close-button / FloatPage aboutToDisappear. */
+  /** `notify_window_close` -- sub-window close-button / SubWindowPage aboutToDisappear. */
   notifyWindowClose?: (windowId: number) => void;
   /** `notify_window_status` — NativeAbility windowStatusChange fan-in. */
   notifyWindowStatus?: (windowId: number, status: number) => void;
+  /** `notify_window_focus` -- SubWindowPage windowEvent ACTIVE/INACTIVE fan-in
+   *  (#180(1): sub-window focus transitions reach tao through the
+   *  PENDING_WINDOW_FOCUS queue; camelCase wire, typeof-probed like the other
+   *  optional exports so stale HARs degrade to a structured warn). */
+  notifyWindowFocus?: (windowId: number, focused: boolean) => void;
   /** `set_display_layout` — display.getAllDisplays() position overlay push
    *  (multi-monitor, issue Eulogizethesun/tauri#106). JSON `[[id, x, y], ...]`. */
   setDisplayLayout?: (layoutJson: string) => void;
   /** `read_continue_snapshot` — onContinue source-side snapshot read. */
   readContinueSnapshot?: () => string;
-  /** `update_cursor_position` — MainPage onMouse cursor tracking. */
+  /** `update_cursor_position` -- onMouse cursor tracking (MainPage AND
+   *  SubWindowPage, fed via helper/cursor_feed.ets -- ohos-cursor-passthrough D2;
+   *  the values are screen-global vp since the same change). */
   updateCursorPosition?: (x: number, y: number) => void;
   /** `notify_key_event` — MainPage onKeyPreIme Rust key forward (issue #109).
    *  action: 0 = Down, 1 = Up. */

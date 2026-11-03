@@ -17,8 +17,12 @@ import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { window as arkWindow, CursorController } from "@kit.ArkUI";
 import { display } from "@kit.ArkUI";
 import { WindowManager } from "../window/WindowManager";
+import { feedCursorFromMouse } from "../helper/cursor_feed";
 import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
 
+// Wire contract: this value and notify_float_window_registered predate the
+// #240 component-page rename and are intentionally unchanged - renaming
+// either breaks @Entry route registration and the bridge handshake.
 export const RouteName = "FloatWindow";
 
 interface Position {
@@ -28,7 +32,7 @@ interface Position {
 
 @Entry({ routeName: RouteName, storage: LocalStorage.getShared() })
 @Component
-struct FloatPage {
+struct SubWindowPage {
   // Receive windowId from WindowManager.createSubWindow
   @LocalStorageProp("windowId") windowId: number = 0;
   @LocalStorageProp("decorations") decorations: boolean = true;
@@ -49,6 +53,8 @@ struct FloatPage {
   @State dpiScale: number = 1;
   private cursorController: CursorController | null = null;
   private acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();
+  // Fix-variant m6: one-shot guard for the stale-HAR structured warn below.
+  private focusNotifyWarned: boolean = false;
 
   // Resize tracking
   private startWidth: number = 0;
@@ -61,7 +67,7 @@ struct FloatPage {
 
   aboutToDisappear(): void {
     // When the OHOS system close button destroys the sub-window,
-    // neither the FloatPage × onClick nor the webview onCloseWindow fires.
+    // neither the SubWindowPage x onClick nor the webview onCloseWindow fires.
     // aboutToDisappear is our last chance to notify Rust.
     if (this.closeNotified) {
       return;
@@ -73,7 +79,7 @@ struct FloatPage {
     }
     hilog.info(
       DOMAIN,
-      "FloatPage",
+      "SubWindowPage",
       "aboutToDisappear: system close detected for window %{public}d",
       this.windowId,
     );
@@ -84,7 +90,7 @@ struct FloatPage {
         nativeModule.notifyWindowClose(this.windowId);
         hilog.info(
           DOMAIN,
-          "FloatPage",
+          "SubWindowPage",
           "Window %{public}d close notified via NAPI (system close)",
           this.windowId,
         );
@@ -93,7 +99,7 @@ struct FloatPage {
     } catch (e) {
       hilog.error(
         DOMAIN,
-        "FloatPage",
+        "SubWindowPage",
         "aboutToDisappear cleanup failed for window %{public}d: %{public}s",
         this.windowId,
         JSON.stringify(e),
@@ -106,14 +112,14 @@ struct FloatPage {
   }
 
   aboutToAppear(): void {
-    hilog.info(DOMAIN, "FloatPage", "=== FloatPage aboutToAppear START ===");
-    hilog.info(DOMAIN, "FloatPage", "Received windowId: %{public}d", this.windowId);
+    hilog.info(DOMAIN, "SubWindowPage", "=== SubWindowPage aboutToAppear START ===");
+    hilog.info(DOMAIN, "SubWindowPage", "Received windowId: %{public}d", this.windowId);
 
     if (this.windowId <= 0) {
       hilog.error(
         DOMAIN,
-        "FloatPage",
-        "Invalid windowId: %{public}d. FloatPage requires windowId > 0.",
+        "SubWindowPage",
+        "Invalid windowId: %{public}d. SubWindowPage requires windowId > 0.",
         this.windowId,
       );
       return;
@@ -132,7 +138,7 @@ struct FloatPage {
             if (rect.height > 0) this.currentHeight = rect.height;
             hilog.info(
               DOMAIN,
-              "FloatPage",
+              "SubWindowPage",
               "Got windowClass: left=%{public}d, top=%{public}d, w=%{public}d, h=%{public}d",
               rect.left,
               rect.top,
@@ -142,13 +148,13 @@ struct FloatPage {
           } catch (e) {
             hilog.error(
               DOMAIN,
-              "FloatPage",
+              "SubWindowPage",
               "Failed to get window rect: %{public}s",
               JSON.stringify(e),
             );
           }
           // 回灌系统窗口状态到 tao 镜像位(问题五 5.3)。
-          // Float 子窗口的 maximize/minimize/fullscreen 系统状态变化经
+          // SubWindow 子窗口的 maximize/minimize/fullscreen 系统状态变化经
           // notifyWindowStatus NAPI 入队,runtime-wry drain 路由到对应 tao Window。
           // API 11+;不支持则静默降级。详见 doc/OHOS窗口遗留问题.md。
           try {
@@ -174,22 +180,83 @@ struct FloatPage {
           } catch (e) {
             hilog.warn(
               DOMAIN,
-              "FloatPage",
+              "SubWindowPage",
               "windowStatusChange registration failed: %{public}s",
+              String(e),
+            );
+          }
+          // #180(1): sub-window focus transitions reach tao through the
+          // PENDING_WINDOW_FOCUS queue (notifyWindowFocus -> event-loop drain
+          // with edge dedup + paired-blur synthesis). `windowFocusChange` is
+          // absent from the local SDK20 @ohos.window.d.ets; `windowEvent`
+          // @since 10 (revised 11) — WINDOW_ACTIVE=2 / WINDOW_INACTIVE=3 —
+          // is the equivalent surface. Everything is probed at runtime: a host
+          // without the API degrades to a structured warn, never a panic.
+          try {
+            if (typeof this.windowClass.on !== "function") {
+              hilog.warn(
+                DOMAIN,
+                "SubWindowPage",
+                "windowEvent skipped: win.on is not a function: id=%{public}d",
+                this.windowId,
+              );
+            } else if (
+              typeof arkWindow.WindowEventType === "undefined" ||
+              (arkWindow.WindowEventType as ESObject)?.WINDOW_ACTIVE === undefined ||
+              (arkWindow.WindowEventType as ESObject)?.WINDOW_INACTIVE === undefined
+            ) {
+              hilog.warn(
+                DOMAIN,
+                "SubWindowPage",
+                "windowEvent skipped: WindowEventType ACTIVE/INACTIVE not available on this host: id=%{public}d",
+                this.windowId,
+              );
+            } else {
+              this.windowClass.on("windowEvent", (event: arkWindow.WindowEventType) => {
+                const nativeModule: Module | undefined =
+                  AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+                if (nativeModule && typeof nativeModule.notifyWindowFocus === "function") {
+                  if (event === arkWindow.WindowEventType.WINDOW_ACTIVE) {
+                    nativeModule.notifyWindowFocus(this.windowId, true);
+                  } else if (event === arkWindow.WindowEventType.WINDOW_INACTIVE) {
+                    nativeModule.notifyWindowFocus(this.windowId, false);
+                  }
+                } else {
+                  // Fix-variant m6: a stale HAR (native module without
+                  // notifyWindowFocus) used to silently drop focus transitions.
+                  // One-time structured warn per SubWindowPage instance instead.
+                  if (!this.focusNotifyWarned) {
+                    this.focusNotifyWarned = true;
+                    hilog.warn(
+                      DOMAIN,
+                      "SubWindowPage",
+                      "windowEvent dropped: native module notifyWindowFocus unavailable (stale HAR?): id=%{public}d event=%{public}d",
+                      this.windowId,
+                      event as number,
+                    );
+                  }
+                }
+              });
+            }
+          } catch (e) {
+            hilog.warn(
+              DOMAIN,
+              "SubWindowPage",
+              "windowEvent registration failed: %{public}s",
               String(e),
             );
           }
         } else {
           hilog.error(
             DOMAIN,
-            "FloatPage",
+            "SubWindowPage",
             "findWindow returned null for name: %{public}s",
             winName,
           );
         }
       }
     } catch (e) {
-      hilog.error(DOMAIN, "FloatPage", "Failed to get windowClass: %{public}s", JSON.stringify(e));
+      hilog.error(DOMAIN, "SubWindowPage", "Failed to get windowClass: %{public}s", JSON.stringify(e));
     }
 
     try {
@@ -197,7 +264,7 @@ struct FloatPage {
     } catch (e) {
       hilog.warn(
         DOMAIN,
-        "FloatPage",
+        "SubWindowPage",
         "Failed to get CursorController: %{public}s",
         JSON.stringify(e),
       );
@@ -206,9 +273,9 @@ struct FloatPage {
     try {
       const defaultDisplay = display.getDefaultDisplaySync();
       this.dpiScale = defaultDisplay.densityPixels;
-      hilog.info(DOMAIN, "FloatPage", "Display densityPixels: %{public}f", this.dpiScale);
+      hilog.info(DOMAIN, "SubWindowPage", "Display densityPixels: %{public}f", this.dpiScale);
     } catch (e) {
-      hilog.warn(DOMAIN, "FloatPage", "Failed to get display scale: %{public}s", JSON.stringify(e));
+      hilog.warn(DOMAIN, "SubWindowPage", "Failed to get display scale: %{public}s", JSON.stringify(e));
     }
   }
 
@@ -262,7 +329,7 @@ struct FloatPage {
                   } catch (err) {
                     hilog.warn(
                       DOMAIN,
-                      "FloatPage",
+                      "SubWindowPage",
                       "minimize failed: %{public}s",
                       JSON.stringify(err),
                     );
@@ -289,7 +356,7 @@ struct FloatPage {
                       // recover() switches MAXIMIZE/FULL_SCREEN → FLOATING (API11+) — the
                       // documented inverse of maximize(). restore() is main-window-only
                       // (restores a minimized MAIN window on 2in1, API14+); on a maximized
-                      // Float sub-window it is the wrong API. Mirrors tao set_maximized(false)
+                      // sub-window it is the wrong API. Mirrors tao set_maximized(false)
                       // → recover_window (plugin-window bridge).
                       WindowManager.getInstance().recoverWindow(this.windowId);
                     } else {
@@ -301,7 +368,7 @@ struct FloatPage {
                   } catch (err) {
                     hilog.warn(
                       DOMAIN,
-                      "FloatPage",
+                      "SubWindowPage",
                       "maximize/restore failed: %{public}s",
                       JSON.stringify(err),
                     );
@@ -326,7 +393,7 @@ struct FloatPage {
                 .onClick(async () => {
                   hilog.info(
                     DOMAIN,
-                    "FloatPage",
+                    "SubWindowPage",
                     "Close button clicked for window %{public}d",
                     this.windowId,
                   );
@@ -338,7 +405,7 @@ struct FloatPage {
                   if (!WindowManager.getInstance().getDecorationFlag(this.windowId, "closable")) {
                     hilog.warn(
                       DOMAIN,
-                      "FloatPage",
+                      "SubWindowPage",
                       "Close blocked: closable flag not set (window %{public}d)",
                       this.windowId,
                     );
@@ -354,14 +421,14 @@ struct FloatPage {
                       nativeModule.notifyWindowClose(this.windowId);
                       hilog.info(
                         DOMAIN,
-                        "FloatPage",
+                        "SubWindowPage",
                         "Window %{public}d close notified via NAPI",
                         this.windowId,
                       );
                     } else {
                       hilog.warn(
                         DOMAIN,
-                        "FloatPage",
+                        "SubWindowPage",
                         "NAPI notifyWindowClose not available for window %{public}d",
                         this.windowId,
                       );
@@ -374,7 +441,7 @@ struct FloatPage {
                       await this.windowClass.destroyWindow();
                       hilog.info(
                         DOMAIN,
-                        "FloatPage",
+                        "SubWindowPage",
                         "Window %{public}d destroyed and cleaned up",
                         this.windowId,
                       );
@@ -382,7 +449,7 @@ struct FloatPage {
                   } catch (e) {
                     hilog.error(
                       DOMAIN,
-                      "FloatPage",
+                      "SubWindowPage",
                       "Failed to close window %{public}d: %{public}s",
                       this.windowId,
                       JSON.stringify(e),
@@ -401,7 +468,7 @@ struct FloatPage {
             // A PanGesture fallback is NOT attached alongside startMoving — a simultaneously
             // bound PanGesture consumes the Down event and blocks startMoving, so the two
             // cannot coexist; mutually-exclusive Row branching was deemed not worth the
-            // duplication given Float dragging targets API14+ desktop.
+            // duplication given sub-window dragging targets API14+ desktop.
             .onTouch((event: TouchEvent) => {
               if (event.type === TouchType.Down) {
                 // While maximized, startMoving() at touch-DOWN triggers WMS
@@ -422,13 +489,13 @@ struct FloatPage {
                   this.windowClass?.startMoving()?.catch((err: BusinessError) => {
                     hilog.warn(
                       DOMAIN,
-                      "FloatPage",
+                      "SubWindowPage",
                       "startMoving failed: %{public}s",
                       JSON.stringify(err),
                     );
                   });
                 } catch (err) {
-                  hilog.warn(DOMAIN, "FloatPage", "startMoving exception: %{public}s", String(err));
+                  hilog.warn(DOMAIN, "SubWindowPage", "startMoving exception: %{public}s", String(err));
                 }
               }
             });
@@ -472,7 +539,7 @@ struct FloatPage {
                 } catch (e) {
                   hilog.error(
                     DOMAIN,
-                    "FloatPage",
+                    "SubWindowPage",
                     "Right resize failed: w=%{public}d, h=%{public}d, err=%{public}s",
                     this.currentWidth,
                     this.currentHeight,
@@ -510,7 +577,7 @@ struct FloatPage {
                 } catch (e) {
                   hilog.error(
                     DOMAIN,
-                    "FloatPage",
+                    "SubWindowPage",
                     "Bottom resize failed: w=%{public}d, h=%{public}d, err=%{public}s",
                     this.currentWidth,
                     this.currentHeight,
@@ -552,7 +619,7 @@ struct FloatPage {
                 } catch (e) {
                   hilog.error(
                     DOMAIN,
-                    "FloatPage",
+                    "SubWindowPage",
                     "Corner resize failed: w=%{public}d, h=%{public}d, err=%{public}s",
                     this.currentWidth,
                     this.currentHeight,
@@ -623,11 +690,40 @@ struct FloatPage {
         } catch (e) {
           hilog.warn(
             DOMAIN,
-            "FloatPage",
+            "SubWindowPage",
             "onTouch: WindowManager not ready: %{public}s",
             String(e),
           );
         }
+      }
+    })
+    // ohos-cursor-passthrough 3.3 (root cause 1): feed the process cursor
+    // snapshot from sub-windows too. This root-Stack onMouse sits at
+    // the same layer as onKeyPreIme/onTouch above; ArkUI onMouse bubbles from
+    // the whole subtree (MenuBarComponent + DefaultXComponent/webview + drag
+    // bar + resize handles) -- the same mechanism MainPage relies on in
+    // production ("NDK DispatchMouseEvent doesn't fire over the WebView,
+    // ArkTS onMouse bubbling works", tao event_loop.rs CURSOR_POSITION note).
+    // Without this, a cursor over a sub-window left the snapshot at the
+    // last main-window coordinate and the consumer's hit-test never matched
+    // (ignore stayed true -> the toolbar was unclickable). R2 fallback bit:
+    // if the webview ever stops bubbling mouse moves, add onMouse to
+    // DefaultXComponent (same reserved-fallback shape as the onTouch note).
+    // Move/Press guard mirrors MainPage (Release is never fed -- release-
+    // instant coordinates are noise).
+    .onMouse((event: MouseEvent) => {
+      if (event.action === MouseAction.Move || event.action === MouseAction.Press) {
+        // Module reference taken the same way as this page's other NAPI
+        // calls (notifyWindowClose/notifyWindowStatus/notifyWindowFocus --
+        // SubWindowPage.ets:88/166/175/216/418 pattern): AppStorage is safe
+        // here because
+        // ProcessInitializer.ets:193-195 seeds NATIVE_MODULE_STORAGE_KEY
+        // during process init, before any page feed point can fire. The
+        // helper deliberately takes the reference as a parameter -- it never
+        // reads AppStorage itself (D2).
+        const nativeModule: Module | undefined =
+          AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+        feedCursorFromMouse(nativeModule, event);
       }
     });
   }

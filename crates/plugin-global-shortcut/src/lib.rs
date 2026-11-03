@@ -50,6 +50,7 @@ fn hotkey_api_version_error(op: &str) -> Error {
 
 // ── Bridge plugin declaration ─────────────────────────────────────────────────
 
+/// Rust facade marker for the `ohos.global-shortcut` bridge plugin (async mode).
 pub struct GlobalShortcutBridgePlugin;
 
 impl BridgePlugin for GlobalShortcutBridgePlugin {
@@ -96,7 +97,9 @@ fn shortcut_event_channel() -> &'static (
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Request to register one global shortcut (preKeys + key).
 pub struct ShortcutRegisterRequest {
+    /// Rust-side registration id echoed back in [`ShortcutTriggeredEvent`].
     pub id: u32,
     /// Modifier key names: `"Control"`, `"Shift"`, `"Alt"`, `"Super"`.
     /// At least 1 is required; at most 2 are supported (OHOS `inputConsumer.preKeys` limit).
@@ -119,7 +122,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Request to unregister one shortcut by id.
 pub struct ShortcutUnregisterRequest {
+    /// Registration id (as passed at register time) to remove.
     pub id: u32,
     /// Operation generation (see [`ShortcutRegisterRequest::generation`]):
     /// the per-id watermark on the ArkTS side is raised to this value, so
@@ -137,6 +142,7 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
+/// Request to sweep all registered shortcuts.
 pub struct ShortcutUnregisterAllRequest {
     /// Sweep generation (see [`ShortcutRegisterRequest::generation`]): the
     /// ArkTS side raises its global generation floor to this value, so any
@@ -155,7 +161,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Wire acknowledgement for register/unregister operations.
 pub struct ShortcutAcknowledgement {
+    /// `true` when the ArkTS side accepted the operation.
     pub accepted: bool,
 }
 
@@ -180,7 +188,9 @@ impl ShortcutAcknowledgement {
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Reverse event fired when a registered shortcut is triggered.
 pub struct ShortcutTriggeredEvent {
+    /// Registration id of the triggered shortcut.
     pub id: u32,
     /// `"Pressed"` or `"Released"`.
     pub state: String,
@@ -223,6 +233,10 @@ pub struct GlobalShortcutClient {
 }
 
 impl GlobalShortcutClient {
+    /// Builds a client bound to the app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
@@ -328,7 +342,12 @@ impl GlobalShortcutClient {
     }
 }
 
+/// Extension trait that adds [`GlobalShortcutClient`] access to the app handle.
 pub trait GlobalShortcutExt {
+    /// Returns the global shortcut client for this app.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     fn global_shortcut(&self) -> Result<GlobalShortcutClient>;
 }
 

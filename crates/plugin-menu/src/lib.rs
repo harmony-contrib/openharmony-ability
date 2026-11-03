@@ -29,53 +29,74 @@ use serde::{Deserialize, Serialize};
 
 #[napi(object)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Application "about" metadata shown by an About menu entry.
 pub struct AboutMetadataData {
+    /// Display name of the application.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Full release version string (e.g. `"1.2.3"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Short display version without leading `v` or trailing build info.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "shortVersion")]
     #[napi(js_name = "shortVersion")]
     pub short_version: Option<String>,
+    /// Author names in display order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authors: Option<Vec<String>>,
+    /// Free-form description shown in the about dialog.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comments: Option<String>,
+    /// Copyright notice line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copyright: Option<String>,
+    /// License identifier or name (e.g. `"MIT"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    /// Project website URL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub website: Option<String>,
 }
 
 #[napi(object)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// One entry of a menu tree, mirroring the legacy ArkTS JSON schema.
 pub struct MenuItemData {
+    /// Stable item identifier reported back in `menu-click` events.
     pub id: String,
+    /// Item kind: `item`, `checkbox`, `submenu` or `separator`.
     #[napi(js_name = "type")]
     #[serde(rename = "type")]
     pub item_type: String,
+    /// Human-readable label; `None` for separators.
     pub text: Option<String>,
+    /// Whether the item is clickable; `None` defaults to enabled.
     pub enabled: Option<bool>,
+    /// Keyboard accelerator label (e.g. `"Ctrl+O"`), display only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accelerator: Option<String>,
+    /// Predefined menu role (`copy`, `paste`, `quit`, ...).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "predefinedType")]
     pub predefined_type: Option<String>,
+    /// Checked state for `checkbox` items.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
+    /// Icon URL rendered before the label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Platform-native icon reference (`nativeIcon` on the wire).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "nativeIcon")]
     #[napi(js_name = "nativeIcon")]
     pub native_icon: Option<String>,
+    /// Child items when `item_type` is `submenu` (`submenuItems` on the wire).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[napi(js_name = "submenuItems")]
     #[serde(rename = "submenuItems")]
     pub submenu_items: Option<Vec<MenuItemData>>,
+    /// About-dialog metadata for predefined `about` roles (`aboutMetadata` on the wire).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "aboutMetadata")]
     #[napi(js_name = "aboutMetadata")]
@@ -107,6 +128,7 @@ static MENU_HAS_CONTENT: LazyLock<RwLock<HashMap<String, bool>>> =
 
 // ─── Bridge plugin declaration ────────────────────────────────────────────────
 
+/// Bridge plugin exposing the `ohos.menu` actions to the worker-safe client.
 pub struct MenuBridgePlugin;
 
 impl BridgePlugin for MenuBridgePlugin {
@@ -137,49 +159,63 @@ impl BridgePlugin for MenuBridgePlugin {
 
 // ─── Bridge request/response NAPI types ──────────────────────────────────────
 
+/// `set-menubar` request payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct MenuSetMenubarRequest {
     /// Serialized `Vec<MenuItemData>` JSON.
     pub json_data: String,
+    /// Target window id (empty string = the main window).
     pub window_id: String,
 }
 
 impl_bridge_napi_type!(MenuSetMenubarRequest, "ohos.menu.SetMenubarRequest");
 
+/// `popup` request payload for a context menu.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct MenuPopupRequest {
     /// Serialized `Vec<MenuItemData>` JSON.
     pub json_data: String,
+    /// Popup anchor X in physical pixels; `None` centers under the cursor.
     pub x: Option<f64>,
+    /// Popup anchor Y in physical pixels; `None` centers under the cursor.
     pub y: Option<f64>,
+    /// Target window id (empty string = the main window).
     pub window_id: String,
 }
 
 impl_bridge_napi_type!(MenuPopupRequest, "ohos.menu.PopupRequest");
 
+/// `set-menubar-visible` request payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct MenuSetVisibleRequest {
+    /// `true` shows the menubar, `false` hides it.
     pub visible: bool,
+    /// Target window id (empty string = the main window).
     pub window_id: String,
 }
 
 impl_bridge_napi_type!(MenuSetVisibleRequest, "ohos.menu.SetVisibleRequest");
 
+/// `execute-predefined` request payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct MenuPredefinedRequest {
+    /// Predefined action identifier (`copy`, `paste`, `quit`, ...).
     pub action: String,
+    /// Target window id; `None` applies to the focused window.
     pub window_id: Option<String>,
 }
 
 impl_bridge_napi_type!(MenuPredefinedRequest, "ohos.menu.PredefinedRequest");
 
+/// Generic acknowledgement returned by mutating menu actions.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct MenuAcknowledgement {
+    /// `true` when the ArkTS side accepted the operation.
     pub accepted: bool,
 }
 
@@ -199,10 +235,13 @@ impl MenuAcknowledgement {
 
 // ─── Inbound event NAPI type ─────────────────────────────────────────────────
 
+/// Inbound `menu-click` event decoded from the ArkTS main thread.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct MenuClickEvent {
+    /// `id` of the clicked [`MenuItemData`].
     pub menu_id: String,
+    /// Window that owned the menu; `None` for the main window.
     pub window_id: Option<String>,
 }
 
@@ -223,6 +262,10 @@ pub struct MenuClient {
 }
 
 impl MenuClient {
+    /// Creates a client bound to the app's bridge runtime.
+    ///
+    /// # Errors
+    /// Returns an error when the app has no bridge runtime installed yet.
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
@@ -314,6 +357,10 @@ impl MenuClient {
 
 /// Extension trait providing the `menu()` client on `OpenHarmonyApp`.
 pub trait MenuExt {
+    /// Returns a worker-safe [`MenuClient`] for this app.
+    ///
+    /// # Errors
+    /// Returns an error when the app has no bridge runtime installed yet.
     fn menu(&self) -> Result<MenuClient>;
 }
 

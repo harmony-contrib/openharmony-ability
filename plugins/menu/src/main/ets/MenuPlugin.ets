@@ -75,9 +75,9 @@ export class MenuPlugin extends AsyncPluginBase {
       }
       const cb = getMenuDataCallback(request.windowId);
       if (!cb) {
-        // No MenuBarComponent mounted for this window (e.g. a FloatPage
-        // sub-window) or the menubar has not attached yet. Rejecting lets the
-        // Rust MenuClient surface the failure instead of caching
+        // No MenuBarComponent mounted for this window (e.g. a sub-window
+        // hosting SubWindowPage) or the menubar has not attached yet. Rejecting
+        // lets the Rust MenuClient surface the failure instead of caching
         // MENU_HAS_CONTENT as success.
         throw new Error(`set-menubar: no menu callback registered for window '${request.windowId}'`);
       }

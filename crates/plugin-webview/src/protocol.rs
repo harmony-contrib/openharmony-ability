@@ -60,6 +60,11 @@ pub use ohos_web_binding::CustomProtocolOption as WebviewProtocolOptions;
 pub struct WebviewProtocol;
 
 impl WebviewProtocol {
+    /// Declares one custom scheme (and its flag bits) for engine-time registration.
+    ///
+    /// # Errors
+    /// Fails when the scheme name is invalid, already declared, or the engine has
+    /// already started.
     pub fn register(scheme: impl AsRef<str>, options: WebviewProtocolOptions) -> Result<()> {
         let scheme = scheme.as_ref();
         validate_scheme(scheme)?;
@@ -216,6 +221,7 @@ pub struct WebviewProtocolResponder {
 unsafe impl Send for WebviewProtocolResponder {}
 
 impl WebviewProtocolResponder {
+    /// Delivers the embedded response for the intercepted scheme request.
     pub fn respond<T: Into<Cow<'static, [u8]>>>(self, response: Response<T>) {
         let (parts, body) = response.into_parts();
         (self.responder)(Response::from_parts(parts, body.into()));

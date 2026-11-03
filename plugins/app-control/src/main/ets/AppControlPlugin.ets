@@ -270,7 +270,7 @@ export class AppControlPlugin extends SyncPluginBase {
       // Creation-time geometry (tao#26 review follow-up F5): forward the
       // builder's size/position through startAbility StartOptions
       // (windowWidth/windowHeight/windowLeft/windowTop, API 11+). Physical
-      // px, window rectangle (frame included) — same contract as the Float
+      // px, window rectangle (frame included) -- same contract as the sub-window
       // path's WindowCreateParams. Absent axes stay unset (OS default), so
       // a start without builder geometry keeps today's sizing exactly.
       const options: StartOptions = {};

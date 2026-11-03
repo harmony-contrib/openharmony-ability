@@ -25,8 +25,6 @@ static NEXT_WINDOW_ID: AtomicI64 = AtomicI64::new(1);
 pub struct WindowCreateParams {
     /// Window label/name, used as the ArkTS sub-window name.
     pub name: String,
-    /// OHOS window type enum value (0=App, 8=Float, etc.)
-    pub window_type: i32,
     /// Initial window width in px. Default: 800.
     pub width: i32,
     /// Initial window height in px. Default: 600.
@@ -36,7 +34,7 @@ pub struct WindowCreateParams {
     /// Initial window Y position in px. Default: 100.
     pub y: i32,
     /// Whether to show window decorations (title bar, drag area, close button).
-    /// Phase 2: controls FloatPage conditional rendering via LocalStorage.
+    /// Phase 2: controls SubWindowPage conditional rendering via LocalStorage.
     pub decorations: bool,
     /// Whether the window background should be fully transparent.
     /// Phase 3: when true, overrides background_color with 0x00000000.
@@ -50,7 +48,6 @@ impl Default for WindowCreateParams {
     fn default() -> Self {
         Self {
             name: String::new(),
-            window_type: 0,
             width: 800,
             height: 600,
             x: 100,
@@ -157,13 +154,13 @@ pub fn create_os_window(params: WindowCreateParams) -> napi_ohos::Result<i64> {
 // immediately without waiting for ArkTS to finish (the sub-window is guaranteed to be
 // ready before the webview bridge create arrives, since both are serialized on the
 // ArkTS UI thread event loop and createSubWindow is dispatched first).
-type CreateSubWindowTsfn = ThreadsafeFunction<
-    (String, i64, i32, i32, i32, i32, bool, bool, Option<u32>),
-    (),
-    FnArgs<(Object<'static>,)>,
-    Status,
-    false,
->;
+/// Flattened payload tuple carried by the `createSubWindow` TSFN (mirrors the
+/// flattened NAPI parameters of `createSubWindow(config)`); destructured by
+/// `build_create_sub_window_args`.
+type CreateSubWindowPayload = (String, i64, i32, i32, i32, i32, bool, bool, Option<u32>);
+
+type CreateSubWindowTsfn =
+    ThreadsafeFunction<CreateSubWindowPayload, (), FnArgs<(Object<'static>,)>, Status, false>;
 static TSFN_CREATE_SUB_WINDOW: OnceLock<CreateSubWindowTsfn> = OnceLock::new();
 
 /// Register the ArkTS `createSubWindow` wrapper as a ThreadsafeFunction.
@@ -184,23 +181,11 @@ pub fn register_create_sub_window_tsfn(
         return Ok(());
     }
     let tsfn = create_fn
-        .build_threadsafe_function::<(String, i64, i32, i32, i32, i32, bool, bool, Option<u32>)>()
+        .build_threadsafe_function::<CreateSubWindowPayload>()
         .callee_handled::<false>()
-        .build_callback(
-            move |ctx: ThreadsafeCallContext<(
-                String,
-                i64,
-                i32,
-                i32,
-                i32,
-                i32,
-                bool,
-                bool,
-                Option<u32>,
-            )>| {
-                build_create_sub_window_args(ctx.env, ctx.value).map(|args| FnArgs { data: args })
-            },
-        )?;
+        .build_callback(move |ctx: ThreadsafeCallContext<CreateSubWindowPayload>| {
+            build_create_sub_window_args(ctx.env, ctx.value).map(|args| FnArgs { data: args })
+        })?;
     let _ = TSFN_CREATE_SUB_WINDOW.set(tsfn);
     crate::info!("Registered create_sub_window TSFN");
     Ok(())
@@ -210,7 +195,7 @@ pub fn register_create_sub_window_tsfn(
 /// Builds a WindowConfig Object from the flattened parameter tuple.
 fn build_create_sub_window_args(
     env: Env,
-    value: (String, i64, i32, i32, i32, i32, bool, bool, Option<u32>),
+    value: CreateSubWindowPayload,
 ) -> Result<(Object<'static>,)> {
     let (name, window_id, width, height, x, y, decorations, transparent, bg_color) = value;
     let mut config = Object::new(&env)?;
@@ -300,7 +285,13 @@ fn pending_ui_abilities() -> std::sync::MutexGuard<'static, Option<HashMap<i64, 
 pub fn register_pending_ui_ability(id: i64) {
     pending_ui_abilities()
         .get_or_insert_with(HashMap::new)
-        .insert(id, PendingAbility { stage_registered: false, waker: None });
+        .insert(
+            id,
+            PendingAbility {
+                stage_registered: false,
+                waker: None,
+            },
+        );
     crate::info!(
         "register_pending_ui_ability: id={} (startAbility dispatched, awaiting stage registration)",
         id
@@ -486,8 +477,8 @@ pub fn notify_ui_ability_start_failed(window_id: i64) {
 
 static UI_ABILITY_SPAWN_REJECTIONS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
-fn ui_ability_spawn_rejections(
-) -> std::sync::MutexGuard<'static, Option<HashMap<String, String>>> {
+fn ui_ability_spawn_rejections() -> std::sync::MutexGuard<'static, Option<HashMap<String, String>>>
+{
     // Poisoned lock: same policy as the pending registry — keep serving, the
     // trace is diagnostic only.
     UI_ABILITY_SPAWN_REJECTIONS
@@ -522,10 +513,7 @@ pub fn take_ui_ability_spawn_rejection(label: &str) -> Option<String> {
         .as_mut()
         .and_then(|m| m.remove(label));
     if reason.is_some() {
-        crate::info!(
-            "take_ui_ability_spawn_rejection: label={} consumed",
-            label
-        );
+        crate::info!("take_ui_ability_spawn_rejection: label={} consumed", label);
     }
     reason
 }
@@ -571,7 +559,7 @@ struct PendingFloat {
 static PENDING_FLOAT_WINDOWS: Mutex<Option<HashMap<i64, PendingFloat>>> = Mutex::new(None);
 
 /// Set by the ArkTS ProcessInitializer via `enable_float_pending_tracking`
-/// before any Float window can be created (capability handshake, review V1).
+/// before any sub-window can be created (capability handshake, review V1).
 static FLOAT_PENDING_TRACKING: AtomicBool = AtomicBool::new(false);
 
 fn pending_float_windows() -> std::sync::MutexGuard<'static, Option<HashMap<i64, PendingFloat>>> {
@@ -580,7 +568,7 @@ fn pending_float_windows() -> std::sync::MutexGuard<'static, Option<HashMap<i64,
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Opens the pending entry for a Float window id pre-allocated inside
+/// Opens the pending entry for a sub-window id pre-allocated inside
 /// `create_os_window`. Only called when the capability handshake is on.
 pub fn register_pending_float(id: i64) {
     pending_float_windows()
@@ -592,7 +580,7 @@ pub fn register_pending_float(id: i64) {
     );
 }
 
-/// Whether the ArkTS creation chain for Float window `id` has settled.
+/// Whether the ArkTS creation chain for sub-window `id` has settled.
 /// Unknown ids read as `true`: only creations opened by
 /// `register_pending_float` (capability handshake on) are tracked.
 pub fn is_float_window_ready(id: i64) -> bool {
@@ -647,6 +635,8 @@ pub fn set_float_window_waker(id: i64, waker: crate::OpenHarmonyWaker) {
 /// "settled") and wakes the attached event-loop waker so queued window ops
 /// replay. On failure the replayed ops hit the ArkTS registry and fail with
 /// today's "Unknown OS sub-window" warn — loud, never a silent hold.
+///
+/// Wire contract: this export name pairs with `SubWindowPage.ets` RouteName "FloatWindow" and is intentionally NOT renamed by #240 (renaming breaks route registration + the bridge handshake).
 #[napi]
 pub fn notify_float_window_registered(window_id: i64, registered: bool) {
     let waker = {
@@ -693,9 +683,9 @@ pub fn enable_float_pending_tracking() {
     }
 }
 
-/// Removes the pending entry for a destroyed Float window (tao `Window::drop`).
+/// Removes the pending entry for a destroyed sub-window (tao `Window::drop`).
 /// Idempotent; window ids are never reused (NEXT_WINDOW_ID is monotonic), so a
-/// removed entry can never collide with a future Float.
+/// removed entry can never collide with a future sub-window.
 pub fn unregister_pending_float(id: i64) {
     if let Some(map) = pending_float_windows().as_mut() {
         map.remove(&id);
@@ -839,16 +829,13 @@ fn cursor_lock_api() -> Option<&'static CursorLockApi> {
     CURSOR_LOCK_API
         .get_or_init(|| unsafe {
             // RTLD_NOW | RTLD_LOCAL = 2 on OHOS musl.
-            let handle = dlopen(
-                b"libnative_window_manager.so\0".as_ptr() as *const std::ffi::c_char,
-                2,
-            );
+            let handle = dlopen(c"libnative_window_manager.so".as_ptr(), 2);
             if handle.is_null() {
                 crate::warn!("[ohos-window] dlopen libnative_window_manager.so failed (library missing/broken) — cursor grab unsupported");
                 return None;
             }
-            let lock = dlsym(handle, b"OH_WindowManager_LockCursor\0".as_ptr() as *const std::ffi::c_char);
-            let unlock = dlsym(handle, b"OH_WindowManager_UnlockCursor\0".as_ptr() as *const std::ffi::c_char);
+            let lock = dlsym(handle, c"OH_WindowManager_LockCursor".as_ptr());
+            let unlock = dlsym(handle, c"OH_WindowManager_UnlockCursor".as_ptr());
             if lock.is_null() || unlock.is_null() {
                 crate::warn!("[ohos-window] OH_WindowManager_LockCursor/UnlockCursor not exported — cursor grab unsupported");
                 return None;
@@ -905,7 +892,7 @@ pub fn set_cursor_grab(
     real_window_id: i32,
     grab: bool,
 ) -> std::result::Result<(), CursorGrabError> {
-    if real_window_id <= 0 {
+    if real_window_id <= 0_i32 {
         return Err(CursorGrabError::Bridge(format!(
             "invalid real window id {real_window_id}"
         )));
@@ -957,17 +944,14 @@ fn window_privacy_api() -> Option<&'static WindowPrivacyApi> {
     WINDOW_PRIVACY_API
         .get_or_init(|| unsafe {
             // RTLD_NOW | RTLD_LOCAL = 2 on OHOS musl.
-            let handle = dlopen(
-                b"libnative_window_manager.so\0".as_ptr() as *const std::ffi::c_char,
-                2,
-            );
+            let handle = dlopen(c"libnative_window_manager.so".as_ptr(), 2);
             if handle.is_null() {
                 crate::warn!("[ohos-window] dlopen libnative_window_manager.so failed (library missing/broken) — content protection unsupported");
                 return None;
             }
             let set_privacy = dlsym(
                 handle,
-                b"OH_WindowManager_SetWindowPrivacyMode\0".as_ptr() as *const std::ffi::c_char,
+                c"OH_WindowManager_SetWindowPrivacyMode".as_ptr(),
             );
             if set_privacy.is_null() {
                 crate::warn!("[ohos-window] OH_WindowManager_SetWindowPrivacyMode not exported — content protection unsupported");
@@ -1024,7 +1008,7 @@ pub fn set_window_privacy_mode(
     real_window_id: i32,
     is_privacy: bool,
 ) -> std::result::Result<(), WindowPrivacyError> {
-    if real_window_id <= 0 {
+    if real_window_id <= 0_i32 {
         return Err(WindowPrivacyError::Bridge(format!(
             "invalid real window id {real_window_id}"
         )));

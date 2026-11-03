@@ -18,6 +18,8 @@ thread_local! {
 /// entry has not run at all" ([`MainThreadStatus::Uninitialized`]).
 static MAIN_THREAD_ENV_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+/// Records the N-API main-thread `Env` so other threads can classify
+/// themselves as workers (see `MAIN_THREAD_ENV_INITIALIZED`).
 pub fn set_main_thread_env(env: Env) {
     // Publish the process-level signal first: once the render entry is
     // running, every other thread is definitively a worker, even if it

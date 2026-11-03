@@ -15,6 +15,8 @@ use openharmony_ability::{
 
 // ── Bridge plugin declaration ─────────────────────────────────────────────────
 
+/// Rust facade marker for the built-in `ohos.deep-link` plugin (async;
+/// requires the Ability context).
 pub struct DeepLinkBridgePlugin;
 
 impl BridgePlugin for DeepLinkBridgePlugin {
@@ -27,15 +29,18 @@ impl BridgePlugin for DeepLinkBridgePlugin {
 
 // ── Request / Response types ──────────────────────────────────────────────────
 
+/// Empty request marker for `get-current` (the response carries the URI).
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct DeepLinkGetUriRequest {}
 
 impl_bridge_napi_type!(DeepLinkGetUriRequest, "ohos.deep-link.GetUriRequest");
 
+/// Response carrying the want URI that launched the current instance.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct DeepLinkGetUriResponse {
+    /// Launch URI, or `None` when the instance was not launched by a deep link.
     pub uri: Option<String>,
 }
 
@@ -58,9 +63,7 @@ impl BridgeNapiType for DeepLinkGetUriResponse {
         <Self as napi_ohos::bindgen_prelude::ToNapiValue>::into_unknown(self, env)
     }
 
-    fn from_bridge_value(
-        value: napi_ohos::bindgen_prelude::Unknown<'_>,
-    ) -> Result<Self> {
+    fn from_bridge_value(value: napi_ohos::bindgen_prelude::Unknown<'_>) -> Result<Self> {
         use napi_ohos::bindgen_prelude::{FromNapiValue, Object};
         let obj = Object::from_unknown(value)?;
         let uri: Option<String> = obj.get::<Option<String>>("uri")?.flatten();
@@ -77,6 +80,10 @@ pub struct DeepLinkClient {
 }
 
 impl DeepLinkClient {
+    /// Builds a deep-link client bound to the app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
@@ -178,7 +185,12 @@ fn normalize_uri(uri: Option<String>) -> Option<String> {
 /// 0. Re-exported here so deep-link consumers only need this crate.
 pub use openharmony_ability::window_id_for_label;
 
+/// Extension trait that adds [`DeepLinkClient`] access to the app handle.
 pub trait DeepLinkExt {
+    /// Returns the deep-link client bound to this app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     fn deep_link(&self) -> Result<DeepLinkClient>;
 }
 

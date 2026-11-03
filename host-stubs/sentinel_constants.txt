@@ -1,0 +1,25 @@
+# Cross-repo set-bounds sentinel-constant pin (PR#55 review gate F12).
+#
+# Format: one entry per line, "<repo-relative-file> <constant-name> <literal>".
+# Lines starting with '#' and blank lines are ignored. generate.ps1 fails with
+# a drift error if the file no longer declares the constant with exactly this
+# literal (rename, retyped declaration, or changed value).
+#
+# The ArkTS sentinel must stay i32::MIN (-2147483648): tauri-runtime-wry
+# (cfg(target_env = "ohos")) sends i32::MIN for the bounds components a call
+# does not set, and -1 would collide with real multi-monitor coordinates. No
+# host UT can observe the ArkTS-only wire, so the value is guarded by three
+# mechanisms (full contract: the WebviewPlugin.ets sentinel-contract comment),
+# with an honest grading of what each mechanism actually covers:
+#   1. this drift check - pins the ArkTS literal itself;
+#   2. the device e2e case-b +-2px set-bounds readback - the SIZE pair pins
+#      real rendered geometry (a wrong sentinel size applied as real
+#      geometry fails the probe assertion); the POSITION pair does NOT pin
+#      ArkTS rendering (the e2e reads wry bounds(), which returns the Rust
+#      bounds cache, so a wrong rendered position would still pass);
+#   3. the wry-side UT pinning that sentinel components never enter the Rust
+#      bounds cache - uses a local i32::MIN literal, pinning the
+#      cache-merge formula, not this production constant.
+# The position pair is un-pinnable today: the webview exposes no rendered
+# position read-back on OHOS.
+plugins/webview/src/main/ets/WebviewPlugin.ets WEBVIEW_BOUNDS_SENTINEL -2147483648

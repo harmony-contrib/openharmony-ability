@@ -47,6 +47,7 @@ impl ResourceManager {
         Self(Arc::new(native))
     }
 
+    /// Borrows the underlying native resource manager.
     pub fn inner(&self) -> &NativeResourceManager {
         self.0.as_ref()
     }
@@ -67,10 +68,14 @@ pub struct ResourceBridgePlugin {
 }
 
 impl ResourceBridgePlugin {
+    /// Creates an empty plugin instance; the manager arrives later via
+    /// `resource-manager-ready`.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Returns the installed manager handle, or `None` before
+    /// `resource-manager-ready` (or after an Ability-scoped lifecycle clear).
     pub fn resource_manager(&self) -> Option<ResourceManager> {
         self.resource_manager
             .read()
@@ -139,6 +144,7 @@ impl BridgePlugin for ResourceBridgePlugin {
 pub struct ResourceManagerRef(ResourceManager);
 
 impl ResourceManagerRef {
+    /// Consumes the ref and returns the owned native resource manager handle.
     pub fn into_manager(self) -> ResourceManager {
         self.0
     }
@@ -167,9 +173,11 @@ impl BridgeNapiType for ResourceManagerRef {
     }
 }
 
+/// `resource-manager-ready` acknowledgement payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ResourceManagerReadyResponse {
+    /// `true` when the Rust side stored the manager.
     pub accepted: bool,
 }
 
@@ -191,6 +199,8 @@ impl_bridge_napi_type!(
 /// }
 /// ```
 pub trait ResourceExt {
+    /// Returns the installed [`ResourceManager`] handle, or `None` when the
+    /// `ohos.resource` plugin has not reported readiness yet.
     fn resource_manager(&self) -> Option<ResourceManager>;
 }
 

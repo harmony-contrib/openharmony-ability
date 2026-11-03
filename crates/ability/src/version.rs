@@ -64,7 +64,7 @@ pub fn init(sdk_version: i32, dist_version: i32) {
 /// # Example
 ///
 /// ```rust
-/// if version::sdk_api_version() >= 14 {
+/// if openharmony_ability::version::sdk_api_version() >= 14 {
 ///     // Use API 14+ feature
 /// }
 /// ```
@@ -92,7 +92,7 @@ pub fn sdk_api_version() -> i32 {
 ///
 /// ```rust
 /// // Check for HarmonyOS 5.0.1 (50001)
-/// if version::distribution_api_version() >= 50001 {
+/// if openharmony_ability::version::distribution_api_version() >= 50001 {
 ///     // Use HarmonyOS 5.0.1+ feature
 /// }
 /// ```
@@ -105,29 +105,29 @@ mod tests {
     #[test]
     fn test_version_calculation() {
         // Test the version calculation formula: M * 10000 + S * 100 + F
-        assert_eq!(5 * 10000 + 0 * 100 + 0, 50000); // HarmonyOS 5.0.0
-        assert_eq!(5 * 10000 + 0 * 100 + 1, 50001); // HarmonyOS 5.0.1
-        assert_eq!(5 * 10000 + 0 * 100 + 2, 50002); // HarmonyOS 5.0.2
-        assert_eq!(5 * 10000 + 1 * 100 + 0, 50100); // HarmonyOS 5.1.0
-        assert_eq!(6 * 10000 + 0 * 100 + 0, 60000); // HarmonyOS 6.0.0
+        assert_eq!(5_i32 * 10_000_i32, 50_000_i32); // HarmonyOS 5.0.0
+        assert_eq!(5_i32 * 10_000_i32 + 1_i32, 50_001_i32); // HarmonyOS 5.0.1
+        assert_eq!(5_i32 * 10_000_i32 + 2_i32, 50_002_i32); // HarmonyOS 5.0.2
+        assert_eq!(5_i32 * 10_000_i32 + 100_i32, 50_100_i32); // HarmonyOS 5.1.0
+        assert_eq!(6_i32 * 10_000_i32, 60_000_i32); // HarmonyOS 6.0.0
     }
 
     #[test]
     fn test_version_comparison() {
         // Test version comparison logic
-        let v50001 = 50001; // HarmonyOS 5.0.1
-        let v60000 = 60000; // HarmonyOS 6.0.0
+        let v50001 = 50_001_i32; // HarmonyOS 5.0.1
+        let v60000 = 60_000_i32; // HarmonyOS 6.0.0
 
-        assert!(v60000 >= 50001);
-        assert!(v50001 >= 50001);
-        assert!(!(v50001 >= 60000));
+        assert!(v60000 >= 50_001_i32);
+        assert!(v50001 >= 50_001_i32);
+        assert!(v50001 < 60_000_i32);
 
-        let sdk_v14 = 14;
-        let sdk_v12 = 12;
+        let sdk_v14 = 14_i32;
+        let sdk_v12 = 12_i32;
 
-        assert!(sdk_v14 >= 14);
-        assert!(sdk_v12 >= 12);
-        assert!(!(sdk_v12 >= 14));
+        assert!(sdk_v14 >= 14_i32);
+        assert!(sdk_v12 >= 12_i32);
+        assert!(sdk_v12 < 14_i32);
     }
 
     // NAPI-dependent tests: require OHOS device runtime

@@ -4,11 +4,17 @@ use ohos_xcomponent_sys::OH_NativeXComponent_MouseEvent;
 /// Input source types from OHOS NDK.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputSourceType {
+    /// Unrecognized source (also the fallback for unknown raw codes).
     Unknown,
+    /// Physical mouse.
     Mouse,
+    /// Finger on a touchscreen.
     TouchScreen,
+    /// Touchpad gesture device.
     Touchpad,
+    /// Joystick / gamepad.
     Joystick,
+    /// Physical keyboard.
     Keyboard,
 }
 
@@ -31,9 +37,13 @@ impl From<i32> for InputSourceType {
 /// hover variants synthesized from `DispatchHoverEvent` callbacks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseAction {
+    /// No action (also the fallback for unknown raw codes).
     None,
+    /// Button pressed.
     Press,
+    /// Button released.
     Release,
+    /// Pointer moved while a button is held.
     Move,
     /// Synthesized from DispatchHoverEvent(isHover=true)
     HoverEnter,
@@ -69,12 +79,19 @@ impl From<ohos_xcomponent_binding::MouseAction> for MouseAction {
 /// Also carries hover events synthesized from `DispatchHoverEvent`.
 #[derive(Debug, Clone)]
 pub struct MouseEventData {
+    /// X coordinate relative to the component, in px.
     pub x: f32,
+    /// Y coordinate relative to the component, in px.
     pub y: f32,
+    /// X coordinate relative to the screen, in px.
     pub screen_x: f32,
+    /// Y coordinate relative to the screen, in px.
     pub screen_y: f32,
+    /// Event timestamp (monotonic, from the NDK event).
     pub timestamp: i64,
+    /// What happened (press/release/move/hover).
     pub action: MouseAction,
+    /// Which button the action applies to.
     pub button: MouseButton,
 }
 
@@ -189,28 +206,34 @@ mod tests {
 
     #[test]
     fn input_source_type_from_i32_covers_all_values() {
-        assert!(matches!(InputSourceType::from(1), InputSourceType::Mouse));
         assert!(matches!(
-            InputSourceType::from(2),
+            InputSourceType::from(1_i32),
+            InputSourceType::Mouse
+        ));
+        assert!(matches!(
+            InputSourceType::from(2_i32),
             InputSourceType::TouchScreen
         ));
         assert!(matches!(
-            InputSourceType::from(3),
+            InputSourceType::from(3_i32),
             InputSourceType::Touchpad
         ));
         assert!(matches!(
-            InputSourceType::from(4),
+            InputSourceType::from(4_i32),
             InputSourceType::Joystick
         ));
         assert!(matches!(
-            InputSourceType::from(5),
+            InputSourceType::from(5_i32),
             InputSourceType::Keyboard
         ));
         assert!(matches!(
-            InputSourceType::from(99),
+            InputSourceType::from(99_i32),
             InputSourceType::Unknown
         ));
-        assert!(matches!(InputSourceType::from(0), InputSourceType::Unknown));
+        assert!(matches!(
+            InputSourceType::from(0_i32),
+            InputSourceType::Unknown
+        ));
     }
 
     #[test]

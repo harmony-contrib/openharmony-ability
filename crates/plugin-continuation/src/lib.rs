@@ -12,7 +12,7 @@
 //! plugin, no ArkTS action, no main-thread dispatch. Active migration (source
 //! device initiating hand-off) is system-UI-exclusive on OHOS and is not
 //! covered. Source-side state saving goes through
-//! [`ContinuationClient::set_continuation_data`]: the snapshot is stored in the
+//! `ContinuationClient::set_continuation_data`: the snapshot is stored in the
 //! process-level `CONTINUATION_SNAPSHOT` global and read synchronously by the
 //! ArkTS `onContinue` callback (via the `read_continue_snapshot` NAPI export)
 //! when the system initiates a migration.
@@ -73,6 +73,7 @@ pub fn set_continuation_data(data: String) {
     openharmony_ability::store_continue_snapshot(&data);
 }
 
+/// Extension trait exposing the continuation facade on `OpenHarmonyApp`.
 pub trait ContinuationExt {
     /// Returns the continuation facade for this app.
     ///

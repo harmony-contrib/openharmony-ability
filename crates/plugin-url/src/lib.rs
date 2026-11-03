@@ -13,6 +13,7 @@ use openharmony_ability::{
     OpenHarmonyApp,
 };
 
+/// Bridge plugin exposing the `ohos.url` actions (`open-url`, `reveal`).
 pub struct UrlBridgePlugin;
 
 impl BridgePlugin for UrlBridgePlugin {
@@ -23,17 +24,21 @@ impl BridgePlugin for UrlBridgePlugin {
         &[BridgeContextRequirement::Ability];
 }
 
+/// `open-url` request payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct UrlOpenRequest {
+    /// Absolute URL to open with the system link service.
     pub url: String,
 }
 
 impl_bridge_napi_type!(UrlOpenRequest, "ohos.url.OpenRequest");
 
+/// `open-url` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct UrlOpenResponse {
+    /// `true` when the ArkTS side dispatched the open.
     pub accepted: bool,
 }
 
@@ -59,6 +64,7 @@ impl UrlOpenResponse {
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct UrlRevealRequest {
+    /// Absolute real filesystem path of the directory to reveal.
     pub path: String,
 }
 

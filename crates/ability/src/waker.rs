@@ -46,7 +46,13 @@ use napi_ohos::{
 /// ime.rs, bridge/mod.rs) — issue #87 minor-1. The waker closure provably always
 /// returns Ok(()), so the error-first null argument the `true` variant passes is
 /// never observed by anyone.
-pub type WakerSlot = Arc<RwLock<Option<Arc<ThreadsafeFunction<(), (), (), Status, false>>>>>;
+/// The waker TSFN handle itself (the inner element of [`WakerSlot`]).
+pub type WakerTsfn = Arc<ThreadsafeFunction<(), (), (), Status, false>>;
+
+/// Shared waker slot type: `None` until `create_lifecycle_handle` installs the
+/// TSFN. See [`WakerTsfn`] for the handle type and the module docs for the
+/// threading contract.
+pub type WakerSlot = Arc<RwLock<Option<WakerTsfn>>>;
 
 /// Process-level alias of the installed TSFN, kept in sync by
 /// `create_lifecycle_handle` (it writes the app's per-app slot and this alias
@@ -55,12 +61,11 @@ pub type WakerSlot = Arc<RwLock<Option<Arc<ThreadsafeFunction<(), (), (), Status
 /// the event loop. Under NG4 (openspec multi-uiability-windows) one app/one
 /// event loop exists per process, so the alias is exact; last-writer-wins if
 /// that invariant is ever broken.
-static INSTALLED_APP_WAKER: RwLock<Option<Arc<ThreadsafeFunction<(), (), (), Status, false>>>> =
-    RwLock::new(None);
+static INSTALLED_APP_WAKER: RwLock<Option<WakerTsfn>> = RwLock::new(None);
 
 /// Record the installed TSFN into the process-level alias. Called from
 /// `create_lifecycle_handle` alongside the per-app slot write.
-pub(crate) fn install_app_waker_alias(tsfn: Arc<ThreadsafeFunction<(), (), (), Status, false>>) {
+pub(crate) fn install_app_waker_alias(tsfn: WakerTsfn) {
     if let Ok(mut guard) = INSTALLED_APP_WAKER.write() {
         guard.replace(tsfn);
     }
@@ -70,31 +75,40 @@ pub(crate) fn install_app_waker_alias(tsfn: Arc<ThreadsafeFunction<(), (), (), S
 /// `OpenHarmonyApp` handle. No-op when lifecycle setup has not run yet —
 /// the caller's event stays queued and is drained by a later wake.
 pub fn wake_installed_app() {
-    let tsfn = INSTALLED_APP_WAKER.read().ok().and_then(|guard| guard.clone());
+    let tsfn = INSTALLED_APP_WAKER
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone());
     if let Some(waker) = tsfn {
         waker.call((), ThreadsafeFunctionCallMode::NonBlocking);
     }
 }
 
+/// Sendable event-loop waker handed to tao's runtime.
+///
+/// Clones share the same underlying [`WakerSlot`]; `wake` reads the slot live
+/// so a waker created before lifecycle setup still works once the TSFN is
+/// installed (see the module docs for the snapshot-timing rationale).
 #[derive(Clone)]
 pub struct OpenHarmonyWaker {
     slot: WakerSlot,
 }
 
 impl OpenHarmonyWaker {
+    /// Creates a waker over the given per-app slot.
     pub fn new(slot: WakerSlot) -> Self {
         Self { slot }
     }
 
+    /// Wakes the event loop through the slot's installed TSFN.
+    ///
+    /// No-op when the TSFN is not installed yet (the caller's event stays
+    /// queued and is drained by a later wake).
     pub fn wake(&self) {
         // Read the slot live rather than using a construction-time snapshot.
         // Clone the `Arc<TSFN>` out and drop the read guard before calling, so
         // we never hold the lock across the (non-blocking) TSFN call.
-        let tsfn = self
-            .slot
-            .read()
-            .ok()
-            .and_then(|guard| guard.clone());
+        let tsfn = self.slot.read().ok().and_then(|guard| guard.clone());
         match tsfn {
             Some(waker) => {
                 // callee_handled=false call(): the raw value, no Result wrapper

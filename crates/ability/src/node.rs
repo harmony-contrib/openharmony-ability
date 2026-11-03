@@ -33,7 +33,9 @@ impl_bridge_napi_type!(
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct NodeAppendChildRequest {
+    /// Handle of the parent node to append under.
     pub parent_handle: u32,
+    /// Handle of the child node to append.
     pub child_handle: u32,
 }
 
@@ -43,6 +45,7 @@ impl_bridge_napi_type!(NodeAppendChildRequest, "ohos.node.AppendChildRequest");
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct NodeMountIntoRootRequest {
+    /// Handle of the node to mount under the module's component root.
     pub handle: u32,
 }
 
@@ -52,6 +55,7 @@ impl_bridge_napi_type!(NodeMountIntoRootRequest, "ohos.node.MountIntoRootRequest
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct NodeDisposeRequest {
+    /// Handle of the node to detach and dispose.
     pub handle: u32,
 }
 
@@ -61,14 +65,17 @@ impl_bridge_napi_type!(NodeDisposeRequest, "ohos.node.DisposeRequest");
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct NodeHandleResponse {
+    /// Opaque ArkTS-side FrameNode handle for later node actions.
     pub handle: u32,
 }
 
 impl_bridge_napi_type!(NodeHandleResponse, "ohos.node.HandleResponse");
 
+/// Acknowledgement returned by every node action.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct NodeAcknowledgement {
+    /// `true` when the ArkTS side accepted the node action.
     pub accepted: bool,
 }
 
@@ -165,6 +172,10 @@ impl NodeSurface {
 
 /// Convenience accessor: `app.node()` returns the outbound surface facade.
 pub trait NodeExt {
+    /// Returns the node surface client for this app.
+    ///
+    /// # Errors
+    /// Returns an error when the app has no bridge runtime installed yet.
     fn node(&self) -> Result<NodeSurface>;
 }
 

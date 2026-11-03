@@ -1,7 +1,13 @@
+//! Screen orientation direction (mirrors `Configuration.direction`).
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Orientation direction of the screen.
 pub enum Direction {
+    /// Direction not set by the system (sentinel).
     NoSet = -1,
+    /// Vertical (portrait) orientation.
     Vertical,
+    /// Horizontal (landscape) orientation.
     Horizontal,
 }
 

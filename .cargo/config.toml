@@ -1,0 +1,19 @@
+# Host-only link path for the fabricated OHOS system-library stubs.
+#
+# The OHOS *-sys binding crates carry `#[link(name = "ace_ndk.z")]`-style
+# device dependencies; Windows-host builds/tests need the stub archives
+# produced by host-stubs/generate.ps1 on the linker search path.
+# Cross builds (aarch64/x86_64-unknown-linux-ohos) are unaffected: this
+# table only applies to the x86_64-pc-windows-msvc host target.
+#
+# NOTE: `rustflags` is a replacing key. If future host-only flags are
+# needed, append them to THIS array - never add a second
+# [target.x86_64-pc-windows-msvc] table.
+#
+# `rustdocflags` is required separately: cargo does NOT forward
+# target rustflags to rustdoc, so doctest links (`cargo test --doc`)
+# would otherwise fail with LNK1181 on the first `#[link]` name
+# (ohinputmethod.lib).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-L", "native=target/host-stub-libs"]
+rustdocflags = ["-L", "native=target/host-stub-libs"]

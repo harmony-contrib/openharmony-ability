@@ -1,3 +1,6 @@
+//! Demo native (NAPI) entry used by the OHOS device smoke suites: wires up the
+//! built-in bridge plugins and exercises the `openharmony-ability` runtime from
+//! ArkTS. Not part of the shipped product.
 #![allow(dead_code)]
 
 mod login_bridge;
@@ -148,6 +151,9 @@ pub fn demo_resource_raw_dir_count() -> i32 {
     }
 }
 
+/// Requests `ohos.permission.APPROXIMATE_LOCATION` through the main-thread
+/// plugin path. Returns the granted permission codes; the one-shot latch
+/// makes later invocations return the cached result instead of re-prompting.
 #[napi]
 pub async fn demo_request_permission_from_main_thread() -> Result<Vec<i32>> {
     if MAIN_THREAD_DEMO_REQUESTED.swap(true, Ordering::SeqCst) {
@@ -246,6 +252,9 @@ pub async fn demo_plugin_profile() -> Result<raw_bridge::DemoProfile> {
     .await
 }
 
+/// Toggles the demo's back-press interception flag and returns the new state.
+/// While enabled, the webview intercepts back presses so the manual test can
+/// exercise the `back_press` event path.
 #[napi]
 pub fn toggle_back_press_intercept() -> bool {
     let current = BACK_PRESS_INTERCEPT_ENABLED.load(Ordering::SeqCst);
@@ -314,6 +323,8 @@ pub async fn create_bottom_demo_webview() -> Result<()> {
                     height: Some(Either::B("30%".to_owned())),
                     visible: None,
                     background_color: Some("#00000000".to_owned()),
+                    // #188: demo keeps the default non-incognito store.
+                    incognito: None,
                 })
                 .url(WEB_URL),
         )
@@ -333,6 +344,7 @@ pub async fn evaluate_demo_webview_script() -> Result<String> {
         .ok_or_else(|| Error::from_reason("WebView JavaScript returned no value"))
 }
 
+/// Sets the demo webview background color (CSS color string, e.g. `#RRGGBB`).
 #[napi]
 pub async fn set_background_color(color: String) -> Result<()> {
     current_app()?
@@ -342,6 +354,7 @@ pub async fn set_background_color(color: String) -> Result<()> {
         .await
 }
 
+/// Shows or hides the demo webview (visibility flag forwarded to the ArkTS host).
 #[napi]
 pub async fn set_visible(visible: bool) -> Result<()> {
     current_app()?

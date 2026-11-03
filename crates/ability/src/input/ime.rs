@@ -14,6 +14,8 @@ type ImeCallback = (
     ThreadsafeFunction<i32, (), i32, Status, false>,
 );
 
+/// Builds the four IME TSFNs (text input / backspace / status / enter) for one
+/// window and returns them as a single callback bundle.
 pub fn ime_ts_fn(
     env: &Env,
     app: OpenHarmonyApp,

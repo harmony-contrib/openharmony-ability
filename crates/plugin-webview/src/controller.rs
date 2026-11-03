@@ -58,6 +58,10 @@ pub(crate) fn on_removed(webview_id: &str, native_tag: &str) -> Result<()> {
     Ok(())
 }
 
+/// Returns the process-unique `native_tag` of the live controller for `webview_id`.
+///
+/// # Errors
+/// Fails when the WebView has no attached ArkWeb controller.
 pub fn native_tag_for(webview_id: &str) -> Result<String> {
     CONTROLLERS
         .read()

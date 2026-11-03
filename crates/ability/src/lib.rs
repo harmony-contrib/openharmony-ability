@@ -1,3 +1,12 @@
+//! OpenHarmony ability runtime: the Rust half of a native ability module.
+//!
+//! The `#[ability]` derive (crate `openharmony_ability_derive`) generates the
+//! N-API entry around an [`OpenHarmonyApp`] facade; this crate supplies the
+//! facade and its supporting surfaces - the ArkTS<->Rust bridge
+//! ([`BridgePlugin`] / [`BridgeRuntime`]), lifecycle and event plumbing,
+//! input/IME, display and window geometry, and the plugin ecosystem
+//! (`openharmony_ability_plugin_*` crates) built on the bridge contracts.
+
 mod app;
 mod area;
 mod bridge;
@@ -39,46 +48,54 @@ pub mod global_shortcut;
 
 // ─── Logging macros (gated behind "log" feature) ───
 // When the feature is on, delegate to the `log` crate (backed by ohos-hilog-binding on OHOS).
-// When off, expand to no-ops — zero overhead, no dependency on `log`.
+// When off, expand to no-ops - zero overhead, no dependency on `log`.
 
+/// Logs at error level (delegates to `log::error!`; no-op without the `log` feature).
 #[cfg(feature = "log")]
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => { ::log::error!($($arg)*) }
 }
+/// Logs at error level (no-op without the `log` feature).
 #[cfg(not(feature = "log"))]
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => {};
 }
 
+/// Logs at info level (delegates to `log::info!`; no-op without the `log` feature).
 #[cfg(feature = "log")]
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => { ::log::info!($($arg)*) }
 }
+/// Logs at info level (no-op without the `log` feature).
 #[cfg(not(feature = "log"))]
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {};
 }
 
+/// Logs at warn level (delegates to `log::warn!`; no-op without the `log` feature).
 #[cfg(feature = "log")]
 #[macro_export]
 macro_rules! warn {
     ($($arg:tt)*) => { ::log::warn!($($arg)*) }
 }
+/// Logs at warn level (no-op without the `log` feature).
 #[cfg(not(feature = "log"))]
 #[macro_export]
 macro_rules! warn {
     ($($arg:tt)*) => {};
 }
 
+/// Logs at debug level (delegates to `log::debug!`; no-op without the `log` feature).
 #[cfg(feature = "log")]
 #[macro_export]
 macro_rules! debug {
     ($($arg:tt)*) => { ::log::debug!($($arg)*) }
 }
+/// Logs at debug level (no-op without the `log` feature).
 #[cfg(not(feature = "log"))]
 #[macro_export]
 macro_rules! debug {

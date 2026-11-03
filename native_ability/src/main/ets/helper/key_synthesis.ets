@@ -266,15 +266,55 @@ function dispatchKeyEvent(
     // the pressed-set is still maintained by the caller.
     return false;
   }
-  controller
-    .runJavaScript(buildDispatchScript(type, dom, repeat))
-    .then(() => {
-      // Fire-and-forget; success is silent to avoid per-event log spam at
-      // ~20Hz during auto-repeat.
-    })
-    .catch((err: BusinessError) => {
-      hilog.warn(DOMAIN, "KeySynthesis", "runJavaScript failed: %{public}s", String(err));
-    });
+  // runJavaScript throws SYNCHRONOUSLY (not a rejected promise) when the
+  // controller is no longer bound to a Web component: BusinessError 17100001
+  // ("Init error. The WebviewController must be associated with a Web
+  // component") is raised from NAPI straight into the calling JS frame
+  // (device-verified via faultlogger — ark_jsruntime Exception::Error, no
+  // promise microtask involved). This function runs inside
+  // MainPage.onKeyPreIme — a UI event callback with no enclosing handler — so
+  // an escaping throw kills the process (JSCrash 2026-10-21 and 2026-10-30,
+  // both with key_synthesis frames; the pre-existing .then/.catch only
+  // intercepts the async-rejection path). The whole chain is therefore
+  // wrapped: synchronous throws and async rejections cannot escape.
+  //
+  // 17100001 means the controller's Web binding is GONE: the registry entry
+  // is a stale pointer to a dead webview, so the entry is dropped — later
+  // keys take the plain `!controller` early-return instead of crashing.
+  // notifyKeySynthesisController re-adds the entry on the next attach, so
+  // pruning is safe for re-mount (idempotent backfill). Any OTHER code or
+  // error kind (script evaluation failure, engine hiccup) is thrown by a
+  // controller whose Web binding may still be alive, so the entry stays and
+  // only the event is dropped.
+  try {
+    controller
+      .runJavaScript(buildDispatchScript(type, dom, repeat))
+      .then(() => {
+        // Fire-and-forget; success is silent to avoid per-event log spam at
+        // ~20Hz during auto-repeat.
+      })
+      .catch((err: BusinessError) => {
+        hilog.warn(DOMAIN, "KeySynthesis", "runJavaScript failed: %{public}s", String(err));
+      });
+  } catch (err) {
+    const errCode = (err as BusinessError).code;
+    hilog.warn(
+      DOMAIN,
+      "KeySynthesis",
+      "runJavaScript threw synchronously (code=%{public}s): %{public}s",
+      String(errCode),
+      String(err),
+    );
+    // napi_throw_error passes the code as a C string, so on device err.code is
+    // the STRING "17100001" — a bare `errCode === 17100001` never matches (the
+    // static number type hides this) and the dead entry would survive every
+    // key press. Number() normalizes both shapes; for a code-less throw it is
+    // NaN, which never equals, so only 17100001 prunes.
+    if (Number(errCode) === 17100001) {
+      controllers.delete(windowId);
+    }
+    return false;
+  }
   return true;
 }
 
@@ -316,8 +356,15 @@ export function notifyKeySynthesisController(
 
 /** Controller registry teardown (design.md D13). Called from WindowManager's
  * window-lifetime sinks — unregisterUIAbilityStage (spawned UIAbility close,
- * skipping the primary's id 0) and removeWindow (Float sub-window close).
+ * skipping the primary's id 0) and removeWindow (sub-window close).
  * Without this the map grew one WebviewController entry per destroyed window. */
 export function unregisterKeySynthesisController(windowId: number): void {
   controllers.delete(windowId);
+}
+
+/** Read-only registry probe (unit tests + diagnostics): reports whether a
+ * controller entry is currently registered for windowId. Exposes the
+ * stale-entry pruning done by dispatchKeyEvent's 17100001 guard. */
+export function hasKeySynthesisController(windowId: number): boolean {
+  return controllers.has(windowId);
 }

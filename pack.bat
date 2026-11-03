@@ -44,4 +44,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
+:: HAR tarball. pushd into SCRIPT_DIR first: GNU tar's CRT argument parsing
+:: treats a trailing backslash before the closing quote (`"...ability\"`) as an
+:: escaped quote and swallows the following `package` operand -> "Cowardly
+:: refusing to create an empty archive" (2026-10-22 stage-A run4). Relative
+:: args from an anchored cwd avoid the whole quoting-hazard class. The cmd
+:: working directory is the CALLER's cwd (bash/CI wrappers do not inherit the
+:: repo root), so the pushd anchor is required.
+pushd "%SCRIPT_DIR%"
 tar -czf ability.har package
+popd

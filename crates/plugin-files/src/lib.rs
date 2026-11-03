@@ -14,6 +14,7 @@ use openharmony_ability::{
     OpenHarmonyApp,
 };
 
+/// Bridge plugin exposing the `ohos.files` actions (file dialog).
 pub struct FilesBridgePlugin;
 
 impl BridgePlugin for FilesBridgePlugin {
@@ -26,8 +27,11 @@ impl BridgePlugin for FilesBridgePlugin {
 
 /// Dialog kind. Constants mirror the picker document modes.
 pub mod dialog_type {
+    /// Opens one or more existing files.
     pub const OPEN_FILE: &str = "open-file";
+    /// Saves a file under a user-chosen location.
     pub const SAVE_FILE: &str = "save-file";
+    /// Opens a single folder instead of files.
     pub const OPEN_FOLDER: &str = "open-folder";
 }
 
@@ -36,13 +40,16 @@ pub mod dialog_type {
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct FileDialogFilter {
+    /// Display name of the filter group (e.g. `"Markdown"`).
     pub name: Option<String>,
+    /// `;`-separated suffixes without dots (e.g. `"md;markdown"`).
     pub pattern: Option<String>,
 }
 
 impl_bridge_napi_type!(FileDialogFilter, "ohos.files.DialogFilter");
 
 impl FileDialogFilter {
+    /// Creates an empty filter group with no name and no pattern.
     pub fn new() -> Self {
         Self {
             name: None,
@@ -50,11 +57,13 @@ impl FileDialogFilter {
         }
     }
 
+    /// Sets the display name of the filter group.
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
     }
 
+    /// Sets the `;`-separated suffix pattern of the filter group.
     pub fn pattern(mut self, pattern: impl Into<String>) -> Self {
         self.pattern = Some(pattern.into());
         self
@@ -67,19 +76,24 @@ impl Default for FileDialogFilter {
     }
 }
 
+/// Options payload for one file-dialog bridge call.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct FileDialogOptions {
     /// One of [`dialog_type`] constants.
     pub dialog_type: String,
+    /// Allow selecting multiple files (ignored for `open-folder`).
     pub allow_many: bool,
+    /// Initial directory URI shown by the picker.
     pub default_location: Option<String>,
+    /// Suffix filter groups applied by the picker.
     pub filters: Vec<FileDialogFilter>,
 }
 
 impl_bridge_napi_type!(FileDialogOptions, "ohos.files.DialogOptions");
 
 impl FileDialogOptions {
+    /// Creates options for the given dialog kind with no filters.
     pub fn new(dialog_type: impl Into<String>) -> Self {
         Self {
             dialog_type: dialog_type.into(),
@@ -89,16 +103,19 @@ impl FileDialogOptions {
         }
     }
 
+    /// Enables or disables multi-file selection.
     pub fn allow_many(mut self, allow_many: bool) -> Self {
         self.allow_many = allow_many;
         self
     }
 
+    /// Sets the initial directory URI shown by the picker.
     pub fn default_location(mut self, default_location: impl Into<String>) -> Self {
         self.default_location = Some(default_location.into());
         self
     }
 
+    /// Replaces the suffix filter groups applied by the picker.
     pub fn filters(mut self, filters: Vec<FileDialogFilter>) -> Self {
         self.filters = filters;
         self
@@ -132,6 +149,7 @@ impl FileDialogOptions {
     }
 }
 
+/// `show-file-dialog` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct FileDialogResponse {
@@ -217,6 +235,6 @@ mod tests {
             filter: -1,
         };
         assert_eq!(response.files.len(), 1);
-        assert_eq!(response.filter, -1);
+        assert_eq!(response.filter, -1_i32);
     }
 }

@@ -1,4 +1,4 @@
-import { WebHeader } from "@kit.ArkUI";
+import { WebHeader, AttributeUpdater } from "@kit.ArkUI";
 import { BuilderNode } from "@ohos.arkui.node";
 import webview from "@ohos.web.webview";
 import { image } from "@kit.ImageKit";
@@ -89,6 +89,54 @@ function enableWebDebuggingIfAvailable(): void {
   setWebDebuggingAccessIfAvailable(true);
 }
 
+/**
+ * Per-component "unspecified" marker for the set-bounds wire contract
+ * (cross-repo, tauri-runtime-wry cfg(target_env = "ohos")). Only the two
+ * partial-bounds arms send sentinels: SetSize sends i32::MIN for the whole
+ * position pair and SetPosition sends it for the whole size pair, so each
+ * call touches only the component it owns. A component equal to this value
+ * keeps the webview's current ArkTS-side geometry instead of being applied.
+ * The auto-resize re-application arm (window Resized) never sends sentinels:
+ * an armed webview (one with runtime bounds rates) gets all four components
+ * re-applied with real geometry, and a natural-layout webview gets no update
+ * at all.
+ *
+ * Known cross-repo limitation: SetAutoResize(false) clears the runtime rates
+ * and the OHOS enable arm is a no-op, so disable-then-enable permanently
+ * stops resize re-application for an explicit-bounds webview (no path back
+ * to container layout).
+ *
+ * The value is i32::MIN (-2147483648), NOT -1: multi-screen setups
+ * legitimately produce -1 window coordinates, which would collide with a -1
+ * sentinel and silently drop real geometry. Where the Rust side has no real
+ * geometry for a component it may instead send its 200x200 default placeholder
+ * (wry's bounds-cache default for a natural-layout webview, never 0x0); only
+ * i32::MIN marks "leave the current value untouched".
+ *
+ * The sentinel is guarded by three mechanisms (PR#55 review gate F12),
+ * because no host UT can observe the ArkTS-only wire. Honest grading of what
+ * each mechanism actually covers:
+ * (1) host-stubs/generate.ps1 drift-checks this constant against
+ *     host-stubs/sentinel_constants.txt and fails on drift - this pins the
+ *     ArkTS literal itself (the only pin that reads the production
+ *     constant).
+ * (2) the device e2e case-b +-2px set-bounds readback: the SIZE pair pins
+ *     real rendered geometry (the probe measures the rendered webview), so
+ *     a wrong sentinel size applied as real geometry fails that assertion.
+ *     The POSITION pair does NOT pin ArkTS rendering: the e2e reads wry
+ *     bounds(), which returns the Rust bounds cache (ohos bounds() ->
+ *     *bounds_cache) rather than the rendered frame - if a wrong sentinel
+ *     position were applied by ArkTS as real geometry, the position
+ *     assertion would still read the correct cached value and pass.
+ * (3) the wry-side UT pins that sentinel components never enter the Rust
+ *     bounds cache using a LOCAL i32::MIN literal - it pins the
+ *     merge_bounds_into_cache formula, not this production constant.
+ * The position pair is un-pinnable today: the webview exposes no rendered
+ * position read-back on OHOS (only the size is measurable by the e2e
+ * probe), so nothing downstream can observe the ArkTS-rendered position.
+ */
+const WEBVIEW_BOUNDS_SENTINEL: number = -2147483648;
+
 interface WebviewStyle {
   x?: number | string | null;
   y?: number | string | null;
@@ -100,6 +148,14 @@ interface WebviewStyle {
   backgroundColor?: string | null;
   /** Blur radius for vibrancy/frosted glass effect. Applied via backdropBlur on the Web component. */
   blurRadius?: number | null;
+  /**
+   * #188: run the Web component in incognito mode (`WebOptions.incognitoMode`,
+   * local SDK web.d.ts:4639 -- the options member, @since 11/18; there is no
+   * `.incognitoMode()` attribute method). Absent/false keeps the default
+   * non-incognito behavior byte-identical to the previous wire. Also feeds the
+   * WebCookieManager fetch/config call sites (per-store selection).
+   */
+  incognito?: boolean | null;
 }
 
 interface WebviewInitializationScript {
@@ -215,19 +271,94 @@ interface ManagedWebview extends WebviewCreatePayload {
    */
   httpsInterceptProtocols: Set<string>;
   /**
-   * Synchronous https intercept handler. Receives the full request URL, dispatches through the
-   * `https-intercept` bridge event, and constructs a `WebResourceResponse` (or returns null to
-   * let ArkWeb continue with its default network stack).
+   * Synchronous https intercept handler. Receives the full request URL plus the
+   * intercepted request's method and headers (#186, parallel same-order arrays --
+   * both optional so callers without the capture stay compatible), dispatches
+   * through the `https-intercept` bridge event, and constructs a
+   * `WebResourceResponse` (or returns null to let ArkWeb continue with its
+   * default network stack).
    */
-  onHttpsInterceptRequest: (url: string) => WebResourceResponse | null;
+  onHttpsInterceptRequest: (
+    url: string,
+    method?: string,
+    headerNames?: string[],
+    headerValues?: string[],
+  ) => WebResourceResponse | null;
   /** Trailing debounce timer for onAreaChange → resize dispatch. Prevents flooding
    *  ArkWeb with rapid JS dispatches during drag-resize. */
   resizeDebounceTimer: number;
+  /**
+   * Frozen at create (decision D2): true when the create request carried no
+   * explicit style.width AND no style.height -- the webview follows its parent
+   * container (100% natural layout) until a runtime set_bounds carries an
+   * explicit width/height and flips it to explicit sizing. Diagnostic anchor
+   * only: setBounds applies whatever components the request carries
+   * (WEBVIEW_BOUNDS_SENTINEL components keep the current geometry, so a
+   * sentinel width/height leaves natural layout intact).
+   */
+  naturalLayout: boolean;
+  /** Runtime geometry refresher bound to the outer Stack wrapper (D1). */
+  geometryModifier: WebviewGeometryModifier;
 }
 
 interface ControllerWaiter {
   resolve: () => void;
   reject: (reason: Error) => void;
+}
+
+/**
+ * Runtime geometry refresher for a webview's outer Stack wrapper
+ * (openspec ohos-webview-sizing, decision D1).
+ *
+ * BuilderNode.update re-runs the builder but does not refresh chained component
+ * attributes (ohos-constraints section4.1 -- the vibrancy backdropBlur counterexample),
+ * so the set-bounds bridge action drives the wrapper geometry through this
+ * AttributeUpdater: `attribute?.position/width/height` writes go straight to the
+ * native attribute instead of waiting for a builder re-run. `initializeModifier`
+ * stays empty on purpose -- the build-time chained attributes (style-driven,
+ * see BuildWebview) must keep their values (p1-window-vibrancy BlurModifier
+ * precedent).
+ */
+class WebviewGeometryModifier extends AttributeUpdater<CommonAttribute> {
+  initializeModifier(_instance: CommonAttribute): void {}
+
+  /**
+   * Applies a geometry (position + size) to the mounted Stack wrapper.
+   * Values arrive from the set-bounds bridge action as vp numbers -- the unit
+   * contract is vp end to end (wry bounds() unit doc, which carries its own
+   * DPI!=1 caveat: physical px equal vp only at density 1, and device-measured
+   * window scale factors can differ -- ohos-webview-sizing green calibration 2).
+   * Per-component skip (WEBVIEW_BOUNDS_SENTINEL contract): a null width/height
+   * leaves that attribute untouched (a natural-layout webview keeps "100%"
+   * instead of being forced to an invented px size); x/y are either both null
+   * (position untouched) or both concrete numbers with a skipped axis resolved
+   * to its current value by the caller. No-op until the modifier is attached
+   * to a built component (the `attribute` proxy appears on attach); the style
+   * fields the builder reads are written alongside by the caller, so a later
+   * builder re-run converges to the same geometry.
+   */
+  applyGeometry(
+    x: number | null,
+    y: number | null,
+    width: number | string | null,
+    height: number | string | null,
+  ): void {
+    const attribute = this.attribute;
+    if (!attribute) {
+      return;
+    }
+    if (x !== null || y !== null) {
+      // position() takes both axes at once; a skipped axis arrives pre-resolved
+      // to its current value (style.x ?? 0, the build-time default).
+      attribute.position({ x: x ?? 0, y: y ?? 0 });
+    }
+    if (width !== null) {
+      attribute.width(width);
+    }
+    if (height !== null) {
+      attribute.height(height);
+    }
+  }
 }
 
 class WebviewEntry {
@@ -554,11 +685,30 @@ class WebviewHttpsInterceptRequestPayload {
   readonly id: string;
   readonly nativeTag: string;
   readonly url: string;
+  // #186: the intercepted request's method + headers, captured by the
+  // onInterceptRequest handler (WebResourceRequest.getRequestMethod() /
+  // getRequestHeader()). Header names and values travel as PARALLEL same-
+  // order arrays -- the NAPI wire has no nested-map form (the Rust side
+  // re-zips them; older Rust plugins that don't know the fields ignore
+  // them, and absent fields keep the GET/no-headers default shape).
+  readonly method?: string;
+  readonly headerNames?: string[];
+  readonly headerValues?: string[];
 
-  constructor(id: string, nativeTag: string, url: string) {
+  constructor(
+    id: string,
+    nativeTag: string,
+    url: string,
+    method?: string,
+    headerNames?: string[],
+    headerValues?: string[],
+  ) {
     this.id = id;
     this.nativeTag = nativeTag;
     this.url = url;
+    this.method = method;
+    this.headerNames = headerNames;
+    this.headerValues = headerValues;
   }
 }
 
@@ -567,6 +717,12 @@ interface WebviewHttpsInterceptResponse {
   status: number;
   mimeType: string;
   body: Uint8Array;
+  // #186 (fix-variant M1): response headers the Rust protocol handler attached,
+  // parallel same-order arrays (request-side precedent). Absent in payloads from
+  // older native modules -- the build site skips setResponseHeader then, which
+  // keeps the pre-M1 behavior byte-identical.
+  headerNames?: string[];
+  headerValues?: string[];
 }
 
 interface WebviewRegisterHttpsInterceptPayload {
@@ -874,6 +1030,14 @@ function styleLength(
   return value;
 }
 
+/**
+ * Normalizes the create-request style (openspec ohos-webview-sizing). The
+ * width/height fields are real geometry: when present they drive the wrapper
+ * Stack's rendered size (BuildWebview D1 migration); when BOTH are absent the
+ * webview is natural layout and fills its container -- create() freezes that
+ * decision in `naturalLayout`. All fields feed the build-time chained
+ * attributes; runtime geometry refreshes go through WebviewGeometryModifier.
+ */
 function normalizeStyle(
   style: WebviewStyle | null | undefined,
   transparent: boolean | null | undefined,
@@ -907,6 +1071,9 @@ function normalizeStyle(
   }
   if (style.blurRadius !== undefined && style.blurRadius !== null) {
     normalized.blurRadius = style.blurRadius;
+  }
+  if (style.incognito !== undefined && style.incognito !== null) {
+    normalized.incognito = style.incognito;
   }
   if (transparent === true && !normalized.backgroundColor) {
     normalized.backgroundColor = "#00000000";
@@ -1048,7 +1215,13 @@ const activePrintTasks = new Map<string, ESObject>();
  * `WebResourceResponse` from the returned body bytes, and returns it. On no match, handler
  * decline, or bridge dispatch failure: returns null so ArkWeb uses its default network stack.
  */
-function handleHttpsIntercept(data: ManagedWebview, url: string): WebResourceResponse | null {
+function handleHttpsIntercept(
+  data: ManagedWebview,
+  url: string,
+  method?: string,
+  headerNames?: string[],
+  headerValues?: string[],
+): WebResourceResponse | null {
   if (!url || !url.startsWith("https://")) {
     if (url) {
       hilog.info(
@@ -1096,7 +1269,7 @@ function handleHttpsIntercept(data: ManagedWebview, url: string): WebResourceRes
     protocol,
   );
   try {
-    const response = data.onHttpsInterceptRequest(url);
+    const response = data.onHttpsInterceptRequest(url, method, headerNames, headerValues);
     hilog.info(
       0x1999,
       "WebviewSurface",
@@ -1336,16 +1509,26 @@ function BuildWebview(data: ManagedWebview) {
         src: "",
         controller: data.controller as webview.WebviewController,
         renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+        // #188: incognito create flag (WebOptions.incognitoMode -- options
+        // member, both branches symmetric). Absent style.incognito stays
+        // false = the default non-incognito store, zero behavior change.
+        incognitoMode: data.style.incognito === true,
       })
+        // Always "100%": the Web fills its wrapper Stack, and the ArkWeb viewport
+        // tracks the wrapper size through container layout -- the same mechanism
+        // natural layout uses on window resize (fixed px directly on the Web
+        // component historically broke that tracking: bottom cutoff). The wrapper
+        // Stack below carries the requested geometry (decision D1).
         .width("100%")
         .height("100%")
-        .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
         // Explicit background color (create-time style or runtime set-background-color)
         // takes precedence; transparent webviews fall back to Color.Transparent so
         // vibrancy/blur stays visible. The old form (transparent ? Color.Transparent
         // : style.backgroundColor) short-circuited runtime set_background_color into
         // a visual no-op on transparent windows (tao skips the window layer for them).
-        .backgroundColor(data.style.backgroundColor ?? (data.transparent === true ? Color.Transparent : undefined))
+        .backgroundColor(
+          data.style.backgroundColor ?? (data.transparent === true ? Color.Transparent : undefined),
+        )
         .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
         // Vibrancy: backdropBlur for opaque sub-windows (see Direct mode comment)
         .backdropBlur(data.style.blurRadius ?? 0)
@@ -1425,8 +1608,16 @@ function BuildWebview(data: ManagedWebview) {
           dispatchWebviewDragLeave(data, dragEvent);
         })
     }
-    .width("100%")
-    .height("100%")
+    // Geometry carrier (decision D1): the outer Stack takes the requested bounds
+    // so hit-testing and drag coverage == the web area. Explicit bounds render at
+    // the requested size; a natural-layout webview (no explicit width/height at
+    // create, D2) keeps "100%" and follows its container. Runtime set_bounds
+    // refreshes through the modifier -- BuilderNode.update re-runs the builder but
+    // does not refresh chained attributes (ohos-constraints section4.1).
+    .width(data.style.width ?? "100%")
+    .height(data.style.height ?? "100%")
+    .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
+    .attributeModifier(data.geometryModifier)
     // Mouse-driven focus gate (issue Eulogizethesun/tauri#109): the Web's own
     // onMouse never fires (ArkWeb consumes mouse events at the component level),
     // but they bubble to ancestors — this Stack wraps only the web area, so its
@@ -1446,9 +1637,9 @@ function BuildWebview(data: ManagedWebview) {
     });
   } else {
     // Direct mode: drag events bound directly on the Web component.
-    // The Stack wrapper is layout-neutral (100%×100% of the mount slot, Web
-    // keeps its own width/height/position inside it) and exists for the
-    // mouse-driven focus gate (issue Eulogizethesun/tauri#109): the Web's own
+    // The outer Stack wrapper carries the webview geometry (decision D1: it takes
+    // the requested bounds below, so its coverage IS the web area) and exists for
+    // the mouse-driven focus gate (issue Eulogizethesun/tauri#109): the Web's own
     // onMouse never fires (ArkWeb's pattern consumes mouse events at the
     // component level), but they DO bubble to ancestors (MainPage.onMouse
     // relies on the same behavior), so the wrapper sees presses over the web
@@ -1458,22 +1649,28 @@ function BuildWebview(data: ManagedWebview) {
         src: "",
         controller: data.controller as webview.WebviewController,
         renderMode: data.transparent === true ? RenderMode.SYNC_RENDER : RenderMode.ASYNC_RENDER,
+        // #188: incognito create flag (WebOptions.incognitoMode -- options
+        // member, both branches symmetric). Absent style.incognito stays
+        // false = the default non-incognito store, zero behavior change.
+        incognitoMode: data.style.incognito === true,
       })
-        // Always "100%": natural ArkUI layout so the Web follows its parent container on
-        // window resize. set_bounds (BuilderNode.update) re-runs this builder but only
-        // .position() below consumes style.{x,y} — sizing via fixed px here would pin the
-        // Web component and break ArkWeb viewport tracking on resize (bottom cutoff).
+        // Always "100%": the Web fills its wrapper Stack, and the ArkWeb viewport
+        // tracks the wrapper size through container layout -- the same mechanism
+        // natural layout uses on window resize (fixed px directly on the Web
+        // component historically broke that tracking: bottom cutoff). The wrapper
+        // Stack below carries the requested geometry (decision D1).
         .width("100%")
         .height("100%")
-        .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
         // Explicit background color takes precedence over the transparent fallback —
         // same precedence flip as the overlay branch above (runtime set_background_color
         // must stay visible on transparent windows). Unset + transparent →
         // Color.Transparent so vibrancy/blur remains visible through the Web component.
-        .backgroundColor(data.style.backgroundColor ?? (data.transparent === true ? Color.Transparent : undefined))
+        .backgroundColor(
+          data.style.backgroundColor ?? (data.transparent === true ? Color.Transparent : undefined),
+        )
         .visibility(data.style.visible === false ? Visibility.Hidden : Visibility.Visible)
         // Vibrancy/frosted glass: backdropBlur blurs in-surface pixels of the Web component.
-        // Works on opaque containers (Float sub-windows where setWindowContainerColor returns 1300004).
+        // Works on opaque containers (sub-windows where setWindowContainerColor returns 1300004).
         // The blur radius is read from WindowManager.getPendingBlur() at webview creation time.
         .backdropBlur(data.style.blurRadius ?? 0)
         // Debounce resize JS dispatch (handleWebviewAreaChange — shared with the
@@ -1546,8 +1743,17 @@ function BuildWebview(data: ManagedWebview) {
           handleWebviewWindowNew(data, e);
         })
     }
-    .width("100%")
-    .height("100%")
+    // Geometry carrier (same as the overlay branch, decision D1): the wrapper
+    // takes the requested bounds -- explicit bounds render at the requested size,
+    // a natural-layout webview (D2) keeps "100%" and follows its container -- and
+    // the mouse focus gate below covers exactly that area (presses over the web
+    // hit-test inside this Stack; menubar presses hit-test outside). Runtime
+    // set_bounds refreshes through the modifier (BuilderNode.update does not
+    // refresh chained attributes).
+    .width(data.style.width ?? "100%")
+    .height(data.style.height ?? "100%")
+    .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
+    .attributeModifier(data.geometryModifier)
     .onMouse((event: MouseEvent) => {
       if (event.action === MouseAction.Press && event.button === MouseButton.Left) {
         hilog.info(
@@ -1569,10 +1775,10 @@ function BuildWebview(data: ManagedWebview) {
  * so pages see only the synthetic stream from MainPage.onKeyPreIme (see
  * native_ability helper/key_synthesis.ets, openspec ohos-webview-key-synthesis).
  *
- * Sub-window (Float) webviews are excluded: they have no key-synthesis wiring
- * (their onKeyPreIme serves other interception purposes, see FloatPage), so
- * suppressing their native key events without synthetic replacement would
- * drop ALL key events there.
+ * Sub-window (WindowKind.SubWindow) webviews are excluded: they have no
+ * key-synthesis wiring (their onKeyPreIme serves other interception purposes,
+ * see SubWindowPage), so suppressing their native key events without
+ * synthetic replacement would drop ALL key events there.
  */
 function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[] {
   const wid = data.windowId ?? 0;
@@ -1601,6 +1807,35 @@ function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[
   return base.concat([shim]);
 }
 
+// --- Live controller index for the main-thread sync bridge (#192) -------------
+// `WebviewController.getUrl()` is a synchronous ArkTS API, but the async bridge
+// cannot serve it to a main-thread caller (the TSFN round-trip needs that same
+// thread to pump -- deadlock). The dedicated `WebviewUrlPlugin` (sync-main-
+// thread) serves it instead; the per-session `WebviewSurface` instance is not
+// reachable from another plugin class, so attached controllers are indexed here
+// at module scope, keyed by the public webview id. Register on attach, unregister
+// on remove (which `dispose()` funnels through) -- the map never outlives a
+// controller.
+const liveWebviewControllers = new Map<string, webview.WebviewController>();
+
+/** Registers an attached controller under the public webview id (#192). */
+export function registerLiveWebviewController(
+  id: string,
+  controller: webview.WebviewController,
+): void {
+  liveWebviewControllers.set(id, controller);
+}
+
+/** Drops the index entry when the webview leaves the surface (#192). */
+export function unregisterLiveWebviewController(id: string): void {
+  liveWebviewControllers.delete(id);
+}
+
+/** Resolves the live controller for the sync `get-url` handler (#192). */
+export function liveWebviewController(id: string): webview.WebviewController | undefined {
+  return liveWebviewControllers.get(id);
+}
+
 function handleControllerAttached(data: ManagedWebview): void {
   if (!data.beginControllerAttach()) {
     return;
@@ -1619,8 +1854,9 @@ function handleControllerAttached(data: ManagedWebview): void {
     // controller stays null.
     notifyPrimaryWebviewController(data.controller as ESObject);
 
-    // === §14 fix: register sub-window controller for menu.getTargetController ===
-    // Sub-windows only (windowId > 0): main window keeps the one-shot path above.
+    // === §14 fix: register non-main-window controller for menu.getTargetController ===
+    // Non-main windows only (windowId > 0 — sub-window or spawned UIAbility
+    // instance): main window keeps the one-shot path above.
     // data.controller is the live attached controller at this point (onControllerAttached
     // just fired), so runJavaScript/getSelection work when Tray Copy later resolves it.
     const wid = data.windowId ?? 0;
@@ -1666,9 +1902,14 @@ function handleControllerAttached(data: ManagedWebview): void {
       data.controller.loadData(data.html!, "text/html", "UTF-8", " ", " ");
     }
     data.markControllerReady();
+    // #192: index the attached controller for the main-thread sync bridge
+    // (WebviewUrlPlugin.get-url). Only the success path registers -- a failed
+    // attach leaves no controller to resolve.
+    registerLiveWebviewController(data.id, data.controller as webview.WebviewController);
   } catch (error) {
     const reason = `WebView '${data.id}' controller initialization failed: ${String(error)}`;
     console.error(reason);
+    unregisterLiveWebviewController(data.id);
     data.failControllerAttach(reason);
   }
 }
@@ -1731,23 +1972,62 @@ function handleWebviewAreaChange(data: ManagedWebview, oldArea: Area, newArea: A
 
 /** https-intercept dispatch with the diagnostic log. `modeTag` keeps the two
  *  branches' log variants ('' vs '(embedded)') byte-identical to the former
- *  inline copies. */
+ *  inline copies. #186: the intercepted request's method and headers are
+ *  captured from the `WebResourceRequest` here (the only handler that holds
+ *  the event object) and threaded through to the bridge payload. Both reads
+ *  are guarded: a capture failure must not sink the intercept -- the payload
+ *  simply stays without the optional fields (older-plugin shape). */
 function handleWebviewInterceptRequest(
   data: ManagedWebview,
   event: WebInterceptRequestEvent,
   modeTag: string,
 ): WebResourceResponse | null {
   const interceptUrl = event.request.getRequestUrl();
-  hilog.info(
+  let method: string | undefined = undefined;
+  let headerNames: string[] | undefined = undefined;
+  let headerValues: string[] | undefined = undefined;
+  try {
+    method = event.request.getRequestMethod() || undefined;
+    // Parallel same-order arrays via the SDK Header[] shape (web.d.ts:3945
+    // `getRequestHeader(): Array<Header>`, Header = {headerKey, headerValue};
+    // the NAPI wire has no nested-map form -- design D2, Context fix 4). A
+    // `?? {}` fallback would union `Header[]` with `{}` and fail the
+    // Record<string,string> assignment (ArkTS 10505001, stage-A build).
+    const rawHeaders = event.request.getRequestHeader();
+    const names: string[] = [];
+    const values: string[] = [];
+    if (rawHeaders !== undefined && rawHeaders !== null) {
+      for (const headerEntry of rawHeaders) {
+        names.push(String(headerEntry.headerKey));
+        values.push(String(headerEntry.headerValue ?? ""));
+      }
+    }
+    headerNames = names.length > 0 ? names : undefined;
+    headerValues = values.length > 0 ? values : undefined;
+  } catch (captureError) {
+    hilog.warn(
+      0x1999,
+      "WebviewSurface",
+      "[https-intercept] method/header capture failed (payload degrades to no method/headers): id=%{public}s error=%{public}s",
+      String(data.id),
+      String(captureError),
+    );
+    method = undefined;
+    headerNames = undefined;
+    headerValues = undefined;
+  }
+  hilog.debug(
     0x1999,
     "WebviewSurface",
-    "[https-intercept] onInterceptRequest%{public}s fired: id=%{public}s url=%{public}s protocols_size=%{public}d",
+    "[https-intercept] onInterceptRequest%{public}s fired: id=%{public}s url=%{public}s protocols_size=%{public}d method=%{public}s header_count=%{public}d",
     modeTag,
     String(data.id),
     interceptUrl ?? "null",
     data.httpsInterceptProtocols?.size ?? 0,
+    method ?? "GET",
+    headerNames?.length ?? 0,
   );
-  return handleHttpsIntercept(data, interceptUrl);
+  return handleHttpsIntercept(data, interceptUrl, method, headerNames, headerValues);
 }
 
 /** pageBegin/pageEnd JS-callback dispatch, gated on the event options. */
@@ -1851,6 +2131,13 @@ class WebviewSurface {
     this.assertCallActive(callContext);
     this.remove(payload.id);
     const style = normalizeStyle(payload.style, payload.transparent);
+    // Freeze the layout mode at create time (decision D2): no explicit width AND
+    // height in the create request -> natural layout (the wrapper Stack renders
+    // "100%" and follows its container); any explicit dimension renders as
+    // requested. A runtime set_bounds with explicit width/height flips a
+    // natural webview to explicit sizing (sentinel components keep the current
+    // geometry instead; setBounds is per-component).
+    const naturalLayout = style.width === undefined && style.height === undefined;
     // Read pending blur radius from WindowManager (set by window set-blur command).
     // Injected at build time here; runtime refresh goes through blurRefreshCallbacks.
     const windowId = payload.windowId ?? 0;
@@ -1898,21 +2185,35 @@ class WebviewSurface {
       nativeTag,
       httpsInterceptProtocols: new Set<string>(payload.httpsInterceptProtocolList ?? []),
       resizeDebounceTimer: 0,
-      onHttpsInterceptRequest: (url: string): WebResourceResponse | null => {
+      onHttpsInterceptRequest: (
+        url: string,
+        method?: string,
+        headerNames?: string[],
+        headerValues?: string[],
+      ): WebResourceResponse | null => {
         hilog.info(
           0x1999,
           "WebviewSurface",
-          "[https-intercept] onHttpsInterceptRequest enter: id=%{public}s nativeTag=%{public}s url=%{public}s",
+          "[https-intercept] onHttpsInterceptRequest enter: id=%{public}s nativeTag=%{public}s url=%{public}s method=%{public}s header_count=%{public}d",
           payload.id,
           nativeTag,
           url,
+          method ?? "GET",
+          headerNames?.length ?? 0,
         );
         try {
           const response = this.pluginContext.invokeNativeSync(
             "https-intercept",
             HTTPS_INTERCEPT_REQUEST_TYPE,
             HTTPS_INTERCEPT_RESPONSE_TYPE,
-            new WebviewHttpsInterceptRequestPayload(payload.id, nativeTag, url) as ESObject,
+            new WebviewHttpsInterceptRequestPayload(
+              payload.id,
+              nativeTag,
+              url,
+              method,
+              headerNames,
+              headerValues,
+            ) as ESObject,
           ) as WebviewHttpsInterceptResponse;
           hilog.info(
             0x1999,
@@ -1938,6 +2239,32 @@ class WebviewSurface {
           webResponse.setResponseData(bodyBuffer);
           webResponse.setResponseMimeType(response.mimeType || "application/octet-stream");
           webResponse.setResponseCode(response.status || 200);
+          // #186 (fix-variant M1): apply the protocol handler's response headers.
+          // Content-Type is excluded by the Rust extractor (carried via
+          // mimeType); parallel arrays must be present, non-empty, and
+          // length-matched -- anything else keeps the pre-M1 behavior.
+          const respHeaderNames = response.headerNames;
+          const respHeaderValues = response.headerValues;
+          if (
+            respHeaderNames !== undefined &&
+            respHeaderNames !== null &&
+            respHeaderValues !== undefined &&
+            respHeaderValues !== null &&
+            respHeaderNames.length > 0 &&
+            respHeaderNames.length === respHeaderValues.length
+          ) {
+            // `Header` is a TOP-LEVEL declare interface in the component
+            // web.d.ts (not a webview-namespace member) -- same global type the
+            // SDK's `setResponseHeader(header: Array<Header>)` names.
+            const responseHeaders: Array<Header> = [];
+            for (let h = 0; h < respHeaderNames.length; h++) {
+              responseHeaders.push({
+                headerKey: respHeaderNames[h],
+                headerValue: respHeaderValues[h] ?? "",
+              });
+            }
+            webResponse.setResponseHeader(responseHeaders);
+          }
           webResponse.setResponseIsReady(true);
           hilog.info(
             0x1999,
@@ -1975,6 +2302,8 @@ class WebviewSurface {
       eventOptions,
       controller: new webview.WebviewController(nativeTag) as WebviewController,
       style,
+      naturalLayout,
+      geometryModifier: new WebviewGeometryModifier(),
       didInitialLoad: false,
       beginControllerAttach: (): boolean => false,
       notifyNativeControllerAttached: (): void => {},
@@ -2123,23 +2452,26 @@ class WebviewSurface {
     if (payload.devtools) {
       enableWebDebuggingIfAvailable();
     }
-    // Sub-window webview mounting: when windowId is provided, use the sub-window's
-    // UIContext and component root from WindowManager instead of this module's host.
+    // Non-main-window webview mounting: when windowId is provided, use that
+    // window's UIContext and component root from WindowManager instead of this
+    // module's host.
     // (windowId already declared above at blur injection)
-    const isSubWindow = windowId > 0;
+    const isNonMainWindow = windowId > 0;
     hilog.info(
       0x1999,
       "WebviewSurface",
-      "create: id=%{public}s windowId=%{public}d isSubWindow=%{public}s",
+      "create: id=%{public}s windowId=%{public}d isNonMainWindow=%{public}s naturalLayout=%{public}s",
       payload.id,
       windowId,
-      isSubWindow ? "true" : "false",
+      isNonMainWindow ? "true" : "false",
+      String(naturalLayout),
     );
-    const wm = isSubWindow ? WindowManager.getInstance() : null;
+    const wm = isNonMainWindow ? WindowManager.getInstance() : null;
 
-    // Timing guard: if sub-window's componentRoot is not yet registered (FloatPage
-    // hasn't aboutToAppear), defer the entire create until registerComponentRoot fires.
-    if (isSubWindow && wm !== null && wm.getComponentRoot(windowId) === undefined) {
+    // Timing guard: if the non-main window's componentRoot is not yet registered
+    // (SubWindowPage — or the spawned window's page — hasn't aboutToAppear),
+    // defer the entire create until registerComponentRoot fires.
+    if (isNonMainWindow && wm !== null && wm.getComponentRoot(windowId) === undefined) {
       hilog.info(
         0x1999,
         "WebviewSurface",
@@ -2161,12 +2493,12 @@ class WebviewSurface {
       subUiCtx !== undefined ? "found" : "undefined",
       subRoot !== undefined ? "found" : "undefined",
     );
-    const builderUiCtx = isSubWindow && subUiCtx ? subUiCtx : this.pluginContext.getUIContext();
+    const builderUiCtx = isNonMainWindow && subUiCtx ? subUiCtx : this.pluginContext.getUIContext();
     const node = new BuilderNode<[ManagedWebview]>(builderUiCtx);
     const entry = new WebviewEntry(data, node);
     // Wire up close-window callback: when the webview navigates to close-window.invalid,
-    // destroy the Float sub-window via WindowManager. Notify Rust FIRST (mirrors menu.ets
-    // closeWindow and FloatPage × button) so the tauri manager drains PENDING_WINDOW_CLOSES
+    // destroy the sub-window via WindowManager. Notify Rust FIRST (mirrors menu.ets
+    // closeWindow and the SubWindowPage close button) so the tauri manager drains PENDING_WINDOW_CLOSES
     // and removes its registry entry — otherwise getByLabel returns a zombie handle and the
     // same-label window can never be rebuilt (manual_tests §二十八 close lifecycle defect).
     if (windowId > 0) {
@@ -2222,8 +2554,8 @@ class WebviewSurface {
           "create: mounted to parentHandle=%{public}s",
           parentHandle,
         );
-      } else if (isSubWindow && subRoot) {
-        // Mount into the Float sub-window's component root
+      } else if (isNonMainWindow && subRoot) {
+        // Mount into the non-main window's component root
         subRoot.appendChild(frameNode);
         hilog.info(
           0x1999,
@@ -2353,9 +2685,13 @@ class WebviewSurface {
   }
 
   async cookiesWithUrl(id: string, url: string, callContext: BridgeCallContext): Promise<string> {
-    await this.controllerEntry(id, callContext);
+    const entry = await this.controllerEntry(id, callContext);
     try {
-      return webview.WebCookieManager.fetchCookieSync(url);
+      // #188: read from the source webview's cookie store (fetchCookieSync's
+      // optional incognito selector, local SDK @ohos.web.webview.d.ts:1642).
+      // Absent style.incognito -> false = the default non-incognito store.
+      const incognito = entry.data.style.incognito === true;
+      return webview.WebCookieManager.fetchCookieSync(url, incognito);
     } catch (error) {
       throw new Error(`Unable to get WebView cookies: ${String(error)}`);
     }
@@ -2363,6 +2699,29 @@ class WebviewSurface {
 
   async clearAllBrowsingData(id: string, callContext: BridgeCallContext): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
+    // #191: the wipes below (WebStorage.deleteAllData, HttpAuthCredentials,
+    // removeCache, clearHistory) do not cover the cookie store --
+    // WebCookieManager is process-global, so wipe it first (false = the
+    // non-incognito store; both persistent and session cookies). Defensive
+    // typeof probe + try/catch (#222 precedent): clearAllCookiesSync
+    // (incognito?) is a single-block @since 11 API in @ohos.web.webview.d.ts
+    // (local SDK d.ts:1952) -- the probe stays as a device-build availability
+    // guard (shipped API surface varies), not an annotation contradiction.
+    // Unavailable or throwing: disclose via warn and continue the existing
+    // cleanup -- zero blocking, zero panic (design D4/R10).
+    try {
+      if (typeof webview?.WebCookieManager?.clearAllCookiesSync === "function") {
+        webview.WebCookieManager.clearAllCookiesSync(false);
+      } else {
+        console.warn(
+          "[WebviewPlugin] clearAllBrowsingData: WebCookieManager.clearAllCookiesSync unavailable on this SDK - cookies not wiped",
+        );
+      }
+    } catch (cookieError) {
+      console.warn(
+        `[WebviewPlugin] clearAllBrowsingData: cookie clear failed (continuing): ${String(cookieError)}`,
+      );
+    }
     try {
       webview.WebStorage.deleteAllData(true);
       webview.WebDataBase.deleteHttpAuthCredentials();
@@ -2379,6 +2738,9 @@ class WebviewSurface {
       return false;
     }
     this.entries.delete(id);
+    // #192: drop the sync-bridge controller index entry too (dispose() funnels
+    // through here, so this covers both teardown paths).
+    unregisterLiveWebviewController(id);
     // Unregister runtime blur refresh callback (sub-window webviews only).
     const wid = entry.data.windowId ?? 0;
     if (wid > 0) {
@@ -2462,6 +2824,12 @@ class WebviewSurface {
               pdfConfig.shouldPrintBackground ?? DEFAULT_PDF_CONFIG.shouldPrintBackground,
           }
         : DEFAULT_PDF_CONFIG;
+      // #233: forward the caller-supplied print scale into the system
+      // PdfConfiguration -- it was declared on WebviewPdfConfig but silently
+      // dropped here, so the rendered PDF always used the system default.
+      if (pdfConfig?.scale !== undefined) {
+        cfg.scale = pdfConfig.scale;
+      }
       const pdfData = await controller.createPdf(cfg);
       const buffer = pdfData.pdfArrayBuffer().buffer;
       if (!buffer || buffer.byteLength === 0) {
@@ -2692,18 +3060,94 @@ class WebviewSurface {
     if (!entry) {
       return false;
     }
-    // Only x/y drive the Web component's .position(); width/height are intentionally
-    // ignored — the Web uses "100%" so it follows its parent container on resize.
-    // Storing them as fixed px would pin the Web and break ArkWeb viewport tracking.
-    entry.data.style.x = x;
-    entry.data.style.y = y;
+    // Per-component semantics (decision D2 full-geometry origin + the 200x200
+    // cross-repo sentinel contract): width/height are applied just like x/y;
+    // the pre-D2 behavior intentionally ignored them, which inflated every
+    // child webview to the full container. A natural-layout webview (created
+    // without explicit style.width/height) flips to explicit sizing when an
+    // explicit width/height arrives, and stops following its parent container
+    // on window resize, matching the desktop "set_bounds breaks auto-dock"
+    // semantics.
+    //
+    // A component equal to WEBVIEW_BOUNDS_SENTINEL (i32::MIN) is "unspecified"
+    // and keeps the webview's CURRENT geometry: the baseline is read from the
+    // ArkTS-side actual layout: the style fields the builder chained (with the
+    // build-time defaults: position 0, natural "100%"), never from a Rust-side
+    // cached rect. Only the two partial-bounds arms of tauri-runtime-wry send
+    // sentinel components (SetSize sentinels the position pair, SetPosition
+    // the size pair); the auto-resize re-application arm never does - it
+    // re-applies all four components with real geometry for an armed webview
+    // and sends nothing for a natural-layout one. Where the Rust side has no
+    // real geometry it may send its 200x200 default placeholder for a
+    // component, and that still applies (only i32::MIN marks "leave the
+    // current value untouched"). Known cross-repo limitation: auto-resize
+    // disable-then-enable permanently stops the resize arm for an
+    // explicit-bounds webview (the OHOS enable arm does not re-arm), so no
+    // resize-driven refresh can be relied on after that.
+    const style = entry.data.style;
+    const applyX = x !== WEBVIEW_BOUNDS_SENTINEL;
+    const applyY = y !== WEBVIEW_BOUNDS_SENTINEL;
+    const applyWidth = width !== WEBVIEW_BOUNDS_SENTINEL;
+    const applyHeight = height !== WEBVIEW_BOUNDS_SENTINEL;
+    // Skipped-axis baseline asymmetry (PR#55 review gate F5, disclosure only,
+    // no behavior change): a skipped x/y falls back to 0 when the chained
+    // style holds a string ("50%" collapses to 0), while a skipped
+    // width/height passes the string style through (or null when absent).
+    // The Rust wire always sends numbers for real components and sentinels
+    // for unset ones, so the asymmetry is only reachable through a
+    // hand-crafted invoke.
+    const effectiveX = applyX ? x : typeof style.x === "number" ? style.x : 0;
+    const effectiveY = applyY ? y : typeof style.y === "number" ? style.y : 0;
+    const effectiveWidth = applyWidth ? width : (style.width ?? null);
+    const effectiveHeight = applyHeight ? height : (style.height ?? null);
+    // Only applied components persist into the style fields, so a later builder
+    // re-run converges to the same geometry and a skipped natural-layout size
+    // stays absent (no invented explicit px).
+    if (applyX) {
+      style.x = x;
+    }
+    if (applyY) {
+      style.y = y;
+    }
+    if (applyWidth) {
+      style.width = width;
+    }
+    if (applyHeight) {
+      style.height = height;
+    }
+    // The modifier is the actual refresh driver (BuilderNode.update does not
+    // refresh chained attributes, ohos-constraints section4.1); node.update stays for
+    // the non-geometry attributes the builder re-run owns (visibility, colors).
     entry.node.update(entry.data);
+    entry.data.geometryModifier.applyGeometry(
+      applyX || applyY ? effectiveX : null,
+      applyX || applyY ? effectiveY : null,
+      effectiveWidth,
+      effectiveHeight,
+    );
+    hilog.info(
+      0x1999,
+      "WebviewSurface",
+      "setBounds: id=%{public}s x=%{public}s y=%{public}s w=%{public}s h=%{public}s " +
+        "(per-component; keep = sentinel i32::MIN)",
+      id,
+      applyX ? String(x) : "keep",
+      applyY ? String(y) : "keep",
+      applyWidth ? String(width) : "keep",
+      applyHeight ? String(height) : "keep",
+    );
     return true;
   }
 
-  setCookie(url: string, value: string): boolean {
+  setCookie(id: string, url: string, value: string): boolean {
+    // #188: cookies are per-store -- write into the source webview's store via
+    // configCookieSync's incognito third param (local SDK
+    // @ohos.web.webview.d.ts:1717). Unknown id or absent style.incognito ->
+    // false = the default non-incognito store (previous behavior preserved).
+    const entry = this.entries.get(id);
+    const incognito = entry?.data.style.incognito === true;
     try {
-      webview.WebCookieManager.configCookieSync(url, value);
+      webview.WebCookieManager.configCookieSync(url, value, incognito);
       return true;
     } catch (error) {
       console.error("WebView set-cookie failed: " + String(error));
@@ -3044,7 +3488,7 @@ export class WebviewPlugin extends AsyncPluginBase {
       if (typeof request.value !== "string") {
         throw new Error("WebView set-cookie value must be a string");
       }
-      const accepted = surface.setCookie(request.url, request.value);
+      const accepted = surface.setCookie(request.id, request.url, request.value);
       return {
         typeName: ACKNOWLEDGEMENT_TYPE,
         value: new WebviewAcceptedResponse(accepted),
@@ -3145,6 +3589,10 @@ export class WebviewPlugin extends AsyncPluginBase {
       }
       accepted = surface.setBackgroundColor(controllerPayload.id, controllerPayload.color);
     } else if (action === "set-bounds") {
+      // All four components stay required on the wire; an unspecified component
+      // arrives as WEBVIEW_BOUNDS_SENTINEL (i32::MIN), a normal number that the
+      // per-component skip logic in setBounds consumes (200x200 cross-repo
+      // sentinel contract with tauri-runtime-wry).
       if (
         typeof controllerPayload.x !== "number" ||
         typeof controllerPayload.y !== "number" ||

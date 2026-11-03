@@ -29,28 +29,44 @@ use serde::{Deserialize, Serialize};
 // mutation during template-mode monochrome conversion.
 
 #[derive(Default, Clone, Serialize, Deserialize)]
+/// One status-bar template item (legacy plain struct, serde-shaped for
+/// menu/icon data construction; see the module-level migration note).
 pub struct StatusBarItem {
+    /// Icon payload (white/black RGBA variants).
     pub icons: StatusBarIcon,
+    /// Quick-operation slot configuration.
     pub quick_operation: QuickOperation,
+    /// Grouped menu entries rendered under the status-bar item.
     pub status_bar_group_menu: Option<Vec<Vec<StatusBarMenuItem>>>,
+    /// Hover tip text, when the item supports it.
     pub hover_tips: Option<String>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
+/// Icon resources for the status bar in light and dark modes.
 pub struct StatusBarIcon {
     #[serde(skip)]
+    /// PNG bytes shown in light mode; `None` keeps the current icon.
     pub white: RefCell<Option<Vec<u8>>>,
     #[serde(skip)]
+    /// PNG bytes shown in dark mode; `None` keeps the current icon.
     pub black: RefCell<Option<Vec<u8>>>,
+    /// Icon edge length in px.
     pub size: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+/// Quick-operation panel entry shown under the status bar icon.
 pub struct QuickOperation {
+    /// UIAbility started when the entry is tapped.
     pub ability_name: String,
+    /// Display title of the entry.
     pub title: String,
+    /// Panel height in vp.
     pub height: u32,
+    /// HAP module providing `ability_name` (defaults to the entry module).
     pub module_name: Option<String>,
+    /// Whether the host shows a loading indicator while the target ability starts.
     pub loading_status: Option<bool>,
 }
 
@@ -77,9 +93,12 @@ impl Default for QuickOperation {
 // `rename_all` restores the contract here. See spec §7.3.
 #[derive(Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// One status bar dropdown menu item.
 pub struct StatusBarMenuItem {
+    /// Display title of the item.
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Stable code echoed back in [`StatusBarMenuClickEvent`] when the item is clicked.
     pub menu_code: Option<String>,
     // CRITICAL: `Option::None` serializes to JSON `null` by default, but the OHOS
     // `statusBarManager` contract makes `subMenu`/`menuAction`/`options` *optional*
@@ -88,50 +107,70 @@ pub struct StatusBarMenuItem {
     // E level per item, then throws 401 "parameter check failed". `skip_serializing_if`
     // makes `None` *absent* (undefined) instead of null. See spec §7.3/§7.5.
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Nested submenu entries.
     pub sub_menu: Option<Vec<StatusBarSubMenuItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional click action overriding the default behavior.
     pub menu_action: Option<StatusBarMenuAction>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional icon/selection presentation options.
     pub options: Option<StatusBarMenuItemOptions>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// One nested submenu entry under [`StatusBarMenuItem`].
 pub struct StatusBarSubMenuItem {
+    /// Display title of the submenu entry.
     pub sub_title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Stable code echoed back in [`StatusBarMenuClickEvent`] when the entry is clicked.
     pub menu_code: Option<String>,
+    /// Click action executed when the entry is tapped.
     pub menu_action: StatusBarMenuAction,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Optional icon/selection presentation options.
     pub options: Option<StatusBarMenuItemOptions>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Click action descriptor: which ability the host starts on tap.
 pub struct StatusBarMenuAction {
+    /// UIAbility started when the action fires.
     pub ability_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// HAP module providing `ability_name`.
     pub module_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Action code identifying this action.
     pub menu_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// `true` marks the item as notification-only (the host skips starting an ability).
     pub notify_only: Option<bool>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Icon and selection state attached to a menu item.
 pub struct StatusBarMenuItemOptions {
     #[serde(skip)]
+    /// Icon shown for the unselected state.
     pub icon: Option<StatusBarItemIcon>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Whether the item starts out selected.
     pub selected: Option<bool>,
     #[serde(skip)]
+    /// Icon shown for the selected state.
     pub selected_icon: Option<StatusBarItemIcon>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Raw RGBA bytes of a custom item icon.
     pub icon_rgba: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Custom item icon width in px.
     pub icon_width: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Custom item icon height in px.
     pub icon_height: Option<u32>,
 }
 
@@ -149,15 +188,27 @@ impl Clone for StatusBarMenuItemOptions {
 }
 
 #[derive(Default)]
+/// Raw icon objects for a menu item, per light/dark mode.
 pub struct StatusBarItemIcon {
+    /// Light-mode icon passed through as a raw ArkTS object.
     pub white: RefCell<Option<napi_ohos::bindgen_prelude::Object<'static>>>,
+    /// Dark-mode icon passed through as a raw ArkTS object.
     pub black: RefCell<Option<napi_ohos::bindgen_prelude::Object<'static>>>,
 }
 
 #[derive(Debug, Clone)]
+/// Click notifications forwarded from the status bar (icon or menu).
 pub enum StatusBarClickEvent {
-    IconClick { click_type: String },
-    MenuClick { menu_code: String },
+    /// The status bar icon itself was clicked.
+    IconClick {
+        /// `"leftClick"` or `"rightClick"` (matches [`StatusBarIconClickEvent`]).
+        click_type: String,
+    },
+    /// A menu item was clicked.
+    MenuClick {
+        /// `menu_code` of the clicked item, as registered by Rust.
+        menu_code: String,
+    },
 }
 
 // ─── Injected event senders (owned by the status bar consumer's OHOS adapter) ──────────────
@@ -184,6 +235,7 @@ pub fn register_menu_click_sender(sender: Sender<StatusBarClickEvent>) {
 
 // ─── Bridge plugin declaration ────────────────────────────────────────────────
 
+/// Rust facade marker for the `ohos.statusbar` bridge plugin.
 pub struct StatusBarBridgePlugin;
 
 impl BridgePlugin for StatusBarBridgePlugin {
@@ -233,19 +285,27 @@ impl BridgePlugin for StatusBarBridgePlugin {
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Request to add a status bar icon with an optional quick-operation panel.
 pub struct StatusBarAddRequest {
     /// RGBA pixels for the white (light-background) icon. None = no white icon.
     pub white_icon: Option<Vec<u8>>,
     /// RGBA pixels for the black (template/dark-background) icon. None = no black icon.
     pub black_icon: Option<Vec<u8>>,
+    /// Icon edge length in px.
     pub icon_size: u32,
+    /// UIAbility backing the status bar icon.
     pub ability_name: String,
+    /// Icon title text.
     pub title: String,
+    /// Quick-operation panel height in vp.
     pub height: u32,
+    /// HAP module providing `ability_name`.
     pub module_name: Option<String>,
+    /// Whether the host shows a loading indicator while the target ability starts.
     pub loading_status: Option<bool>,
     /// Serialized `Vec<Vec<StatusBarMenuItem>>` JSON. None = no menu.
     pub menu_json: Option<String>,
+    /// Hover tip text shown when pointing at the icon (desktop form factor).
     pub hover_tips: Option<String>,
 }
 
@@ -273,15 +333,20 @@ impl From<&StatusBarItem> for StatusBarAddRequest {
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
+/// Request to remove the status bar icon (empty payload).
 pub struct StatusBarRemoveRequest {}
 
 impl_bridge_napi_type!(StatusBarRemoveRequest, "ohos.statusbar.RemoveRequest");
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Request to replace the status bar icon resources.
 pub struct StatusBarUpdateIconRequest {
+    /// New light-mode PNG bytes; `None` keeps the current icon.
     pub white_icon: Option<Vec<u8>>,
+    /// New dark-mode PNG bytes; `None` keeps the current icon.
     pub black_icon: Option<Vec<u8>>,
+    /// New icon edge length in px.
     pub icon_size: u32,
 }
 
@@ -302,6 +367,7 @@ impl From<StatusBarIcon> for StatusBarUpdateIconRequest {
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Request to replace the status bar dropdown menu items.
 pub struct StatusBarUpdateMenuRequest {
     /// Serialized `Vec<Vec<StatusBarMenuItem>>` JSON.
     pub menu_json: String,
@@ -322,7 +388,9 @@ impl From<&Vec<Vec<StatusBarMenuItem>>> for StatusBarUpdateMenuRequest {
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Request to update the status bar tips text.
 pub struct StatusBarUpdateTipsRequest {
+    /// New tips text.
     pub tips: String,
 }
 
@@ -337,20 +405,30 @@ impl_bridge_napi_type!(
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct StatusBarAboutMetadata {
+    /// Application display name.
     pub name: Option<String>,
+    /// Full version string.
     pub version: Option<String>,
     #[napi(js_name = "shortVersion")]
+    /// Short marketing version string.
     pub short_version: Option<String>,
+    /// Author list.
     pub authors: Option<Vec<String>>,
+    /// Description text.
     pub comments: Option<String>,
+    /// Copyright notice.
     pub copyright: Option<String>,
+    /// License name.
     pub license: Option<String>,
+    /// Project website URL.
     pub website: Option<String>,
 }
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Request executing one predefined status bar action.
 pub struct StatusBarPredefinedRequest {
+    /// Predefined action name understood by the host page.
     pub action: String,
     /// Metadata for the `about` action; ignored by every other action.
     #[napi(js_name = "aboutMetadata")]
@@ -364,7 +442,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Generic acknowledgement returned by status bar commands.
 pub struct StatusBarAcknowledgement {
+    /// `true` when the ArkTS side accepted the command.
     pub accepted: bool,
 }
 
@@ -386,6 +466,7 @@ impl StatusBarAcknowledgement {
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Wire form of the status bar icon click notification.
 pub struct StatusBarIconClickEvent {
     /// "leftClick" or "rightClick"
     pub click_type: String,
@@ -395,7 +476,9 @@ impl_bridge_napi_type!(StatusBarIconClickEvent, "ohos.statusbar.IconClickEvent")
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Wire form of the status bar menu click notification.
 pub struct StatusBarMenuClickEvent {
+    /// `menu_code` of the clicked item, as registered by Rust.
     pub menu_code: String,
 }
 
@@ -416,6 +499,10 @@ pub struct StatusBarClient {
 }
 
 impl StatusBarClient {
+    /// Builds a status bar client bound to the app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
@@ -484,6 +571,10 @@ impl StatusBarClient {
 
 /// Extension trait providing the `statusbar()` client on `OpenHarmonyApp`.
 pub trait StatusBarExt {
+    /// Returns the status bar client for this app.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     fn statusbar(&self) -> Result<StatusBarClient>;
 }
 

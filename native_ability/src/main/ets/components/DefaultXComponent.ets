@@ -104,7 +104,7 @@ export struct DefaultXComponent {
     // Spawned UIAbility-instance window (design.md OQ3 multi-root): moduleName
     // is set (same process modules) AND windowId > 0 (pre-allocated by tao).
     // The window's webview content mounts through the same WindowManager
-    // multi-root path as Float sub-windows — register the component root and
+    // multi-root path as sub-windows - register the component root and
     // UIContext keyed by this window id so WebviewSurface.create can build its
     // BuilderNode against them. The native render tree, render-owner claim and
     // bridge component attachment stay with the primary instance
