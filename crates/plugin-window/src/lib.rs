@@ -1155,46 +1155,66 @@ mod tests {
 
     #[test]
     fn ut_decoration_flags_facade_body_has_no_rust_side_main_window_pregate() {
-        // Brief (A55R-5 review follow-up): the test above pins that id 0 passes
-        // the shared validation, but a future main-window pre-gate added inside
-        // the `set_window_decoration_flags` body (before the dispatch) would
-        // still turn the #238 Err into a Rust validation message. A live
-        // behavioral probe ("call the facade and assert the error comes from
-        // the transport, not a Rust gate") is not executable on the host:
-        // `BridgeRuntime` is only constructible from a real N-API Env, so a
-        // `WindowClient` cannot be built here (same limitation recorded on
-        // `validate_resize_args`). The next-strongest enforceable assertion
-        // pins the facade body itself: it must keep the shared window-id
-        // validation, dispatch the frozen wire request, and contain none of the
-        // shapes a main-window pre-gate would take (an id comparison, an early
-        // `return Err`, or a delegate to a main-window classifier). This fails
-        // the build the moment such a gate is added to the facade.
+        // Brief (A55R-5 review follow-up, #251 item-2 hardening): the facade
+        // must dispatch EVERY UIAbility-main-window id to the ArkTS bridge --
+        // the #238 Err is the ArkTS throw, never a Rust-side gate.
+        //
+        // Behavioral arm (call the facade with id 0 and assert the error
+        // identity comes from the transport) is not executable on the host:
+        // `BridgeRuntime::from_bindings` is only reachable from a live N-API
+        // `Env`, and `WindowClient::call` is a private inherent method, so no
+        // host stub can substitute the transport (same limitation recorded on
+        // `validate_resize_args`). The enforceable-next-strongest assertion is
+        // structural but SHAPE-based, not marker-based: the whole facade body,
+        // comment-stripped and whitespace-normalized, must equal the frozen
+        // contract shape (shared validation -> inline wire-request dispatch ->
+        // response ensure). Unlike a marker blocklist, ANY pre-gate shape
+        // fails this: a `matches!(window_id, 0)`, an `if` / early
+        // `return Err`, or a delegation to a same-file helper
+        // (`if is_main_window(window_id) { .. }`) all change the normalized
+        // body, and a helper cannot hide the gate because its call site lives
+        // in this body. Comment-only edits do not (comments are stripped), so
+        // the assertion stays maintainable.
         let src = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
         let body = facade_fn_body(src, "set_window_decoration_flags");
-        assert!(
-            body.contains("validate_window_id(window_id)"),
-            "set_window_decoration_flags must keep the shared window-id validation"
+        let inner = body[body.find('{').expect("facade fn has a body") + 1..]
+            .trim_end()
+            .strip_suffix('}')
+            .expect("facade body slice ends with the fn closing brace");
+        assert_eq!(
+            normalize_rust_fragment(inner),
+            "validate_window_id(window_id)?; \
+             self.call::<DecorationFlagsRequest, WindowAcknowledgement>( \
+             \"set-decoration-flags\", DecorationFlagsRequest { window_id, flags }, ) \
+             .await? .ensure()",
+            "set_window_decoration_flags must stay exactly: shared window-id \
+             validation -> unconditional dispatch of the frozen \
+             DecorationFlagsRequest wire contract -> response ensure. Any \
+             Rust-side main-window pre-gate (id comparison, matches!, helper \
+             delegation, early return) added before the dispatch is a #238 \
+             regression -- the Err must come from the ArkTS throw."
         );
-        assert!(
-            body.contains("DecorationFlagsRequest { window_id, flags }"),
-            "set_window_decoration_flags must dispatch the frozen DecorationFlagsRequest wire contract"
-        );
-        for pregate_marker in [
-            "window_id == 0",
-            "window_id != 0",
-            "window_id > 0",
-            "window_id < 0",
-            "return Err(",
-            "is_uiability_main_window",
-            "isUIAbilityMainWindow",
-        ] {
-            assert!(
-                !body.contains(pregate_marker),
-                "set_window_decoration_flags gained a Rust-side main-window pre-gate \
-                 (marker {pregate_marker:?}) -- the #238 Err must come from the ArkTS throw, \
-                 not from a Rust-side gate"
-            );
-        }
+    }
+
+    /// Normalizes a Rust source fragment for structural comparison: drops
+    /// `//` line comments, then collapses every whitespace run to one space.
+    ///
+    /// Not a lexer: a `//` inside a string literal is stripped too. The
+    /// helpers are only applied to this file's facade bodies, whose string
+    /// literals are frozen wire names without `//`; a future literal with
+    /// `//` makes the comparison fail loudly (fail-safe direction), never
+    /// silently pass.
+    fn normalize_rust_fragment(src: &str) -> String {
+        src.lines()
+            .map(|line| match line.find("//") {
+                Some(idx) => &line[..idx],
+                None => line,
+            })
+            .collect::<Vec<&str>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .join(" ")
     }
 
     /// Slices the body of one `fn <name>(...)` definition out of a source file.

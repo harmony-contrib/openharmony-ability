@@ -66,7 +66,7 @@
 
 **P0-1 ArkTS `tauri_window_id`/`tauri_transparent` want 键 — 死读取，直接删除**
 - 位置：`NativeAbility.ets:492,506`（读取），调用方 :242,:371-372,:470
-- 事实：**全工作区零写入方**（tao/wry/tauri/tray-icon/模板/gen 目录 grep 均无），readWindowId 恒返 0、readTransparent 恒返 false；多窗口实际走 WindowManager Float 子窗口，不经多 ability 实例。这是旧"多实例传参"契约的尸体。
+- 事实：**全工作区零写入方**（tao/wry/tauri/tray-icon/模板/gen 目录 grep 均无），readWindowId 恒返 0、readTransparent 恒返 false；多窗口实际走 WindowManager 悬浮子窗口，不经多 ability 实例。这是旧"多实例传参"契约的尸体。
 - 修法：删除两个读取函数 + 3 处调用点改字面量 `0`/`false`（或直接内联默认值）。与 Rust 侧 window/mod.rs:272 注释（"ohos_window_id 协议已不使用"）的口径统一为"want 传参协议已废弃"。
 - 风险：低（现网行为即 0/false，删除不改行为）。
 

@@ -360,6 +360,141 @@ mod tests {
         assert_eq!(Key::Escape.as_str(), "Escape");
     }
 
+    /// UT for `Key::from_name` round-trip (#251 item 4: the 75-row mapping
+    /// had no unit test, so a table edit could silently break parsing).
+    ///
+    /// # Brief
+    /// 1. Round-trip: `Key::from_name(key.as_str()) == Some(key)` for every
+    ///    one of the 75 `Key` variants, enumerated in declaration order.
+    /// 2. Table invariants: every `NAME_TABLE` row's name equals `as_str()`
+    ///    for its variant (the doc-comment promise), names are unique (no
+    ///    shadowed row), and the table holds exactly 75 rows -- adding,
+    ///    removing, or renaming a row fails here instead of silently
+    ///    regressing.
+    /// 3. Negative: unknown names (lowercase forms, a modifier name, an
+    ///    out-of-range function key, empty/padded strings) parse to `None`.
+    #[test]
+    fn ut_key_from_name_round_trips_every_variant() {
+        const ALL_KEYS: [Key; 75] = [
+            // Letters
+            Key::A,
+            Key::B,
+            Key::C,
+            Key::D,
+            Key::E,
+            Key::F,
+            Key::G,
+            Key::H,
+            Key::I,
+            Key::J,
+            Key::K,
+            Key::L,
+            Key::M,
+            Key::N,
+            Key::O,
+            Key::P,
+            Key::Q,
+            Key::R,
+            Key::S,
+            Key::T,
+            Key::U,
+            Key::V,
+            Key::W,
+            Key::X,
+            Key::Y,
+            Key::Z,
+            // Digits
+            Key::Digit0,
+            Key::Digit1,
+            Key::Digit2,
+            Key::Digit3,
+            Key::Digit4,
+            Key::Digit5,
+            Key::Digit6,
+            Key::Digit7,
+            Key::Digit8,
+            Key::Digit9,
+            // Function keys
+            Key::F1,
+            Key::F2,
+            Key::F3,
+            Key::F4,
+            Key::F5,
+            Key::F6,
+            Key::F7,
+            Key::F8,
+            Key::F9,
+            Key::F10,
+            Key::F11,
+            Key::F12,
+            Key::F13,
+            Key::F14,
+            Key::F15,
+            Key::F16,
+            Key::F17,
+            Key::F18,
+            Key::F19,
+            Key::F20,
+            Key::F21,
+            Key::F22,
+            Key::F23,
+            Key::F24,
+            // Special keys
+            Key::Space,
+            Key::Enter,
+            Key::Escape,
+            Key::Tab,
+            Key::Backspace,
+            Key::Delete,
+            Key::Insert,
+            Key::Home,
+            Key::End,
+            Key::PageUp,
+            Key::PageDown,
+            Key::ArrowUp,
+            Key::ArrowDown,
+            Key::ArrowLeft,
+            Key::ArrowRight,
+        ];
+        for key in ALL_KEYS {
+            assert_eq!(
+                Key::from_name(key.as_str()),
+                Some(key),
+                "Key::{key:?} round-trip broken: from_name({:?}) does not return it",
+                key.as_str()
+            );
+        }
+        // Table-level invariants: exact row count, row name == as_str(), and
+        // no duplicate names (a duplicate would shadow the later row).
+        assert_eq!(
+            Key::NAME_TABLE.len(),
+            75,
+            "NAME_TABLE row count changed -- update ALL_KEYS and this assert together"
+        );
+        let mut names: Vec<&str> = Key::NAME_TABLE.iter().map(|(name, _)| *name).collect();
+        names.sort_unstable();
+        let row_count = names.len();
+        names.dedup();
+        assert_eq!(names.len(), row_count, "duplicate NAME_TABLE names");
+        for (idx, (name, key)) in Key::NAME_TABLE.iter().enumerate() {
+            assert_eq!(
+                *name,
+                key.as_str(),
+                "NAME_TABLE row {idx}: name {name:?} != as_str() for Key::{key:?}"
+            );
+        }
+        // Negative cases: names outside the table must not parse.
+        for unknown in [
+            "a", "z", "semi", "F25", "F0", "Meta", "Ctrl", "control", "", "Space ", " space",
+        ] {
+            assert_eq!(
+                Key::from_name(unknown),
+                None,
+                "unknown name {unknown:?} must not parse"
+            );
+        }
+    }
+
     #[test]
     fn shortcut_state_variants() {
         let pressed = ShortcutState::Pressed;

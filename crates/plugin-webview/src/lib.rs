@@ -344,8 +344,9 @@ pub struct WebviewStyle {
     pub visible: Option<bool>,
     /// Optional background color (CSS color string, e.g. `#RRGGBB`).
     pub background_color: Option<String>,
-    /// Run the Web component in incognito mode (`WebOptions.incognitoMode`, SDK20 @since 20):
-    /// cookies/records/geolocation permissions stay out of persistent storage. Absent (or
+    /// Run the Web component in incognito mode (`WebOptions.incognitoMode`,
+    /// @since 11; @since 18 crossplatform/atomicservice): cookies/records/geolocation
+    /// permissions stay out of persistent storage. Absent (or
     /// false) keeps the default non-incognito behavior byte-identical to the previous wire.
     pub incognito: Option<bool>,
 }
