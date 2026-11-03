@@ -147,7 +147,7 @@ pub struct ClipboardWriteHtmlRequest {
     /// HTML markup to place on the clipboard.
     pub html: String,
     /// Optional plain-text alternate representation. `None` serializes as an
-    /// absent `altText` property on the wire (never a JS `null` — the
+    /// absent `altText` property on the wire (never a JS `null` - the
     /// Option-wire-omit convention; see WebviewPlugin's
     /// WebviewDownloadStartResponse.tempPath). The ArkTS side writes it as a
     /// coexisting `text/plain` pasteboard record. (plugins-workspace#214)
@@ -287,7 +287,7 @@ impl ClipboardClient {
     ///
     /// `alt_text`, when `Some`, is written as a coexisting plain-text
     /// (`text/plain`) pasteboard record so plain-text paste targets (and
-    /// `read_text`) observe it — mirroring arboard's `set_html(html, alt)`
+    /// `read_text`) observe it - mirroring arboard's `set_html(html, alt)`
     /// on desktop. An empty string is treated as absent.
     pub async fn write_html(
         &self,

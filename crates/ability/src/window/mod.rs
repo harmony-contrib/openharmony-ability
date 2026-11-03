@@ -509,7 +509,11 @@ pub fn take_color_mode_failure() -> Option<(i32, String)> {
 #[napi]
 pub fn notify_set_color_mode_failed(code: i32, message: String) {
     note_color_mode_failed(code, &message);
-    crate::error!("notify_set_color_mode_failed: code={} message={}", code, message);
+    crate::error!(
+        "notify_set_color_mode_failed: code={} message={}",
+        code,
+        message
+    );
     crate::waker::wake_installed_app();
 }
 

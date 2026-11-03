@@ -129,7 +129,8 @@ export interface AbilityInitContext {
   prefPath?: string;
   preferredLocales?: string;
   moduleName?: string;
-  /** HAP module name from `currentHapModuleInfo.name` (e.g. `entry_desktop`) — NOT the .so library name carried by `moduleName`. */
+  /** HAP module name from `currentHapModuleInfo.name` (e.g. `entry_desktop`)
+   * -- NOT the .so library name carried by `moduleName`. */
   hapModuleName?: string;
   resourceManager?: resourceManager.ResourceManager;
   sdkApiVersion?: number;
