@@ -35,6 +35,12 @@ export default class EntryAbility extends NativeAbility {
 Rust 侧还需注册 `FilesBridgePlugin`，并通过 `FilesExt::show_file_dialog` 发起调用。使用示例见
 [Rust facade README](../../crates/plugin-files/README.zh-CN.md)。
 
+若应用通过临时文件加原子替换写入目标路径，使用 `new FilesPlugin(false)`。
+在 API 23+ 且支持 `SystemCapability.FileManagement.UserFileService.FolderSelection`
+的设备上，保存选择器不会预创建空文件，由调用方负责创建。默认构造方式保留系统
+预创建空文件的行为；较低 API 或不支持该能力的设备沿用平台默认行为。
+这是宿主配置，不改变具名 N-API 请求与响应契约。
+
 ## Plugin 契约
 
 | 字段 | 值 |
