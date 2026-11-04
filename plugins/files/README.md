@@ -34,6 +34,13 @@ export default class EntryAbility extends NativeAbility {
 
 Register `FilesBridgePlugin` in Rust and call `FilesExt::show_file_dialog`. See the [Rust facade README](../../crates/plugin-files/README.md).
 
+For applications that write through a temporary file and atomically replace the chosen
+path, construct `new FilesPlugin(false)`. On API 23+ devices with
+`SystemCapability.FileManagement.UserFileService.FolderSelection`, the save picker
+then leaves creation to the caller. The default constructor retains the system's
+empty-file creation behavior. Older or unsupported devices retain the platform default.
+This is host configuration; the named N-API request/response contract is unchanged.
+
 ## Plugin contract
 
 | Field | Value |
