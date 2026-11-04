@@ -32,8 +32,7 @@ interface SetColorModeRequest {
   colorMode: number;
 }
 
-interface RestartRequest {
-}
+interface RestartRequest {}
 
 interface StartUiAbilityRequest {
   windowId: number;
@@ -47,7 +46,6 @@ interface StartUiAbilityRequest {
   left?: number;
   top?: number;
 }
-
 
 class TerminateResponse {
   readonly accepted: boolean;
@@ -130,7 +128,9 @@ function parseRestartRequest(payload: BridgeTypedValue): RestartRequest {
 
 function parseStartUiAbilityRequest(payload: BridgeTypedValue): StartUiAbilityRequest {
   if (payload.typeName !== START_UI_ABILITY_REQUEST_TYPE || typeof payload.value !== "object") {
-    throw new Error(`ohos.app-control.start-ui-ability requires bridge type ${START_UI_ABILITY_REQUEST_TYPE}`);
+    throw new Error(
+      `ohos.app-control.start-ui-ability requires bridge type ${START_UI_ABILITY_REQUEST_TYPE}`,
+    );
   }
   const request = payload.value as StartUiAbilityRequest;
   // windowId must be a positive integer: 0 is the process's original
@@ -208,7 +208,9 @@ export class AppControlPlugin extends SyncPluginBase {
       };
       const applicationContext = ctx.getApplicationContext();
       if (typeof applicationContext.restartApp !== "function") {
-        throw new Error("restart requires API level 12+ on OpenHarmony (restartApp is unavailable)");
+        throw new Error(
+          "restart requires API level 12+ on OpenHarmony (restartApp is unavailable)",
+        );
       }
       applicationContext.restartApp(want);
       return { typeName: RESTART_RESPONSE_TYPE, value: new RestartResponse(true) };
@@ -286,7 +288,9 @@ export class AppControlPlugin extends SyncPluginBase {
       if (request.top !== undefined) {
         options.windowTop = request.top;
       }
-      console.info(`[AppControl] start-ui-ability: id=${request.windowId} label=${request.label} url='${request.url}' transparent=${request.transparent} geometry=${request.width ?? "*"}x${request.height ?? "*"}@${request.left ?? "*"},${request.top ?? "*"}`);
+      console.info(
+        `[AppControl] start-ui-ability: id=${request.windowId} label=${request.label} url='${request.url}' transparent=${request.transparent} geometry=${request.width ?? "*"}x${request.height ?? "*"}@${request.left ?? "*"},${request.top ?? "*"}`,
+      );
       // Escape the NAPI re-entrancy context before calling AMS: startAbility
       // invoked synchronously inside a bridge (MainThreadSync) callback drops
       // want.parameters (multi-uiability-windows design D1). Fire-and-forget —
@@ -295,7 +299,9 @@ export class AppControlPlugin extends SyncPluginBase {
       // response (accepted = "dispatched", not "instance created").
       setTimeout(() => {
         ctx.startAbility(want, options).catch((e: BusinessError) => {
-          console.error(`[AppControl] start-ui-ability id=${request.windowId} failed: ${e.code} ${e.message}`);
+          console.error(
+            `[AppControl] start-ui-ability id=${request.windowId} failed: ${e.code} ${e.message}`,
+          );
           // accepted ≠ created: the Rust caller already returned Ok and tao
           // pre-registered the pending D7 handshake entry plus the label→id
           // pairing, so an AMS rejection here (this want never creates a
@@ -311,12 +317,15 @@ export class AppControlPlugin extends SyncPluginBase {
           // catch must not hilog — NAPI re-entrancy turns the log itself into
           // a thrown error and swallows the original one).
           try {
-            const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+            const nativeModule: Module | undefined =
+              AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
             if (nativeModule && typeof nativeModule.notifyUiAbilityStartFailed === "function") {
               nativeModule.notifyUiAbilityStartFailed(request.windowId);
             }
           } catch (notifyErr) {
-            console.error(`[AppControl] start-ui-ability rollback notify failed: ${String(notifyErr)}`);
+            console.error(
+              `[AppControl] start-ui-ability rollback notify failed: ${String(notifyErr)}`,
+            );
           }
         });
       }, 0);
@@ -356,9 +365,27 @@ export class AppControlPlugin extends SyncPluginBase {
     setTimeout(() => {
       try {
         applicationContext.setColorMode(colorMode);
-      } catch (err) {
-        // The ability may have been destroyed between scheduling and execution.
-        // Silently swallow — the response was already accepted.
+      } catch (e) {
+        // The ability may have been destroyed between scheduling and execution
+        // (e.g. 16000011 "context does not exist"). The bridge response has
+        // already returned accepted ("queued"), so surface the execution
+        // failure instead of swallowing it — the same deferred-catch contract
+        // as start-ui-ability above (issue Eulogizethesun/tauri#222 / C85).
+        // console.error only: this timeout callback has escaped the NAPI
+        // re-entrancy context, matching terminate/show-ability catches.
+        const err = e as BusinessError;
+        console.error(`[AppControl] setColorMode failed: ${err.code} ${err.message}`);
+        // typeof-probed optional export: a stale .so without it keeps the
+        // pre-fix silent-swallow semantics instead of throwing a new error.
+        try {
+          const nativeModule: Module | undefined =
+            AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+          if (nativeModule && typeof nativeModule.notifySetColorModeFailed === "function") {
+            nativeModule.notifySetColorModeFailed(err.code, err.message);
+          }
+        } catch (notifyErr) {
+          console.error(`[AppControl] setColorMode failure notify failed: ${String(notifyErr)}`);
+        }
       }
     }, 0);
   }

@@ -2,18 +2,13 @@
   "module": {
     "name": "native_ability",
     "type": "har",
-    "deviceTypes": [
-      "default",
-      "tablet",
-      "2in1"
-    ],
-    "requestPermissions": [
-      {
-        "name": "ohos.permission.SET_WINDOW_TRANSPARENT"
-      },
-      {
-        "name": "ohos.permission.LOCK_WINDOW_CURSOR"
-      }
-    ]
-  }
+    "deviceTypes": ["default", "tablet", "2in1"],
+    // requestPermissions deliberately omitted: a HAR module's permissions are
+    // NOT carried by the packaged har (pack.bat only copies ets sources), so
+    // entries here only leak into apps that depend on the *source* tree (the
+    // demo) — the app's own module.json5 is the real declaration point.
+    // SET_WINDOW_TRANSPARENT + LOCK_WINDOW_CURSOR moved to
+    // demo/entry/src/main/module.json5 (issue Eulogizethesun/tauri#220/C81);
+    // tauri apps declare them via the tauri-cli template.
+  },
 }

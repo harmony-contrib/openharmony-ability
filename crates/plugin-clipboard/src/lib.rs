@@ -146,6 +146,12 @@ pub struct ClipboardImage {
 pub struct ClipboardWriteHtmlRequest {
     /// HTML markup to place on the clipboard.
     pub html: String,
+    /// Optional plain-text alternate representation. `None` serializes as an
+    /// absent `altText` property on the wire (never a JS `null` - the
+    /// Option-wire-omit convention; see WebviewPlugin's
+    /// WebviewDownloadStartResponse.tempPath). The ArkTS side writes it as a
+    /// coexisting `text/plain` pasteboard record. (plugins-workspace#214)
+    pub alt_text: Option<String>,
 }
 
 impl_bridge_napi_type!(ClipboardWriteHtmlRequest, "ohos.clipboard.WriteHtmlRequest");
@@ -278,11 +284,23 @@ impl ClipboardClient {
     }
 
     /// Writes HTML content to the system clipboard.
-    pub async fn write_html(&self, html: impl Into<String>) -> Result<()> {
+    ///
+    /// `alt_text`, when `Some`, is written as a coexisting plain-text
+    /// (`text/plain`) pasteboard record so plain-text paste targets (and
+    /// `read_text`) observe it - mirroring arboard's `set_html(html, alt)`
+    /// on desktop. An empty string is treated as absent.
+    pub async fn write_html(
+        &self,
+        html: impl Into<String>,
+        alt_text: Option<String>,
+    ) -> Result<()> {
         let response = self
             .call::<ClipboardWriteHtmlRequest, ClipboardWriteHtmlResponse>(
                 "write-html",
-                ClipboardWriteHtmlRequest { html: html.into() },
+                ClipboardWriteHtmlRequest {
+                    html: html.into(),
+                    alt_text,
+                },
             )
             .await?;
         if response.accepted {

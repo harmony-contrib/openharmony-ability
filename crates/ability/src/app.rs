@@ -36,6 +36,10 @@ pub struct AbilityInitContext {
     pub preferred_locales: Option<String>,
     /// HAP module name the ability belongs to.
     pub module_name: Option<String>,
+    /// HAP module name (`currentHapModuleInfo.name`, e.g. `entry_desktop`) --
+    /// distinct from [`Self::module_name`], which carries the `.so` library name.
+    #[napi(js_name = "hapModuleName")]
+    pub hap_module_name: Option<String>,
     /// OpenHarmony SDK API level of the running device.
     pub sdk_api_version: Option<i32>,
     /// HarmonyOS distribution API version (`M*10000 + S*100 + F`).
@@ -59,6 +63,7 @@ impl AbilityInitContext {
             pref_path: context.get("prefPath")?,
             preferred_locales: context.get("preferredLocales")?,
             module_name: context.get("moduleName")?,
+            hap_module_name: context.get("hapModuleName")?,
             sdk_api_version: context.get("sdkApiVersion")?,
             distribution_api_version: context.get("distributionOSApiVersion")?,
         })
@@ -597,6 +602,12 @@ impl OpenHarmonyApp {
     /// Returns the HAP module name, when the ArkTS entry provided one.
     pub fn module_name(&self) -> Option<String> {
         self.init_context().module_name
+    }
+
+    /// HAP module name (e.g. `entry_desktop`), as opposed to the `.so` library
+    /// name returned by [`Self::module_name`].
+    pub fn hap_module_name(&self) -> Option<String> {
+        self.init_context().hap_module_name
     }
 
     /// Returns the ability-scoped base directory, when provided.

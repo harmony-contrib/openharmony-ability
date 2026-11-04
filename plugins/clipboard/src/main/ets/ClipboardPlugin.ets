@@ -42,6 +42,9 @@ interface WriteImageRequest {
 
 interface WriteHtmlRequest {
   html: string;
+  // Optional plain-text alternate (Rust Option<String>): absent when None —
+  // the Option-wire-omit convention (never a JS null on the wire).
+  altText?: string;
 }
 
 interface ClearRequest {}
@@ -227,7 +230,22 @@ export class ClipboardPlugin extends AsyncPluginBase {
       if (typeof request.html !== "string") {
         throw new Error("write-html.html must be a string");
       }
+      // Optional plain-text alternate: absent when the Rust side passed None
+      // (Option-wire omit) — validate only when present.
+      if (request.altText !== undefined && typeof request.altText !== "string") {
+        throw new Error("write-html.altText must be a string when present");
+      }
       const pasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_HTML, request.html);
+      // Coexisting plain-text record for the alt text — the official addRecord
+      // (mimeType, value) doc names exactly this "plain text and HTML
+      // coexisting" case and requires non-empty inputs ("all inputs must be
+      // non-empty, otherwise the add fails"), so an empty
+      // altText is treated as absent (zero-diff with today's behavior).
+      // HTML stays the primary (first) record; mirrors arboard's
+      // set_html(html, alt). (plugins-workspace#214)
+      if (request.altText !== undefined && request.altText.length > 0) {
+        pasteData.addRecord(pasteboard.MIMETYPE_TEXT_PLAIN, request.altText);
+      }
       const systemPasteboard = pasteboard.getSystemPasteboard();
       await systemPasteboard.setData(pasteData);
       return {

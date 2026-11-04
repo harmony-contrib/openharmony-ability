@@ -458,6 +458,90 @@ pub fn notify_ui_ability_start_failed(window_id: i64) {
     crate::waker::wake_installed_app();
 }
 
+// ─── setColorMode deferred failure trace (issue Eulogizethesun/tauri#222) ────
+//
+// set-color-mode is a MainThreadSync bridge action whose actual setColorMode
+// call runs on a deferred tick (setTimeout(0) — ohos-constraints 4.3 deadlock
+// avoidance), so by construction the bridge response has already returned
+// accepted=true ("queued") before execution. An execution failure (e.g.
+// 16000011 "The context does not exist" teardown race) used to be swallowed
+// by an empty ArkTS catch — the caller's `!accepted` leg could never fire.
+// The AppControlPlugin now reports it through notify_set_color_mode_failed.
+//
+// Unlike the spawn-rejection trace there is nothing to roll back (no registry
+// or queue is mutated by set-color-mode), so this is a single-slot diagnostic:
+// the latest failure is the one a caller diagnosing "theme didn't change"
+// needs. Keyed by nothing — the app has exactly one application context.
+
+static COLOR_MODE_FAILURE: Mutex<Option<(i32, String)>> = Mutex::new(None);
+
+fn color_mode_failure() -> std::sync::MutexGuard<'static, Option<(i32, String)>> {
+    // Poisoned lock: same policy as the pending registry — keep serving, the
+    // trace is diagnostic only.
+    COLOR_MODE_FAILURE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Records the latest deferred setColorMode failure reported by the ArkTS
+/// side (AppControlPlugin.ets deferred catch). Overwrites any earlier failure:
+/// the slot holds "most recent", not a history.
+pub fn note_color_mode_failed(code: i32, message: &str) {
+    *color_mode_failure() = Some((code, message.to_string()));
+}
+
+/// Takes the latest recorded setColorMode failure. Consuming keeps the slot
+/// bounded and makes "none since last check" a meaningful answer. No caller
+/// is wired in this workspace yet — the failure surface today is the error
+/// log (ArkTS console.error + this crate's error!); the slot is the polling
+/// API for an embedder that wants programmatic access.
+pub fn take_color_mode_failure() -> Option<(i32, String)> {
+    color_mode_failure().take()
+}
+
+/// NAPI: Called by the ArkTS `set-color-mode` handler's deferred catch
+/// (AppControlPlugin.ets) when setColorMode fails on the deferred tick. No
+/// rollback applies (see the section note above) — this records the failure
+/// and logs it. No consumer reads the slot yet (a tao event-loop drain was
+/// the deferred optional enhancement); the loop wake is kept so such a
+/// consumer, once wired, reads it promptly instead of waiting for an
+/// unrelated event.
+#[napi]
+pub fn notify_set_color_mode_failed(code: i32, message: String) {
+    note_color_mode_failed(code, &message);
+    crate::error!(
+        "notify_set_color_mode_failed: code={} message={}",
+        code,
+        message
+    );
+    crate::waker::wake_installed_app();
+}
+
+#[cfg(test)]
+mod color_mode_failure_tests {
+    use super::*;
+
+    #[test]
+    fn note_overwrites_and_take_consumes() {
+        // Only this test touches the slot, so the cold-start state is empty.
+        assert!(take_color_mode_failure().is_none());
+        note_color_mode_failed(16000011, "context does not exist");
+        assert_eq!(
+            take_color_mode_failure(),
+            Some((16000011, "context does not exist".to_string()))
+        );
+        // Consuming clears the slot — "none since last check" is meaningful.
+        assert!(take_color_mode_failure().is_none());
+        // The slot holds the LATEST failure, not a history.
+        note_color_mode_failed(401, "parameter error");
+        note_color_mode_failed(16000011, "context does not exist");
+        assert_eq!(
+            take_color_mode_failure(),
+            Some((16000011, "context does not exist".to_string()))
+        );
+    }
+}
+
 // ─── UIAbility spawn rejection trace (mobile-form fail-fast surfacing) ──────
 //
 // tao's desktop-only spawn gate (window.rs) rejects a mobile-form UIAbility
