@@ -64,8 +64,10 @@ export function unregisterMenuBarRecoverFn(windowId: number | string): void {
 // --- Per-window menu data callback registry (MW-5) ---
 export interface MenuDataCallback {
   onMenubarJson?: (json: string) => void;
+  onMenubarItems?: (items: MenuItemData[]) => void;
   onMenubarVisible?: (visible: boolean) => void;
   onMenuPopup?: (json: string, x: number, y: number) => void;
+  onMenuPopupItems?: (items: MenuItemData[], x: number, y: number) => void;
   onMenuCommands?: (items: MenuItemData[], x: number, y: number, restoreFocusId?: string) => void;
   onMenuShown?: (shown: boolean) => void;
   onApplicationMenu?: (

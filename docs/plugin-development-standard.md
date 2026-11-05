@@ -226,6 +226,11 @@ export { LoginPlugin };
 | `ohos.notification` / `show` | `ohos.notification.ShowRequest { tag, title, body, actions }` → `ohos.notification.Acknowledgement { accepted }` | async / `ability`；最多 3 个 action；响应 URI scheme 由 ArkTS 工厂的 `NotificationPlugin({ scheme })` 配置 |
 | `ohos.system-state` | `ohos.system-state.*` 具名类型 | async / `ability`；ID 与 typeName 前缀统一；Rust facade 和 ArkTS HAR 必须配套更新，旧 `ohos.system_state.*` 类型名不再使用 |
 | `ohos.menu` / 入站 `menu-open` | `ohos.menu.MenuOpenEvent { windowId }` → `std.bool` | 菜单打开通道传递完整事件和来源窗口 ID（主窗为 `main`），消费者可按窗口处理 |
+| `ohos.menu` / `set-menubar-items` | `ohos.menu.SetMenubarItemsRequest { items: MenuItemData[], windowId }` → `ohos.menu.Acknowledgement` | async / `ui-context`；保留 `set-menubar`，结构化菜单沿用相同渲染、快捷键提示与窗口路由 |
+| `ohos.menu` / `popup-items` | `ohos.menu.PopupItemsRequest { items: MenuItemData[], x?, y?, windowId }` → `ohos.menu.Acknowledgement` | async / `ui-context`；保留 `popup`，坐标默认为 0 且必须有限 |
+| `ohos.statusbar` / `add-items` | `ohos.statusbar.AddItemsRequest { whiteIcon?, blackIcon?, iconSize, abilityName, title, height, moduleName?, loadingStatus?, menuGroups?, hoverTips? }` → `ohos.statusbar.Acknowledgement` | async / `ability`；结构化菜单组；兼容保留 `add` / `AddRequest` 的 `menuJson` 字段 |
+| `ohos.statusbar` / `update-menu-items` | `ohos.statusbar.UpdateMenuItemsRequest { menuGroups }` → `ohos.statusbar.Acknowledgement` | async / `ability`；空数组清空菜单；兼容保留 `update-menu` / `UpdateMenuRequest` 的 `menuJson` 字段 |
+| `ohos.statusbar` / `remove` | `ohos.statusbar.RemoveRequest {}` → `ohos.statusbar.Acknowledgement` | async / `ability`；调用平台前校验请求类型 |
 | `ohos.window` / `set-status-bar` | `ohos.window.StatusBarRequest { windowId, enabled, lightContent, background?, animated }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；API 12，windowId=0 路由实际组件窗口；仅修改状态栏，保留导航栏状态；遵循平台主窗口全屏/最大化生效规则 |
 | `ohos.window` / `get-avoid-area` | `ohos.window.AvoidAreaRequest { areaType }` → `ohos.window.AvoidAreaResponse { area }` | async / `ui-context`；查询当前 component 所在窗口 |
 | `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | async / `ui-context` |
@@ -241,6 +246,7 @@ export { LoginPlugin };
 | ohos.webview / configure-native | NativeSettings { id, scrollEnabled, injectedJavascript?, htmlBaseUrl? } → Acknowledgement | async / ui-context |
 | ohos.webview / update-document-options | DocumentOptionsRequest { id, javascriptEnabled?, initializationScripts? } → Acknowledgement | async / ui-context; updates the existing controller without navigation; await before the next load; omitted fields retain values and an empty script list clears application scripts |
 | ohos.webview / go-back, go-forward, stop-loading | ControllerRequest → Acknowledgement | async / ui-context |
+| ohos.webview / can-go-back, can-go-forward | ohos.webview.ControllerRequest → ohos.webview.BooleanResponse { value } | async / ui-context; waits for controller attachment before querying history |
 | ohos.webview / native-event | NativeEvent { id, targetId, phase, url, title, loading, canGoBack, canGoForward, message?, code? } → EventAcknowledgement | scoped main-thread; target-indexed callback under Ability dispatch guard; notification failure only logged |
 | ohos.webview / native-controller-attached, native-controller-removed | NativeControllerEvent { id, targetId, nativeTag } → EventAcknowledgement | Ability target dispatch guard; attach before navigation; remove before synchronous target retirement |
 | ohos.webview / native-node-ready, native-node-retiring | existing ohos.node native receipt types → NodeAcknowledgement | UI-thread callback; decoding is pure, ready explicitly attaches before acknowledgement; retiring requires no context and uses closing hook permit |
