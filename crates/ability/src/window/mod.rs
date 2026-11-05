@@ -95,7 +95,7 @@ pub fn create_os_window(params: WindowCreateParams) -> napi_ohos::Result<i64> {
         }
     };
 
-    // Float creation race fix (doc/OHOS窗口遗留问题.md issue-7 addendum): open the
+    // Sub-window creation race fix (doc/OHOS窗口遗留问题.md issue-7 addendum): open the
     // pending entry BEFORE dispatching, so window ops the embedding runtime
     // dispatches between now and the ArkTS creation chain settling (tauri's
     // post-build set_visible/set_focus, or user setters right after build)
@@ -602,7 +602,7 @@ pub fn take_ui_ability_spawn_rejection(label: &str) -> Option<String> {
     reason
 }
 
-// ─── Float creation pending registry (Float creation-time race fix,
+// ─── Sub-window creation pending registry (creation-time race fix,
 // doc/OHOS窗口遗留问题.md issue-7 addendum) ─────────────────────────────────────────
 //
 // create_os_window pre-allocates an id and fires the createSubWindow TSFN
@@ -628,11 +628,11 @@ pub fn take_ui_ability_spawn_rejection(label: &str) -> Option<String> {
 // by ProcessInitializer before registering the createSubWindow TSFN. A stale
 // HAR (fresh .so, cached ArkTS) never sets the flag, so create_os_window
 // never gates — behavior degrades to exactly today's fire-and-forget
-// semantics instead of queueing every Float op against an entry no ArkTS
+// semantics instead of queueing every sub-window op against an entry no ArkTS
 // code would ever settle. Reverse skew (fresh HAR, old .so) is covered on
 // the ArkTS side with `typeof` guards.
 
-/// Waker attached to a pending Float creation; consumed (and woken) when the
+/// Waker attached to a pending sub-window creation; consumed (and woken) when the
 /// ArkTS creation chain settles so the embedding runtime's queued ops replay
 /// on the next event-loop pass. Existence of the entry IS the pending state —
 /// settlement removes it (unlike PendingAbility, which lingers with a flag).
@@ -675,13 +675,13 @@ pub fn is_float_window_ready(id: i64) -> bool {
 }
 
 /// Combined readiness for window-op gating: ready unless the id is a pending
-/// Float creation OR a pending UIAbility handshake. Unknown ids read as
+/// sub-window creation OR a pending UIAbility handshake. Unknown ids read as
 /// ready on both halves.
 pub fn is_window_ready(id: i64) -> bool {
     is_ui_ability_stage_ready(id) && is_float_window_ready(id)
 }
 
-/// Attaches an event-loop waker to a pending Float creation.
+/// Attaches an event-loop waker to a pending sub-window creation.
 ///
 /// Deviates from `set_ui_ability_waker` on unknown ids: it STILL wakes. The
 /// ArkTS creation chain can settle before the embedding runtime attaches
@@ -754,7 +754,7 @@ pub fn notify_float_window_registered(window_id: i64, registered: bool) {
 
 /// NAPI: capability handshake (review V1). Called by ProcessInitializer
 /// before registering the createSubWindow TSFN — only after this does
-/// create_os_window gate Float ops on ArkTS registration. A stale HAR never
+/// create_os_window gate sub-window ops on ArkTS registration. A stale HAR never
 /// calls it, keeping the pre-fix fire-and-forget semantics (and never
 /// wedging ops against entries no ArkTS code would settle).
 #[napi]
@@ -762,7 +762,7 @@ pub fn enable_float_pending_tracking() {
     let was = FLOAT_PENDING_TRACKING.swap(true, Ordering::AcqRel);
     if !was {
         crate::info!(
-            "enable_float_pending_tracking: Float creation pending tracking armed (ProcessInitializer handshake)"
+            "enable_float_pending_tracking: sub-window creation pending tracking armed (ProcessInitializer handshake)"
         );
     }
 }

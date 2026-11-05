@@ -558,6 +558,7 @@ impl OpenHarmonyApp {
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
             #[allow(clippy::arc_with_non_send_sync)]
             event_loop: Arc::new(RefCell::new(None)),
+            #[allow(clippy::arc_with_non_send_sync)]
             event_loop_installed: Arc::new(Cell::new(false)),
             waker: Arc::new(RwLock::new(None)),
             #[allow(clippy::arc_with_non_send_sync)]
@@ -1524,8 +1525,9 @@ pub fn drain_pending_window_status() -> Vec<(i32, i32)> {
 
 /// Global queue for pending window focus transitions from ArkTS (#180(1):
 /// `win.on('windowEvent')` WINDOW_ACTIVE/WINDOW_INACTIVE collection --
-/// `windowFocusChange` is absent from the local SDK20 `@ohos.window.d.ets`
-/// overload table, so the @since 20 `windowEvent` enum is the equivalent
+/// `windowFocusChange` is absent from the local DevEco SDK `@ohos.window.d.ts`
+/// overload table, so the `WindowEventType` enum behind the `'windowEvent'`
+/// event (@since 10; @since 11 crossplatform/atomicservice) is the equivalent
 /// signal). The runtime event loop drains this queue and feeds each
 /// (window_id, focused) transition into tao's `LAST_FOCUSED_WINDOW_ID`
 /// change-edge guard, which forwards to the existing focus paths and the
@@ -2083,13 +2085,13 @@ mod tests {
 
         let inner = app.inner.read().unwrap();
         assert!(
-            inner.window_rects.get(&spawned_id).is_none(),
+            !inner.window_rects.contains_key(&spawned_id),
             "unregister_ui_ability_state must remove the destroyed UIAbility's \
              window_rects entry (id {})",
             spawned_id
         );
         assert!(
-            inner.inner_rects.get(&spawned_id).is_none(),
+            !inner.inner_rects.contains_key(&spawned_id),
             "unregister_ui_ability_state must also remove the destroyed \
              UIAbility's inner_rects entry (id {}): set_window_rects writes \
              the outer+drawable pair into both tables together, so teardown \
@@ -2294,7 +2296,7 @@ mod tests {
         // and true sub-window entries have no destroy-notification path in
         // this registry at all (see the NOTE above release_render_owner).
         // Assert key 0 is gone.
-        assert!(inner.window_rects.get(&0).is_none());
+        assert!(!inner.window_rects.contains_key(&0));
         assert!(inner.avoid_areas.is_empty());
     }
 

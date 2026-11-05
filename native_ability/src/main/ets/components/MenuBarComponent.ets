@@ -9,7 +9,7 @@ import { hilog } from "@kit.PerformanceAnalysisKit";
 // ─── Open-menu accelerator triggering (issue Eulogizethesun/tauri#111) ───
 //
 // Closed-menu accelerators are dispatched by the AcceleratorMatcher +
-// onKeyPreIme chain in MainPage/FloatPage. While a dropdown/popup menu is
+// onKeyPreIme chain in MainPage/SubWindowPage. While a dropdown/popup menu is
 // OPEN the menu sub-window owns focus, the main window's onKeyPreIme sees
 // nothing, and ArkUI's `.keyboardShortcut` attribute does NOT fire inside
 // menu sub-windows (device-verified: key events reach the Menu nodes with
@@ -663,7 +663,7 @@ export struct MenuBarComponent {
                 // modifier keyup swallowed by the dying menu sub-window (race
                 // between Menu.onKeyEvent teardown and page focus return)
                 // would leave the module-level bit stuck. The page handlers
-                // now also track ups (MainPage/FloatPage onKeyPreIme); this
+                // now also track ups (MainPage/SubWindowPage onKeyPreIme); this
                 // clear only covers that sub-window-death gap. Consistent
                 // with the existing clear-on-expand trade-off above.
                 clearAllTrackedModifiers();

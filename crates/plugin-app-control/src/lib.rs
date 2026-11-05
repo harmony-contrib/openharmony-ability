@@ -154,7 +154,7 @@ pub struct StartUiAbilityRequest {
     /// follow-up F5): applied via `StartOptions.windowWidth` on
     /// `startAbility` (API 11+). `None` keeps the OS default. StartOptions
     /// sizes the window rectangle (frame included) — same contract as the
-    /// Float path's `WindowCreateParams`.
+    /// sub-window path's `WindowCreateParams`.
     pub width: Option<i32>,
     /// Optional creation-time window height, physical px — see `width`.
     pub height: Option<i32>,

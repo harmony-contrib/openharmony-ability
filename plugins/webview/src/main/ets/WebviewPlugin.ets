@@ -101,10 +101,13 @@ function enableWebDebuggingIfAvailable(): void {
  * re-applied with real geometry, and a natural-layout webview gets no update
  * at all.
  *
- * Known cross-repo limitation: SetAutoResize(false) clears the runtime rates
- * and the OHOS enable arm is a no-op, so disable-then-enable permanently
- * stops resize re-application for an explicit-bounds webview (no path back
- * to container layout).
+ * Auto-resize re-arming is Rust-side (issue Eulogizethesun/tauri#244): a
+ * disable parks the runtime rates and a later enable restores them (or
+ * re-derives them from the wry bounds cache for fully-explicit geometry), so
+ * an explicit-bounds webview follows window resizes again after
+ * disable-then-enable. The ArkTS side stays render-truth only: it applies the
+ * last explicit set_bounds and lets natural-layout webviews track their
+ * container -- it performs no rate re-derivation of its own.
  *
  * The value is i32::MIN (-2147483648), NOT -1: multi-screen setups
  * legitimately produce -1 window coordinates, which would collide with a -1
@@ -3080,10 +3083,12 @@ class WebviewSurface {
     // and sends nothing for a natural-layout one. Where the Rust side has no
     // real geometry it may send its 200x200 default placeholder for a
     // component, and that still applies (only i32::MIN marks "leave the
-    // current value untouched"). Known cross-repo limitation: auto-resize
-    // disable-then-enable permanently stops the resize arm for an
-    // explicit-bounds webview (the OHOS enable arm does not re-arm), so no
-    // resize-driven refresh can be relied on after that.
+    // current value untouched"). Auto-resize re-arming is Rust-side (issue
+    // Eulogizethesun/tauri#244): disable parks the runtime rates and a later
+    // enable restores them (or re-derives them from the wry bounds cache for
+    // fully-explicit geometry), so the resize arm can be relied on again
+    // after a disable-then-enable; the ArkTS side performs no rate
+    // re-derivation of its own.
     const style = entry.data.style;
     const applyX = x !== WEBVIEW_BOUNDS_SENTINEL;
     const applyY = y !== WEBVIEW_BOUNDS_SENTINEL;

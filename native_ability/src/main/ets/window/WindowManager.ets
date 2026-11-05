@@ -2028,7 +2028,7 @@ export class WindowManager {
         // inner-rect cache went stale and no Resized fired. Push synthetic
         // rect changes — a fresh getWindowProperties() pair through the same
         // throttled channel the real handler uses (same wrap shape as the
-        // Float sub-window post-load seed in createSubWindow); the Rust-side
+        // floating sub-window post-load seed in createSubWindow); the Rust-side
         // rect dedup makes a push with not-yet-settled (stale) properties a
         // no-op. Immediate push covers the synchronous-property case; the
         // delayed one lands after the ArkUI layout settles (~11-18ms

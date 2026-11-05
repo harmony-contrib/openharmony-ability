@@ -228,11 +228,11 @@ export interface Module {
   notifyKeyEvent?: (keyCode: number, action: number, deviceId: number) => void;
   /** `register_create_sub_window_tsfn` — legacy create_os_window path hookup. */
   registerCreateSubWindowTsfn?: (createSubWindow: (config: ESObject) => Promise<number>) => void;
-  /** `notify_float_window_registered` — Float creation-chain settle signal (success or
+  /** `notify_float_window_registered` — sub-window creation-chain settle signal (success or
    *  failure); drains the Rust-side ops queued against the pre-registration race window
    *  (doc/OHOS窗口遗留问题.md issue-7 addendum). */
   notifyFloatWindowRegistered?: (windowId: number, registered: boolean) => void;
-  /** `enable_float_pending_tracking` — Float pending-registry capability handshake
+  /** `enable_float_pending_tracking` — sub-window pending-registry capability handshake
    *  (review V1); arms the Rust-side gate only when present, so a stale HAR keeps the
    *  pre-fix fire-and-forget semantics. */
   enableFloatPendingTracking?: () => void;
