@@ -119,6 +119,7 @@ function pickerLocation(location: string | undefined | null): string | undefined
 async function showFileDialog(
   context: BridgeCallContext,
   options: FileDialogOptions,
+  autoCreateEmptyFile: boolean,
 ): Promise<FileDialogResponse> {
   let documentPicker: picker.DocumentViewPicker;
   if (options.parentWindowId != null) {
@@ -142,7 +143,11 @@ async function showFileDialog(
     // An Ability can keep running after its original main workspace closes. Using only its
     // context would attach this picker to that hidden window instead of the requesting one.
     const abilityContext = parent.getUIContext().getHostContext() as common.UIAbilityContext;
-    documentPicker = new picker.DocumentViewPicker(abilityContext, parent);
+    if (deviceInfo.deviceType === "phone") {
+      documentPicker = new picker.DocumentViewPicker(abilityContext);
+    } else {
+      documentPicker = new picker.DocumentViewPicker(abilityContext, parent);
+    }
   } else {
     documentPicker = new picker.DocumentViewPicker(context.abilityContext);
   }
@@ -151,6 +156,10 @@ async function showFileDialog(
 
   if (options.dialogType === "save-file") {
     const saveOptions = new picker.DocumentSaveOptions();
+    if (deviceInfo.sdkApiVersion >= 23 && canIUse(SELECTED_FILTER_INDEX_SYSCAP)) {
+      // Atomic writers select a destination without allocating a placeholder file.
+      saveOptions.autoCreateEmptyFile = autoCreateEmptyFile;
+    }
     saveOptions.defaultFilePathUri = location;
     if (options.suggestedName) {
       saveOptions.newFileNames = [options.suggestedName];
@@ -181,6 +190,9 @@ async function showFileDialog(
     }
     selectOptions.fileSuffixFilters = undefined;
   } else if (options.dialogType === "open-mixed") {
+    if (!canIUse(SELECTED_FILTER_INDEX_SYSCAP)) {
+      throw new Error("This device does not support mixed file and folder selection");
+    }
     selectOptions.selectMode = picker.DocumentSelectMode.MIXED;
   }
   if (
@@ -198,6 +210,12 @@ async function showFileDialog(
 export class FilesPlugin extends AsyncPluginBase {
   readonly id = "ohos.files";
   readonly requires: BridgeContextRequirement[] = ["ability"];
+  private readonly autoCreateEmptyFile: boolean;
+
+  constructor(autoCreateEmptyFile: boolean = true) {
+    super();
+    this.autoCreateEmptyFile = autoCreateEmptyFile;
+  }
 
   async invokeAsync(
     action: string,
@@ -213,7 +231,7 @@ export class FilesPlugin extends AsyncPluginBase {
     const options = parseDialogOptions(payload);
     let response: FileDialogResponse;
     try {
-      response = await showFileDialog(context, options);
+      response = await showFileDialog(context, options, this.autoCreateEmptyFile);
     } catch (error) {
       const detail = error as BusinessError;
       throw new Error(
