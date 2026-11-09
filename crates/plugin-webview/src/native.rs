@@ -1,5 +1,5 @@
 //! Native-tree presentation and callback snapshots, with no ArkTS references.
-use super::{WebviewAcknowledgement, WebviewHandle};
+use super::{WebviewAcknowledgement, WebviewBooleanResponse, WebviewHandle};
 use crate::{
     native_routes::{NativeEvents, Registration},
     WebviewBridgePlugin,
@@ -106,6 +106,22 @@ impl WebviewHandle {
     pub async fn go_forward(&self) -> Result<()> {
         self.acknowledge("go-forward", self.controller_request())
             .await
+    }
+    /// Returns whether history has a previous entry.
+    pub async fn can_go_back(&self) -> Result<bool> {
+        Ok(self
+            .client
+            .call::<_, WebviewBooleanResponse>("can-go-back", self.controller_request())
+            .await?
+            .value)
+    }
+    /// Returns whether history has a following entry.
+    pub async fn can_go_forward(&self) -> Result<bool> {
+        Ok(self
+            .client
+            .call::<_, WebviewBooleanResponse>("can-go-forward", self.controller_request())
+            .await?
+            .value)
     }
     /// Stops the current navigation.
     pub async fn stop_loading(&self) -> Result<()> {

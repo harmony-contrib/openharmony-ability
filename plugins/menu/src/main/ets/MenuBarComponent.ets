@@ -95,15 +95,19 @@ export struct MenuBarComponent {
 
   // --- Watch handlers ---
 
+  private setPopupItems(items: MenuItemData[]): void {
+    this.popupIconIds.clear();
+    this.collectIconIds(items, this.popupIconIds);
+    this.prepareIcons(items);
+    this.cleanupStaleIcons();
+    this.menuItems = items;
+    this.popupRevision++;
+  }
+
   onMenuJsonChange(): void {
     try {
       const items = JSON.parse(this.menuJson) as MenuItemData[];
-      this.popupIconIds.clear();
-      this.collectIconIds(items, this.popupIconIds);
-      this.prepareIcons(items);
-      this.cleanupStaleIcons();
-      this.menuItems = items;
-      this.popupRevision++;
+      this.setPopupItems(items);
     } catch (e) {
       this.popupIconIds.clear();
       this.cleanupStaleIcons();
@@ -112,21 +116,26 @@ export struct MenuBarComponent {
     }
   }
 
+  private setMenubarItems(items: MenuItemData[]): void {
+    this.menubarIconIds.clear();
+    this.collectIconIds(items, this.menubarIconIds);
+    this.prepareIcons(items);
+    this.cleanupStaleIcons();
+    this.menubarItems = items.filter((i) => i.type === "submenu" && i.text);
+    this.acceleratorMatcher.buildFromItems(items);
+    this.menubarRevision++;
+    const activeItem = this.getMenubarItem(this.activeDropdownId);
+    if (!activeItem || activeItem.enabled === false) {
+      this.activeDropdownShown = false;
+      this.activeDropdownId = "";
+    }
+    // Revision keys rebuild popup contents while keeping its anchor mounted.
+  }
+
   onMenubarJsonChange(): void {
     try {
       const items = JSON.parse(this.menubarJson) as MenuItemData[];
-      this.menubarIconIds.clear();
-      this.collectIconIds(items, this.menubarIconIds);
-      this.prepareIcons(items);
-      this.cleanupStaleIcons();
-      this.menubarItems = items.filter((i) => i.type === "submenu" && i.text);
-      this.acceleratorMatcher.buildFromItems(items);
-      this.menubarRevision++;
-      const activeItem = this.getMenubarItem(this.activeDropdownId);
-      if (!activeItem || activeItem.enabled === false) {
-        this.activeDropdownShown = false;
-        this.activeDropdownId = "";
-      }
+      this.setMenubarItems(items);
       const submenuDetails = this.menubarItems.map(
         (i) => `${i.text}: [${(i.submenuItems ?? []).map((s) => s.text ?? s.id).join(",")}]`,
       );
@@ -134,7 +143,6 @@ export struct MenuBarComponent {
         `[Menubar] onMenubarJsonChange: items=${items.length}, ` +
           `submenuItems=${this.menubarItems.length}, details=${submenuDetails.join("; ")}`,
       );
-      // Revision keys rebuild popup contents while keeping its anchor mounted.
     } catch (e) {
       this.menubarIconIds.clear();
       this.cleanupStaleIcons();
@@ -752,6 +760,19 @@ export struct MenuBarComponent {
 
   // --- Lifecycle ---
 
+  private showMenuPopup(x: number, y: number): void {
+    this.restoreFocusId = undefined;
+    this.applicationMenu = false;
+    this.commandMenu = false;
+    this.menuX = x;
+    this.menuY = y;
+    // Close first, then reopen to re-trigger bindMenu.
+    this.menuShown = false;
+    setTimeout(() => {
+      this.menuShown = true;
+    }, 0);
+  }
+
   aboutToAppear(): void {
     if (!this.menuKey) {
       // Direct embeddings and legacy builders still belong to their actual window.
@@ -763,16 +784,21 @@ export struct MenuBarComponent {
     menubarVisibilityTracker.set(this.registryKey(), this.menubarVisible);
     this.menuCallback = {
       onMenubarJson: (json: string) => {
-        this.menubarJson = json;
+        if (this.menubarJson === json) {
+          // A structured update may have replaced the last JSON-backed state.
+          this.onMenubarJsonChange();
+        } else {
+          this.menubarJson = json;
+        }
+      },
+      onMenubarItems: (items: MenuItemData[]) => {
+        this.setMenubarItems(items);
       },
       onMenubarVisible: (visible: boolean) => {
         this.menubarVisible = visible;
         menubarVisibilityTracker.set(this.registryKey(), visible);
       },
       onMenuPopup: (json: string, x: number, y: number) => {
-        this.restoreFocusId = undefined;
-        this.applicationMenu = false;
-        this.commandMenu = false;
         hilog.info(
           0x1999,
           "MenuBar",
@@ -782,14 +808,16 @@ export struct MenuBarComponent {
           y,
           json.length,
         );
-        this.menuJson = json;
-        this.menuX = x;
-        this.menuY = y;
-        // Close first, then reopen to re-trigger bindMenu
-        this.menuShown = false;
-        setTimeout(() => {
-          this.menuShown = true;
-        }, 0);
+        if (this.menuJson === json) {
+          this.onMenuJsonChange();
+        } else {
+          this.menuJson = json;
+        }
+        this.showMenuPopup(x, y);
+      },
+      onMenuPopupItems: (items: MenuItemData[], x: number, y: number) => {
+        this.setPopupItems(items);
+        this.showMenuPopup(x, y);
       },
       onMenuShown: (shown: boolean) => {
         this.menuShown = shown;

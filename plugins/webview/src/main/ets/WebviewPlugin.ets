@@ -60,6 +60,7 @@ const ACKNOWLEDGEMENT_TYPE = "ohos.webview.Acknowledgement";
 const SCRIPT_REQUEST_TYPE = "ohos.webview.ScriptRequest";
 const SCRIPT_RESPONSE_TYPE = "ohos.webview.ScriptResponse";
 const STRING_RESPONSE_TYPE = "ohos.webview.StringResponse";
+const BOOLEAN_RESPONSE_TYPE = "ohos.webview.BooleanResponse";
 const NAVIGATION_REQUEST_TYPE = "ohos.webview.NavigationRequest";
 const NAVIGATION_RESPONSE_TYPE = "ohos.webview.NavigationResponse";
 const DOWNLOAD_START_REQUEST_TYPE = "ohos.webview.DownloadStartRequest";
@@ -400,6 +401,14 @@ class WebviewStringResponse {
   readonly value: string | null;
 
   constructor(value: string | null) {
+    this.value = value;
+  }
+}
+
+class WebviewBooleanResponse {
+  readonly value: boolean;
+
+  constructor(value: boolean) {
     this.value = value;
   }
 }
@@ -3194,6 +3203,16 @@ class WebviewSurface {
     }
   }
 
+  async canGoBack(id: string, context: BridgeCallContext): Promise<boolean> {
+    const entry = await this.controllerEntry(id, context);
+    return Boolean(entry.data.controller.accessBackward());
+  }
+
+  async canGoForward(id: string, context: BridgeCallContext): Promise<boolean> {
+    const entry = await this.controllerEntry(id, context);
+    return Boolean(entry.data.controller.accessForward());
+  }
+
   async dispose(detachNodes: boolean = true, cleanup?: BridgePluginHookContext): Promise<void> {
     this.disposed = true;
     let firstError: Error | undefined;
@@ -3510,6 +3529,18 @@ export class WebviewPlugin extends AsyncPluginBase {
     } else if (action === "go-back" || action === "go-forward" || action === "stop-loading") {
       await surface.navigateNative(controllerPayload.id, action, context);
       accepted = true;
+    } else if (action === "can-go-back") {
+      return {
+        typeName: BOOLEAN_RESPONSE_TYPE,
+        value: new WebviewBooleanResponse(await surface.canGoBack(controllerPayload.id, context)),
+      };
+    } else if (action === "can-go-forward") {
+      return {
+        typeName: BOOLEAN_RESPONSE_TYPE,
+        value: new WebviewBooleanResponse(
+          await surface.canGoForward(controllerPayload.id, context),
+        ),
+      };
     } else if (action === "reload") {
       await surface.reload(controllerPayload.id, context);
       accepted = true;

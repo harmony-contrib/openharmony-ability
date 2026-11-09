@@ -55,6 +55,7 @@ interface LiveAnnouncement {
   text: string;
   assertive: boolean;
 }
+// Native C hosts use "default"; Rust observations keep decimal route IDs.
 interface MotionRequest {
   id: string;
 }
@@ -152,7 +153,11 @@ export class AccessibilityPlugin extends AsyncPluginBase {
     if (action === "observe-reduce-motion" || action === "stop-observing-reduce-motion") {
       expectBridgeRequestType(payload, this.id, action, MOTION_REQUEST_TYPE);
       const request = payload.value as MotionRequest;
-      if (!request || typeof request.id !== "string" || !/^[0-9]{1,20}$/.test(request.id)) {
+      if (
+        !request ||
+        typeof request.id !== "string" ||
+        !/^(default|[0-9]{1,20})$/.test(request.id)
+      ) {
         throw new Error("Invalid motion observation identity");
       }
       if (action === "stop-observing-reduce-motion") {
@@ -336,7 +341,7 @@ export class AccessibilityPlugin extends AsyncPluginBase {
       typeof subscriptions.screenReader !== "boolean" ||
       !Array.isArray(subscriptions.motionIds) ||
       !subscriptions.motionIds.every(
-        (id: string) => typeof id === "string" && /^[0-9]{1,20}$/.test(id),
+        (id: string) => typeof id === "string" && /^(default|[0-9]{1,20})$/.test(id),
       )
     ) {
       throw new Error("Invalid accessibility subscription snapshot");
