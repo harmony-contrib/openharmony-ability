@@ -5,6 +5,11 @@ const path = require("node:path");
 const rootDir = path.resolve(__dirname, "..");
 const versionOnly = process.argv.includes("--version-only");
 const dryRun = process.argv.includes("--dry-run");
+const prBodyFileIndex = process.argv.indexOf("--pr-body-file");
+const prBodyFile = prBodyFileIndex === -1 ? null : process.argv[prBodyFileIndex + 1];
+if (prBodyFileIndex !== -1 && (!prBodyFile || prBodyFile.startsWith("--"))) {
+  throw new Error("--pr-body-file requires a path to the release PR body template");
+}
 
 // Historical unified release commit for 1.0.0-beta.3 before per-package release-plz tags.
 const HISTORICAL_RELEASE_COMMITS = {
@@ -644,5 +649,13 @@ if (!dryRun && pendingBumps.length > 0) {
 }
 
 if (!versionOnly) {
-  updateReleasePrDescription([...initialReleases, ...pendingBumps]);
+  const harReleases = [...initialReleases, ...pendingBumps];
+  if (prBodyFile) {
+    if (!dryRun) {
+      const body = fs.readFileSync(prBodyFile, "utf8");
+      fs.writeFileSync(prBodyFile, renderReleasePrBodyWithHars(body, harReleases));
+    }
+  } else {
+    updateReleasePrDescription(harReleases);
+  }
 }
