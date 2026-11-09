@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [1.0.0-beta.6] - 2026-11-09
+
+- fix(files): support atomic saves and guard picker capabilities (#123)
+
 ## [1.0.0-beta.5] - 2026-11-02
 
 - fix(release): keep ohpm lockfiles in sync with manifest versions (#116)
