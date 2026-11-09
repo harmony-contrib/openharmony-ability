@@ -13,6 +13,7 @@
     "prek": "prek run",
     "prepare": "prek install",
     "pack": "ohpm-rs pack --workspace --output dist",
+    "test:release": "node --test scripts/release.test.js",
     "release:sync": "node scripts/sync-release.js",
     "postinstall": "node scripts/ensure-ohpm.js && pnpm run install:ohpm"
   },

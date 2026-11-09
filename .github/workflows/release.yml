@@ -94,17 +94,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-      - name: Sync OHPM HAR versions and changelogs to release PR
-        if: ${{ steps.release-pr.outputs.pr != '' }}
+      - name: Create or sync the HAR release PR
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           PR_JSON: ${{ steps.release-pr.outputs.pr }}
         run: |
-          # release-plz outputs `{}` when it creates no PR (for example, a push
-          # that touches no crate); there is nothing to sync in that case.
           BRANCH_NAME=$(node -e 'const pr = JSON.parse(process.env.PR_JSON || "{}"); if (pr.head_branch) console.log(pr.head_branch);')
           if [ -z "${BRANCH_NAME}" ]; then
-            echo "No release PR was created; skipping HAR version sync."
+            node scripts/create-har-release-pr.js
             exit 0
           fi
           git fetch origin "${BRANCH_NAME}"
