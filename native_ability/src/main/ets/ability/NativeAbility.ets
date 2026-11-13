@@ -328,7 +328,7 @@ export class NativeAbility extends UIAbility {
 
     // Process-level initialization, once per process (adaptation line): WindowManager
     // singleton, custom-scheme probing + web-engine init, createSubWindow TSFN hookup
-    // and the primary-module AppStorage publish consumed by FloatPage / the
+    // and the primary-module AppStorage publish consumed by SubWindowPage / the
     // windowStatusChange fan-in below. Idempotent for subsequent Ability instances;
     // module loading itself is re-done transactionally below via NativeModuleLoader.
     await ProcessInitializer.initialize(context, this.moduleName, this.loadMode, want);
@@ -1409,7 +1409,7 @@ export class NativeAbility extends UIAbility {
     // module" guard. This used to probe the onMenuRequest stub — dead code whose
     // registration body never executed (the Rust side discarded the callback);
     // the stub has been deleted (issue #87 major-4), so probe isDesktopDevice
-    // instead, which is what FloatPage's __openharmony_ability_is_desktop__
+    // instead, which is what SubWindowPage's __openharmony_ability_is_desktop__
     // AppStorage flag below is derived from.
     if (!primaryModule || typeof primaryModule.isDesktopDevice !== "function") {
       return;

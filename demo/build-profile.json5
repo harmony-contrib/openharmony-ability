@@ -112,10 +112,6 @@
       "srcPath": "../plugins/statusbar",
     },
     {
-      "name": "plugin_process",
-      "srcPath": "../plugins/process",
-    },
-    {
       "name": "plugin_account",
       "srcPath": "../plugins/account",
     },

@@ -125,10 +125,6 @@ name = "openharmony-ability-plugin-permission"
 changelog_path = "crates/plugin-permission/CHANGELOG.md"
 
 [[package]]
-name = "openharmony-ability-plugin-process"
-changelog_path = "crates/plugin-process/CHANGELOG.md"
-
-[[package]]
 name = "openharmony-ability-plugin-resource"
 changelog_path = "crates/plugin-resource/CHANGELOG.md"
 

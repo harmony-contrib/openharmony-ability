@@ -101,7 +101,6 @@ Package changelogs below contain capability-specific notes and existing release 
 | menu | [crate](crates/plugin-menu/CHANGELOG.md) | [HAR](plugins/menu/CHANGELOG.md) |
 | notification | [crate](crates/plugin-notification/CHANGELOG.md) | [HAR](plugins/notification/CHANGELOG.md) |
 | permission | [crate](crates/plugin-permission/CHANGELOG.md) | [HAR](plugins/permission/CHANGELOG.md) |
-| process | [crate](crates/plugin-process/CHANGELOG.md) | [HAR](plugins/process/CHANGELOG.md) |
 | resource | [crate](crates/plugin-resource/CHANGELOG.md) | [HAR](plugins/resource/CHANGELOG.md) |
 | screenshot | [crate](crates/plugin-screenshot/CHANGELOG.md) | Uses [WebView HAR](plugins/webview/CHANGELOG.md) |
 | statusbar | [crate](crates/plugin-statusbar/CHANGELOG.md) | [HAR](plugins/statusbar/CHANGELOG.md) |

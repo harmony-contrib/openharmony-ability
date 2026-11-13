@@ -1010,7 +1010,7 @@ export class WindowManager {
     // both support title text (icon is NOT changeable at runtime). No extra permission
     // for main window. Only visible when window decorations are enabled (decorEnabled=true).
     // Also update LocalStorage 'title' so the sub-window host page's
-    // @LocalStorageProp('title') (SubWindowPage, or HIS's FloatPage) refreshes
+    // @LocalStorageProp('title') (SubWindowPage) refreshes
     // the title bar text.
     const entry = this.windows.get(windowId);
     if (entry?.storage) {

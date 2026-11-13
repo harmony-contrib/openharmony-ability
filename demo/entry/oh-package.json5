@@ -25,7 +25,6 @@
     "@ohos-rs/ability-plugin-autostart": "workspace:*",
     "@ohos-rs/ability-plugin-menu": "workspace:*",
     "@ohos-rs/ability-plugin-statusbar": "workspace:*",
-    "@ohos-rs/ability-plugin-process": "workspace:*",
     "@ohos-rs/ability-plugin-account": "workspace:*",
     "@ohos-rs/ability-plugin-accessibility": "workspace:*",
     "@ohos-rs/ability-plugin-updater": "workspace:*",
