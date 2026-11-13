@@ -54,3 +54,6 @@ jobs:
 
       - name: Rust clippy
         run: npm run lint:rs
+
+      - name: Check sys.symbol whitelist is subset of min SDK 5.0.0(12)
+        run: python3 scripts/check-sys-symbols.py

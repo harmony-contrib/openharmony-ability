@@ -2607,10 +2607,18 @@ export class WindowManager {
           "setDecorations: main window %{public}d not found",
           windowId,
         );
-        return;
+        return false;
       }
       try {
         win.setWindowDecorVisible(decorations);
+        if (deviceInfo.sdkApiVersion >= 14) {
+          // HIS's graft: the main window can retain its three-button overlay
+          // after its title bar is hidden — setWindowDecorVisible alone does
+          // not cover the button strip, so mirror the visibility there too.
+          // (HIS called this from the plugin arm; with ours' delegation the
+          // plugin no longer touches win, so it moved into this success path.)
+          win.setWindowTitleButtonVisible(decorations, decorations, decorations);
+        }
         hilog.info(
           DOMAIN,
           "WindowManager",
@@ -2645,6 +2653,10 @@ export class WindowManager {
         );
       }
     }
+    // Unknown window kind, or the ability-main call threw above: the window
+    // kind was not handled — signal the caller (the plugin arm surfaces this
+    // as an error instead of acking success).
+    return false;
   }
 
   /** Synthetic rect-change push after a decor visibility change: reads a
