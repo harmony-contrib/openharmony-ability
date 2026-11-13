@@ -4,44 +4,18 @@ use napi_derive_ohos::napi;
 use napi_ohos::{Error, Result};
 use openharmony_ability::{impl_bridge_napi_type, BridgeCallOptions};
 
-#[napi(object)]
-#[derive(Clone, Debug)]
-pub struct WindowPromptAnchor {
-    /// Horizontal position in the target window's content, in logical vp units.
-    pub x: f64,
-    /// Vertical position in the target window's content, in logical vp units.
-    pub y: f64,
-}
-impl_bridge_napi_type!(WindowPromptAnchor, "ohos.window.PromptAnchor");
-
-/// Application-owned semantic colors in ARGB order, including alpha.
-#[napi(object)]
-#[derive(Clone, Debug)]
-pub struct WindowPromptAppearance {
-    pub background: u32,
-    pub foreground: u32,
-    pub muted_foreground: u32,
-    pub primary: u32,
-    pub primary_foreground: u32,
-    pub border: u32,
-    pub focus: u32,
-}
-impl_bridge_napi_type!(WindowPromptAppearance, "ohos.window.PromptAppearance");
-
+/// A system-owned prompt. Colors, typography, placement, and animation follow ArkUI.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct WindowPromptRequest {
     pub window_id: i64,
     pub message: String,
     pub detail: Option<String>,
-    /// 0 information, 1 warning, 2 critical.
-    pub level: u32,
     pub buttons: Vec<String>,
+    /// Button index returned for Back/Esc. Omit to require a button selection.
     pub cancel_index: Option<u32>,
-    /// Optional content-local position in logical vp units, not physical px or screen coordinates.
-    pub anchor: Option<WindowPromptAnchor>,
-    /// Omit to follow the target window's system colors.
-    pub appearance: Option<WindowPromptAppearance>,
+    /// Also allow mask taps to select `cancel_index`. Requires a cancel index.
+    pub cancel_on_touch_outside: bool,
 }
 impl_bridge_napi_type!(WindowPromptRequest, "ohos.window.PromptRequest");
 
@@ -55,18 +29,16 @@ impl_bridge_napi_type!(WindowPromptResponse, "ohos.window.PromptResponse");
 impl WindowPromptRequest {
     fn validate(&self) -> Result<()> {
         validate_window_id(self.window_id)?;
-        if self.anchor.as_ref().is_some_and(|anchor| {
-            !anchor.x.is_finite() || !anchor.y.is_finite() || anchor.x < 0.0 || anchor.y < 0.0
-        }) || self.level > 2
-            || self.buttons.is_empty()
+        if self.buttons.is_empty()
             || self.buttons.len() > 128
             || self.buttons.iter().any(|label| label.trim().is_empty())
             || self
                 .cancel_index
                 .is_some_and(|index| index as usize >= self.buttons.len())
+            || (self.cancel_on_touch_outside && self.cancel_index.is_none())
         {
             return Err(Error::from_reason(
-                "invalid window prompt level, buttons, or cancel index",
+                "invalid window prompt buttons or cancellation policy",
             ));
         }
         Ok(())
@@ -74,6 +46,10 @@ impl WindowPromptRequest {
 }
 
 impl WindowClient {
+    /// Shows a system alert (up to three buttons) or action sheet (more buttons).
+    /// Returns the original button index after the system exit animation completes.
+    /// Bridge cancellation invalidates callbacks. The system has no imperative
+    /// close API, so a displayed prompt may remain until dismissed or its window closes.
     pub async fn show_prompt(&self, request: WindowPromptRequest) -> Result<u32> {
         request.validate()?;
         let count = request.buttons.len();
@@ -100,11 +76,6 @@ mod tests {
     use openharmony_ability::BridgeNapiType;
     #[test]
     fn prompt_contract_and_cancellation() {
-        assert_eq!(
-            WindowPromptAppearance::TYPE_NAME,
-            "ohos.window.PromptAppearance"
-        );
-        assert_eq!(WindowPromptAnchor::TYPE_NAME, "ohos.window.PromptAnchor");
         assert_eq!(WindowPromptRequest::TYPE_NAME, "ohos.window.PromptRequest");
         assert_eq!(
             WindowPromptResponse::TYPE_NAME,
@@ -114,22 +85,19 @@ mod tests {
             window_id: 0,
             message: "Save?".into(),
             detail: None,
-            level: 1,
             buttons: vec!["Save".into(), "Cancel".into()],
             cancel_index: Some(1),
-            anchor: None,
-            appearance: None,
+            cancel_on_touch_outside: false,
         };
         assert!(request.validate().is_ok());
-        request.anchor = Some(WindowPromptAnchor {
-            x: f64::NAN,
-            y: 0.0,
-        });
-        assert!(request.validate().is_err());
-        request.anchor = None;
         request.cancel_index = Some(2);
         assert!(request.validate().is_err());
         request.cancel_index = None;
+        assert!(request.validate().is_ok());
+        request.cancel_on_touch_outside = true;
+        assert!(request.validate().is_err());
+        request.cancel_index = Some(0);
+        assert!(request.validate().is_ok());
         request.buttons.clear();
         assert!(request.validate().is_err());
     }
