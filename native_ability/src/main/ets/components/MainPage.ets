@@ -4,7 +4,8 @@ import { Module } from "../ability/type";
 import { getMenuBarPort, MenuBarSlotHost } from "./MenuBarSlot";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { DOMAIN, MAIN_WINDOW_ID } from "../helper/constants";
-import { synthesizeDomKeyEvent } from "../helper/key_synthesis";
+import { synthesizeDomKeyEvent, isWebFocused } from "../helper/key_synthesis";
+import { feedCursorFromMouse } from "../helper/cursor_feed";
 import { WindowManager } from "../window/WindowManager";
 import { NativeModuleLoader } from "../runtime/NativeModuleLoader";
 import { invokeNativeBackPressInterceptor } from "../runtime/BackPress";
@@ -17,6 +18,13 @@ struct MainPage {
   @StorageProp("moduleName") moduleNames: string | string[] = "";
   // Subsequent UIAbility instances receive their windowId via LocalStorage
   @LocalStorageProp("windowId") windowId: number = MAIN_WINDOW_ID;
+  // Bridge session id (design.md D6/D12): the primary instance's own session,
+  // or the shared session id for a joined spawned instance. Delivered through
+  // the per-instance LocalStorage built in NativeAbility.loadWindowStageContent
+  // — NOT AppStorage, which is a process-global single value a spawned
+  // instance would overwrite mid-attachment. Passed down to
+  // DefaultXComponent as a plain @Prop.
+  @LocalStorageProp("bridgeSessionId") bridgeSessionId: string = "";
 
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
 
@@ -57,7 +65,11 @@ struct MainPage {
         Row() {
           Column() {
             if (this.resolvedModuleName !== "") {
-              DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: this.windowId });
+              DefaultXComponent({
+                moduleName: this.resolvedModuleName,
+                windowId: this.windowId,
+                bridgeSessionId: this.bridgeSessionId,
+              });
             } else {
               Text("Loading Main Window...")
                 .fontSize($r("sys.float.Body_L"))
@@ -81,9 +93,10 @@ struct MainPage {
           return false;
         }
         // Menu key handling — clipboard / zoom shortcut blocking per window
-        // flags, accelerator dispatch, ESC fullscreen recover — lives in the
-        // menu plugin's MenuBarPort implementation (MenuBarSlot.ets seam).
-        // Consumed events never reach the synthesizer below.
+        // flags, accelerator dispatch (with modifier-key tracking for every
+        // event, issue #111 residue fix), ESC fullscreen recover — lives in
+        // the menu plugin's MenuBarPort implementation (MenuBarSlot.ets
+        // seam). Consumed events never reach the synthesizer below.
         const menuPort = getMenuBarPort(window.findWindow(this.getUIContext().getWindowName()));
         if (menuPort !== null && menuPort.onKeyPreIme(event, this.windowId)) {
           return true;
@@ -101,6 +114,34 @@ struct MainPage {
         // synthetic + unsuppressed degenerate native). They keep the
         // pre-feature degradation, matching the ohos-platform-limitations spec.
         if (this.windowId === MAIN_WINDOW_ID) {
+          // Rust-side key forward (issue Eulogizethesun/tauri#109): the NDK
+          // XComponent key path never fires in webview apps (the render node
+          // is not in the ArkUI focus chain — no focusable, Web grabs focus
+          // on load and overlays it), so tao's WindowEvent::KeyboardInput was
+          // dead. onKeyPreIme sees every key the web sees — feed them to Rust
+          // through the same Event::Input dispatch the NDK path would have
+          // used. Gated on Web focus: focused ⇒ NDK structurally silent ⇒ no
+          // double dispatch; unfocused (menu bar / GL-style apps) ⇒ gate
+          // closed ⇒ NDK path stays exclusive (and webview-less apps are
+          // unchanged, per the key-synthesis spec). Same fall-through position
+          // as the DOM synthesis — keys consumed by the interceptors above
+          // are NOT forwarded (the shell already acted on them).
+          // Precise KeyType mapping (issue Eulogizethesun/tauri#138): the NDK
+          // action domain is DOWN=0/UP=1 (plus an UNKNOWN=-1 sentinel that is
+          // never a KeyType value), so only Down/Up are forwarded; any other
+          // KeyType value a future ArkUI adds (e.g. Cancel) has no NDK
+          // counterpart and must not be reported as a synthesized Up.
+          if (
+            isWebFocused(MAIN_WINDOW_ID) &&
+            typeof this.nativeModule?.notifyKeyEvent === "function" &&
+            (event.type === KeyType.Down || event.type === KeyType.Up)
+          ) {
+            this.nativeModule.notifyKeyEvent(
+              event.keyCode,
+              event.type === KeyType.Down ? 0 : 1,
+              event.deviceId,
+            );
+          }
           synthesizeDomKeyEvent(event, this.windowId);
         }
         return false;
@@ -130,15 +171,15 @@ struct MainPage {
     // Track mouse cursor position for cursor_position() API.
     // NDK DispatchMouseEvent doesn't fire when cursor is over WebView,
     // so we use ArkTS onMouse which bubbles from all children.
+    // ohos-cursor-passthrough 3.2: the feed goes through the shared helper
+    // (single source of truth for the screen-global coordinate extraction
+    // and guards -- D2). The module reference passed here is this page's OWN
+    // `this.nativeModule` (declared :42, loaded :62) -- deliberately NOT an
+    // AppStorage read: AppStorage is a process-global single value a spawned
+    // instance would overwrite mid-attachment (admonition at :35-36).
     .onMouse((event: MouseEvent) => {
       if (event.action === MouseAction.Move || event.action === MouseAction.Press) {
-        try {
-          if (typeof this.nativeModule?.updateCursorPosition === "function") {
-            this.nativeModule.updateCursorPosition(event.x, event.y);
-          }
-        } catch (e) {
-          // Silently ignore — cursor tracking is best-effort
-        }
+        feedCursorFromMouse(this.nativeModule, event);
       }
     });
   }

@@ -94,7 +94,12 @@ export struct DefaultXComponent {
 
   private rootSlot = new NodeContent();
   private nodeController = new BridgeRootNodeController();
-  @StorageProp("bridgeSessionId") bridgeSessionId: string = "";
+  // Bridge session id, passed down from MainPage's per-instance LocalStorage
+  // (design.md D6). Was @StorageProp — a process-global AppStorage single value
+  // that a spawned instance would overwrite before the primary's component
+  // finished attaching. @Prop keeps it per-instance; the primary passes its own
+  // session, a joined instance passes the shared session id (D12).
+  @Prop bridgeSessionId: string = "";
   @StorageProp("loadMode") loadMode: "async" | "sync" = "async";
   @State private blurRadius: number = 0;
   private appearanceGeneration: number = 0;
@@ -134,35 +139,31 @@ export struct DefaultXComponent {
       return;
     }
 
+    // Spawned UIAbility-instance window (design.md OQ3 multi-root): moduleName
+    // is set (same process modules) AND windowId > 0 (pre-allocated by tao).
+    // The window's webview content mounts through the same WindowManager
+    // multi-root path as sub-windows - register the component root and
+    // UIContext keyed by this window id so WebviewSurface.create can build its
+    // BuilderNode against them. No native render happens here: the spawned
+    // tauri window's content is its webview (WebviewSurface mounts the ArkWeb
+    // component into this root), and the native render tree plus render-owner
+    // claim stay with the primary instance. HIS's renderWindow entry
+    // (render_for_window → app.rs sub_surfaces, keyed by window id rather than
+    // the single render-owner claim) remains exported via type.ets and the
+    // Rust side for standalone consumers, but has no ArkTS caller in this
+    // tree — its only host was FloatPage, superseded by SubWindowPage's
+    // webview mount.
     if (moduleName && this.windowId > 0) {
-      // Populate the page's ContentSlot before yielding when the module is ready.
-      // First-time loading and pending teardown still need to finish first.
-      const nativeModule =
-        NativeModuleLoader.getLoaded(moduleName) ??
-        (await NativeModuleLoader.load(moduleName, this.loadMode));
-      if (generation !== this.appearanceGeneration) {
-        return;
-      }
-      if (!nativeModule.renderWindow) {
-        throw new Error(`Native module '${moduleName}' does not support sub-window rendering`);
-      }
-      const renderOwner = `${this.bridgeSessionId}:${moduleName}:${nextRenderOwnerId++}`;
-      const componentWindow = window.findWindow(this.getUIContext().getWindowName());
-      const nativeWindowId = componentWindow.getWindowProperties().id;
-      nativeModule.renderWindow(this.rootSlot, renderOwner, this.windowId, nativeWindowId);
-      if (generation !== this.appearanceGeneration) {
-        nativeModule.disposeRender(renderOwner);
-        return;
-      }
-      this.attachment = {
-        sessionId: this.bridgeSessionId,
-        moduleName,
-        renderOwner,
-        nativeModule,
-        nativeSubWindow: true,
-        componentWindow,
-      };
-      this.attachSurfaceBlur(generation);
+      WindowManager.getInstance().applyTransparentBackground(this.windowId);
+      const root = this.nodeController.makeNode(this.getUIContext());
+      WindowManager.getInstance().registerComponentRoot(this.windowId, root);
+      WindowManager.getInstance().registerUIContext(this.windowId, this.getUIContext());
+      hilog.info(
+        0xa01999,
+        "DefaultXComponent",
+        "spawned-UIAbility mode: root + uiContext registered for windowId=%{public}d",
+        this.windowId,
+      );
       return;
     }
 
@@ -253,6 +254,16 @@ export struct DefaultXComponent {
     // Sub-window mode cleanup: unregister component root and dispose FrameNode
     if (!this.moduleName.trim() && this.windowId > 0) {
       WindowManager.getInstance().unregisterComponentRoot(this.windowId);
+      this.nodeController.disposeRoot();
+      return;
+    }
+    // Spawned UIAbility-instance mode cleanup (OQ3 multi-root): mirror the
+    // registration pair. removeControllerAndUIContext drops the componentRoot
+    // and UIContext entries (plus the webview-controller caches keyed by this
+    // id); unregisterUIAbilityStage covers the stage-side keys when the
+    // instance's window is torn down.
+    if (this.moduleName.trim() && this.windowId > 0) {
+      WindowManager.getInstance().removeControllerAndUIContext(this.windowId);
       this.nodeController.disposeRoot();
       return;
     }

@@ -81,6 +81,8 @@ export {
   notifyKeySynthesisController,
   synthesizeDomKeyEvent,
   KEY_SYNTHESIS_SHIM,
+  setWebFocused,
+  isWebFocused,
 } from "./src/main/ets/helper/key_synthesis";
 
 // ─── Shared bridge-plugin utilities (issue #87 minor-6) ──────────────────────

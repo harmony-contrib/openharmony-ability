@@ -19,13 +19,17 @@ export interface ApplicationLifecycle {
   keyboardEventCallback: KeyboardCallback;
 }
 
+// Trailing windowId parameters (multi-UIAbility, design.md D3/D8): 0 = the
+// process's first instance, or a spawned instance's pre-allocated tauri window
+// id. Payload-object callbacks whose object already wraps windowId
+// (onWindowSizeChange / onWindowRectChange) keep their single-arg shape.
 export interface EnvironmentCallback {
-  onConfigurationUpdated: (arg: object) => void;
-  onMemoryLevel: (arg: number) => void;
+  onConfigurationUpdated: (arg: object, windowId: number) => void;
+  onMemoryLevel: (arg: number, windowId: number) => void;
 }
 
 export interface KeyboardCallback {
-  onKeyboardHeightChange: (height: number) => void;
+  onKeyboardHeightChange: (height: number, windowId: number) => void;
 }
 
 // NewWantData payload for onNewWant. Optional continuation fields are read with
@@ -45,18 +49,24 @@ export interface CreateWithWantData {
 }
 
 export interface WindowStageEventCallback {
-  onWindowStageCreate: () => void;
-  onWindowStageDestroy: () => void;
-  onAbilityCreate: (arg: string) => void;
-  onAbilityCreateWithWant: (data: CreateWithWantData) => void;
-  onAbilityDestroy: () => void;
-  onAbilitySaveState: () => string;
-  onWindowStageEvent: (arg: number) => void;
+  onWindowStageCreate: (windowId: number) => void;
+  onWindowStageDestroy: (windowId: number) => void;
+  onAbilityCreate: (arg: string, windowId: number) => void;
+  onAbilityCreateWithWant: (data: CreateWithWantData, windowId: number) => void;
+  onAbilityDestroy: (windowId: number) => void;
+  onAbilitySaveState: (windowId: number) => void;
+  onWindowStageEvent: (arg: number, windowId: number) => void;
   onWindowSizeChange: (arg: object) => void;
   onWindowRectChange: (arg: object) => void;
+  onAvoidAreaChange: (arg: object, windowId: number) => void;
+  onNewWant: (data: NewWantData, windowId: number) => void;
+  // Window focus/avoid-area dispatch through HIS's typed wraps (#93): the
+  // WindowManager registry fans these out per window; the wrap carries the
+  // windowId inside (WindowFocusEventWrap/WindowAvoidAreaEventWrap).
   onWindowFocusChange: (arg: object) => void;
-  onAvoidAreaChange: (arg: object) => void;
-  onNewWant: (data: NewWantData) => void;
+  // PC/2in1 pre-close probe (onPrepareToTerminateAsync). Return true to CANCEL
+  // this termination, false to allow it (normal destroy chain follows).
+  onPrepareToTerminate: () => boolean;
 }
 
 export interface WebViewComponentEventCallback {
@@ -130,6 +140,13 @@ export interface AbilityInitContext {
   prefPath?: string;
   preferredLocales?: string;
   moduleName?: string;
+  /** HAP module name from `currentHapModuleInfo.name` (e.g. `entry_desktop`)
+   * -- NOT the .so library name carried by `moduleName`. */
+  hapModuleName?: string;
+  /** OpenHarmony SDK API level of the running device. */
+  sdkApiVersion?: number;
+  /** HarmonyOS distribution API version (`M*10000 + S*100 + F`). */
+  distributionOSApiVersion?: number;
   resourceManager?: resourceManager.ResourceManager;
   configuration?: NormalizedConfiguration;
 }
@@ -167,10 +184,14 @@ export interface Module {
   /**
    * Opens this native module's Ability-session bridge before any component is rendered. The
    * owner is unique per Ability session and guards a later session from stale cleanup.
+   *
+   * Back-compat: legacy native modules (built before the pluginize refactor) expose
+   * `init(context?: AbilityInitContext): ApplicationLifecycle`. Callers that bridge both
+   * shapes (ProcessInitializer) type the module as ESObject before invoking.
    */
   init: (
-    bindings: BridgeBindings,
-    bridgeOwner: string,
+    bindings: BridgeBindings | ESObject,
+    bridgeOwner?: string,
     context?: AbilityInitContext,
   ) => ApplicationLifecycle;
   /** Releases only the matching Ability-session bridge; stale owners are ignored. */
@@ -202,18 +223,56 @@ export interface Module {
   // optional: pre-pluginize legacy modules lack them, so callers keep their
   // typeof-probes before invoking. These used to be duck-typed via `as ESObject`.
   /** `is_desktop_device` — desktop form-factor probe (setupMenuPopup guard,
-   *  FloatPage `__openharmony_ability_is_desktop__`). */
+   *  SubWindowPage `__openharmony_ability_is_desktop__`). */
   isDesktopDevice?: () => boolean;
-  /** `notify_window_close` — Float close-button / FloatPage aboutToDisappear. */
+  /** `notify_window_close` -- sub-window close-button / SubWindowPage aboutToDisappear. */
   notifyWindowClose?: (windowId: number) => void;
   /** `notify_window_status` — NativeAbility windowStatusChange fan-in. */
   notifyWindowStatus?: (windowId: number, status: number) => void;
+  /** `notify_window_focus` -- SubWindowPage windowEvent ACTIVE/INACTIVE fan-in
+   *  (#180(1): sub-window focus transitions reach tao through the
+   *  PENDING_WINDOW_FOCUS queue; camelCase wire, typeof-probed like the other
+   *  optional exports so stale HARs degrade to a structured warn). */
+  notifyWindowFocus?: (windowId: number, focused: boolean) => void;
+  /** `set_display_layout` — display.getAllDisplays() position overlay push
+   *  (multi-monitor, issue Eulogizethesun/tauri#106). JSON `[[id, x, y], ...]`. */
+  setDisplayLayout?: (layoutJson: string) => void;
   /** `read_continue_snapshot` — onContinue source-side snapshot read. */
   readContinueSnapshot?: () => string;
-  /** `update_cursor_position` — MainPage onMouse cursor tracking. */
+  /** `update_cursor_position` -- onMouse cursor tracking (MainPage AND
+   *  SubWindowPage, fed via helper/cursor_feed.ets -- ohos-cursor-passthrough D2;
+   *  the values are screen-global vp since the same change). */
   updateCursorPosition?: (x: number, y: number) => void;
+  /** `notify_key_event` — MainPage onKeyPreIme Rust key forward (issue #109).
+   *  action: 0 = Down, 1 = Up. */
+  notifyKeyEvent?: (keyCode: number, action: number, deviceId: number) => void;
   /** `register_create_sub_window_tsfn` — legacy create_os_window path hookup. */
   registerCreateSubWindowTsfn?: (createSubWindow: (config: ESObject) => Promise<number>) => void;
+  /** `notify_float_window_registered` — sub-window creation-chain settle signal (success or
+   *  failure); drains the Rust-side ops queued against the pre-registration race window
+   *  (doc/OHOS窗口遗留问题.md issue-7 addendum). */
+  notifyFloatWindowRegistered?: (windowId: number, registered: boolean) => void;
+  /** `enable_float_pending_tracking` — sub-window pending-registry capability handshake
+   *  (review V1); arms the Rust-side gate only when present, so a stale HAR keeps the
+   *  pre-fix fire-and-forget semantics. */
+  enableFloatPendingTracking?: () => void;
+  /** `notify_ui_ability_start_failed` — start-ui-ability deferred-catch rollback
+   *  (AppControlPlugin): AMS rejected the spawn after the bridge response already
+   *  returned accepted; drops the pending D7 handshake entry and the label→id
+   *  pairing so a rejected spawn cannot strand them (review G15). */
+  notifyUiAbilityStartFailed?: (windowId: number) => void;
+  /** `notify_set_color_mode_failed` — set-color-mode deferred-catch failure
+   *  surfacing (AppControlPlugin): setColorMode runs on a later tick than the
+   *  bridge response (deadlock avoidance, ohos-constraints 4.3), so an
+   *  execution failure (e.g. 16000011 context-gone teardown race) arrives
+   *  after accepted=true already returned; this notify records it on the
+   *  Rust side instead of swallowing it (issue Eulogizethesun/tauri#222). */
+  notifySetColorModeFailed?: (code: number, message: string) => void;
+  /** `enable_ui_ability_pending_tracking` — UIAbility spawn pending-registry
+   *  capability handshake (mirrors enableFloatPendingTracking); arms the Rust-side
+   *  gate only when present, so a stale HAR keeps the pre-registry fire-and-forget
+   *  semantics instead of wedging ops against entries no ArkTS code would settle. */
+  enableUiAbilityPendingTracking?: () => void;
   /**
    * Synchronous ArkTS platform callback -> Rust plugin decision. The value is a named N-API
    * object and must be returned before the platform callback resumes.
@@ -225,7 +284,7 @@ export interface Module {
     responseTypeName: string,
     value: ESObject,
   ) => ESObject;
-  onBridgeLifecycle?: (kind: string) => void;
+  onBridgeLifecycle?: (kind: string, windowId: number) => void;
   /**
    * Legacy opt-in for native modules that register a custom `webview` URL scheme. Retained so
    * ProcessInitializer can probe for web-engine requirements on pre-pluginize modules. New
