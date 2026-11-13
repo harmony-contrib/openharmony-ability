@@ -6,9 +6,19 @@ license.workspace = true
 description = "Binding Rust application on Harmony with Ability"
 
 [features]
-default = ["log", "window"]
+# `updater` is a core-privileged capability (see `OpenHarmonyApp::updater()`).
+# Retained in default features: the updater plugin consumes it via
+# `tauri::ohos::APP` without an explicit feature declaration, and the tauri
+# crate's dependency (default features on) propagates the default set. Moving
+# it out requires synchronizing tauri/crates/tauri/Cargo.toml.
+default = ["log", "updater", "window"]
+account = []
+clipboard = ["log"]
 log = ["dep:log"]
+updater = []
 window = ["dep:ohos-window-manager-binding", "dep:ohos-image-native-binding"]
+global_shortcut = []
+fault-injection = []
 # ArkUI keyboard snapshots and consumption are opt-in; raw XComponent keys remain available.
 keyboard = ["ohos-arkui-binding/api-15"]
 # These features select linked NDK APIs and raise the application's minimum API.

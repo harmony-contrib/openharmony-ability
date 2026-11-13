@@ -20,6 +20,8 @@ impl BridgePlugin for DemoLoginPlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "demo.login";
+    // Mirrors the ArkTS DemoLoginPlugin's `requires: ["ui-context"]` — BridgeHost's
+    // assertPluginDeclaration fails the whole module setup when the two sides disagree.
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::UiContext];
 

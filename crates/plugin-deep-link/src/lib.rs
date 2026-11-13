@@ -15,6 +15,8 @@ use openharmony_ability::{
 
 // ── Bridge plugin declaration ─────────────────────────────────────────────────
 
+/// Rust facade marker for the built-in `ohos.deep-link` plugin (async;
+/// requires the Ability context).
 pub struct DeepLinkBridgePlugin;
 
 impl BridgePlugin for DeepLinkBridgePlugin {
@@ -27,19 +29,47 @@ impl BridgePlugin for DeepLinkBridgePlugin {
 
 // ── Request / Response types ──────────────────────────────────────────────────
 
+/// Empty request marker for `get-current` (the response carries the URI).
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct DeepLinkGetUriRequest {}
 
 impl_bridge_napi_type!(DeepLinkGetUriRequest, "ohos.deep-link.GetUriRequest");
 
+/// Response carrying the want URI that launched the current instance.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct DeepLinkGetUriResponse {
+    /// Launch URI, or `None` when the instance was not launched by a deep link.
     pub uri: Option<String>,
 }
 
-impl_bridge_napi_type!(DeepLinkGetUriResponse, "ohos.deep-link.GetUriResponse");
+// Hand-rolled decode instead of `impl_bridge_napi_type!` — same reason as
+// UpdaterCheckResponse (crates/ability/src/updater.rs): the
+// napi-derive-backend-ohos 1.2.0 object getter infers the item type from the
+// assignment target, so a derived `let uri_: Option<String> = obj.get("uri")`
+// compiles as `obj.get::<String>` and explodes with `StringExpected` when
+// ArkTS sends an explicit `null` — which DeepLinkPlugin.readUri() does for
+// the no-deep-link launch, the most common case. A missing property happens
+// to work (the getter skips conversion); the explicit turbofish + `flatten()`
+// handles present-null, absent, and undefined alike.
+impl BridgeNapiType for DeepLinkGetUriResponse {
+    const TYPE_NAME: &'static str = "ohos.deep-link.GetUriResponse";
+
+    fn into_bridge_value<'env>(
+        self,
+        env: &'env napi_ohos::Env,
+    ) -> Result<napi_ohos::bindgen_prelude::Unknown<'env>> {
+        <Self as napi_ohos::bindgen_prelude::ToNapiValue>::into_unknown(self, env)
+    }
+
+    fn from_bridge_value(value: napi_ohos::bindgen_prelude::Unknown<'_>) -> Result<Self> {
+        use napi_ohos::bindgen_prelude::{FromNapiValue, Object};
+        let obj = Object::from_unknown(value)?;
+        let uri: Option<String> = obj.get::<Option<String>>("uri")?.flatten();
+        Ok(Self { uri })
+    }
+}
 
 // ── Client facade ─────────────────────────────────────────────────────────────
 
@@ -47,16 +77,16 @@ impl_bridge_napi_type!(DeepLinkGetUriResponse, "ohos.deep-link.GetUriResponse");
 #[derive(Clone)]
 pub struct DeepLinkClient {
     bridge: BridgeRuntime,
-    /// App handle for the Rust-side want state (issue #87 major-9: migrated
-    /// from module statics into `OpenHarmonyAppInner`).
-    app: OpenHarmonyApp,
 }
 
 impl DeepLinkClient {
+    /// Builds a deep-link client bound to the app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
-            app: app.clone(),
         })
     }
 
@@ -105,9 +135,11 @@ impl DeepLinkClient {
 
     /// Returns the cold-start `want.uri` from the app's session state, then clears it.
     ///
-    /// This is a **synchronous** RwLock read — safe to call from any thread including the
-    /// main thread. Unlike [`get_initial_uri`](Self::get_initial_uri), this does NOT go
-    /// through the bridge and will not deadlock when called from a sync/main-thread context.
+    /// This is a synchronous read of a module-level mutex-guarded static
+    /// (`INITIAL_WANT_URI` in the ability crate; no bridge call, no await) —
+    /// safe to call from any thread including the main thread. Unlike
+    /// [`get_initial_uri`](Self::get_initial_uri), this does NOT go through
+    /// the bridge and will not deadlock when called from a sync/main-thread context.
     ///
     /// The value is populated by `onAbilityCreateWithWant` via the lifecycle callback.
     pub fn take_initial_uri(&self) -> String {
@@ -116,8 +148,10 @@ impl DeepLinkClient {
 
     /// Returns the latest `want.parameters` JSON from `onNewWant`, then clears it.
     ///
-    /// This is a **synchronous** RwLock read — safe to call from any thread including the
-    /// main thread. The value is populated by the `on_new_want` lifecycle callback.
+    /// This is a synchronous read of a module-level mutex-guarded static
+    /// (`WANT_PARAMETERS` in the ability crate; no bridge call, no await) —
+    /// safe to call from any thread including the main thread. The value is
+    /// populated by the `on_new_want` lifecycle callback.
     pub fn take_want_parameters(&self) -> String {
         self.app.take_want_parameters()
     }
@@ -128,7 +162,18 @@ fn normalize_uri(uri: Option<String>) -> Option<String> {
     uri.filter(|value| !value.is_empty())
 }
 
+/// Resolves a tauri window label to its pre-allocated UIAbility window id
+/// (design.md D9, openspec multi-uiability-windows). Labels that never
+/// spawned a UIAbility instance — including the primary window — resolve to
+/// 0. Re-exported here so deep-link consumers only need this crate.
+pub use openharmony_ability::window_id_for_label;
+
+/// Extension trait that adds [`DeepLinkClient`] access to the app handle.
 pub trait DeepLinkExt {
+    /// Returns the deep-link client bound to this app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     fn deep_link(&self) -> Result<DeepLinkClient>;
 }
 

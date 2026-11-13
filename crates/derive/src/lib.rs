@@ -1,3 +1,10 @@
+//! Proc-macro crate for OpenHarmony native ability modules.
+//!
+//! [`macro@ability`] turns a plain Rust function into the full N-API module
+//! entry: app registration, bridge session attachment, render/component
+//! wiring and ArkTS platform callbacks, following the contracts documented
+//! in the `openharmony_ability` crate.
+
 use proc_macro::TokenStream;
 
 use syn::ItemFn;
@@ -172,6 +179,42 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
                 (*APP).get_back_press_interceptor()
             }
 
+            /// ArkTS pre-IME key forward (issue Eulogizethesun/tauri#109):
+            /// MainPage.onKeyPreIme feeds every key the web sees into the
+            /// tao event loop through the same `Event::Input` dispatch the
+            /// (structurally unreachable, see `dispatch_key_event`'s doc)
+            /// NDK XComponent path would have used. `action`: 0 = Down,
+            /// 1 = Up (KeyType only has Down/Up).
+            #[napi_derive_ohos::napi]
+            pub fn notify_key_event(key_code: i32, action: i32, device_id: i64) {
+                use ::openharmony_ability::xcomponent::{Action, EventSource, KeyCode, KeyEventData};
+                // try_from_raw, NOT From: EnumFrom's generated From hits
+                // unreachable!() on key codes absent from the binding's enum,
+                // and the ArkTS InputKit keycode table may be newer — a panic
+                // here would cross the NAPI boundary. The raw type is i32
+                // (OH_NativeXComponent_KeyCode; KEY_UNKNOWN = -1).
+                let code = KeyCode::try_from_raw(key_code).unwrap_or(KeyCode::Unknown);
+                let action = match action {
+                    0 => Action::Down,
+                    1 => Action::Up,
+                    _ => Action::Unknown,
+                };
+                (*APP).dispatch_key_event(KeyEventData {
+                    code,
+                    action,
+                    device_id,
+                    source: EventSource::Keyboard,
+                    // `timestamp: 0` is a placeholder, harmless today: tao's
+                    // OHOS backend never reads this field — repeat detection
+                    // is keycode-based (pressed-keys set), and the winit-level
+                    // KeyEvent it dispatches carries no time. (The ArkTS
+                    // KeyEvent does expose `timestamp` — ns since boot, same
+                    // unit as the NDK field — so forward it here if a
+                    // consumer ever appears.)
+                    timestamp: 0,
+                });
+            }
+
             #[napi_derive_ohos::napi]
             pub fn init<'a>(
                 env: &'a napi_ohos::Env,
@@ -232,8 +275,13 @@ pub fn ability(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             /// ArkTS-only lifecycle transitions, currently UI-context readiness transitions.
             #[napi_derive_ohos::napi]
-            pub fn on_bridge_lifecycle(kind: String) -> napi_ohos::Result<()> {
-                let event = ::openharmony_ability::PluginLifecycleEvent::from_arkts(&kind)?;
+            pub fn on_bridge_lifecycle(kind: String, window_id: Option<i64>) -> napi_ohos::Result<()> {
+                // Option<i64>: an outdated HAR calling the pre-window_id
+                // signature degrades to the primary instance (id 0) instead of
+                // failing NAPI arg marshalling (mirrors lifecycle.rs's
+                // window_id_arg pattern).
+                let window_id = window_id.unwrap_or(0);
+                let event = ::openharmony_ability::PluginLifecycleEvent::from_arkts(&kind, window_id)?;
                 (*APP).dispatch_plugin_lifecycle(event)
             }
 
