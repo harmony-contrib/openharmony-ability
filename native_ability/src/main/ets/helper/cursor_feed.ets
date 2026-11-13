@@ -68,8 +68,11 @@ export function feedCursorFromMouse(module: Module | null | undefined, event: Mo
     let gy: number;
     let adoptedField: string;
     if (deviceInfo.sdkApiVersion >= 20 && Number.isFinite(event.globalDisplayX)) {
-      gx = event.globalDisplayX;
-      gy = event.globalDisplayY;
+      // globalDisplayX/Y are optional in the typings; ?? NaN keeps a
+      // half-present pair on the guard-3 skip path (gx is proven finite
+      // here, so only gy can degrade).
+      gx = event.globalDisplayX ?? NaN;
+      gy = event.globalDisplayY ?? NaN;
       adoptedField = "globalDisplayX";
     } else {
       gx = event.displayX;

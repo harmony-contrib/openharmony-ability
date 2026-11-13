@@ -533,6 +533,7 @@ export class NativeAbility extends UIAbility {
         try {
           runtime.lifecycle.environmentCallback.onConfigurationUpdated(
             runtime.initialConfiguration,
+            this.abilityWindowId,
           );
         } catch (e) {
           hilog.error(
@@ -934,20 +935,18 @@ export class NativeAbility extends UIAbility {
         );
       });
       // Sub-window avoid-area fan-in (HIS #93): WindowManager's sub-window path
-      // wraps {windowId, type, area}. Re-shaped to the Rust callback contract
-      // (make_on_avoid_area_change in crates/ability/src/lifecycle.rs): the raw
-      // {type, area} object as arg 1 and the windowId as arg 2 — the single-arg
-      // wrap form degrades windowId to 0 and would cross-write the primary's
-      // avoid_areas cache. Per-window avoid areas remain primary-window-scoped
-      // in Rust (known limitation): a sub-window (windowId>0) delivery reaches
-      // this fan but the Rust closure drops it at its window_id==0 gate.
+      // wraps {windowId, type, area}. Forwarded whole as arg 1 — the Rust
+      // callback (make_on_avoid_area_change in crates/ability/src/lifecycle.rs)
+      // reads only the "type"/"area" fields and ignores the rest — with the
+      // windowId as arg 2. The single-arg form degrades windowId to 0 and would
+      // cross-write the primary's avoid_areas cache. Per-window avoid areas
+      // remain primary-window-scoped in Rust (known limitation): a sub-window
+      // (windowId>0) delivery reaches this fan but the Rust closure drops it at
+      // its window_id==0 gate.
       WindowManager.getInstance().registerAvoidAreaChangeCallback(
         (wrapped: WindowAvoidAreaEventWrap) => {
           this.forEachLifecycle((lifecycle) =>
-            lifecycle.windowStageEventCallback.onAvoidAreaChange(
-              { type: wrapped.type, area: wrapped.area },
-              wrapped.windowId,
-            ),
+            lifecycle.windowStageEventCallback.onAvoidAreaChange(wrapped, wrapped.windowId),
           );
         },
       );
@@ -1423,7 +1422,9 @@ export class NativeAbility extends UIAbility {
       return;
     }
     void this.enqueueLifecycleOperation("memory-level", async (): Promise<void> => {
-      this.forEachLifecycle((lifecycle) => lifecycle.environmentCallback.onMemoryLevel(level));
+      this.forEachLifecycle((lifecycle) =>
+        lifecycle.environmentCallback.onMemoryLevel(level, this.abilityWindowId),
+      );
       await this.notifyBridgeLifecycle({
         kind: "memory-level",
         payload: new BridgeMemoryLevelLifecyclePayload(level),
@@ -1694,7 +1695,10 @@ export class NativeAbility extends UIAbility {
     );
     void this.enqueueLifecycleOperation("configuration-updated", async (): Promise<void> => {
       this.forEachLifecycle((lifecycle) =>
-        lifecycle.environmentCallback.onConfigurationUpdated(normalizedConfig),
+        lifecycle.environmentCallback.onConfigurationUpdated(
+          normalizedConfig,
+          this.abilityWindowId,
+        ),
       );
       await this.notifyBridgeLifecycle({
         kind: "configuration-updated",

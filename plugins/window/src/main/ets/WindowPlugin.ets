@@ -1010,8 +1010,10 @@ export class WindowPlugin extends AsyncPluginBase {
             );
             return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
           }
-          const windowModule: ESObject = window;
-          if (typeof windowModule.shiftAppWindowFocus !== "function") {
+          // shiftAppWindowFocus is @since 12. arkts-no-ns-as-obj: a module
+          // namespace cannot be captured as ESObject for a runtime typeof
+          // probe — gate by API level instead.
+          if (deviceInfo.sdkApiVersion < 12) {
             throw new Error("shiftAppWindowFocus is unavailable on this API level");
           }
           hilog.info(
@@ -1021,7 +1023,7 @@ export class WindowPlugin extends AsyncPluginBase {
             sourceRealId,
             targetRealId,
           );
-          await (windowModule.shiftAppWindowFocus(sourceRealId, targetRealId) as Promise<void>);
+          await window.shiftAppWindowFocus(sourceRealId, targetRealId);
           return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
         } catch (error) {
           throw new Error(`focus (main window) failed: ${String(error)}`);

@@ -96,7 +96,7 @@ export class ProcessInitializer {
    * not mutate it.
    */
   static getLifecycles(): Map<string, ApplicationLifecycle> {
-    return this.lifecycleByModule;
+    return ProcessInitializer.lifecycleByModule;
   }
 
   static createInitContext(
@@ -127,7 +127,7 @@ export class ProcessInitializer {
     loadMode: "async" | "sync",
     want: Want,
   ): Promise<void> {
-    if (this.initialized) {
+    if (ProcessInitializer.initialized) {
       hilog.info(DOMAIN, "ProcessInitializer", "Already initialized, skipping");
       return;
     }
@@ -201,7 +201,9 @@ export class ProcessInitializer {
               // (today's "Unknown OS sub-window" warn) instead of being
               // held forever.
               notifySettled(windowId, false);
-              throw err;
+              // arkts-limited-throw: ESObject cannot be rethrown as-is.
+              // Preserve Error identity; wrap everything else.
+              throw err instanceof Error ? err : new Error(String(err));
             });
         });
         hilog.info(DOMAIN, "ProcessInitializer", "Registered createSubWindow TSFN");
@@ -214,7 +216,7 @@ export class ProcessInitializer {
     // lacks this member entirely, so the Rust side never opens pending entries
     // and spawned-window ops keep fire-and-forget dispatch (no queue wedge —
     // same degrade contract as enableFloatPendingTracking above).
-    for (const module of this.nativeModules) {
+    for (const module of ProcessInitializer.nativeModules) {
       if (typeof module.enableUiAbilityPendingTracking === "function") {
         module.enableUiAbilityPendingTracking();
       }
@@ -237,7 +239,7 @@ export class ProcessInitializer {
       );
     }
 
-    this.initialized = true;
+    ProcessInitializer.initialized = true;
     hilog.info(DOMAIN, "ProcessInitializer", "Process initialization complete");
   }
 }

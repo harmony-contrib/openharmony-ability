@@ -655,7 +655,10 @@ class BridgeHost {
           type: options.type,
           area: options.area,
         };
-        this.applicationLifecycle?.windowStageEventCallback.onAvoidAreaChange(wrapped);
+        this.applicationLifecycle?.windowStageEventCallback.onAvoidAreaChange(
+          wrapped,
+          wrapped.windowId,
+        );
       } catch {}
     };
     const onKeyboardHeightChange = (height: number): void => {
@@ -663,7 +666,7 @@ class BridgeHost {
         return;
       }
       try {
-        this.applicationLifecycle?.keyboardEventCallback.onKeyboardHeightChange(height);
+        this.applicationLifecycle?.keyboardEventCallback.onKeyboardHeightChange(height, 0);
       } catch {}
     };
     state.windowBinding = {

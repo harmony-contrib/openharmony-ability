@@ -3648,7 +3648,7 @@ class WebviewSurface {
       // Static named import from @kit.BasicServicesKit (API 12 / SDK 5.0.0, 2in1 supported).
       // The prior dynamic import("@ohos.print") resolved printMod.print to a non-function —
       // the kit-level named export `print` is the correct entrypoint per Huawei docs.
-      const task = (await print.print([fileUriStr], ctx)) as ESObject;
+      const task: print.PrintTask = await print.print([fileUriStr], ctx);
       if (!task) {
         hilog.error(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "printPdf: print() returned no PrintTask");
         cleanup();
@@ -3684,19 +3684,13 @@ class WebviewSurface {
           );
         }
         try {
-          task.on("fail", (err: BusinessError) => {
-            hilog.error(
-              PRINT_LOG_DOMAIN,
-              PRINT_LOG_TAG,
-              "PrintTask 'fail': %{public}s",
-              String(err?.message ?? err),
-            );
-            notifyPrintState(
-              this.pluginContext,
-              id,
-              "fail",
-              String(err?.message ?? err) || undefined,
-            );
+          // The 'fail' callback is Callback<void> in the SDK typings — no error
+          // payload in the official contract. Keep the handler zero-arg so it
+          // type-checks on every API level (an err-typed handler also
+          // mis-forwarded the literal "undefined" string as the message).
+          task.on("fail", () => {
+            hilog.error(PRINT_LOG_DOMAIN, PRINT_LOG_TAG, "PrintTask 'fail': print job failed");
+            notifyPrintState(this.pluginContext, id, "fail");
             activePrintTasks.delete(id);
             cleanup();
           });
