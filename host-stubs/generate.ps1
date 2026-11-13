@@ -9,7 +9,7 @@
 #   - one empty archive per requested name (satisfies the link line,
 #     provides no symbols);
 #   - ohos-host-stubs.lib  - all ArkUI/native symbols compiled from stubs.rs
-#     (full symbol set recorded across symbols_round1-5.txt);
+#     (full symbol set recorded across symbols_round1-6.txt);
 #   - ohinputmethod.lib    - copy of the host stub archive (the
 #     ohos-input-method-sys `#[link]` name puts it on every host link, so
 #     the ArkUI/IME stub symbols resolve through it);
@@ -112,7 +112,8 @@ Assert-SymbolRecord $stubSymbols @(
     (Join-Path $stubDir "symbols_round2.txt"),
     (Join-Path $stubDir "symbols_round3.txt"),
     (Join-Path $stubDir "symbols_round4.txt"),
-    (Join-Path $stubDir "symbols_round5.txt")
+    (Join-Path $stubDir "symbols_round5.txt"),
+    (Join-Path $stubDir "symbols_round6.txt")
 ) "stubs.rs"
 $webSymbols = Get-StubSymbols (Join-Path $stubDir "stub-web.rs")
 Assert-SymbolRecord $webSymbols @((Join-Path $stubDir "symbols_web.txt")) "stub-web.rs"
@@ -234,7 +235,8 @@ $emptyNames = @(
     "image_receiver", "image_receiver_ndk.z", "image_source",
     "image_source_ndk.z", "native_buffer", "native_display_manager",
     "native_drawing", "ohimage", "ohresmgr", "picture", "pixelmap",
-    "pixelmap_ndk.z", "rawfile.z", "udmf", "hilog_ndk.z"
+    "pixelmap_ndk.z", "rawfile.z", "udmf", "hilog_ndk.z",
+    "deviceinfo_ndk.z", "native_window", "native_window_manager", "ohinput"
 )
 foreach ($n in $emptyNames) {
     Invoke-LibArchive $emptyObj (Join-Path $outDir ($n + ".lib"))

@@ -1062,3 +1062,757 @@ extern "C" fn OH_ResourceManager_ReleaseNativeResourceManager() {}
 extern "C" fn OH_ResourceManager_SeekRawFile() {}
 #[no_mangle]
 extern "C" fn OH_ResourceManager_SeekRawFile64() {}
+
+// Round 6: symbols pulled by the upstream (harmony-contrib) binding bump --
+// ohos-arkui-binding 0.6.0 (accessibility element-info/event-info setters,
+// drag action/drag-and-drop info, pointer-event clone family, axis events,
+// node-utils layout position, mouse-event deltas), ohos-device-binding (canIUse).
+// First full host test link of the ohos-patch worktree (LNK2019 sweep).
+#[no_mangle]
+extern "C" fn canIUse() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetAccessibilityDescription() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetAccessibilityFocused() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetAccessibilityGroup() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetAccessibilityLevel() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetAccessibilityOffset() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetAccessibilityOpacity() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetAccessibilityText() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetBackgroundColor() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetBackgroundImage() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetBlur() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetCheckable() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetChecked() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetChildNodeIds() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetClickable() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetComponentType() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetContents() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetCurrentItemIndex() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetEditable() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetElementId() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetEnabled() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetEndItemIndex() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetFocusable() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetFocused() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetGridInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetGridItemInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetHintText() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetHitTestBehavior() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetIsHint() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetIsPassword() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetItemCount() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetLongClickable() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetOperationActions() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetParentId() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetRangeInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetScreenRect() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetScrollable() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetSelected() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetSelectedTextEnd() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetSelectedTextStart() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetStartItemIndex() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetVisible() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityElementInfoSetZIndex() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityEventSetElementInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityEventSetEventType() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityEventSetRequestFocusId() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AccessibilityEventSetTextAnnouncedForAccessibility() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AddAndGetAccessibilityElementInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_AxisEvent_GetAxisAction() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_CreateAccessibilityElementInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_CreateAccessibilityEventInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_CreateDragActionWithNode() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DestoryAccessibilityElementInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DestoryAccessibilityEventInfo() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragAction_Dispose() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragAction_SetPointerId() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragAction_SetTouchPointX() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragAction_SetTouchPointY() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragAction_UnregisterStatusListener() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragAndDropInfo_GetDragEvent() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragAndDropInfo_GetDragStatus() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragEvent_GetDragResult() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragEvent_GetDropOperation() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragEvent_GetTouchPointXToWindow() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragEvent_GetTouchPointYToWindow() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragEvent_SetDragResult() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_DragEvent_SetSuggestedDropOperation() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_FindAccessibilityActionArgumentByKey() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_FocusAxisEvent_GetAxisValue() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_FocusAxisEvent_SetStopPropagation() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_MouseEvent_GetPressedButtons() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_MouseEvent_GetRawDeltaX() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_MouseEvent_GetRawDeltaY() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_NodeUtils_GetLayoutPosition() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_NodeUtils_GetLayoutPositionInScreen() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_CreateClonedEvent() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_DestroyClonedEvent() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_GetChangedPointerId() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_GetInteractionHand() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_GetInteractionHandByIndex() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_GetPressedTimeByIndex() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_PostClonedEvent() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_SetClonedEventActionType() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_SetClonedEventChangedFingerId() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_SetClonedEventFingerIdByIndex() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_SetClonedEventLocalPosition() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_PointerEvent_SetClonedEventLocalPositionByIndex() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_SendAccessibilityAsyncEvent() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_StartDrag() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_UIInputEvent_GetDeviceId() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_UIInputEvent_GetPressedKeys() {}
+#[no_mangle]
+extern "C" fn OH_ArkUI_UIInputEvent_GetTargetDisplayId() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_Create() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_GetPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_GetRowStride() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_GetSize() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_GetType() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_Release() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_SetPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_SetRowStride() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_SetSize() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureInfo_SetType() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_Create() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_GetInfo() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_GetMetadata() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_GetType() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_ReadPixels() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_Release() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_SetInfo() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_SetMetadata() {}
+#[no_mangle]
+extern "C" fn OH_AuxiliaryPictureNative_WritePixels() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_Create() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetCropAndScaleStrategy() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetCropRegion() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetDesiredColorSpace() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetDesiredDynamicRange() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetDesiredRegion() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetDesiredSize() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetIndex() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_GetRotate() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_Release() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetCropAndScaleStrategy() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetCropRegion() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetDesiredColorSpace() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetDesiredDynamicRange() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetDesiredRegion() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetDesiredSize() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetIndex() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptions_SetRotate() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptionsForPicture_Create() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptionsForPicture_GetDesiredAuxiliaryPictures() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptionsForPicture_Release() {}
+#[no_mangle]
+extern "C" fn OH_DecodingOptionsForPicture_SetDesiredAuxiliaryPictures() {}
+#[no_mangle]
+extern "C" fn OH_GetAbiList() {}
+#[no_mangle]
+extern "C" fn OH_GetBootloaderVersion() {}
+#[no_mangle]
+extern "C" fn OH_GetBrand() {}
+#[no_mangle]
+extern "C" fn OH_GetBuildHost() {}
+#[no_mangle]
+extern "C" fn OH_GetBuildRootHash() {}
+#[no_mangle]
+extern "C" fn OH_GetBuildTime() {}
+#[no_mangle]
+extern "C" fn OH_GetBuildType() {}
+#[no_mangle]
+extern "C" fn OH_GetBuildUser() {}
+#[no_mangle]
+extern "C" fn OH_GetDeviceType() {}
+#[no_mangle]
+extern "C" fn OH_GetDisplayVersion() {}
+#[no_mangle]
+extern "C" fn OH_GetDistributionOSApiVersion() {}
+#[no_mangle]
+extern "C" fn OH_GetDistributionOSName() {}
+#[no_mangle]
+extern "C" fn OH_GetDistributionOSReleaseType() {}
+#[no_mangle]
+extern "C" fn OH_GetDistributionOSVersion() {}
+#[no_mangle]
+extern "C" fn OH_GetFirstApiVersion() {}
+#[no_mangle]
+extern "C" fn OH_GetHardwareModel() {}
+#[no_mangle]
+extern "C" fn OH_GetIncrementalVersion() {}
+#[no_mangle]
+extern "C" fn OH_GetManufacture() {}
+#[no_mangle]
+extern "C" fn OH_GetMarketName() {}
+#[no_mangle]
+extern "C" fn OH_GetOSFullName() {}
+#[no_mangle]
+extern "C" fn OH_GetOsReleaseType() {}
+#[no_mangle]
+extern "C" fn OH_GetProductModel() {}
+#[no_mangle]
+extern "C" fn OH_GetProductSeries() {}
+#[no_mangle]
+extern "C" fn OH_GetSdkApiVersion() {}
+#[no_mangle]
+extern "C" fn OH_GetSecurityPatchTag() {}
+#[no_mangle]
+extern "C" fn OH_GetSoftwareModel() {}
+#[no_mangle]
+extern "C" fn OH_GetVersionId() {}
+#[no_mangle]
+extern "C" fn OH_ImageNative_GetBufferSize() {}
+#[no_mangle]
+extern "C" fn OH_ImageNative_GetByteBuffer() {}
+#[no_mangle]
+extern "C" fn OH_ImageNative_GetComponentTypes() {}
+#[no_mangle]
+extern "C" fn OH_ImageNative_GetImageSize() {}
+#[no_mangle]
+extern "C" fn OH_ImageNative_GetPixelStride() {}
+#[no_mangle]
+extern "C" fn OH_ImageNative_GetRowStride() {}
+#[no_mangle]
+extern "C" fn OH_ImageNative_GetTimestamp() {}
+#[no_mangle]
+extern "C" fn OH_ImageNative_Release() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_Create() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_GetSupportedFormats() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_PackToDataFromImageSource() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_PackToDataFromPicture() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_PackToDataFromPixelmap() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_PackToDataFromPixelmapSequence() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_PackToFileFromImageSource() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_PackToFileFromPicture() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_PackToFileFromPixelmap() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_PackToFileFromPixelmapSequence() {}
+#[no_mangle]
+extern "C" fn OH_ImagePackerNative_Release() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_Create() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_GetCapacity() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_GetReceivingSurfaceId() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_GetSize() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_Off() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_OffImageArrive() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_ReadLatestImage() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_ReadNextImage() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverNative_Release() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverOptions_Create() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverOptions_GetCapacity() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverOptions_GetSize() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverOptions_Release() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverOptions_SetCapacity() {}
+#[no_mangle]
+extern "C" fn OH_ImageReceiverOptions_SetSize() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceInfo_Create() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceInfo_GetDynamicRange() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceInfo_GetHeight() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceInfo_GetMimeType() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceInfo_GetWidth() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceInfo_Release() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreateFromData() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreateFromFd() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreateFromRawFile() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreateFromUri() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreatePicture() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreatePictureAtIndex() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreatePixelmap() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreatePixelmapList() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_CreatePixelmapUsingAllocator() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_GetDelayTimeList() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_GetFrameCount() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_GetImageInfo() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_GetImageProperty() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_GetImagePropertyWithNull() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_GetSupportedFormats() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_ModifyImageProperty() {}
+#[no_mangle]
+extern "C" fn OH_ImageSourceNative_Release() {}
+#[no_mangle]
+extern "C" fn OH_InputMethodProxy_NotifyConfigurationChange() {}
+#[no_mangle]
+extern "C" fn OH_InputMethodProxy_NotifyCursorUpdate() {}
+#[no_mangle]
+extern "C" fn OH_InputMethodProxy_NotifySelectionChange() {}
+#[no_mangle]
+extern "C" fn OH_NativeBuffer_Alloc() {}
+#[no_mangle]
+extern "C" fn OH_NativeBuffer_FromNativeWindowBuffer() {}
+#[no_mangle]
+extern "C" fn OH_NativeBuffer_GetConfig() {}
+#[no_mangle]
+extern "C" fn OH_NativeBuffer_Map() {}
+#[no_mangle]
+extern "C" fn OH_NativeBuffer_Reference() {}
+#[no_mangle]
+extern "C" fn OH_NativeBuffer_Unmap() {}
+#[no_mangle]
+extern "C" fn OH_NativeBuffer_Unreference() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_CreateAllDisplays() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_CreateAvailableArea() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_CreateDisplayById() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_CreatePrimaryDisplay() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_DestroyAllDisplays() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_DestroyAvailableArea() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_DestroyDisplay() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_GetDisplayPosition() {}
+#[no_mangle]
+extern "C" fn OH_NativeDisplayManager_GetDisplaySourceMode() {}
+#[no_mangle]
+extern "C" fn OH_NativeWindowManager_RegisterKeyEventFilter() {}
+#[no_mangle]
+extern "C" fn OH_NativeWindowManager_RegisterMouseEventFilter() {}
+#[no_mangle]
+extern "C" fn OH_NativeWindowManager_RegisterTouchEventFilter() {}
+#[no_mangle]
+extern "C" fn OH_NativeWindowManager_UnregisterKeyEventFilter() {}
+#[no_mangle]
+extern "C" fn OH_NativeWindowManager_UnregisterMouseEventFilter() {}
+#[no_mangle]
+extern "C" fn OH_NativeWindowManager_UnregisterTouchEventFilter() {}
+#[no_mangle]
+extern "C" fn OH_NativeXComponent_GetTouchPointTiltX() {}
+#[no_mangle]
+extern "C" fn OH_NativeXComponent_GetTouchPointTiltY() {}
+#[no_mangle]
+extern "C" fn OH_NativeXComponent_SetNeedSoftKeyboard() {}
+#[no_mangle]
+extern "C" fn OH_NativeXComponent_UnregisterOnFrameCallback() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_Create() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_GetDesiredDynamicRange() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_GetMimeType() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_GetMimeTypeWithNull() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_GetNeedsPackProperties() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_GetQuality() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_Release() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_SetDesiredDynamicRange() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_SetMimeType() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_SetNeedsPackProperties() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptions_SetQuality() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_Create() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_GetDelayTimeList() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_GetDisposalTypes() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_GetFrameCount() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_GetLoopCount() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_Release() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_SetDelayTimeList() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_SetDisposalTypes() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_SetFrameCount() {}
+#[no_mangle]
+extern "C" fn OH_PackingOptionsForSequence_SetLoopCount() {}
+#[no_mangle]
+extern "C" fn OH_PictureMetadata_Clone() {}
+#[no_mangle]
+extern "C" fn OH_PictureMetadata_Create() {}
+#[no_mangle]
+extern "C" fn OH_PictureMetadata_GetProperty() {}
+#[no_mangle]
+extern "C" fn OH_PictureMetadata_GetPropertyWithNull() {}
+#[no_mangle]
+extern "C" fn OH_PictureMetadata_Release() {}
+#[no_mangle]
+extern "C" fn OH_PictureMetadata_SetProperty() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_CreatePicture() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_GetAuxiliaryPicture() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_GetGainmapPixelmap() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_GetHdrComposedPixelmap() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_GetMainPixelmap() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_GetMetadata() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_Release() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_SetAuxiliaryPicture() {}
+#[no_mangle]
+extern "C" fn OH_PictureNative_SetMetadata() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_Create() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_GetAlphaMode() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_GetAlphaType() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_GetDynamicRange() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_GetHeight() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_GetPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_GetRowStride() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_GetWidth() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapImageInfo_Release() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_Create() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_GetAlphaType() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_GetEditable() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_GetHeight() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_GetPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_GetRowStride() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_GetSrcPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_GetWidth() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_Release() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_SetAlphaType() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_SetEditable() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_SetHeight() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_SetPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_SetRowStride() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_SetSrcPixelFormat() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapInitializationOptions_SetWidth() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_AccessPixels() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Clone() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_ConvertAlphaFormat() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_ConvertPixelmapNativeFromNapi() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_ConvertPixelmapNativeToNapi() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreateAlphaPixelmap() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreateCroppedAndScaledPixelMap() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreateEmptyPixelmap() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreateEmptyPixelmapUsingAllocator() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreatePixelmap() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreatePixelmapFromNativeBuffer() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreatePixelmapFromSurface() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreatePixelmapUsingAllocator() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreateScaledPixelMap() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_CreateScaledPixelMapWithAntiAliasing() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Crop() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Destroy() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Flip() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_GetAllocationByteCount() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_GetArgbPixels() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_GetByteCount() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_GetColorSpaceNative() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_GetImageInfo() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_GetMetadata() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_GetNativeBuffer() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_GetUniqueId() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_IsReleased() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Opacity() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_ReadPixels() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_ReadPixelsFromArea() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Release() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Rotate() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Scale() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_ScaleWithAntiAliasing() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_SetColorSpaceNative() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_SetMemoryName() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_SetMetadata() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_ToSdr() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_Translate() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_UnaccessPixels() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_WritePixels() {}
+#[no_mangle]
+extern "C" fn OH_PixelmapNative_WritePixelsToArea() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_GetAllMainWindowInfo() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_GetAllWindowLayoutInfoList() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_GetMainWindowSnapshot() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_GetWindowAvoidArea() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_GetWindowProperties() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_InjectTouchEvent() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_IsWindowShown() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_LockCursor() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_ReleaseAllMainWindowInfo() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_ReleaseAllWindowLayoutInfoList() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_ReleaseMainWindowSnapshot() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowBackgroundColor() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowBrightness() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowFocusable() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowKeepScreenOn() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowNavigationBarEnabled() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowPrivacyMode() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowStatusBarColor() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowStatusBarEnabled() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_SetWindowTouchable() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_ShowWindow() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_Snapshot() {}
+#[no_mangle]
+extern "C" fn OH_WindowManager_UnlockCursor() {}

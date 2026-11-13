@@ -142,8 +142,18 @@ impl DeepLinkClient {
     /// the bridge and will not deadlock when called from a sync/main-thread context.
     ///
     /// The value is populated by `onAbilityCreateWithWant` via the lifecycle callback.
+    /// Resolves the primary instance's (window id 0) entry; use
+    /// [`take_initial_uri_for_window`](Self::take_initial_uri_for_window) for a
+    /// spawned instance.
     pub fn take_initial_uri(&self) -> String {
-        self.app.take_initial_want_uri()
+        openharmony_ability::take_initial_want_uri()
+    }
+
+    /// Per-instance variant of [`take_initial_uri`](Self::take_initial_uri):
+    /// drains the cold-start `want.uri` stored by the UIAbility instance that
+    /// owns `window_id` (design.md D9, openspec multi-uiability-windows).
+    pub fn take_initial_uri_for_window(&self, window_id: i64) -> String {
+        openharmony_ability::take_initial_want_uri_for_window(window_id)
     }
 
     /// Returns the latest `want.parameters` JSON from `onNewWant`, then clears it.
@@ -153,7 +163,14 @@ impl DeepLinkClient {
     /// safe to call from any thread including the main thread. The value is
     /// populated by the `on_new_want` lifecycle callback.
     pub fn take_want_parameters(&self) -> String {
-        self.app.take_want_parameters()
+        openharmony_ability::take_want_parameters()
+    }
+
+    /// Per-instance variant of [`take_want_parameters`](Self::take_want_parameters):
+    /// drains the `want.parameters` JSON stored by the UIAbility instance that
+    /// owns `window_id` (design.md D9).
+    pub fn take_want_parameters_for_window(&self, window_id: i64) -> String {
+        openharmony_ability::take_want_parameters_for_window(window_id)
     }
 }
 
