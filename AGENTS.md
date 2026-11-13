@@ -10,6 +10,10 @@
 # Check the whole workspace
 cargo check --workspace
 
+# Windows host, before any `cargo test`/doctest (LNK1181 otherwise): generate the
+# device-library link stubs once per clone. See host-stubs/README.md.
+powershell -ExecutionPolicy Bypass -File host-stubs/generate.ps1
+
 # Host unit tests for a plugin crate (typeName / validation / mode+context assertions)
 cargo test -p openharmony-ability-plugin-<name> --lib
 

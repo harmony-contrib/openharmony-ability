@@ -4,15 +4,15 @@
 //! launches the ability with `launchParam.launchReason === CONTINUATION` and the
 //! source device's `wantParam` in `want.parameters`. `NativeAbility.onCreate` /
 //! `onNewWant` forward that signal (as the boolean `isContinuation`, never a raw
-//! enum number) into the lifecycle closures, which store it in the app's
-//! session state (`OpenHarmonyAppInner`, since issue #87 major-9) — the same
-//! pattern the deep-link cold-start path uses.
+//! enum number) into the lifecycle closures, which store it in the
+//! openharmony-ability module-level statics (`CONTINUATION_RESTORE` /
+//! `CONTINUATION_DATA`, app.rs).
 //!
 //! This facade is a **pure synchronous** reader of that state: no bridge
 //! plugin, no ArkTS action, no main-thread dispatch. Active migration (source
 //! device initiating hand-off) is system-UI-exclusive on OHOS and is not
 //! covered. Source-side state saving goes through
-//! [`ContinuationClient::set_continuation_data`]: the snapshot is stored in the
+//! `ContinuationClient::set_continuation_data`: the snapshot is stored in the
 //! process-level `CONTINUATION_SNAPSHOT` global and read synchronously by the
 //! ArkTS `onContinue` callback (via the `read_continue_snapshot` NAPI export)
 //! when the system initiates a migration.
@@ -23,17 +23,16 @@ use openharmony_ability::OpenHarmonyApp;
 
 /// Sync facade for app-continuation restore queries.
 ///
-/// Holds an [`OpenHarmonyApp`] clone and performs no ArkTS round-trips. The
-/// continuation signal is captured by the lifecycle callbacks in
+/// Zero-sized: the restore state lives in openharmony-ability's module-level
+/// statics, so the facade holds no app handle and performs no ArkTS
+/// round-trips. The continuation signal is captured by the lifecycle callbacks in
 /// `onAbilityCreateWithWant`, which runs AFTER the embedding runtime's entry
 /// (`module.init` builds and runs the Tauri app first) — queries made from a
 /// plugin `setup`/initialize hook during a continuation cold start still read
 /// `false`/`""`. JS callers are unaffected (webviews load much later); Rust
 /// callers must query after setup completes.
 #[derive(Clone, Debug)]
-pub struct ContinuationClient {
-    app: OpenHarmonyApp,
-}
+pub struct ContinuationClient;
 
 impl ContinuationClient {
     /// Returns whether the current launch is an app-continuation restore.
@@ -74,6 +73,7 @@ pub fn set_continuation_data(data: String) {
     openharmony_ability::store_continue_snapshot(&data);
 }
 
+/// Extension trait exposing the continuation facade on `OpenHarmonyApp`.
 pub trait ContinuationExt {
     /// Returns the continuation facade for this app.
     ///
@@ -84,7 +84,7 @@ pub trait ContinuationExt {
 
 impl ContinuationExt for OpenHarmonyApp {
     fn continuation(&self) -> ContinuationClient {
-        ContinuationClient { app: self.clone() }
+        ContinuationClient
     }
 }
 
@@ -101,10 +101,12 @@ mod tests {
     #[test]
     fn facade_delegates_to_app_state() {
         // Delegate wiring only — per-app state semantics are covered by the
-        // continuation_tests module in openharmony-ability (app.rs).
-        let app = OpenHarmonyApp::new();
-        let client = app.continuation();
-        app.store_continuation(true, r#"{"probe":1}"#);
+        // continuation_tests module in openharmony-ability (app.rs). The
+        // restore state rides the module-level statics, so drive the public
+        // free function the lifecycle closures use — the app-instance store
+        // writes the per-app inner state this facade never reads.
+        let client = OpenHarmonyApp::new().continuation();
+        openharmony_ability::store_continuation(true, r#"{"probe":1}"#);
         assert!(client.is_continuation_restore());
         assert_eq!(client.take_continuation_data(), r#"{"probe":1}"#);
     }

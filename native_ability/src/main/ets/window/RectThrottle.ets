@@ -15,6 +15,27 @@ export interface WindowRectEventWrap {
   windowId: number;
   reason: window.RectChangeReason;
   rect: window.Rect;
+  /**
+   * Issue Eulogizethesun/tauri#97: the same moment's
+   * `getWindowProperties().drawableRect` — the system's own inner rect
+   * (position relative to the window, size = drawable area, px), read
+   * synchronously by the rect-change handler so the outer and inner snapshots
+   * in one wrap can never tear. Omitted when the sync read threw (window not
+   * created / content not loaded): the Rust side keeps the last snapshot.
+   */
+  drawable?: window.Rect;
+}
+
+/**
+ * Review R13: post-load seed snapshot — the WM (outer) rect and the drawable
+ * (inner) rect from ONE `getWindowProperties()` call, both deep-copied. A seed
+ * must plant the pair atomically or not at all (half a pair is exactly the
+ * torn state the Rust side's pair-in/pair-out contract rejects), so
+ * `readWindowRectSnapshot` returns undefined when either rect is unreadable.
+ */
+export interface WindowRectSnapshot {
+  rect: window.Rect;
+  drawable: window.Rect;
 }
 
 /**

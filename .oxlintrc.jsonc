@@ -7,7 +7,17 @@
     "arkts/system-api-version": [
       "warn",
       {
-        "minApiVersion": 12
+        "minApiVersion": 12,
+        // Official @ohos.notificationManager reference deprecates only the two
+        // NO-context overloads of requestEnableNotification at API 12 and marks
+        // the UIAbilityContext overloads as current (10+). oxk's bundled data
+        // is name-keyed and flags all overloads (verified empirically), so pin
+        // the method to its introduction version. NOTE: this also un-flags the
+        // deprecated no-arg form — the repo's only call site is the fixed one
+        // in WindowPlugin.ets; proper fix is per-overload data upstream in oxk.
+        "apis": {
+          "@kit.NotificationKit.notificationManager.requestEnableNotification": 10
+        }
       }
     ]
   }
