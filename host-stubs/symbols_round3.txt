@@ -1,0 +1,5 @@
+dlopen
+dlsym
+OH_NativeXComponent_RegisterKeyEventCallback
+OH_NativeXComponent_RegisterUIInputEventCallback
+OH_NativeXComponent_GetNativeAccessibilityProvider

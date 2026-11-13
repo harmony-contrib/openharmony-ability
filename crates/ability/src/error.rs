@@ -1,5 +1,8 @@
 #[derive(Debug)]
+/// Error type for ability runtime misuse.
 pub enum AbilityError {
+    /// An entry point that may only run on the main thread was called from
+    /// another thread; carries the offending call site description.
     OnlyRunWithMainThread(String),
 }
 
