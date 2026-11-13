@@ -34,6 +34,15 @@ export interface AboutMetadataData {
 /**
  * Predefined menu item types, which will be translated to system default menu items with
  * corresponding actions.
+ *
+ * Mirrors muda's PredefinedMenuItemType serialization (the to_menu_item_data
+ * mapping in muda/src/platform_impl/ohos/mod.rs) — the only producer of the
+ * menu JSON's `predefinedType` field — plus the execute-predefined bridge
+ * action strings tray-icon's event.rs dispatches. muda's enum has no
+ * recover/restore/destroyWindow variants, so nothing ever emits them
+ * (issue #203): 'restore'/'destroyWindow' are removed; 'recover' is kept
+ * (its executor arm is retained per upstream #219) as an unreachable member
+ * for switch-case comparability.
  */
 export type PredefinedType =
   | "separator"
@@ -47,8 +56,6 @@ export type PredefinedType =
   | "maximize"
   | "fullscreen"
   | "recover"
-  | "restore"
-  | "destroyWindow"
   | "close"
   | "quit"
   | "about"

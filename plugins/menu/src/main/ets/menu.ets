@@ -89,6 +89,14 @@ export class PredefinedActionExecutor {
    * Restore the Ability (app) from background.
    * Called when user clicks the tray icon to bring the app back to foreground.
    * Uses startAbility() to bring the hidden Ability back to front.
+   * D4 specified amendment (openspec multi-uiability-windows): under
+   * launchType "specified" + AbilityStage.onAcceptWant, a bare self-targeting
+   * startAbility routes to the live primary instance — AMS pulls it back to the
+   * top of the stack (official foreground primitive, covers visible/
+   * minimized/hidden states). This is the only mechanism that can undo a
+   * context.hideAbility()-backgrounded ability; window-level restore()/
+   * showWindow() cannot (device-proven regression under the interim
+   * "standard" + showWindowMethod variant, 2026-09-15).
    */
   async showAbility(): Promise<void> {
     if (!this.context) {
@@ -237,10 +245,12 @@ export class PredefinedActionExecutor {
       return;
     }
 
-    const isSubWindow = windowId > 0;
+    const isNonMainWindow = windowId > 0;
 
-    if (isSubWindow) {
-      // Sub-window: notify Rust + use WindowManager.closeWindow()
+    if (isNonMainWindow) {
+      // Non-main window: notify Rust + use WindowManager.closeWindow() —
+      // sub-windows are destroyed via destroyWindow, spawned UIAbility
+      // instances terminateSelf
       try {
         const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
         if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
@@ -248,7 +258,7 @@ export class PredefinedActionExecutor {
         }
         await WindowManager.getInstance().closeWindow(windowId);
       } catch (e) {
-        hilog.warn(DOMAIN, "Menu", "Close sub-window failed: %{public}s", String(e));
+        hilog.warn(DOMAIN, "Menu", "Close non-main window failed: %{public}s", String(e));
       }
     } else {
       // Main window: hideAbility (cannot destroyWindow as WindowStage becomes invalid)
@@ -434,6 +444,18 @@ export class PredefinedActionExecutor {
           this.exitFn(0);
           break;
         case "hideOthers":
+        case "services":
+          // macOS-only semantics (hideOtherApplications: / the services menu)
+          // with no OHOS counterpart — muda still serializes these on
+          // cross-platform menus, and upstream Windows no-ops them on click
+          // too. Warn so the dead click leaves a trace in hilog instead of
+          // vanishing (the item is rendered and clickable).
+          hilog.warn(
+            DOMAIN,
+            "Menu",
+            "predefined action '%{public}s' is macOS-only with no OHOS counterpart; click ignored",
+            String(type),
+          );
           break;
         case "showAll":
         case "bringAllToFront":
@@ -441,8 +463,6 @@ export class PredefinedActionExecutor {
           break;
         case "about":
           this.showAboutFn?.(aboutMetadata ?? ({} as AboutMetadataData));
-          break;
-        case "restore":
           break;
       }
     } catch (e) {

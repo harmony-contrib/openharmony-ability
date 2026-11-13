@@ -1,17 +1,8 @@
 import { DefaultXComponent } from "./DefaultXComponent";
+import { WindowTitleBar } from "./WindowTitleBar";
 import { Module } from "../ability/type";
-import {
-  MenuBarComponent,
-  getMenuClickHandler,
-  getMenuBarRecoverFn,
-  isMenubarVisible,
-} from "./MenuBarComponent";
-import {
-  AcceleratorMatcher,
-  isClipboardEnabled,
-  isZoomHotkeysEnabled,
-} from "../helper/accelerator_matcher";
-import { KeyCode, pointer } from "@kit.InputKit";
+import { getMenuBarPort, MenuBarSlotHost } from "./MenuBarSlot";
+import { pointer } from "@kit.InputKit";
 import { hilog } from "@kit.PerformanceAnalysisKit";
 import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { window as arkWindow, CursorController } from "@kit.ArkUI";
@@ -25,16 +16,12 @@ import { DOMAIN, NATIVE_MODULE_STORAGE_KEY } from "../helper/constants";
 // either breaks @Entry route registration and the bridge handshake.
 export const RouteName = "FloatWindow";
 
-interface Position {
-  x: number;
-  y: number;
-}
-
 @Entry({ routeName: RouteName, storage: LocalStorage.getShared() })
 @Component
 struct SubWindowPage {
   // Receive windowId from WindowManager.createSubWindow
   @LocalStorageProp("windowId") windowId: number = 0;
+  @LocalStorageProp("nativeModuleName") nativeModuleName: string = "";
   @LocalStorageProp("decorations") decorations: boolean = true;
   // D group: decoration button availability (all available by default). Written by WindowManager.setDecorationFlags.
   @LocalStorageProp("closable") closable: boolean = true;
@@ -46,14 +33,14 @@ struct SubWindowPage {
   @StorageProp("__openharmony_ability_is_desktop__") isDesktop: boolean = false;
   // Maximize toggle state (local UI state, not persisted)
   @State isMaximized: boolean = false;
+  @State private windowFocused: boolean = true;
 
   // Window control
   private windowClass: arkWindow.Window | null = null;
-  @State @Watch("moveAndSetWindow") windowPosition: Position = { x: 100, y: 100 };
   @State dpiScale: number = 1;
   private cursorController: CursorController | null = null;
-  private acceleratorMatcher: AcceleratorMatcher = new AcceleratorMatcher();
-  // Fix-variant m6: one-shot guard for the stale-HAR structured warn below.
+  // Fix-variant m6: one-shot guard for the stale-HAR structured warn in
+  // onWindowEvent below (#180 focus-notify fold).
   private focusNotifyWarned: boolean = false;
 
   // Resize tracking
@@ -65,7 +52,77 @@ struct SubWindowPage {
   // Prevent double NAPI notification when window is closed via multiple paths
   private closeNotified: boolean = false;
 
+  private onWindowStatusChange = (status: arkWindow.WindowStatusType): void => {
+    // System/tao transitions drive the restore icon, including changes that did
+    // not originate from the title-bar button.
+    // Apps targeting API < 14 receive FULL_SCREEN for maximized windows. Both
+    // states need the recover action and must disable floating drag/resize.
+    this.isMaximized =
+      status === arkWindow.WindowStatusType.MAXIMIZE ||
+      status === arkWindow.WindowStatusType.FULL_SCREEN;
+    const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+    if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
+      nativeModule.notifyWindowStatus(this.windowId, status);
+    }
+  };
+
+  private onWindowEvent = (event: arkWindow.WindowEventType): void => {
+    if (event === arkWindow.WindowEventType.WINDOW_ACTIVE) {
+      this.windowFocused = true;
+    } else if (event === arkWindow.WindowEventType.WINDOW_INACTIVE) {
+      this.windowFocused = false;
+    }
+    // #180: sub-window focus transitions reach tao through the
+    // PENDING_WINDOW_FOCUS queue (notifyWindowFocus -> event-loop drain
+    // with edge dedup + paired-blur synthesis). The windowFocused state above
+    // drives the title-bar visuals; this notify drives the Rust-side
+    // Focused/Blurred events -- two consumers, one handler (E-batch fold).
+    const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+    if (nativeModule && typeof nativeModule.notifyWindowFocus === "function") {
+      if (event === arkWindow.WindowEventType.WINDOW_ACTIVE) {
+        nativeModule.notifyWindowFocus(this.windowId, true);
+      } else if (event === arkWindow.WindowEventType.WINDOW_INACTIVE) {
+        nativeModule.notifyWindowFocus(this.windowId, false);
+      }
+    } else if (!this.focusNotifyWarned) {
+      // Fix-variant m6: a stale HAR (native module without notifyWindowFocus)
+      // used to silently drop focus transitions. One-time structured warn per
+      // SubWindowPage instance instead.
+      this.focusNotifyWarned = true;
+      hilog.warn(
+        DOMAIN,
+        "SubWindowPage",
+        "windowEvent dropped: native module notifyWindowFocus unavailable (stale HAR?): id=%{public}d",
+        this.windowId,
+      );
+    }
+  };
+
+  private detachWindowListeners(): void {
+    try {
+      this.windowClass?.off("windowStatusChange", this.onWindowStatusChange);
+    } catch (error) {
+      hilog.warn(
+        DOMAIN,
+        "SubWindowPage",
+        "Detach window status listener: %{public}s",
+        String(error),
+      );
+    }
+    try {
+      this.windowClass?.off("windowEvent", this.onWindowEvent);
+    } catch (error) {
+      hilog.warn(
+        DOMAIN,
+        "SubWindowPage",
+        "Detach window focus listener: %{public}s",
+        String(error),
+      );
+    }
+  }
+
   aboutToDisappear(): void {
+    this.detachWindowListeners();
     // When the OHOS system close button destroys the sub-window,
     // neither the SubWindowPage x onClick nor the webview onCloseWindow fires.
     // aboutToDisappear is our last chance to notify Rust.
@@ -86,6 +143,9 @@ struct SubWindowPage {
     this.closeNotified = true;
     try {
       const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+      if (this.nativeModuleName && nativeModule?.notifyNativeWindowClose) {
+        nativeModule.notifyNativeWindowClose(this.windowId);
+      }
       if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
         nativeModule.notifyWindowClose(this.windowId);
         hilog.info(
@@ -107,8 +167,17 @@ struct SubWindowPage {
     }
   }
 
-  moveAndSetWindow() {
-    this.windowClass?.moveWindowTo(this.windowPosition.x, this.windowPosition.y);
+  private startMoveFromTitle(event: TouchEvent): void {
+    if (event.type !== TouchType.Down || this.isMaximized || deviceInfo.sdkApiVersion < 14) {
+      return;
+    }
+    try {
+      this.windowClass?.startMoving()?.catch((err: BusinessError) => {
+        hilog.warn(DOMAIN, "SubWindowPage", "startMoving failed: %{public}s", JSON.stringify(err));
+      });
+    } catch (err) {
+      hilog.warn(DOMAIN, "SubWindowPage", "startMoving exception: %{public}s", String(err));
+    }
   }
 
   aboutToAppear(): void {
@@ -133,7 +202,6 @@ struct SubWindowPage {
         if (this.windowClass) {
           try {
             const rect = this.windowClass.getGlobalRect();
-            this.windowPosition = { x: rect.left, y: rect.top };
             if (rect.width > 0) this.currentWidth = rect.width;
             if (rect.height > 0) this.currentHeight = rect.height;
             hilog.info(
@@ -158,25 +226,8 @@ struct SubWindowPage {
           // notifyWindowStatus NAPI 入队,runtime-wry drain 路由到对应 tao Window。
           // API 11+;不支持则静默降级。详见 doc/OHOS窗口遗留问题.md。
           try {
-            this.windowClass.on("windowStatusChange", (statusType: arkWindow.WindowStatusType) => {
-              // G9: drive the maximize/restore button icon from the actual system status,
-              // so it stays in sync when maximize/restore is triggered by the system or by
-              // the tao mirror (apply_window_status), not only on button click.
-              this.isMaximized = statusType === arkWindow.WindowStatusType.MAXIMIZE;
-              const nativeModule: Module | undefined =
-                AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-              if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
-                nativeModule.notifyWindowStatus(this.windowId, statusType);
-              }
-            });
-            // seed 初始态(同时驱动按钮图标 + NAPI 镜像位)。
-            const initialStatus = this.windowClass.getWindowStatus();
-            this.isMaximized = initialStatus === arkWindow.WindowStatusType.MAXIMIZE;
-            const nativeModule: Module | undefined =
-              AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-            if (nativeModule && typeof nativeModule.notifyWindowStatus === "function") {
-              nativeModule.notifyWindowStatus(this.windowId, initialStatus);
-            }
+            this.windowClass.on("windowStatusChange", this.onWindowStatusChange);
+            this.onWindowStatusChange(this.windowClass.getWindowStatus());
           } catch (e) {
             hilog.warn(
               DOMAIN,
@@ -185,65 +236,15 @@ struct SubWindowPage {
               String(e),
             );
           }
-          // #180(1): sub-window focus transitions reach tao through the
-          // PENDING_WINDOW_FOCUS queue (notifyWindowFocus -> event-loop drain
-          // with edge dedup + paired-blur synthesis). `windowFocusChange` is
-          // absent from the local SDK20 @ohos.window.d.ets; `windowEvent`
-          // @since 10 (revised 11) — WINDOW_ACTIVE=2 / WINDOW_INACTIVE=3 —
-          // is the equivalent surface. Everything is probed at runtime: a host
-          // without the API degrades to a structured warn, never a panic.
           try {
-            if (typeof this.windowClass.on !== "function") {
-              hilog.warn(
-                DOMAIN,
-                "SubWindowPage",
-                "windowEvent skipped: win.on is not a function: id=%{public}d",
-                this.windowId,
-              );
-            } else if (
-              typeof arkWindow.WindowEventType === "undefined" ||
-              (arkWindow.WindowEventType as ESObject)?.WINDOW_ACTIVE === undefined ||
-              (arkWindow.WindowEventType as ESObject)?.WINDOW_INACTIVE === undefined
-            ) {
-              hilog.warn(
-                DOMAIN,
-                "SubWindowPage",
-                "windowEvent skipped: WindowEventType ACTIVE/INACTIVE not available on this host: id=%{public}d",
-                this.windowId,
-              );
-            } else {
-              this.windowClass.on("windowEvent", (event: arkWindow.WindowEventType) => {
-                const nativeModule: Module | undefined =
-                  AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-                if (nativeModule && typeof nativeModule.notifyWindowFocus === "function") {
-                  if (event === arkWindow.WindowEventType.WINDOW_ACTIVE) {
-                    nativeModule.notifyWindowFocus(this.windowId, true);
-                  } else if (event === arkWindow.WindowEventType.WINDOW_INACTIVE) {
-                    nativeModule.notifyWindowFocus(this.windowId, false);
-                  }
-                } else {
-                  // Fix-variant m6: a stale HAR (native module without
-                  // notifyWindowFocus) used to silently drop focus transitions.
-                  // One-time structured warn per SubWindowPage instance instead.
-                  if (!this.focusNotifyWarned) {
-                    this.focusNotifyWarned = true;
-                    hilog.warn(
-                      DOMAIN,
-                      "SubWindowPage",
-                      "windowEvent dropped: native module notifyWindowFocus unavailable (stale HAR?): id=%{public}d event=%{public}d",
-                      this.windowId,
-                      event as number,
-                    );
-                  }
-                }
-              });
-            }
-          } catch (e) {
+            this.windowClass.on("windowEvent", this.onWindowEvent);
+            this.windowFocused = this.windowClass.isFocused();
+          } catch (error) {
             hilog.warn(
               DOMAIN,
               "SubWindowPage",
-              "windowEvent registration failed: %{public}s",
-              String(e),
+              "Window focus tracking failed: %{public}s",
+              String(error),
             );
           }
         } else {
@@ -289,233 +290,139 @@ struct SubWindowPage {
     }
   }
 
+  private minimizeWindow(): void {
+    try {
+      WindowManager.getInstance().minimizeWindow(this.windowId);
+    } catch (error) {
+      hilog.warn(DOMAIN, "SubWindowPage", "minimize failed: %{public}s", String(error));
+    }
+  }
+
+  private toggleMaximize(): void {
+    try {
+      if (this.isMaximized) {
+        // recover(), rather than the main-window-only restore(), returns a
+        // maximized Float window to its saved floating bounds.
+        WindowManager.getInstance().recoverWindow(this.windowId);
+      } else {
+        WindowManager.getInstance().maximizeWindow(this.windowId);
+      }
+      // The system status callback updates the icon after the operation succeeds.
+    } catch (error) {
+      hilog.warn(DOMAIN, "SubWindowPage", "maximize/restore failed: %{public}s", String(error));
+    }
+  }
+
+  private async closeWindow(): Promise<void> {
+    hilog.info(
+      DOMAIN,
+      "SubWindowPage",
+      "Close button clicked for window %{public}d",
+      this.windowId,
+    );
+    if (this.closeNotified) {
+      return;
+    }
+    // Check closable flag BEFORE anything else (问题四: 拦截 API 执行路径)
+    // Must be before notifyWindowClose — otherwise Rust triggers close event chain.
+    if (!WindowManager.getInstance().getDecorationFlag(this.windowId, "closable")) {
+      hilog.warn(
+        DOMAIN,
+        "SubWindowPage",
+        "Close blocked: closable flag not set (window %{public}d)",
+        this.windowId,
+      );
+      return;
+    }
+    if (WindowManager.getInstance().requestWindowClose(this.windowId)) {
+      return;
+    }
+    this.closeNotified = true;
+    try {
+      // Notify Rust event loop before destroying the OHOS window,
+      // so CloseRequested → Destroyed → WindowsStore cleanup can run.
+      const nativeModule: Module | undefined = AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
+      if (this.nativeModuleName && nativeModule?.notifyNativeWindowClose) {
+        nativeModule.notifyNativeWindowClose(this.windowId);
+      }
+      if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
+        nativeModule.notifyWindowClose(this.windowId);
+        hilog.info(
+          DOMAIN,
+          "SubWindowPage",
+          "Window %{public}d close notified via NAPI",
+          this.windowId,
+        );
+      } else {
+        hilog.warn(
+          DOMAIN,
+          "SubWindowPage",
+          "NAPI notifyWindowClose not available for window %{public}d",
+          this.windowId,
+        );
+      }
+
+      // removeWindow BEFORE destroyWindow so that aboutToDisappear
+      // sees the window as already handled (consistent with ArkHelper.onCloseWindow)
+      WindowManager.getInstance().removeWindow(this.windowId);
+      if (this.windowClass) {
+        await this.windowClass.destroyWindow();
+        hilog.info(
+          DOMAIN,
+          "SubWindowPage",
+          "Window %{public}d destroyed and cleaned up",
+          this.windowId,
+        );
+      }
+    } catch (e) {
+      hilog.error(
+        DOMAIN,
+        "SubWindowPage",
+        "Failed to close window %{public}d: %{public}s",
+        this.windowId,
+        String(e),
+      );
+    }
+  }
+
   build() {
     Stack() {
       Column() {
-        // Menubar (only on desktop when menu items are available and decorations are enabled)
-        if (this.isDesktop && this.decorations) {
-          MenuBarComponent({
-            windowId: this.windowId,
-            acceleratorMatcher: this.acceleratorMatcher,
+        // The floating window draws its own title controls. Keep them above the
+        // menubar, matching the main window's system title bar and menubar order.
+        // (E-batch graft: the gate widens to ours' `decorations || isDesktop` --
+        // WindowTitleBar gates its own title/buttons on decorations and keeps
+        // only the drag surface when they are off, which is ours' transparent
+        // drag-bar behavior for undecorated desktop float windows.)
+        if (this.windowClass && (this.decorations || this.isDesktop)) {
+          WindowTitleBar({
+            title: this.title,
+            decorations: this.decorations,
+            windowFocused: this.windowFocused,
+            maximized: this.isMaximized,
+            minimizable: this.minimizable,
+            maximizable: this.maximizable,
+            closable: this.closable,
+            onDrag: (event: TouchEvent) => this.startMoveFromTitle(event),
+            onMinimize: () => this.minimizeWindow(),
+            onMaximize: () => this.toggleMaximize(),
+            onClose: () => {
+              this.closeWindow();
+            },
           });
         }
-        Stack({ alignContent: Alignment.TopEnd }) {
-          // 1. WebView content area (full screen)
-          DefaultXComponent({ windowId: this.windowId })
+
+        // Native windows need their own menu host and accelerator registry even
+        // when the shared library was built for the mobile device class. The
+        // menu host stays empty if the application has not supplied any menus.
+        // Preserve the existing decoration gate for webview-only float windows.
+        if (this.nativeModuleName.length > 0 || (this.isDesktop && this.decorations)) {
+          MenuBarSlotHost({ windowId: this.windowId });
+        }
+        Stack() {
+          DefaultXComponent({ moduleName: this.nativeModuleName, windowId: this.windowId })
             .width("100%")
             .height("100%")
-
-          // 2. Top drag control area + right close button
-          //    - decorations=true: drag bar + close button (all platforms)
-          //    - decorations=false on desktop: transparent drag bar only (no close button)
-          if (this.windowClass && (this.decorations || this.isDesktop)) {
-            Row() {
-              // Title text (left, occupies remaining space)
-              Text(this.title)
-                .fontSize(13)
-                .fontColor("#333333")
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .margin({ left: 12 })
-                .height(40)
-                .layoutWeight(1)
-
-              // Minimize button — always visible when decorations=true;
-              // interception is in WindowManager.minimizeWindow (getDecorationFlag check)
-              if (this.decorations) {
-                Button() {
-                  Text("—")
-                    .fontSize(16)
-                    .fontColor("#666666")
-                }
-                .width(32)
-                .height(32)
-                .borderRadius(16)
-                .backgroundColor("#f0f0f0")
-                .margin({ top: 4, right: 4 })
-                .onClick(() => {
-                  try {
-                    WindowManager.getInstance().minimizeWindow(this.windowId);
-                  } catch (err) {
-                    hilog.warn(
-                      DOMAIN,
-                      "SubWindowPage",
-                      "minimize failed: %{public}s",
-                      JSON.stringify(err),
-                    );
-                  }
-                });
-              }
-
-              // Maximize/restore button — always visible when decorations=true;
-              // interception is in WindowManager.maximizeWindow (getDecorationFlag check)
-              if (this.decorations) {
-                Button() {
-                  Text(this.isMaximized ? "❐" : "□")
-                    .fontSize(14)
-                    .fontColor("#666666")
-                }
-                .width(32)
-                .height(32)
-                .borderRadius(16)
-                .backgroundColor("#f0f0f0")
-                .margin({ top: 4, right: 4 })
-                .onClick(() => {
-                  try {
-                    if (this.isMaximized) {
-                      // recover() switches MAXIMIZE/FULL_SCREEN → FLOATING (API11+) — the
-                      // documented inverse of maximize(). restore() is main-window-only
-                      // (restores a minimized MAIN window on 2in1, API14+); on a maximized
-                      // sub-window it is the wrong API. Mirrors tao set_maximized(false)
-                      // → recover_window (plugin-window bridge).
-                      WindowManager.getInstance().recoverWindow(this.windowId);
-                    } else {
-                      WindowManager.getInstance().maximizeWindow(this.windowId);
-                    }
-                    // isMaximized is driven by windowStatusChange (G9) — no optimistic
-                    // toggle here, so the icon always reflects the actual system state
-                    // once the status-change callback fires (also covers system/tao triggers).
-                  } catch (err) {
-                    hilog.warn(
-                      DOMAIN,
-                      "SubWindowPage",
-                      "maximize/restore failed: %{public}s",
-                      JSON.stringify(err),
-                    );
-                  }
-                });
-              }
-
-              // Close button — always visible when decorations=true;
-              // interception is in WindowManager.destroyWindow (getDecorationFlag check)
-              if (this.decorations) {
-                Button() {
-                  Image($r("sys.media.ohos_ic_public_cancel"))
-                    .width(20)
-                    .height(20)
-                    .fillColor("#666666")
-                }
-                .width(32)
-                .height(32)
-                .borderRadius(16)
-                .backgroundColor("#f0f0f0")
-                .margin({ top: 4, right: 8 })
-                .onClick(async () => {
-                  hilog.info(
-                    DOMAIN,
-                    "SubWindowPage",
-                    "Close button clicked for window %{public}d",
-                    this.windowId,
-                  );
-                  if (this.closeNotified) {
-                    return;
-                  }
-                  // Check closable flag BEFORE anything else (问题四: 拦截 API 执行路径)
-                  // Must be before notifyWindowClose — otherwise Rust triggers close event chain.
-                  if (!WindowManager.getInstance().getDecorationFlag(this.windowId, "closable")) {
-                    hilog.warn(
-                      DOMAIN,
-                      "SubWindowPage",
-                      "Close blocked: closable flag not set (window %{public}d)",
-                      this.windowId,
-                    );
-                    return;
-                  }
-                  this.closeNotified = true;
-                  try {
-                    // Notify Rust event loop before destroying the OHOS window,
-                    // so CloseRequested → Destroyed → WindowsStore cleanup can run.
-                    const nativeModule: Module | undefined =
-                      AppStorage.get<Module>(NATIVE_MODULE_STORAGE_KEY);
-                    if (nativeModule && typeof nativeModule.notifyWindowClose === "function") {
-                      nativeModule.notifyWindowClose(this.windowId);
-                      hilog.info(
-                        DOMAIN,
-                        "SubWindowPage",
-                        "Window %{public}d close notified via NAPI",
-                        this.windowId,
-                      );
-                    } else {
-                      hilog.warn(
-                        DOMAIN,
-                        "SubWindowPage",
-                        "NAPI notifyWindowClose not available for window %{public}d",
-                        this.windowId,
-                      );
-                    }
-
-                    // removeWindow BEFORE destroyWindow so that aboutToDisappear
-                    // sees the window as already handled (consistent with ArkHelper.onCloseWindow)
-                    WindowManager.getInstance().removeWindow(this.windowId);
-                    if (this.windowClass) {
-                      await this.windowClass.destroyWindow();
-                      hilog.info(
-                        DOMAIN,
-                        "SubWindowPage",
-                        "Window %{public}d destroyed and cleaned up",
-                        this.windowId,
-                      );
-                    }
-                  } catch (e) {
-                    hilog.error(
-                      DOMAIN,
-                      "SubWindowPage",
-                      "Failed to close window %{public}d: %{public}s",
-                      this.windowId,
-                      JSON.stringify(e),
-                    );
-                  }
-                });
-              }
-            }
-            .width("100%")
-            .height(40)
-            .align(Alignment.TopEnd)
-            // startMoving (API14+) must be called in onTouch(TouchType.Down) on the Row
-            // (not Text — Text may not capture touch events reliably).
-            // Guarded like setWindowTopmost/restoreWindow: on API<14 startMoving is undefined,
-            // so skip (drag unavailable on old API) instead of throwing on every touch-down.
-            // A PanGesture fallback is NOT attached alongside startMoving — a simultaneously
-            // bound PanGesture consumes the Down event and blocks startMoving, so the two
-            // cannot coexist; mutually-exclusive Row branching was deemed not worth the
-            // duplication given sub-window dragging targets API14+ desktop.
-            .onTouch((event: TouchEvent) => {
-              if (event.type === TouchType.Down) {
-                // While maximized, startMoving() at touch-DOWN triggers WMS
-                // drag-off-maximize immediately (GetFullScreenToFloatingRect,
-                // pointer-anchored): the window jumps away before touch-UP, the
-                // UP lands out of region, and the ❐/—/✕ button click gesture is
-                // rejected — onClick never fires (device-verified 2026-08-27:
-                // "MOVE/UP event is out of region, try to reject click gesture").
-                // Drag while maximized is sacrificed; restore via the ❐ button
-                // (recoverWindow restores the pre-maximize rect).
-                if (this.isMaximized) {
-                  return;
-                }
-                if (deviceInfo.sdkApiVersion < 14) {
-                  return;
-                }
-                try {
-                  this.windowClass?.startMoving()?.catch((err: BusinessError) => {
-                    hilog.warn(
-                      DOMAIN,
-                      "SubWindowPage",
-                      "startMoving failed: %{public}s",
-                      JSON.stringify(err),
-                    );
-                  });
-                } catch (err) {
-                  hilog.warn(
-                    DOMAIN,
-                    "SubWindowPage",
-                    "startMoving exception: %{public}s",
-                    String(err),
-                  );
-                }
-              }
-            });
-            // PanGesture removed — startMoving handles drag natively (no conflict).
-          }
         }
         .layoutWeight(1)
         .width("100%")
@@ -524,8 +431,8 @@ struct SubWindowPage {
       .height("100%")
       .backgroundColor(Color.Transparent)
 
-      // 3. Resize handles (on desktop, always available regardless of decorations)
-      if (this.isDesktop && this.windowClass && this.resizable) {
+      // Desktop resize handles remain available without decorations in floating mode.
+      if (this.isDesktop && this.windowClass && this.resizable && !this.isMaximized) {
         // Right edge resize handle
         Row()
           .width(10)
@@ -649,46 +556,11 @@ struct SubWindowPage {
     .height("100%")
     .backgroundColor(Color.Transparent)
     .onKeyPreIme((event: KeyEvent) => {
-      // Track modifier down/up for EVERY event (issue #111 residue root cause,
-      // 2026-09-22): the matcher branches below are all KeyType.Down-gated, so
-      // a modifier KEYUP landing here never cleared the module-level tracked
-      // bit — same fix as MainPage.onKeyPreIme.
-      this.acceleratorMatcher.trackModifiers(event);
-      // Block native clipboard shortcuts when with_clipboard(false) (ohos-webview-flag-clipboard)
-      if (
-        event.type === KeyType.Down &&
-        this.acceleratorMatcher.matchesClipboardShortcut(event) &&
-        !isClipboardEnabled(this.windowId)
-      ) {
-        return true;
-      }
-      // Block native zoom hotkeys when with_zoom_hotkeys(false) (ohos-webview-flag-zoom-hotkeys)
-      if (
-        event.type === KeyType.Down &&
-        this.acceleratorMatcher.matchesZoomShortcut(event) &&
-        !isZoomHotkeysEnabled(this.windowId)
-      ) {
-        return true;
-      }
-      if (event.type === KeyType.Down && this.acceleratorMatcher.matches(event)) {
-        const matchedItem = this.acceleratorMatcher.getMatchedItem();
-        if (matchedItem) {
-          const handler = getMenuClickHandler(this.windowId);
-          if (handler) {
-            handler(matchedItem);
-          }
-        }
-        return true;
-      }
-      if (
-        event.type === KeyType.Down &&
-        event.keyCode === KeyCode.KEYCODE_ESCAPE &&
-        !isMenubarVisible(this.windowId)
-      ) {
-        const recoverFn = getMenuBarRecoverFn(this.windowId);
-        if (recoverFn) {
-          recoverFn();
-        }
+      // Menu key handling — clipboard / zoom shortcut blocking per window
+      // flags, accelerator dispatch, ESC fullscreen recover — lives in the
+      // menu plugin's MenuBarPort implementation (MenuBarSlot.ets seam).
+      const menuPort = getMenuBarPort(arkWindow.findWindow(this.getUIContext().getWindowName()));
+      if (menuPort !== null && menuPort.onKeyPreIme(event, this.windowId)) {
         return true;
       }
       return false;
@@ -715,8 +587,9 @@ struct SubWindowPage {
     // ohos-cursor-passthrough 3.3 (root cause 1): feed the process cursor
     // snapshot from sub-windows too. This root-Stack onMouse sits at
     // the same layer as onKeyPreIme/onTouch above; ArkUI onMouse bubbles from
-    // the whole subtree (MenuBarComponent + DefaultXComponent/webview + drag
-    // bar + resize handles) -- the same mechanism MainPage relies on in
+    // the whole subtree (WindowTitleBar + MenuBarSlotHost +
+    // DefaultXComponent/webview + resize handles) -- the same mechanism
+    // MainPage relies on in
     // production ("NDK DispatchMouseEvent doesn't fire over the WebView,
     // ArkTS onMouse bubbling works", tao event_loop.rs CURSOR_POSITION note).
     // Without this, a cursor over a sub-window left the snapshot at the
