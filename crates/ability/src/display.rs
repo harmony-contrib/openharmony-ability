@@ -310,6 +310,9 @@ pub fn default_display() -> u32 {
 }
 
 /// Read the fixed-size C char array as a Rust String (NUL-terminated).
+// `c_char` is u8 on aarch64/armv7-ohos (clippy: unnecessary cast) but i8 on
+// x86_64-ohos where the cast is required; keep it for the latter.
+#[allow(clippy::unnecessary_cast)]
 fn c_name_to_string(raw: &[c_char]) -> String {
     let bytes: Vec<u8> = raw
         .iter()
