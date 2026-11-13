@@ -1212,32 +1212,6 @@ impl BridgeClient {
                 ))
             })
     }
-
-    /// Calls an action on the built-in `ohos.fault-injection` plugin.
-    ///
-    /// This plugin is not registered as a Rust `BridgePlugin` (it's a built-in ArkTS
-    /// plugin installed by BridgeHost), so it cannot use `call_async::<P, ...>()`.
-    /// Instead, this method calls `call_raw` directly with the plugin ID string.
-    /// Generic over `Request`/`Response` to support the different actions
-    /// (enable/disable/clear use `FaultNoopRequest`; set-rule uses `FaultRuleWire`).
-    #[cfg(feature = "fault-injection")]
-    pub(crate) async fn call_fault_injection<Request, Response>(
-        &self,
-        action: &str,
-        request: Request,
-    ) -> Result<Response>
-    where
-        Request: BridgeNapiType,
-        Response: BridgeNapiType,
-    {
-        self.call_raw::<Request, Response>(
-            "ohos.fault-injection",
-            action,
-            request,
-            BridgeCallOptions::default(),
-        )
-        .await
-    }
 }
 
 fn attach_promise(

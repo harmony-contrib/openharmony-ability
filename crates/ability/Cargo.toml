@@ -18,7 +18,6 @@ log = ["dep:log"]
 updater = []
 window = ["dep:ohos-window-manager-binding", "dep:ohos-image-native-binding"]
 global_shortcut = []
-fault-injection = []
 # ArkUI keyboard snapshots and consumption are opt-in; raw XComponent keys remain available.
 keyboard = ["ohos-arkui-binding/api-15"]
 # These features select linked NDK APIs and raise the application's minimum API.
