@@ -397,7 +397,7 @@ mod tests {
     use super::{
         HideAbilityRequest, HideAbilityResponse, RestartRequest, RestartResponse,
         SetColorModeRequest, SetColorModeResponse, ShowAbilityRequest, ShowAbilityResponse,
-        TerminateRequest, TerminateResponse,
+        StartUiAbilityRequest, StartUiAbilityResponse, TerminateRequest, TerminateResponse,
     };
     use openharmony_ability::BridgeNapiType;
 

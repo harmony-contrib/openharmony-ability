@@ -42,6 +42,8 @@ extern "C" fn OH_ArkWebResourceHandler_DidFinish() {}
 #[no_mangle]
 extern "C" fn OH_ArkWebResourceHandler_DidReceiveResponse() {}
 #[no_mangle]
+extern "C" fn OH_ArkWebResourceRequest_DestroyHttpBodyStream() {}
+#[no_mangle]
 extern "C" fn OH_ArkWebResourceRequest_GetFrameUrl() {}
 #[no_mangle]
 extern "C" fn OH_ArkWebResourceRequest_GetHttpBodyStream() {}

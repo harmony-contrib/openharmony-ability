@@ -27,6 +27,11 @@
 # (ArkUI/IME/XComponent/dlopen/hilog/resource-manager family, plus the
 # round-4 ArkWeb scheme set) or stub-web.rs (ArkWeb scheme-handler/resource
 # family pulled by links that include ohos-web-sys), then rerun this script.
+# EXCEPTION - the OH_Get* deviceinfo family in stubs.rs must keep its
+# deterministic returns (null strings / 0 ints): ohos-device-binding's
+# c_str_to_static only guards null, so a `() {}` body dereferences register
+# residue under some test interleavings (host ACCESS_VIOLATION, flaky in
+# parallel test mode).
 # It compiles those two sources into the archives - that compile leg NEVER
 # reads the symbols_roundN.txt / symbols_web.txt files; those are documentation
 # records only. A separate verification leg (Assert-SymbolRecord) DOES read
@@ -113,7 +118,8 @@ Assert-SymbolRecord $stubSymbols @(
     (Join-Path $stubDir "symbols_round3.txt"),
     (Join-Path $stubDir "symbols_round4.txt"),
     (Join-Path $stubDir "symbols_round5.txt"),
-    (Join-Path $stubDir "symbols_round6.txt")
+    (Join-Path $stubDir "symbols_round6.txt"),
+    (Join-Path $stubDir "symbols_round7.txt")
 ) "stubs.rs"
 $webSymbols = Get-StubSymbols (Join-Path $stubDir "stub-web.rs")
 Assert-SymbolRecord $webSymbols @((Join-Path $stubDir "symbols_web.txt")) "stub-web.rs"
@@ -236,7 +242,8 @@ $emptyNames = @(
     "image_source_ndk.z", "native_buffer", "native_display_manager",
     "native_drawing", "ohimage", "ohresmgr", "picture", "pixelmap",
     "pixelmap_ndk.z", "rawfile.z", "udmf", "hilog_ndk.z",
-    "deviceinfo_ndk.z", "native_window", "native_window_manager", "ohinput"
+    "deviceinfo_ndk.z", "native_window", "native_window_manager", "ohinput",
+    "pasteboard"
 )
 foreach ($n in $emptyNames) {
     Invoke-LibArchive $emptyObj (Join-Path $outDir ($n + ".lib"))

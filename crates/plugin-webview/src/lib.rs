@@ -96,6 +96,11 @@ impl BridgePlugin for WebviewBridgePlugin {
             | "download-end" | "title-change" | "print-state" => {
                 Self::on_callback_ack_event(&event)
             }
+            "native-node-ready"
+            | "native-node-retiring"
+            | "native-event"
+            | "native-controller-attached"
+            | "native-controller-removed" => self.on_native_tree_event(&event),
             _ => Err(unsupported_main_thread_event(&event)),
         }
     }
@@ -122,6 +127,40 @@ impl WebviewBridgePlugin {
     /// `on_main_thread_event`'s original match; the trailing wildcard
     /// mirrors the dispatcher and is unreachable through it.
     fn on_engine_lifecycle_event<'env>(
+        event: &BridgeMainThreadEvent<'env>,
+    ) -> Result<Unknown<'env>> {
+        match event.name() {
+            SEAL_ENGINE_SCHEMES_EVENT => {
+                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
+                expect_engine_phase(&lifecycle, SEAL_ENGINE_SCHEMES_EVENT)?;
+                WebviewProtocol::seal_before_engine_init()?;
+                event.respond(engine_lifecycle_response()?)
+            }
+            BEFORE_ENGINE_INIT_EVENT => {
+                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
+                expect_engine_phase(&lifecycle, BEFORE_ENGINE_INIT_EVENT)?;
+                WebviewProtocol::validate_process_schemes(&engine_scheme_pairs(&lifecycle))?;
+                WebviewProtocol::flush_before_engine_init()?;
+                event.respond(engine_lifecycle_response()?)
+            }
+            ENGINE_INITIALIZED_EVENT => {
+                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
+                expect_engine_phase(&lifecycle, ENGINE_INITIALIZED_EVENT)?;
+                WebviewProtocol::mark_engine_initialized(&engine_scheme_pairs(&lifecycle))?;
+                event.respond(engine_lifecycle_response()?)
+            }
+            _ => Err(unsupported_main_thread_event(event)),
+        }
+    }
+
+    /// Native tree family (node ready/retiring, native-event fan-out,
+    /// native controller attach/remove). Unlike the stateless extracted
+    /// families this one takes `&self`: the native-event arm dispatches
+    /// through the plugin's `native_events` router. Arms carried verbatim
+    /// from his inline `on_main_thread_event`; the trailing wildcard
+    /// mirrors the dispatcher and is unreachable through it.
+    fn on_native_tree_event<'env>(
+        &self,
         event: &BridgeMainThreadEvent<'env>,
     ) -> Result<Unknown<'env>> {
         match event.name() {
@@ -160,25 +199,6 @@ impl WebviewBridgePlugin {
                     }
                 })??;
                 event.respond(WebviewEventAcknowledgement { accepted: true })
-            }
-            SEAL_ENGINE_SCHEMES_EVENT => {
-                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
-                expect_engine_phase(&lifecycle, SEAL_ENGINE_SCHEMES_EVENT)?;
-                WebviewProtocol::seal_before_engine_init()?;
-                event.respond(engine_lifecycle_response()?)
-            }
-            BEFORE_ENGINE_INIT_EVENT => {
-                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
-                expect_engine_phase(&lifecycle, BEFORE_ENGINE_INIT_EVENT)?;
-                WebviewProtocol::validate_process_schemes(&engine_scheme_pairs(&lifecycle))?;
-                WebviewProtocol::flush_before_engine_init()?;
-                event.respond(engine_lifecycle_response()?)
-            }
-            ENGINE_INITIALIZED_EVENT => {
-                let lifecycle = event.decode::<WebviewEngineLifecycleEvent>()?;
-                expect_engine_phase(&lifecycle, ENGINE_INITIALIZED_EVENT)?;
-                WebviewProtocol::mark_engine_initialized(&engine_scheme_pairs(&lifecycle))?;
-                event.respond(engine_lifecycle_response()?)
             }
             _ => Err(unsupported_main_thread_event(event)),
         }

@@ -1338,60 +1338,122 @@ extern "C" fn OH_DecodingOptionsForPicture_GetDesiredAuxiliaryPictures() {}
 extern "C" fn OH_DecodingOptionsForPicture_Release() {}
 #[no_mangle]
 extern "C" fn OH_DecodingOptionsForPicture_SetDesiredAuxiliaryPictures() {}
+// OH_Get* deviceinfo family: ohos-device-binding funnels the string members
+// through c_str_to_static, which only guards null - a `() {}` body leaves the
+// return register undefined, and register residue under some test
+// interleavings dereferences to a host ACCESS_VIOLATION (flaky only in
+// parallel test mode). These stubs return deterministic values instead:
+// null for the string members (the binding maps null -> None) and 0 for the
+// version ints (below every API gate, keeping gated host paths on their
+// documented "not supported" branch).
 #[no_mangle]
-extern "C" fn OH_GetAbiList() {}
+extern "C" fn OH_GetAbiList() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetBootloaderVersion() {}
+extern "C" fn OH_GetBootloaderVersion() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetBrand() {}
+extern "C" fn OH_GetBrand() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetBuildHost() {}
+extern "C" fn OH_GetBuildHost() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetBuildRootHash() {}
+extern "C" fn OH_GetBuildRootHash() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetBuildTime() {}
+extern "C" fn OH_GetBuildTime() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetBuildType() {}
+extern "C" fn OH_GetBuildType() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetBuildUser() {}
+extern "C" fn OH_GetBuildUser() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetDeviceType() {}
+extern "C" fn OH_GetDeviceType() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetDisplayVersion() {}
+extern "C" fn OH_GetDisplayVersion() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetDistributionOSApiVersion() {}
+extern "C" fn OH_GetDistributionOSApiVersion() -> u32 {
+    0
+}
 #[no_mangle]
-extern "C" fn OH_GetDistributionOSName() {}
+extern "C" fn OH_GetDistributionOSName() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetDistributionOSReleaseType() {}
+extern "C" fn OH_GetDistributionOSReleaseType() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetDistributionOSVersion() {}
+extern "C" fn OH_GetDistributionOSVersion() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetFirstApiVersion() {}
+extern "C" fn OH_GetFirstApiVersion() -> u32 {
+    0
+}
 #[no_mangle]
-extern "C" fn OH_GetHardwareModel() {}
+extern "C" fn OH_GetHardwareModel() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetIncrementalVersion() {}
+extern "C" fn OH_GetIncrementalVersion() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetManufacture() {}
+extern "C" fn OH_GetManufacture() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetMarketName() {}
+extern "C" fn OH_GetMarketName() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetOSFullName() {}
+extern "C" fn OH_GetOSFullName() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetOsReleaseType() {}
+extern "C" fn OH_GetOsReleaseType() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetProductModel() {}
+extern "C" fn OH_GetProductModel() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetProductSeries() {}
+extern "C" fn OH_GetProductSeries() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetSdkApiVersion() {}
+extern "C" fn OH_GetSdkApiVersion() -> u32 {
+    0
+}
 #[no_mangle]
-extern "C" fn OH_GetSecurityPatchTag() {}
+extern "C" fn OH_GetSecurityPatchTag() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetSoftwareModel() {}
+extern "C" fn OH_GetSoftwareModel() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
-extern "C" fn OH_GetVersionId() {}
+extern "C" fn OH_GetVersionId() -> *const core::ffi::c_char {
+    core::ptr::null()
+}
 #[no_mangle]
 extern "C" fn OH_ImageNative_GetBufferSize() {}
 #[no_mangle]
@@ -1770,6 +1832,102 @@ extern "C" fn OH_PixelmapNative_UnaccessPixels() {}
 extern "C" fn OH_PixelmapNative_WritePixels() {}
 #[no_mangle]
 extern "C" fn OH_PixelmapNative_WritePixelsToArea() {}
+#[no_mangle]
+extern "C" fn OH_Udmf_SetUnifiedData() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_AddRecord() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_Create() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_Destroy() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_GetPrimaryHtml() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_GetPrimaryPlainText() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_GetRecord() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_GetRecordCount() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_GetRecords() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_GetTypes() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_HasType() {}
+#[no_mangle]
+extern "C" fn OH_UdmfData_IsLocal() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_AddFileUri() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_AddGeneralEntry() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_AddHtml() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_AddPixelMap() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_AddPlainText() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_Create() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_Destroy() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_GetFileUri() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_GetGeneralEntry() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_GetHtml() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_GetPlainText() {}
+#[no_mangle]
+extern "C" fn OH_UdmfRecord_GetTypes() {}
+#[no_mangle]
+extern "C" fn OH_UdsFileUri_Create() {}
+#[no_mangle]
+extern "C" fn OH_UdsFileUri_Destroy() {}
+#[no_mangle]
+extern "C" fn OH_UdsFileUri_GetFileType() {}
+#[no_mangle]
+extern "C" fn OH_UdsFileUri_GetFileUri() {}
+#[no_mangle]
+extern "C" fn OH_UdsFileUri_SetFileType() {}
+#[no_mangle]
+extern "C" fn OH_UdsFileUri_SetFileUri() {}
+#[no_mangle]
+extern "C" fn OH_UdsHtml_Create() {}
+#[no_mangle]
+extern "C" fn OH_UdsHtml_Destroy() {}
+#[no_mangle]
+extern "C" fn OH_UdsHtml_GetContent() {}
+#[no_mangle]
+extern "C" fn OH_UdsHtml_GetPlainContent() {}
+#[no_mangle]
+extern "C" fn OH_UdsPixelMap_Create() {}
+#[no_mangle]
+extern "C" fn OH_UdsPixelMap_Destroy() {}
+#[no_mangle]
+extern "C" fn OH_UdsPixelMap_GetPixelMap() {}
+#[no_mangle]
+extern "C" fn OH_UdsPixelMap_GetType() {}
+#[no_mangle]
+extern "C" fn OH_UdsPixelMap_SetPixelMap() {}
+#[no_mangle]
+extern "C" fn OH_UdsPlainText_Create() {}
+#[no_mangle]
+extern "C" fn OH_UdsPlainText_Destroy() {}
+#[no_mangle]
+extern "C" fn OH_UdsPlainText_GetContent() {}
+#[no_mangle]
+extern "C" fn OH_UdsPlainText_GetType() {}
+#[no_mangle]
+extern "C" fn OH_Utd_Create() {}
+#[no_mangle]
+extern "C" fn OH_Utd_Destroy() {}
+#[no_mangle]
+extern "C" fn OH_Utd_Equals() {}
+#[no_mangle]
+extern "C" fn OH_Utd_IsHigher() {}
+#[no_mangle]
+extern "C" fn OH_Utd_IsLower() {}
 #[no_mangle]
 extern "C" fn OH_WindowManager_GetAllMainWindowInfo() {}
 #[no_mangle]
