@@ -1872,6 +1872,14 @@ impl_bridge_napi_type!(WebviewStringResponse, "ohos.webview.StringResponse");
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+pub struct WebviewBooleanResponse {
+    pub value: bool,
+}
+
+impl_bridge_napi_type!(WebviewBooleanResponse, "ohos.webview.BooleanResponse");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
 pub struct WebviewAcknowledgement {
     pub accepted: bool,
 }
@@ -2023,6 +2031,10 @@ mod tests {
         assert_eq!(
             <WebviewStringResponse as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.StringResponse"
+        );
+        assert_eq!(
+            <WebviewBooleanResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.BooleanResponse"
         );
         assert_eq!(
             <WebviewEngineLifecycleEvent as BridgeNapiType>::TYPE_NAME,

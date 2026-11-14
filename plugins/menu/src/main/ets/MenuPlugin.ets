@@ -46,7 +46,9 @@ import { MenuManager, PredefinedActionExecutor, registerWindowMenuExecutor } fro
 import type { AboutMetadataData, MenuItemData, PredefinedType } from "./menu_types";
 
 const SET_MENUBAR_REQUEST_TYPE = "ohos.menu.SetMenubarRequest";
+const SET_MENUBAR_ITEMS_REQUEST_TYPE = "ohos.menu.SetMenubarItemsRequest";
 const POPUP_REQUEST_TYPE = "ohos.menu.PopupRequest";
+const POPUP_ITEMS_REQUEST_TYPE = "ohos.menu.PopupItemsRequest";
 const POPUP_MENUBAR_REQUEST_TYPE = "ohos.menu.PopupMenubarRequest";
 const POPUP_COMMANDS_REQUEST_TYPE = "ohos.menu.PopupCommandsRequest";
 const SET_VISIBLE_REQUEST_TYPE = "ohos.menu.SetVisibleRequest";
@@ -177,6 +179,11 @@ interface SetMenubarRequest {
   windowId: string;
 }
 
+interface SetMenubarItemsRequest {
+  items: MenuItemData[];
+  windowId: string;
+}
+
 export interface MenuPluginOptions {
   /** Disable when the native renderer resolves shortcuts using its own focus context. */
   handleKeyboardShortcuts?: boolean;
@@ -194,6 +201,13 @@ interface PopupMenubarRequest {
 
 interface PopupRequest {
   jsonData: string;
+  x?: number;
+  y?: number;
+  windowId: string;
+}
+
+interface PopupItemsRequest {
+  items: MenuItemData[];
   x?: number;
   y?: number;
   windowId: string;
@@ -453,6 +467,24 @@ export class MenuPlugin extends AsyncPluginBase {
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
+    if (action === "set-menubar-items") {
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        SET_MENUBAR_ITEMS_REQUEST_TYPE,
+      ) as SetMenubarItemsRequest;
+      if (!Array.isArray(request.items)) {
+        throw new Error("set-menubar-items.items must be an array");
+      }
+      if (typeof request.windowId !== "string") {
+        throw new Error("set-menubar-items.windowId must be a string");
+      }
+      const cb = await this.menuCallback(request.windowId, context);
+      cb.onMenubarItems?.(request.items);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
     if (action === "popup-menubar") {
       const request = expectBridgeRequestType(
         payload,
@@ -570,6 +602,29 @@ export class MenuPlugin extends AsyncPluginBase {
       const y = request.y ?? 0;
       const cb = await this.menuCallback(request.windowId, context);
       cb.onMenuPopup?.(request.jsonData, x, y);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
+    if (action === "popup-items") {
+      const request = expectBridgeRequestType(
+        payload,
+        "ohos.menu",
+        action,
+        POPUP_ITEMS_REQUEST_TYPE,
+      ) as PopupItemsRequest;
+      if (!Array.isArray(request.items)) {
+        throw new Error("popup-items.items must be an array");
+      }
+      if (typeof request.windowId !== "string") {
+        throw new Error("popup-items.windowId must be a string");
+      }
+      const x = request.x ?? 0;
+      const y = request.y ?? 0;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        throw new Error("Menu coordinates must be finite");
+      }
+      const cb = await this.menuCallback(request.windowId, context);
+      cb.onMenuPopupItems?.(request.items, x, y);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 

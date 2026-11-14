@@ -22,18 +22,19 @@ import {
   reRegisterStatusBarClickHandlers,
   setAbilityContext,
   setCurrentAbilityName,
-  type StatusBarIconRgba,
 } from "./StatusBarUtils";
 
 const ADD_REQUEST_TYPE = "ohos.statusbar.AddRequest";
+const ADD_ITEMS_REQUEST_TYPE = "ohos.statusbar.AddItemsRequest";
 const REMOVE_REQUEST_TYPE = "ohos.statusbar.RemoveRequest";
 const UPDATE_ICON_REQUEST_TYPE = "ohos.statusbar.UpdateIconRequest";
 const UPDATE_MENU_REQUEST_TYPE = "ohos.statusbar.UpdateMenuRequest";
+const UPDATE_MENU_ITEMS_REQUEST_TYPE = "ohos.statusbar.UpdateMenuItemsRequest";
 const UPDATE_TIPS_REQUEST_TYPE = "ohos.statusbar.UpdateTipsRequest";
 const PREDEFINED_REQUEST_TYPE = "ohos.statusbar.PredefinedRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.statusbar.Acknowledgement";
 
-interface AddRequest {
+interface AddRequestBase {
   /** RGBA pixel data for the white variant of the icon. */
   whiteIcon?: Uint8Array;
   /** RGBA pixel data for the black variant of the icon. */
@@ -46,10 +47,18 @@ interface AddRequest {
   height: number;
   moduleName?: string;
   loadingStatus?: boolean;
-  /** Serialized `Vec<Vec<StatusBarMenuItem>>` JSON string for the right-click context menu. */
-  menuJson?: string;
   /** Hover tooltip text (max 128 chars). */
   hoverTips?: string;
+}
+
+interface AddRequest extends AddRequestBase {
+  /** Legacy serialized right-click context menu. */
+  menuJson?: string;
+}
+
+interface AddItemsRequest extends AddRequestBase {
+  /** Structured menu groups; PixelMaps are created by this plugin. */
+  menuGroups?: statusBarManager.StatusBarGroupMenu[];
 }
 
 interface UpdateIconRequest {
@@ -63,6 +72,10 @@ interface UpdateMenuRequest {
   menuJson: string;
 }
 
+interface UpdateMenuItemsRequest {
+  menuGroups: statusBarManager.StatusBarGroupMenu[];
+}
+
 interface UpdateTipsRequest {
   tips: string;
 }
@@ -71,6 +84,18 @@ interface PredefinedRequest {
   action: string;
   /** About-panel metadata; only read by the `about` action. */
   aboutMetadata?: AboutMetadataData;
+}
+
+function validateMenuGroups(groups: statusBarManager.StatusBarGroupMenu[]): void {
+  if (!Array.isArray(groups)) throw new Error("menuGroups must be an array");
+  for (const group of groups) {
+    if (!Array.isArray(group)) throw new Error("Each menu group must be an array");
+    for (const item of group) {
+      if (!item || typeof item.title !== "string") {
+        throw new Error("Menu item title must be a string");
+      }
+    }
+  }
 }
 
 /**
@@ -96,13 +121,13 @@ export class StatusbarPlugin extends AsyncPluginBase {
       throw new Error("Statusbar bridge session is no longer active");
     }
 
-    if (action === "add") {
+    if (action === "add" || action === "add-items") {
       const request = expectBridgeRequestType(
         payload,
         "ohos.statusbar",
         action,
-        ADD_REQUEST_TYPE,
-      ) as AddRequest;
+        action === "add" ? ADD_REQUEST_TYPE : ADD_ITEMS_REQUEST_TYPE,
+      ) as AddRequest | AddItemsRequest;
       if (!Number.isInteger(request.iconSize) || request.iconSize <= 0) {
         throw new Error("add.iconSize must be a positive integer");
       }
@@ -134,10 +159,8 @@ export class StatusbarPlugin extends AsyncPluginBase {
         throw new Error("add: no valid icon data provided");
       }
 
-      // Rust flattens StatusBarQuickOperation into top-level AddRequest fields
-      // (abilityName/title/height/moduleName/loadingStatus) and serializes the
-      // right-click context menu to menuJson (a JSON string). Rebuild the nested
-      // shapes the OHOS statusBarManager.addToStatusBar API expects.
+      // Both add contracts flatten the quick operation into top-level fields.
+      // Rebuild the nested shape expected by statusBarManager.addToStatusBar.
       //
       // IMPORTANT: use `??` (not `||`). An empty-string abilityName is the legacy
       // contract (ArkHelper.ets addToStatusBarWithRgba) meaning "no QuickOperation
@@ -156,18 +179,22 @@ export class StatusbarPlugin extends AsyncPluginBase {
         loadingStatus: request.loadingStatus,
       };
       let statusBarGroupMenu: statusBarManager.StatusBarGroupMenu[] = [];
-      if (request.menuJson) {
-        try {
-          statusBarGroupMenu = JSON.parse(
-            request.menuJson,
-          ) as statusBarManager.StatusBarGroupMenu[];
-        } catch (e) {
-          hilog.warn(
-            DOMAIN,
-            "StatusbarPlugin",
-            "add: failed to parse menuJson: %{public}s",
-            String(e),
-          );
+      if (action === "add-items") {
+        statusBarGroupMenu = (request as AddItemsRequest).menuGroups ?? [];
+        validateMenuGroups(statusBarGroupMenu);
+      } else {
+        const menuJson = (request as AddRequest).menuJson;
+        if (menuJson) {
+          try {
+            statusBarGroupMenu = JSON.parse(menuJson) as statusBarManager.StatusBarGroupMenu[];
+          } catch (e) {
+            hilog.warn(
+              DOMAIN,
+              "StatusbarPlugin",
+              "add: failed to parse menuJson: %{public}s",
+              String(e),
+            );
+          }
         }
       }
 
@@ -244,6 +271,7 @@ export class StatusbarPlugin extends AsyncPluginBase {
     }
 
     if (action === "remove") {
+      expectBridgeRequestType(payload, this.id, action, REMOVE_REQUEST_TYPE);
       const abilityContext = context.abilityContext;
       try {
         // Await the AsyncCallback overload (API 14+): the tray backend issues
@@ -322,22 +350,28 @@ export class StatusbarPlugin extends AsyncPluginBase {
       }
     }
 
-    if (action === "update-menu") {
+    if (action === "update-menu" || action === "update-menu-items") {
       const request = expectBridgeRequestType(
         payload,
         "ohos.statusbar",
         action,
-        UPDATE_MENU_REQUEST_TYPE,
-      ) as UpdateMenuRequest;
-      if (typeof request.menuJson !== "string" || request.menuJson.length === 0) {
-        throw new Error("update-menu.menuJson must be a non-empty string");
-      }
+        action === "update-menu" ? UPDATE_MENU_REQUEST_TYPE : UPDATE_MENU_ITEMS_REQUEST_TYPE,
+      ) as UpdateMenuRequest | UpdateMenuItemsRequest;
       const abilityContext = context.abilityContext;
       let statusBarGroupMenu: statusBarManager.StatusBarGroupMenu[] = [];
-      try {
-        statusBarGroupMenu = JSON.parse(request.menuJson) as statusBarManager.StatusBarGroupMenu[];
-      } catch (e) {
-        throw new Error(`update-menu: failed to parse menuJson: ${String(e)}`);
+      if (action === "update-menu-items") {
+        statusBarGroupMenu = (request as UpdateMenuItemsRequest).menuGroups;
+        validateMenuGroups(statusBarGroupMenu);
+      } else {
+        const menuJson = (request as UpdateMenuRequest).menuJson;
+        if (typeof menuJson !== "string" || menuJson.length === 0) {
+          throw new Error("update-menu.menuJson must be a non-empty string");
+        }
+        try {
+          statusBarGroupMenu = JSON.parse(menuJson) as statusBarManager.StatusBarGroupMenu[];
+        } catch (e) {
+          throw new Error(`update-menu: failed to parse menuJson: ${String(e)}`);
+        }
       }
       try {
         fillMenuItemAbilityName(statusBarGroupMenu, abilityContext.abilityInfo.name);
