@@ -1,5 +1,6 @@
 import commonEventManager from "@ohos.commonEventManager";
 import thermal from "@ohos.thermal";
+import runningLock from "@ohos.runningLock";
 import display from "@ohos.display";
 import { ThermalSubscriptions } from "./ThermalSubscriptions";
 import {
@@ -20,6 +21,22 @@ const GET_AVAILABLE_AREA_RESPONSE_TYPE = "ohos.system-state.GetAvailableAreaResp
 const GET_DISPLAYS_REQUEST_TYPE = "ohos.system-state.GetDisplaysRequest";
 const GET_DISPLAYS_RESPONSE_TYPE = "ohos.system-state.GetDisplaysResponse";
 const CHANGED_EVENT_TYPE = "ohos.system-state.ChangedEvent";
+
+interface PreventSleepRequest {
+  reason: string;
+}
+interface ReleaseSleepRequest {
+  id: string;
+}
+class PreventSleepResponse {
+  readonly id: string;
+  constructor(id: string) {
+    this.id = id;
+  }
+}
+class ReleaseSleepResponse {
+  readonly accepted: boolean = true;
+}
 
 class GetThermalLevelResponse {
   readonly level: number;
@@ -79,6 +96,10 @@ export class SystemStatePlugin extends AsyncPluginBase {
 
   private subscriber: commonEventManager.CommonEventSubscriber | null = null;
   private active = false;
+  private sleepLocks: Map<string, runningLock.RunningLock> = new Map();
+  private nextSleepLock: number = 0;
+  private sleepEpoch: number = 0;
+  private forcedSleep: boolean = false;
   private unsubscribeThermal?: () => void;
   private currentDisplay: display.Display | null = null;
   private availableAreaCallback: (area: display.Rect) => void = () => {};
@@ -135,13 +156,20 @@ export class SystemStatePlugin extends AsyncPluginBase {
           await this.unsubscribeSubscriber(subscriber);
           return;
         }
-        this.subscriber = subscriber;
         commonEventManager.subscribe(subscriber, (error, data) => {
           if (error) {
+            this.releaseAllSleep();
+            this.subscriber = null;
             console.warn(`[SystemState] common event failed: ${String(error)}`);
             return;
           }
           const event = data.event;
+          if (event === commonEventManager.Support.COMMON_EVENT_ENTER_FORCE_SLEEP) {
+            this.forcedSleep = true;
+            this.releaseAllSleep();
+          } else if (event === commonEventManager.Support.COMMON_EVENT_EXIT_FORCE_SLEEP) {
+            this.forcedSleep = false;
+          }
           if (
             event === commonEventManager.Support.COMMON_EVENT_SCREEN_OFF ||
             event === commonEventManager.Support.COMMON_EVENT_ENTER_FORCE_SLEEP
@@ -154,6 +182,7 @@ export class SystemStatePlugin extends AsyncPluginBase {
             this.emit(context, "wake");
           }
         });
+        this.subscriber = subscriber;
       })
       .catch((error: Error) => {
         console.warn(`[SystemState] common event registration failed: ${String(error)}`);
@@ -162,6 +191,7 @@ export class SystemStatePlugin extends AsyncPluginBase {
 
   async onDispose(): Promise<void> {
     this.active = false;
+    this.releaseAllSleep();
     try {
       this.unsubscribeThermal?.();
     } catch (error) {
@@ -191,6 +221,25 @@ export class SystemStatePlugin extends AsyncPluginBase {
     }
   }
 
+  private releaseSleep(id: string): void {
+    const lock = this.sleepLocks.get(id);
+    if (lock !== undefined) {
+      lock.unhold();
+      this.sleepLocks.delete(id);
+    }
+  }
+
+  private releaseAllSleep(): void {
+    this.sleepEpoch++;
+    for (const id of Array.from(this.sleepLocks.keys())) {
+      try {
+        this.releaseSleep(id);
+      } catch (error) {
+        console.warn(`[SystemState] sleep release failed: ${String(error)}`);
+      }
+    }
+  }
+
   private unsubscribeSubscriber(
     subscriber: commonEventManager.CommonEventSubscriber,
   ): Promise<void> {
@@ -216,6 +265,76 @@ export class SystemStatePlugin extends AsyncPluginBase {
   ): Promise<BridgeTypedValue> {
     if (!context.isActive()) {
       throw new Error("System state bridge session is no longer active");
+    }
+    if (action === "prevent-sleep") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.PreventSleepRequest",
+      ) as PreventSleepRequest;
+      if (
+        typeof request.reason !== "string" ||
+        !request.reason.trim() ||
+        Array.from(request.reason).length > 256 ||
+        /[\u0000-\u001f\u007f]/.test(request.reason)
+      ) {
+        throw new Error("Invalid sleep prevention reason");
+      }
+      // A forced-sleep listener is required by the running-lock contract.
+      const epoch = this.sleepEpoch;
+      if (
+        !this.active ||
+        this.forcedSleep ||
+        this.subscriber === null ||
+        !(await runningLock.isSupported(runningLock.RunningLockType.BACKGROUND_USER_IDLE))
+      ) {
+        throw new Error("Idle sleep prevention is unavailable");
+      }
+      const lock = await runningLock.create(
+        request.reason,
+        runningLock.RunningLockType.BACKGROUND_USER_IDLE,
+      );
+      if (
+        !this.active ||
+        !context.isActive() ||
+        this.forcedSleep ||
+        this.sleepEpoch !== epoch ||
+        this.subscriber === null
+      ) {
+        throw new Error("Sleep prevention request cancelled");
+      }
+      lock.hold(-1);
+      if (!context.isActive()) {
+        lock.unhold();
+        throw new Error("Sleep prevention request cancelled while acquiring");
+      }
+      if (!lock.isHolding()) {
+        lock.unhold();
+        throw new Error("System refused idle sleep prevention");
+      }
+      const id = `sleep-${++this.nextSleepLock}`;
+      this.sleepLocks.set(id, lock);
+      return {
+        typeName: "ohos.system-state.PreventSleepResponse",
+        value: new PreventSleepResponse(id),
+      };
+    }
+    if (action === "release-sleep") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.ReleaseSleepRequest",
+      ) as ReleaseSleepRequest;
+      if (typeof request.id !== "string" || !request.id) {
+        throw new Error("Invalid sleep prevention id");
+      }
+      this.releaseSleep(request.id);
+      return {
+        typeName: "ohos.system-state.ReleaseSleepResponse",
+        value: new ReleaseSleepResponse(),
+      };
     }
     if (action === "get-thermal-level") {
       expectBridgeRequestType(payload, this.id, action, GET_THERMAL_LEVEL_REQUEST_TYPE);

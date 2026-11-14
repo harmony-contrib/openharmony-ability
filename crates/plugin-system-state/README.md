@@ -81,3 +81,9 @@ Clients bind to the bridge session active at construction; obtain a new client a
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+
+## Idle sleep prevention
+
+`prevent-sleep` accepts `ohos.system-state.PreventSleepRequest { reason }` and returns `PreventSleepResponse { id }`; `release-sleep` accepts `ReleaseSleepRequest { id }` and returns `ReleaseSleepResponse { accepted }`. Each ID owns a separate API 23+ `BACKGROUND_USER_IDLE` running lock. It does not keep the display on. Applications must declare `ohos.permission.RUNNING_LOCK`; unsupported device profiles and denied permissions return errors. Reasons must contain 1–256 non-control characters.
+
+The plugin requires its forced-sleep subscription before acquiring a lock and releases all locks on forced sleep or disposal. Release is idempotent, including after forced sleep. A cancelled acquisition never holds a lock after its asynchronous creation finishes. These source contracts require runtime verification on the selected device profile.

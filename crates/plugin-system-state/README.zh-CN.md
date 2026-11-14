@@ -81,3 +81,9 @@ client 绑定创建时的 bridge session；session 关闭后重新从当前 app 
 ## License
 
 可选择 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)。
+
+## 阻止空闲系统休眠
+
+`prevent-sleep` 使用具名 `ohos.system-state.PreventSleepRequest { reason }` / `PreventSleepResponse { id }`，`release-sleep` 使用 `ReleaseSleepRequest { id }` / `ReleaseSleepResponse { accepted }`。每个 ID 独立持有 API 23+ `BACKGROUND_USER_IDLE` 运行锁，不保持屏幕常亮。应用须声明 `ohos.permission.RUNNING_LOCK`；不支持的设备配置或权限拒绝返回真实错误。reason 为 1–256 个非控制字符。
+
+获取锁前必须注册强制休眠订阅，强制休眠和插件销毁会释放全部锁；重复释放（包括强制休眠后）无害。异步创建结束后若调用已取消，不会继续持锁。新增契约仍需所选设备配置的运行验收。

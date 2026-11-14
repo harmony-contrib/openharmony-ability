@@ -12,6 +12,38 @@ use openharmony_ability::{
 
 pub struct SystemStateBridgePlugin;
 
+/// Hold an idle-system sleep inhibitor without keeping the display on (API 23+).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct PreventSleepRequest {
+    pub reason: String,
+}
+impl_bridge_napi_type!(PreventSleepRequest, "ohos.system-state.PreventSleepRequest");
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct PreventSleepResponse {
+    pub id: String,
+}
+impl_bridge_napi_type!(
+    PreventSleepResponse,
+    "ohos.system-state.PreventSleepResponse"
+);
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ReleaseSleepRequest {
+    pub id: String,
+}
+impl_bridge_napi_type!(ReleaseSleepRequest, "ohos.system-state.ReleaseSleepRequest");
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ReleaseSleepResponse {
+    pub accepted: bool,
+}
+impl_bridge_napi_type!(
+    ReleaseSleepResponse,
+    "ohos.system-state.ReleaseSleepResponse"
+);
+
 impl BridgePlugin for SystemStateBridgePlugin {
     type Mode = AsyncBridge;
 
@@ -174,6 +206,39 @@ impl SystemStateClient {
             )
             .await?;
         Ok(response.level)
+    }
+
+    pub async fn prevent_sleep(&self, reason: String) -> Result<String> {
+        if reason.trim().is_empty()
+            || reason.chars().count() > 256
+            || reason.chars().any(char::is_control)
+        {
+            return Err(Error::from_reason("Invalid sleep prevention reason"));
+        }
+        let response = self
+            .bridge
+            .call_async::<SystemStateBridgePlugin, PreventSleepRequest, PreventSleepResponse>(
+                "prevent-sleep",
+                PreventSleepRequest { reason },
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.id)
+    }
+
+    pub async fn release_sleep(&self, id: String) -> Result<()> {
+        let response = self
+            .bridge
+            .call_async::<SystemStateBridgePlugin, ReleaseSleepRequest, ReleaseSleepResponse>(
+                "release-sleep",
+                ReleaseSleepRequest { id },
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        if !response.accepted {
+            return Err(Error::from_reason("Sleep prevention release rejected"));
+        }
+        Ok(())
     }
 
     pub async fn bundle_code_dir(&self) -> Result<String> {

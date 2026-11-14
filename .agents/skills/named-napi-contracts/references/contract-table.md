@@ -72,3 +72,6 @@
 
 下载、导航与标题回调已经使用上述具名 N-API 契约实现。新增 WebView callback 时必须在
 `docs/plugin-development-standard.md` §7.1 记录 request/response 与失败策略，且不得回退到 JSON。
+
+| `ohos.system-state` | `prevent-sleep` | `ohos.system-state.PreventSleepRequest` | `ohos.system-state.PreventSleepResponse` | API 23+ idle running lock; permission and device support required |
+| `ohos.system-state` | `release-sleep` | `ohos.system-state.ReleaseSleepRequest` | `ohos.system-state.ReleaseSleepResponse` | Idempotent lease release; forced sleep/disposal also release |
