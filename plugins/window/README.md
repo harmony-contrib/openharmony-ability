@@ -61,3 +61,7 @@ lifecycle and contract acceptance rules.
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+
+## Toolkit contract additions
+
+`show-prompt-choice` adds a real ArkUI checkbox to a window-scoped prompt and returns both the button index and checked state. The request has a distinct named contract; existing prompts remain compatible. Cancellation and plugin disposal close active dialogs and retire their callbacks.

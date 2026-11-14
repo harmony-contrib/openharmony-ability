@@ -24,7 +24,10 @@ mod stack;
 pub use stack::{WindowStackRequest, WindowStackResponse};
 
 mod prompt;
-pub use prompt::{WindowPromptRequest, WindowPromptResponse};
+pub use prompt::{
+    WindowPromptChoiceRequest, WindowPromptChoiceResponse, WindowPromptRequest,
+    WindowPromptResponse,
+};
 
 mod system_bars;
 pub use system_bars::WindowStatusBarRequest;

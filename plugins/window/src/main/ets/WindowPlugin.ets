@@ -25,6 +25,7 @@ import {
 } from "@ohos-rs/ability";
 
 import { PromptDialogs, WindowPromptRequest } from "./PromptDialogs";
+import { PromptChoices, WindowPromptChoiceRequest } from "./PromptChoices";
 
 const TAG: string = "WindowPlugin";
 const MOVE_REQUESTED_TYPE = "ohos.window.MoveRequested";
@@ -590,6 +591,7 @@ export class WindowPlugin extends AsyncPluginBase {
   readonly id = "ohos.window";
   readonly requires: BridgeContextRequirement[] = ["ui-context"];
   private readonly prompts: PromptDialogs = new PromptDialogs();
+  private readonly promptChoices: PromptChoices = new PromptChoices();
   private readonly windows: Map<number, window.Window> = new Map();
   private removeCloseInterceptor?: () => void;
 
@@ -714,6 +716,26 @@ export class WindowPlugin extends AsyncPluginBase {
         }
       }
       return { typeName: "ohos.window.StackResponse", value: { windowIds: ids } };
+    }
+
+    if (action === "show-prompt-choice") {
+      if (
+        payload.typeName !== "ohos.window.PromptChoiceRequest" ||
+        typeof payload.value !== "object"
+      ) {
+        throw new Error("show-prompt-choice requires ohos.window.PromptChoiceRequest");
+      }
+      const request = payload.value as WindowPromptChoiceRequest;
+      if (!isWindowId(request?.windowId)) {
+        throw new Error("Invalid prompt choice window");
+      }
+      const result = await this.promptChoices.show(
+        await this.requireWindow(request.windowId, context),
+        request,
+        context,
+      );
+      this.assertCallActive(context);
+      return { typeName: "ohos.window.PromptChoiceResponse", value: result };
     }
 
     if (action === "show-prompt") {
@@ -1459,6 +1481,7 @@ export class WindowPlugin extends AsyncPluginBase {
     this.removeCloseInterceptor?.();
     this.removeCloseInterceptor = undefined;
     await this.prompts.dispose();
+    this.promptChoices.dispose();
     const windows = Array.from(this.windows.values());
     this.windows.clear();
     await Promise.all(

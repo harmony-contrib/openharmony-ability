@@ -195,3 +195,7 @@ custom protocol 时使用 `custom_protocol_async` / `WebviewProtocolResponder`�
 ## License
 
 可选择 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)。
+
+## Toolkit contract additions
+
+嵌入式视图通过 `set-viewport` 指定窗口坐标中的 frame、局部 clip 和最多 256 个局部输入区域；空区域禁用命中。旧 `set-bounds` 的容器布局语义保持兼容。`cookies-details`（API 23+）保留 Cookie 属性；`clear-cookies` 不删除存储或缓存。全量清理针对普通存储并包含 Cookie。

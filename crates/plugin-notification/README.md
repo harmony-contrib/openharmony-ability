@@ -84,3 +84,7 @@ Clients bind to the bridge session active at construction; obtain a new client a
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+
+## Toolkit contract additions
+
+`show-with-options` adds grouping, a decoded image, sender display name and the silent content-information slot. System notification preferences still apply. `parse-response` recognizes the configured response URI for cold and warm starts; `dismiss-all` also removes notifications from previous runs. Sender identity/avatar and communication-notification semantics are not synthesized.

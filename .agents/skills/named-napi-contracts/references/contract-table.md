@@ -30,6 +30,20 @@
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象） | `ohos.resource.ResourceManagerReadyResponse` → `{ accepted }` | 入站事件 / `ability` |
 | `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `{ player, sourceFd?, replace, release, play, volume, reportErrors, label }` | `ohos.audio.UpdateResponse` → `{ accepted }` | async / `ability` |
 
+## 2026-11 Viva / MyGo 主线增补
+
+| 插件 / action | request type | response type | 语义与边界 |
+|---|---|---|---|
+| `ohos.webview` / `set-viewport` | `ohos.webview.ViewportRequest` | `ohos.webview.Acknowledgement` | frame 为窗口 vp，clip/inputRegions 为视口内 vp；最多 256 输入区域，空数组禁止命中；保留旧 set-bounds 语义 |
+| `ohos.webview` / `cookies-details` | `ohos.webview.ControllerRequest` | `ohos.webview.CookiesResponse` | API 23+ 全部普通 Cookie，保留 domain/path/secure/httpOnly/sameSite/到期 Unix 毫秒 |
+| `ohos.webview` / `clear-cookies` | `ohos.webview.ControllerRequest` | `ohos.webview.Acknowledgement` | 仅清理普通 Cookie；不删除其他浏览数据 |
+| `ohos.window` / `show-prompt-choice` | `ohos.window.PromptChoiceRequest` | `ohos.window.PromptChoiceResponse` | 实际窗口中的 ArkUI Checkbox；index 与 checked 一起返回；取消和销毁关闭对话框 |
+| `ohos.notification` / `show-with-options` | `ohos.notification.ShowOptionsRequest` | `ohos.notification.Acknowledgement` | 保留原 show；图片按 192×192 解码且释放，分组、发件人显示名、静默 CONTENT_INFORMATION 槽位 |
+| `ohos.notification` / `parse-response` | `ohos.notification.ResponseRequest` | `ohos.notification.Response` | 仅识别配置 scheme 的 response URI，包含 matched/tag/action；普通深链不匹配 |
+| `ohos.notification` / `dismiss-all` | `ohos.notification.EmptyRequest` | `ohos.notification.Acknowledgement` | 撤销本应用通知，包含以前启动发布的通知 |
+
+所有新 action 均为 async；WebView 和窗口需要 ui-context，通知需要 ability。不新增全局回调缓存。
+
 ## 代码位置
 
 | 插件 | Rust facade | ArkTS 实现 |

@@ -33,3 +33,7 @@ ArkTS 在申请授权或创建 WantAgent 前先检查整个数组。
 ## License
 
 可选择 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)。
+
+## Toolkit contract additions
+
+`show-with-options` 补充分组、解码图片、发件人显示名和静默内容资讯槽位；最终展示仍遵循系统通知设置。`parse-response` 按配置的 scheme 识别冷启动或后续点击 URI；`dismiss-all` 同时撤销旧启动发布的通知。不模拟发件人身份/头像与通讯通知语义。

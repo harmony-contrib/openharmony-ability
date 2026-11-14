@@ -26,6 +26,47 @@ pub struct WindowPromptResponse {
 }
 impl_bridge_napi_type!(WindowPromptResponse, "ohos.window.PromptResponse");
 
+/// A modal prompt with an actual, interactive checkbox.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowPromptChoiceRequest {
+    pub window_id: i64,
+    pub message: String,
+    pub detail: Option<String>,
+    pub buttons: Vec<String>,
+    pub cancel_index: Option<u32>,
+    pub cancel_on_touch_outside: bool,
+    pub checkbox_label: String,
+    pub checkbox_checked: bool,
+}
+impl_bridge_napi_type!(WindowPromptChoiceRequest, "ohos.window.PromptChoiceRequest");
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowPromptChoiceResponse {
+    pub index: u32,
+    pub checked: bool,
+}
+impl_bridge_napi_type!(
+    WindowPromptChoiceResponse,
+    "ohos.window.PromptChoiceResponse"
+);
+impl WindowPromptChoiceRequest {
+    fn validate(&self) -> Result<()> {
+        if self.checkbox_label.trim().is_empty() {
+            return Err(Error::from_reason("checkbox label must not be empty"));
+        }
+        WindowPromptRequest {
+            window_id: self.window_id,
+            message: self.message.clone(),
+            detail: self.detail.clone(),
+            buttons: self.buttons.clone(),
+            cancel_index: self.cancel_index,
+            cancel_on_touch_outside: self.cancel_on_touch_outside,
+        }
+        .validate()
+    }
+}
+
 impl WindowPromptRequest {
     fn validate(&self) -> Result<()> {
         validate_window_id(self.window_id)?;
@@ -46,6 +87,22 @@ impl WindowPromptRequest {
 }
 
 impl WindowClient {
+    /// Returns the selected button and the final state of the native checkbox.
+    pub async fn show_prompt_choice(
+        &self,
+        request: WindowPromptChoiceRequest,
+    ) -> Result<WindowPromptChoiceResponse> {
+        request.validate()?;
+        let count = request.buttons.len();
+        let response = self.bridge.call_async::<WindowBridgePlugin, WindowPromptChoiceRequest, WindowPromptChoiceResponse>("show-prompt-choice",request,BridgeCallOptions::default().with_timeout_ms(300_000)).await?;
+        if response.index as usize >= count {
+            return Err(Error::from_reason(
+                "prompt returned an invalid button index",
+            ));
+        }
+        Ok(response)
+    }
+
     /// Shows a system alert (up to three buttons) or action sheet (more buttons).
     /// Returns the original button index after the system exit animation completes.
     /// Bridge cancellation invalidates callbacks. The system has no imperative
@@ -76,6 +133,27 @@ mod tests {
     use openharmony_ability::BridgeNapiType;
     #[test]
     fn prompt_contract_and_cancellation() {
+        assert_eq!(
+            WindowPromptChoiceRequest::TYPE_NAME,
+            "ohos.window.PromptChoiceRequest"
+        );
+        assert_eq!(
+            WindowPromptChoiceResponse::TYPE_NAME,
+            "ohos.window.PromptChoiceResponse"
+        );
+        let mut choice = WindowPromptChoiceRequest {
+            window_id: 0,
+            message: "Save?".into(),
+            detail: None,
+            buttons: vec!["Save".into()],
+            cancel_index: Some(0),
+            cancel_on_touch_outside: false,
+            checkbox_label: "Remember".into(),
+            checkbox_checked: true,
+        };
+        assert!(choice.validate().is_ok());
+        choice.checkbox_label.clear();
+        assert!(choice.validate().is_err());
         assert_eq!(WindowPromptRequest::TYPE_NAME, "ohos.window.PromptRequest");
         assert_eq!(
             WindowPromptResponse::TYPE_NAME,

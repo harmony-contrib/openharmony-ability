@@ -114,3 +114,7 @@ separate native client owner or runtime document-options action.
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+
+## Toolkit contract additions
+
+Embedded toolkit views can opt into `set-viewport` with a window-relative frame, local clip, and up to 256 local input rectangles. Empty input rectangles disable hit testing. Existing `set-bounds` retains its full-container behavior. `cookies-details` (API 23+) returns cookie attributes; `clear-cookies` does not clear storage or cache. All-data clearing targets the regular store, including its cookies.

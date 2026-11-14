@@ -735,6 +735,72 @@ impl_bridge_napi_type!(
     "ohos.webview.EventAcknowledgement"
 );
 
+/// Rectangle in logical vp units, relative to the WebView viewport.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewRegion {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewViewportRequest {
+    pub id: String,
+    pub frame: WebviewRegion,
+    pub clip: WebviewRegion,
+    /// Non-overlapping input regions after subtracting framework overlays.
+    pub input_regions: Vec<WebviewRegion>,
+}
+impl_bridge_napi_type!(WebviewViewportRequest, "ohos.webview.ViewportRequest");
+impl WebviewViewportRequest {
+    fn validate(&self) -> Result<()> {
+        let valid = |r: &WebviewRegion| {
+            r.x.is_finite()
+                && r.y.is_finite()
+                && r.width.is_finite()
+                && r.height.is_finite()
+                && r.width >= 0.0
+                && r.height >= 0.0
+                && r.width <= 16384.0
+                && r.height <= 16384.0
+        };
+        if self.id.trim().is_empty()
+            || !valid(&self.frame)
+            || self.frame.width == 0.0
+            || self.frame.height == 0.0
+            || !valid(&self.clip)
+            || self.input_regions.len() > 256
+            || !self.input_regions.iter().all(valid)
+        {
+            return Err(Error::from_reason("invalid WebView viewport"));
+        }
+        Ok(())
+    }
+}
+
+/// A cookie copied from ArkWeb's cookie store (API 23+).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewCookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    pub secure: bool,
+    pub http_only: bool,
+    pub same_site: String,
+    /// Unix milliseconds; absent for session cookies.
+    pub expires: Option<f64>,
+}
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewCookiesResponse {
+    pub cookies: Vec<WebviewCookie>,
+}
+impl_bridge_napi_type!(WebviewCookiesResponse, "ohos.webview.CookiesResponse");
+
 // ── create-pdf ──────────────────────────────────────────────────────────────────
 
 /// Optional PDF generation configuration, mirroring `webview.PdfConfiguration`.
@@ -1591,6 +1657,37 @@ impl WebviewHandle {
         .ok_or_else(|| Error::from_reason("WebView cookie manager returned no cookie string"))
     }
 
+    /// Places a page without resizing its document when the visible clip changes.
+    pub async fn set_viewport(&self, request: WebviewViewportRequest) -> Result<()> {
+        request.validate()?;
+        if request.id != self.id {
+            return Err(Error::from_reason("viewport targets another WebView"));
+        }
+        let response: WebviewAcknowledgement = self
+            .client
+            .call::<WebviewViewportRequest, WebviewAcknowledgement>("set-viewport", request)
+            .await?;
+        response.ensure()
+    }
+
+    /// Returns full cookie attributes, including HttpOnly and session cookies.
+    pub async fn cookies_details(&self) -> Result<Vec<WebviewCookie>> {
+        let response: WebviewCookiesResponse = self
+            .client
+            .call::<WebviewControllerRequest, WebviewCookiesResponse>(
+                "cookies-details",
+                self.controller_request(),
+            )
+            .await?;
+        Ok(response.cookies)
+    }
+
+    /// Deletes cookies without deleting storage, caches, credentials or history.
+    pub async fn clear_cookies(&self) -> Result<()> {
+        self.acknowledge("clear-cookies", self.controller_request())
+            .await
+    }
+
     pub async fn clear_all_browsing_data(&self) -> Result<()> {
         self.acknowledge("clear-all-browsing-data", self.controller_request())
             .await
@@ -1904,7 +2001,36 @@ mod tests {
     use openharmony_ability::BridgeNapiType;
 
     #[test]
+    fn viewport_rejects_invalid_geometry_and_accepts_occlusion() {
+        let r = WebviewRegion {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 50.0,
+        };
+        let mut request = WebviewViewportRequest {
+            id: "view".into(),
+            frame: r.clone(),
+            clip: r,
+            input_regions: vec![],
+        };
+        assert!(request.validate().is_ok());
+        request.frame.width = 0.0;
+        assert!(request.validate().is_err());
+        request.frame.width = 100.0;
+        request.clip.x = f64::NAN;
+        assert!(request.validate().is_err());
+        request.clip.x = 0.0;
+        request.input_regions = vec![request.clip.clone(); 257];
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
     fn native_webview_uses_named_target_contracts() {
+        assert_eq!(
+            WebviewCookiesResponse::TYPE_NAME,
+            "ohos.webview.CookiesResponse"
+        );
         assert_eq!(
             WebviewNativeCreateRequest::TYPE_NAME,
             "ohos.webview.NativeCreateRequest"

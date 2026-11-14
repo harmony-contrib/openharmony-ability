@@ -61,3 +61,7 @@ Rust 侧注册和调用示例见[Rust facade README](../../crates/plugin-window/
 ## License
 
 可选择 [MIT](LICENSE-MIT) 或 [Apache-2.0](LICENSE-APACHE)。
+
+## Toolkit contract additions
+
+`show-prompt-choice` 在指定窗口的提示框中显示真正的 ArkUI 复选框，同时返回按钮索引和勾选状态。使用独立具名契约，与旧提示框兼容；取消或插件销毁关闭对话框并清理回调。

@@ -1,3 +1,6 @@
+import legacyNotification from "@ohos.notification";
+import { image } from "@kit.ImageKit";
+import { url } from "@kit.ArkTS";
 import wantAgent, { WantAgent } from "@ohos.app.ability.wantAgent";
 import { notificationManager } from "@kit.NotificationKit";
 import {
@@ -27,6 +30,21 @@ interface ShowRequest {
   title: string;
   body: string;
   actions: NotificationAction[];
+}
+
+interface ShowOptionsRequest extends ShowRequest {
+  silent: boolean;
+  group: string;
+  image: number[];
+  senderName: string;
+}
+interface NotificationResponseRequest {
+  uri: string;
+}
+class NotificationResponse {
+  matched: boolean = false;
+  tag: string = "";
+  action: string = "";
 }
 
 interface DismissRequest {
@@ -84,12 +102,44 @@ export class NotificationPlugin extends AsyncPluginBase {
     if (!context.isActive()) {
       throw new Error("Notification bridge session is no longer active");
     }
-    if (action === "show") {
+    if (action === "parse-response") {
       const request = expectBridgeRequestType(
         payload,
         this.id,
         action,
-        SHOW_REQUEST_TYPE,
+        "ohos.notification.ResponseRequest",
+      ) as NotificationResponseRequest;
+      const result = new NotificationResponse();
+      try {
+        const parsed = new url.URL(request.uri);
+        if (
+          parsed.protocol === this.responseScheme + ":" &&
+          parsed.hostname === "response" &&
+          (parsed.pathname === "" || parsed.pathname === "/")
+        ) {
+          const tag = parsed.searchParams.get("tag");
+          if (tag !== null && tag.length > 0) {
+            result.matched = true;
+            result.tag = tag;
+            result.action = parsed.searchParams.get("action") ?? "";
+          }
+        }
+      } catch (_) {
+        /* Ordinary non-URL wants do not match. */
+      }
+      return { typeName: "ohos.notification.Response", value: result };
+    }
+    if (action === "dismiss-all") {
+      expectBridgeRequestType(payload, this.id, action, "ohos.notification.EmptyRequest");
+      await notificationManager.cancelAll();
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new NotificationAcknowledgement(true) };
+    }
+    if (action === "show" || action === "show-with-options") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        action === "show" ? SHOW_REQUEST_TYPE : "ohos.notification.ShowOptionsRequest",
       ) as ShowRequest;
       if (
         typeof request.tag !== "string" ||
@@ -155,7 +205,50 @@ export class NotificationPlugin extends AsyncPluginBase {
         wantAgent: await agentFor(responseUri(this.responseScheme, request.tag)),
         actionButtons: buttons,
       };
-      await notificationManager.publish(notification);
+      let icon: image.PixelMap | undefined;
+      let source: image.ImageSource | undefined;
+      try {
+        if (action === "show-with-options") {
+          const options = request as ShowOptionsRequest;
+          if (
+            typeof options.silent !== "boolean" ||
+            typeof options.group !== "string" ||
+            typeof options.senderName !== "string" ||
+            !Array.isArray(options.image) ||
+            options.image.length > 16 * 1024 * 1024
+          ) {
+            throw new Error("Invalid notification presentation options");
+          }
+          notification.groupName = options.group;
+          if (options.silent) {
+            // The SDK NotificationRequest still declares the legacy enum type.
+            notification.slotType = legacyNotification.SlotType.CONTENT_INFORMATION;
+          }
+          if (options.senderName) {
+            notification.content.normal = {
+              title: request.title,
+              text: request.body,
+              additionalText: options.senderName,
+            };
+          }
+          if (options.image.length > 0) {
+            source = image.createImageSource(new Uint8Array(options.image).buffer as ArrayBuffer);
+            icon = await source.createPixelMap({ desiredSize: { width: 192, height: 192 } });
+            notification.largeIcon = icon;
+          }
+        }
+        if (!context.isActive()) {
+          throw new Error("Notification session ended before publish");
+        }
+        await notificationManager.publish(notification);
+      } finally {
+        if (icon !== undefined) {
+          await icon.release();
+        }
+        if (source !== undefined) {
+          source.release();
+        }
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new NotificationAcknowledgement(true) };
     }
     if (action === "dismiss") {

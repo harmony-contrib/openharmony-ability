@@ -1,6 +1,7 @@
 import { WebHeader, window } from "@kit.ArkUI";
 import { BuilderNode, FrameNode } from "@ohos.arkui.node";
 import webview from "@ohos.web.webview";
+import { RectShape } from "@ohos.arkui.shape";
 import { image } from "@kit.ImageKit";
 import { buffer } from "@kit.ArkTS";
 import { fileIo, fileUri } from "@kit.CoreFileKit";
@@ -122,6 +123,44 @@ function enableWebDebuggingIfAvailable(): void {
   setWebDebuggingAccessIfAvailable(true);
 }
 
+interface WebviewRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+interface WebviewViewportRequest {
+  id: string;
+  frame: WebviewRegion;
+  clip: WebviewRegion;
+  inputRegions: WebviewRegion[];
+}
+function validWebviewRegion(r: WebviewRegion): boolean {
+  return (
+    r !== undefined &&
+    r !== null &&
+    Number.isFinite(r.x) &&
+    Number.isFinite(r.y) &&
+    Number.isFinite(r.width) &&
+    Number.isFinite(r.height) &&
+    r.width >= 0 &&
+    r.height >= 0 &&
+    r.width <= 16384 &&
+    r.height <= 16384
+  );
+}
+function viewportRegions(data: ManagedWebview): Rectangle[] {
+  if (data.viewport === undefined) {
+    return [{ x: 0, y: 0, width: "100%", height: "100%" }];
+  }
+  if (data.viewport.inputRegions.length === 0) {
+    return [{ x: 0, y: 0, width: 0, height: 0 }];
+  }
+  return data.viewport.inputRegions.map(
+    (r: WebviewRegion): Rectangle => ({ x: r.x, y: r.y, width: r.width, height: r.height }),
+  );
+}
+
 interface WebviewStyle {
   x?: number | string | null;
   y?: number | string | null;
@@ -211,6 +250,7 @@ interface ScriptPayload {
 }
 
 interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
+  viewport?: WebviewViewportRequest;
   getHostWindow: () => window.Window;
   nativeNotify: (phase: string, message?: string, code?: number) => void;
   nativePageFinished: () => void;
@@ -394,6 +434,23 @@ class WebviewScriptResponse {
 
   constructor(result: string | null) {
     this.result = result;
+  }
+}
+
+interface WebviewCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  sameSite: string;
+  expires?: number;
+}
+class WebviewCookiesResponse {
+  readonly cookies: WebviewCookie[];
+  constructor(cookies: WebviewCookie[]) {
+    this.cookies = cookies;
   }
 }
 
@@ -1427,13 +1484,23 @@ function setupDownloadDelegate(data: ManagedWebview): void {
 /** Shared declaration-time attributes; the controller callback starts the first navigation. */
 @Extend(Web)
 function managedWebviewAttributes(data: ManagedWebview, interceptContext: string) {
-  // Always "100%": natural ArkUI layout so the Web follows its parent container on
-  // window resize. set_bounds (BuilderNode.update) re-runs this builder but only
-  // .position() below consumes style.{x,y} — sizing via fixed px here would pin the
-  // Web component and break ArkWeb viewport tracking on resize (bottom cutoff).
-  .width("100%")
-  .height("100%")
-  .position({ x: data.style.x ?? 0, y: data.style.y ?? 0 })
+  // The default follows its container; explicit viewports are opt-in for embedded toolkit pages.
+  .width(data.viewport?.frame.width ?? "100%")
+  .height(data.viewport?.frame.height ?? "100%")
+  .position({
+    x: data.viewport?.frame.x ?? data.style.x ?? 0,
+    y: data.viewport?.frame.y ?? data.style.y ?? 0,
+  })
+  .clipShape(
+    data.viewport === undefined
+      ? undefined
+      : new RectShape({
+          width: data.viewport.clip.width,
+          height: data.viewport.clip.height,
+        }).offset({ x: data.viewport.clip.x, y: data.viewport.clip.y }),
+  )
+  .responseRegion(viewportRegions(data))
+  .mouseResponseRegion(viewportRegions(data))
   .hitTestBehavior(HitTestMode.Block)
   // Transparent windows: force Web background to transparent so vibrancy/blur
   // effects are visible through the Web component. Without this, the Web renders
@@ -2537,10 +2604,47 @@ class WebviewSurface {
     }
   }
 
+  async cookiesDetails(
+    id: string,
+    callContext: BridgeCallContext,
+  ): Promise<WebviewCookiesResponse> {
+    await this.controllerEntry(id, callContext);
+    const cookies = await webview.WebCookieManager.fetchAllCookies(false);
+    if (!callContext.isActive()) {
+      throw new Error("Cookie query was cancelled");
+    }
+    return new WebviewCookiesResponse(
+      cookies.map((cookie: webview.WebHttpCookie): WebviewCookie => {
+        const expires = Date.parse(cookie.expiresDate);
+        return {
+          name: cookie.name,
+          value: cookie.value,
+          domain: cookie.domain,
+          path: cookie.path,
+          secure: cookie.isSecure,
+          httpOnly: cookie.isHttpOnly,
+          sameSite:
+            cookie.samesitePolicy === webview.WebHttpCookieSameSitePolicy.STRICT
+              ? "Strict"
+              : cookie.samesitePolicy === webview.WebHttpCookieSameSitePolicy.LAX
+                ? "Lax"
+                : "None",
+          expires: !cookie.isSessionCookie && Number.isFinite(expires) ? expires : undefined,
+        };
+      }),
+    );
+  }
+
+  async clearCookies(id: string, callContext: BridgeCallContext): Promise<void> {
+    await this.controllerEntry(id, callContext);
+    webview.WebCookieManager.clearAllCookiesSync(false);
+  }
+
   async clearAllBrowsingData(id: string, callContext: BridgeCallContext): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
     try {
-      webview.WebStorage.deleteAllData(true);
+      webview.WebCookieManager.clearAllCookiesSync(false);
+      webview.WebStorage.deleteAllData(false);
       webview.WebDataBase.deleteHttpAuthCredentials();
       entry.data.controller.removeCache(true);
       entry.data.controller.clearHistory();
@@ -2891,6 +2995,16 @@ class WebviewSurface {
     return true;
   }
 
+  setViewport(request: WebviewViewportRequest): boolean {
+    const entry = this.entries.get(request.id);
+    if (!entry) {
+      return false;
+    }
+    entry.data.viewport = request;
+    entry.node.update(entry.data);
+    return true;
+  }
+
   setBounds(id: string, x: number, y: number, width: number, height: number): boolean {
     const entry = this.entries.get(id);
     if (!entry) {
@@ -2907,7 +3021,7 @@ class WebviewSurface {
 
   setCookie(url: string, value: string): boolean {
     try {
-      webview.WebCookieManager.configCookieSync(url, value);
+      webview.WebCookieManager.configCookieSync(url, value, false, true);
       return true;
     } catch (error) {
       console.error("WebView set-cookie failed: " + String(error));
@@ -3472,6 +3586,33 @@ export class WebviewPlugin extends AsyncPluginBase {
       };
     }
 
+    if (action === "set-viewport") {
+      if (
+        payload.typeName !== "ohos.webview.ViewportRequest" ||
+        typeof payload.value !== "object"
+      ) {
+        throw new Error("set-viewport requires ohos.webview.ViewportRequest");
+      }
+      const request = payload.value as WebviewViewportRequest;
+      if (
+        typeof request.id !== "string" ||
+        request.id.trim().length === 0 ||
+        !validWebviewRegion(request.frame) ||
+        request.frame.width === 0 ||
+        request.frame.height === 0 ||
+        !validWebviewRegion(request.clip) ||
+        !Array.isArray(request.inputRegions) ||
+        request.inputRegions.length > 256 ||
+        !request.inputRegions.every((r: WebviewRegion): boolean => validWebviewRegion(r))
+      ) {
+        throw new Error("Invalid WebView viewport");
+      }
+      return {
+        typeName: ACKNOWLEDGEMENT_TYPE,
+        value: new WebviewAcceptedResponse(surface.setViewport(request)),
+      };
+    }
+
     const controllerPayload = parseControllerPayload(payload, action);
     if (!controllerPayload?.id?.trim()) {
       throw new Error("WebView controller id must not be empty");
@@ -3558,6 +3699,14 @@ export class WebviewPlugin extends AsyncPluginBase {
           ),
         ),
       };
+    } else if (action === "cookies-details") {
+      return {
+        typeName: "ohos.webview.CookiesResponse",
+        value: await surface.cookiesDetails(controllerPayload.id, context),
+      };
+    } else if (action === "clear-cookies") {
+      await surface.clearCookies(controllerPayload.id, context);
+      accepted = true;
     } else if (action === "clear-all-browsing-data") {
       await surface.clearAllBrowsingData(controllerPayload.id, context);
       accepted = true;

@@ -80,6 +80,46 @@ impl_bridge_napi_type!(
     "ohos.notification.Acknowledgement"
 );
 
+/// Extended presentation uses a new action so existing ShowRequest callers retain their ABI.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ShowNotificationOptionsRequest {
+    pub tag: String,
+    pub title: String,
+    pub body: String,
+    pub actions: Vec<NotificationAction>,
+    pub silent: bool,
+    pub group: String,
+    pub image: Vec<u8>,
+    pub sender_name: String,
+}
+impl_bridge_napi_type!(
+    ShowNotificationOptionsRequest,
+    "ohos.notification.ShowOptionsRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct NotificationResponseRequest {
+    pub uri: String,
+}
+impl_bridge_napi_type!(
+    NotificationResponseRequest,
+    "ohos.notification.ResponseRequest"
+);
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct NotificationResponse {
+    pub matched: bool,
+    pub tag: String,
+    pub action: String,
+}
+impl_bridge_napi_type!(NotificationResponse, "ohos.notification.Response");
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct NotificationEmptyRequest {}
+impl_bridge_napi_type!(NotificationEmptyRequest, "ohos.notification.EmptyRequest");
+
 #[derive(Clone)]
 pub struct NotificationClient {
     bridge: BridgeRuntime,
@@ -100,6 +140,30 @@ impl NotificationClient {
                 "show", request, BridgeCallOptions::default().with_timeout_ms(120_000),
             )
             .await?;
+        Ok(response.accepted)
+    }
+
+    pub async fn show_with_options(&self, request: ShowNotificationOptionsRequest) -> Result<bool> {
+        ShowNotificationRequest {
+            tag: request.tag.clone(),
+            title: request.title.clone(),
+            body: request.body.clone(),
+            actions: request.actions.clone(),
+        }
+        .validate()?;
+        if request.image.len() > 16 * 1024 * 1024 {
+            return Err(Error::from_reason("Notification image exceeds 16 MiB"));
+        }
+        let response = self.bridge.call_async::<NotificationBridgePlugin, ShowNotificationOptionsRequest, NotificationAcknowledgement>("show-with-options", request, BridgeCallOptions::default().with_timeout_ms(120_000)).await?;
+        Ok(response.accepted)
+    }
+
+    pub async fn parse_response(&self, uri: String) -> Result<NotificationResponse> {
+        self.bridge.call_async::<NotificationBridgePlugin, NotificationResponseRequest, NotificationResponse>("parse-response", NotificationResponseRequest { uri }, BridgeCallOptions::default()).await
+    }
+
+    pub async fn dismiss_all(&self) -> Result<bool> {
+        let response = self.bridge.call_async::<NotificationBridgePlugin, NotificationEmptyRequest, NotificationAcknowledgement>("dismiss-all", NotificationEmptyRequest {}, BridgeCallOptions::default()).await?;
         Ok(response.accepted)
     }
 
