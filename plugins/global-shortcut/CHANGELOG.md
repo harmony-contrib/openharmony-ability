@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+
+## [1.0.0-beta.6] - 2026-11-15
+
+- Align the package version to `1.0.0-beta.6` and resolve internal HAR dependencies through `workspace:*`.
+
 ## [1.0.0-beta.5] - 2026-11-02
 
 - fix(release): keep ohpm lockfiles in sync with manifest versions (#116)
