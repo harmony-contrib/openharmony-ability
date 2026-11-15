@@ -1259,13 +1259,41 @@ impl WebviewClient {
         Self { bridge }
     }
 
-    pub async fn create(&self, mut request: WebviewCreateRequest) -> Result<WebviewHandle> {
+    pub async fn create(&self, request: WebviewCreateRequest) -> Result<WebviewHandle> {
+        self.create_with_keyboard_mode(request, false).await
+    }
+
+    /// Creates a WebView using ArkWeb's native keyboard input, without the
+    /// MainPage-only synthetic DOM event shim. Custom hosts must use this path
+    /// because they do not provide MainPage's paired pre-IME synthesizer.
+    /// This does not change ArkWeb's own key identity/IME behavior.
+    pub async fn create_with_native_keyboard(
+        &self,
+        request: WebviewCreateRequest,
+    ) -> Result<WebviewHandle> {
+        self.create_with_keyboard_mode(request, true).await
+    }
+
+    async fn create_with_keyboard_mode(
+        &self,
+        mut request: WebviewCreateRequest,
+        native_keyboard: bool,
+    ) -> Result<WebviewHandle> {
         request.validate()?;
         // Callback declarations live solely in Rust. Snapshot their event subscriptions into the
         // named create request so ArkTS can bind ArkWeb hooks without retaining Rust closures.
         request.event_options = callbacks::options_for(&request.id)?;
         let request_id = request.id.clone();
-        let response: WebviewCreateResponse = self.call("create", request).await?;
+        let response: WebviewCreateResponse = if native_keyboard {
+            self.call::<WebviewCreateRequest, WebviewCreateResponse>(
+                "create-with-native-keyboard",
+                request,
+            )
+            .await?
+        } else {
+            self.call::<WebviewCreateRequest, WebviewCreateResponse>("create", request)
+                .await?
+        };
         if response.id != request_id {
             return Err(Error::from_reason(
                 "WebView plugin returned a mismatched controller ID",

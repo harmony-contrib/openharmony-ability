@@ -130,3 +130,16 @@ Super through this public pointer callback. Events do not cancel browser input.
 Disabling, removing the view, retiring its controller, or disposing the session
 stops notifications. Pointer notifications do not implement Tab-out or unhandled
 keyboard forwarding.
+
+### Custom hosts and keyboard input
+
+Use `WebviewClient::create_with_native_keyboard` (action
+`create-with-native-keyboard`, existing named `CreateRequest`/`CreateResponse`)
+when hosting WebViews outside Ability's MainPage. MainPage's legacy creation
+path pairs a document-start suppression shim with its pre-IME DOM synthesizer.
+Injecting that shim into a custom host without the synthesizer hides physical
+keyboard events from page listeners. The new action leaves ArkWeb input intact,
+preserves application initialization scripts on creation and later updates, and
+does not register the controller with MainPage's synthetic event dispatcher.
+It does not fabricate missing ArkWeb key identities or implement unhandled-key
+notifications / Tab-out. The existing `create` action retains its legacy behavior.

@@ -31,7 +31,6 @@ import {
   WindowManager,
   notifyPrimaryWebviewController,
   notifyKeySynthesisController,
-  KEY_SYNTHESIS_SHIM,
 } from "@ohos-rs/ability";
 
 import {
@@ -40,6 +39,12 @@ import {
   POINTER_EVENT_TYPE,
   parsePointerEvents,
 } from "./WebviewPointerEvents";
+
+import {
+  WebviewInitializationScript,
+  usesLegacyWebviewKeyboard,
+  webviewKeyboardScripts,
+} from "./WebviewKeyboardPolicy";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
 const NATIVE_CREATE_REQUEST_TYPE = "ohos.webview.NativeCreateRequest";
@@ -186,10 +191,6 @@ interface NativeControllerEvent {
   targetId: number;
   nativeTag: string;
 }
-interface WebviewInitializationScript {
-  script: string;
-  scriptRules: string[];
-}
 
 interface WebviewEventOptions {
   navigationIntercept?: boolean | null;
@@ -258,6 +259,7 @@ interface ScriptPayload {
 
 interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
   pointerEvents: WebviewPointerEvents;
+  nativeKeyboard: boolean;
   viewport?: WebviewViewportRequest;
   getHostWindow: () => window.Window;
   nativeNotify: (phase: string, message?: string, code?: number) => void;
@@ -1682,30 +1684,10 @@ function BuildWebview(data: ManagedWebview) {
  * drop ALL key events there.
  */
 function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[] {
-  const wid = data.windowId ?? 0;
-  const base = data.initializationScripts ?? [];
-  if (wid !== 0 || data.nativeTarget !== null) {
-    return base;
-  }
-  // scriptRules are ArkWeb URL match patterns — an EMPTY array matches no
-  // document (the shim silently never runs; observed 2026-08-28 as unsuppressed
-  // native key events). "*" alone does not match custom protocols
-  // (tauri://localhost), so reuse the UNION of the app's own init-script
-  // rules — the shim must run exactly wherever those run. No init scripts → "*".
-  const rules: Set<string> = new Set();
-  for (const item of base) {
-    for (const rule of item.scriptRules) {
-      rules.add(rule);
-    }
-  }
-  if (rules.size === 0) {
-    rules.add("*");
-  }
-  const shim: WebviewInitializationScript = {
-    script: KEY_SYNTHESIS_SHIM,
-    scriptRules: Array.from(rules),
-  };
-  return base.concat([shim]);
+  return webviewKeyboardScripts(
+    data.initializationScripts ?? [],
+    usesLegacyWebviewKeyboard(data.nativeKeyboard, data.nativeTarget, data.windowId ?? 0),
+  );
 }
 
 function handleControllerAttached(data: ManagedWebview): void {
@@ -1755,7 +1737,7 @@ function handleControllerAttached(data: ManagedWebview): void {
     // ohos-webview-key-synthesis: register the controller (ALL windows incl.
     // main — unlike the sub-window-only WindowManager map above) so
     // MainPage.onKeyPreIme can dispatch synthetic DOM key events into it.
-    if (data.nativeTarget === null) {
+    if (!data.nativeKeyboard && data.nativeTarget === null) {
       notifyKeySynthesisController(wid, data.controller as webview.WebviewController);
     }
 
@@ -1993,6 +1975,7 @@ class WebviewSurface {
     callContext: BridgeCallContext,
     nativeTarget: number | null = null,
     nativeSettings: NativeWebviewSettings | null = null,
+    nativeKeyboard: boolean = false,
   ): Promise<void> {
     if (nativeTarget === null) {
       if (
@@ -2001,13 +1984,13 @@ class WebviewSurface {
       ) {
         return this.serializeNative(
           payload.id,
-          (): Promise<void> => this.createEntry(payload, callContext),
+          (): Promise<void> => this.createEntry(payload, callContext, null, null, nativeKeyboard),
         );
       }
-      return this.createEntry(payload, callContext);
+      return this.createEntry(payload, callContext, null, null, nativeKeyboard);
     }
     return this.serializeNative(payload.id, async (): Promise<void> => {
-      await this.createEntry(payload, callContext, nativeTarget, nativeSettings);
+      await this.createEntry(payload, callContext, nativeTarget, nativeSettings, nativeKeyboard);
     });
   }
 
@@ -2016,6 +1999,7 @@ class WebviewSurface {
     callContext: BridgeCallContext,
     nativeTarget: number | null = null,
     nativeSettings: NativeWebviewSettings | null = null,
+    nativeKeyboard: boolean = false,
   ): Promise<void> {
     this.assertActive();
     this.assertCallActive(callContext);
@@ -2069,6 +2053,7 @@ class WebviewSurface {
     // Same source as the BuilderNode construction below (`this.pluginContext.getUIContext()`).
     const newWindowUiCtx = this.pluginContext.getUIContext();
     const data: ManagedWebview = {
+      nativeKeyboard,
       pointerEvents: new WebviewPointerEvents(
         payload.id,
         nativeTag,
@@ -3548,9 +3533,15 @@ export class WebviewPlugin extends AsyncPluginBase {
       );
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
     }
-    if (action === "create") {
+    if (action === "create" || action === "create-with-native-keyboard") {
       const createPayload = ensureCreatePayload(parseCreatePayload(payload));
-      await surface.create(createPayload, context);
+      await surface.create(
+        createPayload,
+        context,
+        null,
+        null,
+        action === "create-with-native-keyboard",
+      );
       if (!context.isActive()) {
         throw new Error(
           "Bridge session is no longer active after WebView controller initialization",
