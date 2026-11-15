@@ -271,17 +271,44 @@ export class NotificationPlugin extends AsyncPluginBase {
             // API 23+ explicitly disables both audible and vibrating alerts.
             notification.notificationFlags = { soundEnabled: 2, vibrationEnabled: 2 };
           }
-          if (options.senderName) {
-            notification.content.normal = {
-              title: request.title,
-              text: request.body,
-              additionalText: options.senderName,
-            };
-          }
+          // additionalText is not rendered by the notification center. Keep
+          // the sender visible without repeating a name already in the title.
+          const normal: notificationManager.NotificationBasicContent = {
+            title: request.title,
+            text:
+              options.senderName && options.senderName !== request.title
+                ? `${options.senderName}\n${request.body}`
+                : request.body,
+            additionalText: options.senderName,
+          };
+          notification.content.normal = normal;
           if (options.image.length > 0) {
             source = image.createImageSource(new Uint8Array(options.image).buffer as ArrayBuffer);
-            icon = await source.createPixelMap({ desiredSize: { width: 192, height: 192 } });
-            notification.largeIcon = icon;
+            const info = await source.getImageInfo();
+            if (info.size.width <= 0 || info.size.height <= 0) {
+              throw new Error("Invalid notification image dimensions");
+            }
+            const scale = Math.min(1, 512 / info.size.width, 512 / info.size.height);
+            icon = await source.createPixelMap({
+              desiredSize: {
+                width: Math.max(1, Math.floor(info.size.width * scale)),
+                height: Math.max(1, Math.floor(info.size.height * scale)),
+              },
+              desiredPixelFormat: image.PixelMapFormat.RGBA_8888,
+            });
+            // Picture content is the public attachment presentation. It avoids
+            // relying on the optional large application icon's device policy.
+            notification.content = {
+              notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_PICTURE,
+              picture: {
+                title: normal.title,
+                text: normal.text,
+                additionalText: normal.additionalText,
+                briefText: request.body,
+                expandedTitle: request.title,
+                picture: icon,
+              },
+            };
           }
         }
         if (hasAvatar) {

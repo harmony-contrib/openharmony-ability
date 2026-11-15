@@ -54,7 +54,7 @@ function notificationHarness() {
   const published = [],
     resources = [];
   const manager = {
-    ContentType: { NOTIFICATION_CONTENT_BASIC_TEXT: 1 },
+    ContentType: { NOTIFICATION_CONTENT_BASIC_TEXT: 0, NOTIFICATION_CONTENT_PICTURE: 2 },
     SlotType: { SOCIAL_COMMUNICATION: 1 },
     async isNotificationEnabled() {
       return true;
@@ -74,14 +74,27 @@ function notificationHarness() {
     return value;
   }
   const device = { sdkApiVersion: 26 };
+  const imageState = {
+    size: { width: 1200, height: 600 },
+    endDuringDecode: false,
+    failDecode: false,
+  };
+  const decodeOptions = [];
   const { NotificationPlugin } = load("plugins/notification/src/main/ets/NotificationPlugin.ets", {
     "@ohos.deviceInfo": { default: device },
     "@kit.ArkTS": { url: {} },
     "@kit.ImageKit": {
       image: {
+        PixelMapFormat: { RGBA_8888: 3 },
         createImageSource() {
           return Object.assign(resource(), {
-            async createPixelMap() {
+            async getImageInfo() {
+              return { size: imageState.size };
+            },
+            async createPixelMap(options) {
+              decodeOptions.push(options);
+              if (imageState.failDecode) throw new Error("image decode failed");
+              if (imageState.endDuringDecode) ctx.active = false;
               return resource();
             },
           });
@@ -116,7 +129,18 @@ function notificationHarness() {
     value = request,
     typeName = "ohos.notification.ShowAvatarRequest",
   ) => plugin.invokeAsync(action, { typeName, value }, ctx);
-  return { ctx, manager, device, published, resources, options, request, invoke };
+  return {
+    ctx,
+    manager,
+    device,
+    published,
+    resources,
+    options,
+    request,
+    invoke,
+    imageState,
+    decodeOptions,
+  };
 }
 
 test("social slot preserves silent flags, group, actions and images and releases pixel maps", async () => {
@@ -130,14 +154,57 @@ test("social slot preserves silent flags, group, actions and images and releases
   assert.equal(n.notificationFlags.soundEnabled, 2);
   assert.equal(n.notificationFlags.vibrationEnabled, 2);
   assert.equal(n.groupName, "chat");
-  assert.equal(n.content.normal.additionalText, "Sender");
+  assert.equal(n.content.notificationContentType, 2);
+  assert.equal(n.content.picture.text, "Sender\nBody");
   assert.equal(
     n.actionButtons[0].wantAgent.wants[0].uri,
     "messages://response?tag=m%2F1&action=reply",
   );
   assert.equal(n.wantAgent.wants[0].uri, "messages://response?tag=m%2F1");
-  assert.ok(n.smallIcon && n.largeIcon);
+  assert.ok(n.smallIcon && n.content.picture.picture);
+  assert.equal(n.largeIcon, undefined);
+  assert.equal(n.content.normal, undefined);
   assert.equal(h.resources.length, 4);
+  assert.ok(h.resources.every((r) => r.released === 1));
+});
+for (const [width, height, expectedWidth, expectedHeight] of [
+  [1200, 600, 512, 256],
+  [100, 400, 100, 400],
+  [1, 2000, 1, 512],
+]) {
+  test(`picture attachment preserves aspect ratio and bounds: ${width}x${height}`, async () => {
+    const h = notificationHarness();
+    h.imageState.size = { width, height };
+    await h.invoke();
+    assert.equal(h.decodeOptions[0].desiredSize.width, expectedWidth);
+    assert.equal(h.decodeOptions[0].desiredSize.height, expectedHeight);
+    assert.equal(h.decodeOptions[0].desiredPixelFormat, 3);
+  });
+}
+test("sender name is visible in plain text and not repeated when already the title", async () => {
+  const h = notificationHarness();
+  h.options.image = [];
+  await h.invoke();
+  assert.equal(h.published[0].content.normal.text, "Sender\nBody");
+  h.options.senderName = h.options.title;
+  await h.invoke();
+  assert.equal(h.published[1].content.normal.text, "Body");
+});
+test("invalid dimensions and decode errors release image source and do not publish", async () => {
+  const h = notificationHarness();
+  h.imageState.size.width = 0;
+  await assert.rejects(h.invoke(), /Invalid notification image dimensions/);
+  h.imageState.size.width = 1;
+  h.imageState.failDecode = true;
+  await assert.rejects(h.invoke(), /image decode failed/);
+  assert.equal(h.published.length, 0);
+  assert.ok(h.resources.every((r) => r.released === 1));
+});
+test("session ending during image decode releases pixel maps without publishing", async () => {
+  const h = notificationHarness();
+  h.imageState.endDuringDecode = true;
+  await assert.rejects(h.invoke(), /session ended before publish/);
+  assert.equal(h.published.length, 0);
   assert.ok(h.resources.every((r) => r.released === 1));
 });
 test("social notification does not require a display name or avatar", async () => {

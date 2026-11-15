@@ -38,7 +38,7 @@
 | `ohos.webview` / `cookies-details` | `ohos.webview.ControllerRequest` | `ohos.webview.CookiesResponse` | API 23+ 全部普通 Cookie，保留 domain/path/secure/httpOnly/sameSite/到期 Unix 毫秒 |
 | `ohos.webview` / `clear-cookies` | `ohos.webview.ControllerRequest` | `ohos.webview.Acknowledgement` | 仅清理普通 Cookie；不删除其他浏览数据 |
 | `ohos.window` / `show-prompt-choice` | `ohos.window.PromptChoiceRequest` | `ohos.window.PromptChoiceResponse` | 实际窗口中的 ArkUI Checkbox；index 与 checked 一起返回；取消和销毁关闭对话框 |
-| `ohos.notification` / `show-with-options` | `ohos.notification.ShowOptionsRequest` | `ohos.notification.Acknowledgement` | 保留原 show；图片按 192×192 解码且释放，分组、发件人显示名、API 23+ 静默声音／振动关闭标记 |
+| `ohos.notification` / `show-with-options` | `ohos.notification.ShowOptionsRequest` | `ohos.notification.Acknowledgement` | 保留原 show；图片等比限边 512 像素后以 PictureContent 展示且释放，分组、发件人显示名、API 23+ 静默声音／振动关闭标记 |
 | `ohos.notification` / `show-social` | `ohos.notification.ShowAvatarRequest` | `ohos.notification.Acknowledgement` | 社交通信槽位，头像可为空；silent 使用 API 23+ 声音／振动关闭标记；不声明联系人或系统会话身份 |
 | `ohos.notification` / `parse-response` | `ohos.notification.ResponseRequest` | `ohos.notification.Response` | 仅识别配置 scheme 的 response URI，包含 matched/tag/action；普通深链不匹配 |
 | `ohos.notification` / `dismiss-all` | `ohos.notification.EmptyRequest` | `ohos.notification.Acknowledgement` | 撤销本应用通知，包含以前启动发布的通知 |
