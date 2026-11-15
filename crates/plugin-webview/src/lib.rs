@@ -181,6 +181,11 @@ impl BridgePlugin for WebviewBridgePlugin {
                 let request = event.decode::<WebviewNewWindowRequest>()?;
                 event.respond(callbacks::new_window_decision(request)?)
             }
+            "pointer-down" => {
+                let pointer = event.decode::<WebviewPointerEvent>()?;
+                callbacks::dispatch_pointer_down(pointer)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
             "page-begin" => {
                 let page_event = event.decode::<WebviewPageEvent>()?;
                 callbacks::dispatch_page_begin(page_event)?;
@@ -1168,6 +1173,33 @@ pub struct WebviewPageEvent {
 
 impl_bridge_napi_type!(WebviewPageEvent, "ohos.webview.PageEvent");
 
+/// Enables passive pointer-down notifications without changing the create/callback ABI.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPointerEventsRequest {
+    pub id: String,
+    pub enabled: bool,
+}
+impl_bridge_napi_type!(
+    WebviewPointerEventsRequest,
+    "ohos.webview.PointerEventsRequest"
+);
+
+/// Pointer position in component-local vp; buttons: primary=0, secondary=1,
+/// middle=2, back=3, forward=4. Modifiers: Shift=1, Ctrl=2, Alt=4.
+/// ArkUI's public pointer callback does not expose the Super modifier.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPointerEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub x: f64,
+    pub y: f64,
+    pub button: i32,
+    pub modifiers: u32,
+}
+impl_bridge_napi_type!(WebviewPointerEvent, "ohos.webview.PointerEvent");
+
 #[derive(Clone)]
 pub struct WebviewClient {
     bridge: BridgeRuntime,
@@ -1743,6 +1775,21 @@ impl WebviewHandle {
         self.acknowledge("reload", self.controller_request()).await
     }
 
+    /// Opts into passive mouse/primary-touch notifications. Register
+    /// `WebviewCallbacksBuilder::on_pointer_down` before enabling.
+    pub async fn set_pointer_events(&self, enabled: bool) -> Result<()> {
+        self.client
+            .call::<WebviewPointerEventsRequest, WebviewAcknowledgement>(
+                "set-pointer-events",
+                WebviewPointerEventsRequest {
+                    id: self.id.clone(),
+                    enabled,
+                },
+            )
+            .await?
+            .ensure()
+    }
+
     pub async fn focus(&self) -> Result<()> {
         self.acknowledge("focus", self.controller_request()).await
     }
@@ -2230,6 +2277,14 @@ mod tests {
 
     #[test]
     fn webview_actions_have_named_napi_contracts() {
+        assert_eq!(
+            <WebviewPointerEventsRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PointerEventsRequest"
+        );
+        assert_eq!(
+            <WebviewPointerEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PointerEvent"
+        );
         assert_eq!(
             WebviewDocumentOptionsRequest::TYPE_NAME,
             "ohos.webview.DocumentOptionsRequest"

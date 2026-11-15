@@ -15,7 +15,8 @@ use super::{
     controller, WebviewCallbackOptions, WebviewDownloadEndEvent, WebviewDownloadStartRequest,
     WebviewDownloadStartResponse, WebviewDragEvent, WebviewDropEvent, WebviewHttpsInterceptRequest,
     WebviewHttpsInterceptResponse, WebviewNavigationRequest, WebviewNavigationResponse,
-    WebviewNewWindowRequest, WebviewNewWindowResponse, WebviewPageEvent, WebviewTitleChangeEvent,
+    WebviewNewWindowRequest, WebviewNewWindowResponse, WebviewPageEvent, WebviewPointerEvent,
+    WebviewTitleChangeEvent,
 };
 
 type NavigationCallback = Arc<dyn Fn(WebviewNavigationRequest) -> bool + Send + Sync + 'static>;
@@ -29,6 +30,7 @@ type DragOverCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
 type DragDropCallback = Arc<dyn Fn(WebviewDropEvent) + Send + Sync + 'static>;
 type DragLeaveCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
 type NewWindowCallback = Arc<dyn Fn(WebviewNewWindowRequest) -> bool + Send + Sync + 'static>;
+type PointerDownCallback = Arc<dyn Fn(WebviewPointerEvent) + Send + Sync + 'static>;
 type PageBeginCallback = Arc<dyn Fn(WebviewPageEvent) + Send + Sync + 'static>;
 type PageEndCallback = Arc<dyn Fn(WebviewPageEvent) + Send + Sync + 'static>;
 type CloseWindowCallback = Arc<dyn Fn() + Send + Sync + 'static>;
@@ -50,6 +52,7 @@ struct WebviewCallbacks {
     drag_drop: Option<DragDropCallback>,
     drag_leave: Option<DragLeaveCallback>,
     new_window: Option<NewWindowCallback>,
+    pointer_down: Option<PointerDownCallback>,
     page_begin: Option<PageBeginCallback>,
     page_end: Option<PageEndCallback>,
     close_window: Option<CloseWindowCallback>,
@@ -83,6 +86,7 @@ impl WebviewCallbacks {
             && self.drag_drop.is_none()
             && self.drag_leave.is_none()
             && self.new_window.is_none()
+            && self.pointer_down.is_none()
             && self.page_begin.is_none()
             && self.page_end.is_none()
             && self.close_window.is_none()
@@ -195,6 +199,15 @@ impl WebviewCallbacksBuilder {
         F: Fn(WebviewNewWindowRequest) -> bool + Send + Sync + 'static,
     {
         self.callbacks.new_window = Some(Arc::new(callback));
+        self
+    }
+
+    /// Receives passive pointer-down notifications after `set_pointer_events(true)`.
+    pub fn on_pointer_down<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewPointerEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.pointer_down = Some(Arc::new(callback));
         self
     }
 
@@ -453,6 +466,29 @@ pub(crate) fn new_window_decision(
     })
 }
 
+pub(crate) fn dispatch_pointer_down(event: WebviewPointerEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    if !event.x.is_finite()
+        || !event.y.is_finite()
+        || !(0..=4).contains(&event.button)
+        || event.modifiers > 7
+    {
+        return Err(Error::from_reason("Invalid WebView pointer event"));
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.pointer_down.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
 pub(crate) fn dispatch_page_begin(event: WebviewPageEvent) -> Result<()> {
     if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
@@ -612,6 +648,41 @@ mod tests {
     }
 
     // ─── S7 纯变换批：options 派生 + 三个 decision 函数的全分支 ─────────────────
+
+    #[test]
+    fn pointer_only_subscription_drops_stale_generations() {
+        use super::{dispatch_pointer_down, remove};
+        use crate::WebviewPointerEvent;
+        let count = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&count);
+        WebviewCallbacksBuilder::new("pointer-test")
+            .on_pointer_down(move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+            })
+            .build()
+            .unwrap();
+        controller::on_attached("pointer-test", "new").unwrap();
+        let mut event = WebviewPointerEvent {
+            id: "pointer-test".into(),
+            native_tag: "old".into(),
+            x: 1.5,
+            y: -2.0,
+            button: 0,
+            modifiers: 7,
+        };
+        dispatch_pointer_down(event.clone()).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 0);
+        event.native_tag = "new".into();
+        dispatch_pointer_down(event.clone()).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+        let mut invalid = event.clone();
+        invalid.x = f64::NAN;
+        assert!(dispatch_pointer_down(invalid).is_err());
+        controller::on_removed("pointer-test", "new").unwrap();
+        dispatch_pointer_down(event).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+        remove("pointer-test").unwrap();
+    }
 
     #[test]
     fn options_and_is_empty_derive_from_callback_presence() {

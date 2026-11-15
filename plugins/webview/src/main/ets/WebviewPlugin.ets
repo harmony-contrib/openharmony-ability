@@ -34,6 +34,13 @@ import {
   KEY_SYNTHESIS_SHIM,
 } from "@ohos-rs/ability";
 
+import {
+  WebviewPointerEvents,
+  WebviewPointerEvent,
+  POINTER_EVENT_TYPE,
+  parsePointerEvents,
+} from "./WebviewPointerEvents";
+
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
 const NATIVE_CREATE_REQUEST_TYPE = "ohos.webview.NativeCreateRequest";
 interface NativeCreatePayload {
@@ -250,6 +257,7 @@ interface ScriptPayload {
 }
 
 interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
+  pointerEvents: WebviewPointerEvents;
   viewport?: WebviewViewportRequest;
   getHostWindow: () => window.Window;
   nativeNotify: (phase: string, message?: string, code?: number) => void;
@@ -1534,6 +1542,8 @@ function managedWebviewAttributes(data: ManagedWebview, interceptContext: string
     data.onTitleChange(event.title);
     data.nativeNotify("title");
   })
+  .onMouse((event: MouseEvent) => data.pointerEvents.mouse(event))
+  .onTouch((event: TouchEvent) => data.pointerEvents.touch(event))
   .onFocus(() => data.nativeNotify("focus"))
   .onBlur(() => data.nativeNotify("blur"))
   .onErrorReceive((event) => {
@@ -2059,6 +2069,15 @@ class WebviewSurface {
     // Same source as the BuilderNode construction below (`this.pluginContext.getUIContext()`).
     const newWindowUiCtx = this.pluginContext.getUIContext();
     const data: ManagedWebview = {
+      pointerEvents: new WebviewPointerEvents(
+        payload.id,
+        nativeTag,
+        (): boolean =>
+          !this.disposed && this.entries.get(payload.id)?.data === data && data.nativeActive,
+        (event: WebviewPointerEvent): void => {
+          notifyNative(this.pluginContext, "pointer-down", POINTER_EVENT_TYPE, event as ESObject);
+        },
+      ),
       id: payload.id,
       windowId: payload.windowId ?? null,
       mountParentHandle: parentHandle,
@@ -2586,6 +2605,15 @@ class WebviewSurface {
     }
   }
 
+  async setPointerEvents(
+    id: string,
+    enabled: boolean,
+    callContext: BridgeCallContext,
+  ): Promise<void> {
+    const entry = await this.controllerEntry(id, callContext);
+    entry.data.pointerEvents.enabled = enabled;
+  }
+
   async focus(id: string, callContext: BridgeCallContext): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
     try {
@@ -2674,6 +2702,7 @@ class WebviewSurface {
     if (!entry || (expected !== undefined && entry !== expected)) {
       return false;
     }
+    entry.data.pointerEvents.enabled = false;
     // Unregister runtime blur refresh callback (sub-window webviews only).
     const wid = entry.data.windowId ?? 0;
     if (wid > 0) {
@@ -3431,6 +3460,11 @@ export class WebviewPlugin extends AsyncPluginBase {
       throw new Error("Bridge session is no longer active");
     }
     const surface = this.requireSurface();
+    if (action === "set-pointer-events") {
+      const request = parsePointerEvents(payload);
+      await surface.setPointerEvents(request.id, request.enabled, context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
     if (
       action === "default-cookies" ||
       action === "default-clear-cookies" ||
