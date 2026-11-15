@@ -226,6 +226,7 @@ export { LoginPlugin };
 | `ohos.notification` / `show` | `ohos.notification.ShowRequest { tag, title, body, actions }` → `ohos.notification.Acknowledgement { accepted }` | async / `ability`；最多 3 个 action；响应 URI scheme 由 ArkTS 工厂的 `NotificationPlugin({ scheme })` 配置 |
 | `ohos.notification` / `set-badge` | `ohos.notification.SetBadgeRequest { count }` → `Acknowledgement` | async / `ability`；0 清除角标，最大 2147483647，不将任意文字当成计数 |
 | `ohos.notification` / `show-with-avatar` | `ohos.notification.ShowAvatarRequest { options: ShowOptionsRequest, avatar }` → `Acknowledgement` | async / `ability`；沿用已有 options，头像为编码图片字节，最大 16 MiB；smallIcon 展示头像，不等同于系统会话身份；silent 使用 API 23+ 的声音／振动关闭标记，旧版本明确失败 |
+| `ohos.notification` / `show-social` | `ohos.notification.ShowAvatarRequest { options: ShowOptionsRequest, avatar }` → `Acknowledgement` | async / `ability`；社交通信槽位，头像可为空；保留 group、silent、图片和动作；不声明联系人或系统会话身份 |
 | `ohos.system-state` / `resolve-proxy` | `ohos.system-state.ResolveProxyRequest { url }` → `ResolveProxyResponse { directives }` | async / `ability`；HTTP(S)，查询系统已配置 PAC；空结果报错，不降级为 DIRECT；API 20，手机／平板 API 23+ |
 | `ohos.system-state` / `preferred-languages` | `ohos.system-state.PreferredLanguagesRequest {}` → `PreferredLanguagesResponse { languages }` | async / `ability`；返回系统首选语言列表，保留顺序 |
 | `ohos.system-state` | `ohos.system-state.*` 具名类型 | async / `ability`；ID 与 typeName 前缀统一；Rust facade 和 ArkTS HAR 必须配套更新，旧 `ohos.system_state.*` 类型名不再使用 |

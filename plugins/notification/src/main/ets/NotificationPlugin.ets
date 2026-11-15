@@ -155,21 +155,26 @@ export class NotificationPlugin extends AsyncPluginBase {
       await notificationManager.cancelAll();
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new NotificationAcknowledgement(true) };
     }
-    if (action === "show" || action === "show-with-options" || action === "show-with-avatar") {
+    if (
+      action === "show" ||
+      action === "show-with-options" ||
+      action === "show-with-avatar" ||
+      action === "show-social"
+    ) {
+      const hasAvatar = action === "show-with-avatar" || action === "show-social";
       const value = expectBridgeRequestType(
         payload,
         this.id,
         action,
         action === "show"
           ? SHOW_REQUEST_TYPE
-          : action === "show-with-avatar"
+          : hasAvatar
             ? "ohos.notification.ShowAvatarRequest"
             : "ohos.notification.ShowOptionsRequest",
       ) as ShowRequest | ShowAvatarRequest;
-      const request: ShowRequest =
-        action === "show-with-avatar"
-          ? (value as ShowAvatarRequest).options
-          : (value as ShowRequest);
+      const request: ShowRequest = hasAvatar
+        ? (value as ShowAvatarRequest).options
+        : (value as ShowRequest);
       if (
         !request ||
         typeof request.tag !== "string" ||
@@ -242,6 +247,9 @@ export class NotificationPlugin extends AsyncPluginBase {
         wantAgent: await agentFor(responseUri(this.responseScheme, request.tag)),
         actionButtons: buttons,
       };
+      if (action === "show-social") {
+        notification.notificationSlotType = notificationManager.SlotType.SOCIAL_COMMUNICATION;
+      }
       let avatar: image.PixelMap | undefined;
       let avatarSource: image.ImageSource | undefined;
       let icon: image.PixelMap | undefined;
@@ -276,7 +284,7 @@ export class NotificationPlugin extends AsyncPluginBase {
             notification.largeIcon = icon;
           }
         }
-        if (action === "show-with-avatar") {
+        if (hasAvatar) {
           const bytes = (value as ShowAvatarRequest).avatar;
           if (!Array.isArray(bytes) || bytes.length > 16 * 1024 * 1024) {
             throw new Error("Invalid notification avatar");
