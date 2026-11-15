@@ -502,6 +502,49 @@ pub struct WindowStateResponse {
 
 impl_bridge_napi_type!(WindowStateResponse, "ohos.window.StateResponse");
 
+/// Physical pixels relative to the owning display, including native decorations.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowDisplayGeometry {
+    pub display_id: i64,
+    pub bounds: RawRect,
+    pub content_bounds: RawRect,
+    pub component_bounds: Option<RawRect>,
+}
+impl_bridge_napi_type!(WindowDisplayGeometry, "ohos.window.DisplayGeometry");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowDisplayBoundsRequest {
+    pub window_id: i64,
+    pub display_id: i64,
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
+}
+impl_bridge_napi_type!(
+    WindowDisplayBoundsRequest,
+    "ohos.window.DisplayBoundsRequest"
+);
+
+impl WindowDisplayBoundsRequest {
+    fn validate(&self) -> Result<()> {
+        validate_window_id(self.window_id)?;
+        validate_window_id(self.display_id)?;
+        if i32::try_from(self.x).is_err()
+            || i32::try_from(self.y).is_err()
+            || !(1..=i64::from(i32::MAX)).contains(&self.width)
+            || !(1..=i64::from(i32::MAX)).contains(&self.height)
+        {
+            return Err(Error::from_reason(
+                "display bounds require signed 32-bit coordinates and positive sizes",
+            ));
+        }
+        Ok(())
+    }
+}
+
 const MAX_SAFE_JAVASCRIPT_INTEGER: i64 = 9_007_199_254_740_991;
 
 fn validate_window_id(window_id: i64) -> Result<()> {
@@ -678,6 +721,40 @@ impl WindowClient {
         self.call::<WindowMoveRequest, WindowAcknowledgement>(
             "move-to",
             WindowMoveRequest { window_id, x, y },
+        )
+        .await?
+        .ensure()
+    }
+
+    /// Query the window and drawable content in physical display-local pixels.
+    pub async fn get_geometry_on_display(&self, window_id: i64) -> Result<WindowDisplayGeometry> {
+        validate_window_id(window_id)?;
+        let result = self
+            .call::<WindowIdRequest, WindowDisplayGeometry>(
+                "get-geometry-on-display",
+                WindowIdRequest { window_id },
+            )
+            .await?;
+        validate_window_id(result.display_id)?;
+        if result.bounds.width <= 0
+            || result.bounds.height <= 0
+            || result.content_bounds.width < 0
+            || result.content_bounds.height < 0
+        {
+            return Err(Error::from_reason(
+                "window returned invalid display geometry",
+            ));
+        }
+        Ok(result)
+    }
+
+    /// Place a floating window on an explicit display (API 15+). Coordinates and
+    /// dimensions are physical pixels relative to that display's origin.
+    pub async fn set_bounds_on_display(&self, request: WindowDisplayBoundsRequest) -> Result<()> {
+        request.validate()?;
+        self.call::<WindowDisplayBoundsRequest, WindowAcknowledgement>(
+            "set-bounds-on-display",
+            request,
         )
         .await?
         .ensure()
@@ -944,6 +1021,47 @@ impl WindowExt for OpenHarmonyApp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn display_geometry_contracts_and_bounds() {
+        use super::*;
+        assert_eq!(
+            WindowDisplayGeometry::TYPE_NAME,
+            "ohos.window.DisplayGeometry"
+        );
+        assert_eq!(
+            WindowDisplayBoundsRequest::TYPE_NAME,
+            "ohos.window.DisplayBoundsRequest"
+        );
+        let valid = WindowDisplayBoundsRequest {
+            window_id: 0,
+            display_id: 1_i64 << 32,
+            x: -300,
+            y: 10,
+            width: 1000,
+            height: 800,
+        };
+        assert!(valid.validate().is_ok());
+        for invalid in [
+            WindowDisplayBoundsRequest {
+                display_id: -1,
+                ..valid.clone()
+            },
+            WindowDisplayBoundsRequest {
+                x: i64::from(i32::MAX) + 1,
+                ..valid.clone()
+            },
+            WindowDisplayBoundsRequest {
+                width: 0,
+                ..valid.clone()
+            },
+            WindowDisplayBoundsRequest {
+                height: -1,
+                ..valid.clone()
+            },
+        ] {
+            assert!(invalid.validate().is_err());
+        }
+    }
     #[test]
     fn move_requests_are_one_shot_and_preserve_replacements() {
         use super::{take_window_move_request, WindowMoveSubscription};

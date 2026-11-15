@@ -1,4 +1,6 @@
 import window from "@ohos.window";
+import display from "@ohos.display";
+import { WindowDisplayGeometry } from "./DisplayGeometry";
 import pointer from "@ohos.multimodalInput.pointer";
 import { image } from "@kit.ImageKit";
 import { setWindowIcon } from "./WindowIcon";
@@ -47,6 +49,8 @@ const FULLSCREEN_REQUEST_TYPE = "ohos.window.FullscreenRequest";
 const COLOR_REQUEST_TYPE = "ohos.window.ColorRequest";
 const BLUR_REQUEST_TYPE = "ohos.window.BlurRequest";
 const MOVE_REQUEST_TYPE = "ohos.window.MoveRequest";
+const DISPLAY_BOUNDS_REQUEST_TYPE = "ohos.window.DisplayBoundsRequest";
+const DISPLAY_GEOMETRY_TYPE = "ohos.window.DisplayGeometry";
 const RESIZE_REQUEST_TYPE = "ohos.window.ResizeRequest";
 const FOCUSABLE_REQUEST_TYPE = "ohos.window.FocusableRequest";
 const TOUCHABLE_REQUEST_TYPE = "ohos.window.TouchableRequest";
@@ -135,6 +139,42 @@ interface WindowMoveRequest {
   windowId: number;
   x: number;
   y: number;
+}
+
+interface WindowDisplayBoundsRequest {
+  windowId: number;
+  displayId: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function parseDisplayBounds(payload: BridgeTypedValue): WindowDisplayBoundsRequest {
+  if (payload.typeName !== DISPLAY_BOUNDS_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window requires bridge type ${DISPLAY_BOUNDS_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowDisplayBoundsRequest;
+  if (
+    !request ||
+    !isWindowId(request.windowId) ||
+    !isWindowId(request.displayId) ||
+    !Number.isInteger(request.x) ||
+    request.x < -2147483648 ||
+    request.x > 2147483647 ||
+    !Number.isInteger(request.y) ||
+    request.y < -2147483648 ||
+    request.y > 2147483647 ||
+    !Number.isInteger(request.width) ||
+    request.width < 1 ||
+    request.width > 2147483647 ||
+    !Number.isInteger(request.height) ||
+    request.height < 1 ||
+    request.height > 2147483647
+  ) {
+    throw new Error("Invalid display window bounds");
+  }
+  return request;
 }
 
 interface WindowResizeRequest {
@@ -996,6 +1036,44 @@ export class WindowPlugin extends AsyncPluginBase {
       } catch (error) {
         throw new Error(`set-touchable failed: ${String(error)}`);
       }
+    }
+
+    if (action === "get-geometry-on-display") {
+      const request = parseWindowIdRequest(payload);
+      const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
+      const root =
+        request.windowId === 0
+          ? context.getRootFrameNode()
+          : WindowManager.getInstance().getComponentRoot(request.windowId);
+      return { typeName: DISPLAY_GEOMETRY_TYPE, value: new WindowDisplayGeometry(win, root) };
+    }
+
+    if (action === "set-bounds-on-display") {
+      const request = parseDisplayBounds(payload);
+      if (deviceInfo.sdkApiVersion < 15) {
+        throw new Error("set-bounds-on-display requires API 15");
+      }
+      // An unknown target otherwise silently falls back to the current display.
+      display.getDisplayByIdSync(request.displayId);
+      if (
+        WindowManager.getInstance().configureDeferredWindow(request.windowId, (options): void => {
+          options.displayId = request.displayId;
+          options.x = request.x;
+          options.y = request.y;
+          options.width = request.width;
+          options.height = request.height;
+        })
+      ) {
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
+      const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
+      await win.moveWindowToGlobal(request.x, request.y, { displayId: request.displayId });
+      this.assertCallActive(context);
+      await win.resize(request.width, request.height);
+      this.assertCallActive(context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
     if (action === "move-to") {
