@@ -163,10 +163,15 @@ export struct MenuBarComponent {
       if (item.icon) {
         try {
           const decoded = buffer.from(item.icon, "base64");
-          const arrayBuf = decoded.buffer as ArrayBuffer;
+          const bytes = new Uint8Array(decoded.length);
+          for (let index = 0; index < decoded.length; index++) {
+            bytes[index] = decoded[index];
+          }
+          const arrayBuf = bytes.buffer as ArrayBuffer;
           const imageSource = image.createImageSource(arrayBuf);
           const pixelMap = imageSource.createPixelMapSync();
           imageSource.release();
+          this.iconPixelMaps.get(item.id)?.release();
           this.iconPixelMaps.set(item.id, pixelMap);
         } catch (e) {
           console.error(`[Menu] prepareIcons failed for ${item.id}: ${e}`);
@@ -280,6 +285,7 @@ export struct MenuBarComponent {
             if (item.type === "submenu") {
               MenuItem({
                 content: item.text ?? "",
+                startIcon: item.icon ? "data:image/png;base64," + item.icon : undefined,
                 builder: (): void =>
                   this.SubmenuContent({
                     items: item.submenuItems ?? [],
@@ -356,6 +362,7 @@ export struct MenuBarComponent {
             } else if (item.type === "check") {
               MenuItem({
                 content: item.text ?? "",
+                startIcon: item.icon ? "data:image/png;base64," + item.icon : undefined,
                 labelInfo: item.accelerator,
                 symbolStartIcon: item.nativeIcon
                   ? this.nativeIconSymbol(item.nativeIcon)

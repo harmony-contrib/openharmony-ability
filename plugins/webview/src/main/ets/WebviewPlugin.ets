@@ -2608,7 +2608,9 @@ class WebviewSurface {
     id: string,
     callContext: BridgeCallContext,
   ): Promise<WebviewCookiesResponse> {
-    await this.controllerEntry(id, callContext);
+    if (id) {
+      await this.controllerEntry(id, callContext);
+    }
     const cookies = await webview.WebCookieManager.fetchAllCookies(false);
     if (!callContext.isActive()) {
       throw new Error("Cookie query was cancelled");
@@ -2636,7 +2638,9 @@ class WebviewSurface {
   }
 
   async clearCookies(id: string, callContext: BridgeCallContext): Promise<void> {
-    await this.controllerEntry(id, callContext);
+    if (id) {
+      await this.controllerEntry(id, callContext);
+    }
     webview.WebCookieManager.clearAllCookiesSync(false);
   }
 
@@ -3427,6 +3431,23 @@ export class WebviewPlugin extends AsyncPluginBase {
       throw new Error("Bridge session is no longer active");
     }
     const surface = this.requireSurface();
+    if (action === "default-cookies" || action === "default-clear-cookies") {
+      if (
+        payload.typeName !== "ohos.webview.DefaultStoreRequest" ||
+        !payload.value ||
+        typeof payload.value !== "object"
+      ) {
+        throw new Error("Default cookie store requires ohos.webview.DefaultStoreRequest");
+      }
+      if (action === "default-cookies") {
+        return {
+          typeName: "ohos.webview.CookiesResponse",
+          value: await surface.cookiesDetails("", context),
+        };
+      }
+      await surface.clearCookies("", context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
+    }
     if (action === "create-native") {
       if (
         payload.typeName !== NATIVE_CREATE_REQUEST_TYPE ||
@@ -3552,16 +3573,18 @@ export class WebviewPlugin extends AsyncPluginBase {
       };
     }
 
-    if (action === "set-cookie") {
+    if (action === "set-cookie" || action === "default-set-cookie") {
+      const requestType =
+        action === "set-cookie" ? SET_COOKIE_REQUEST_TYPE : "ohos.webview.DefaultSetCookieRequest";
       if (
-        payload.typeName !== SET_COOKIE_REQUEST_TYPE ||
+        payload.typeName !== requestType ||
         payload.value === null ||
         typeof payload.value !== "object"
       ) {
-        throw new Error(`ohos.webview.set-cookie requires bridge type ${SET_COOKIE_REQUEST_TYPE}`);
+        throw new Error(`ohos.webview.${action} requires bridge type ${requestType}`);
       }
       const request = payload.value as WebviewSetCookieRequest;
-      if (!request?.id?.trim()) {
+      if (action === "set-cookie" && !request?.id?.trim()) {
         throw new Error("WebView set-cookie id must not be empty");
       }
       if (typeof request.url !== "string" || !request.url.trim()) {

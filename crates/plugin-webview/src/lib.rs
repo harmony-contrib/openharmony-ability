@@ -946,6 +946,70 @@ pub struct WebviewPickColorResponse {
 
 impl_bridge_napi_type!(WebviewPickColorResponse, "ohos.webview.PickColorResponse");
 
+/// Process-default cookies are independent of a controller; named isolated stores
+/// are not implied by this facade.
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct WebviewDefaultStoreRequest {}
+impl_bridge_napi_type!(
+    WebviewDefaultStoreRequest,
+    "ohos.webview.DefaultStoreRequest"
+);
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewDefaultSetCookieRequest {
+    pub url: String,
+    pub value: String,
+}
+impl_bridge_napi_type!(
+    WebviewDefaultSetCookieRequest,
+    "ohos.webview.DefaultSetCookieRequest"
+);
+#[derive(Clone)]
+pub struct WebviewDefaultStoreClient {
+    bridge: BridgeRuntime,
+}
+impl WebviewDefaultStoreClient {
+    pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
+        Ok(Self {
+            bridge: app.bridge()?,
+        })
+    }
+    pub async fn cookies(&self) -> Result<Vec<WebviewCookie>> {
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewCookiesResponse>(
+                "default-cookies",
+                WebviewDefaultStoreRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.cookies)
+    }
+    pub async fn clear_cookies(&self) -> Result<bool> {
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
+                "default-clear-cookies",
+                WebviewDefaultStoreRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
+    }
+    pub async fn set_cookie(&self, url: String, value: String) -> Result<bool> {
+        if url.trim().is_empty()
+            || url.chars().any(char::is_control)
+            || value.chars().any(char::is_control)
+        {
+            return Err(Error::from_reason("Invalid default-store cookie"));
+        }
+        let response = self.bridge.call_async::<WebviewBridgePlugin, WebviewDefaultSetCookieRequest, WebviewAcknowledgement>(
+            "default-set-cookie", WebviewDefaultSetCookieRequest { url, value }, BridgeCallOptions::default()).await?;
+        Ok(response.accepted)
+    }
+}
+
 // ── set-cookie ──────────────────────────────────────────────────────────────────
 
 /// Request to set a cookie for a specific URL via `WebCookieManager.configCookieSync`.
@@ -2338,5 +2402,21 @@ mod tests {
             schemes: vec![],
         };
         assert!(engine_scheme_pairs(&event).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod default_store_contract_tests {
+    use super::*;
+    #[test]
+    fn named_default_store_contracts() {
+        assert_eq!(
+            WebviewDefaultStoreRequest::TYPE_NAME,
+            "ohos.webview.DefaultStoreRequest"
+        );
+        assert_eq!(
+            WebviewDefaultSetCookieRequest::TYPE_NAME,
+            "ohos.webview.DefaultSetCookieRequest"
+        );
     }
 }

@@ -121,6 +121,7 @@ export struct MenuPopup {
     } else if (item.type === "item" || item.type === "predefined") {
       MenuItem({
         content: item.text ?? "",
+        startIcon: item.icon ? `data:image/png;base64,${item.icon}` : undefined,
         labelInfo: item.accelerator,
         symbolStartIcon: this.nativeIconSymbol(item.nativeIcon),
       })
@@ -131,6 +132,7 @@ export struct MenuPopup {
     } else if (item.type === "check") {
       MenuItem({
         content: item.text ?? "",
+        startIcon: item.icon ? `data:image/png;base64,${item.icon}` : undefined,
         labelInfo: item.accelerator,
         symbolStartIcon: this.nativeIconSymbol(item.nativeIcon),
       })
@@ -144,6 +146,7 @@ export struct MenuPopup {
     } else if (item.type === "icon") {
       MenuItem({
         content: item.text ?? "",
+        startIcon: item.icon ? `data:image/png;base64,${item.icon}` : undefined,
         labelInfo: item.accelerator,
         symbolStartIcon: this.nativeIconSymbol(item.nativeIcon),
       })
@@ -154,6 +157,7 @@ export struct MenuPopup {
     } else if (item.type === "submenu") {
       MenuItem({
         content: item.text ?? "",
+        startIcon: item.icon ? `data:image/png;base64,${item.icon}` : undefined,
         symbolStartIcon: this.nativeIconSymbol(item.nativeIcon),
         builder: () => this.SubmenuContent(item.submenuItems ?? []),
       }).enabled(item.enabled ?? true);

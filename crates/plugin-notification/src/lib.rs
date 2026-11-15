@@ -9,6 +9,13 @@ use openharmony_ability::{
 
 pub struct NotificationBridgePlugin;
 
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct SetBadgeRequest {
+    pub count: u32,
+}
+impl_bridge_napi_type!(SetBadgeRequest, "ohos.notification.SetBadgeRequest");
+
 impl BridgePlugin for NotificationBridgePlugin {
     type Mode = AsyncBridge;
 
@@ -80,6 +87,18 @@ impl_bridge_napi_type!(
     "ohos.notification.Acknowledgement"
 );
 
+/// Sender avatars use the system small icon; this does not declare a conversation identity.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ShowNotificationAvatarRequest {
+    pub options: ShowNotificationOptionsRequest,
+    pub avatar: Vec<u8>,
+}
+impl_bridge_napi_type!(
+    ShowNotificationAvatarRequest,
+    "ohos.notification.ShowAvatarRequest"
+);
+
 /// Extended presentation uses a new action so existing ShowRequest callers retain their ABI.
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -132,6 +151,21 @@ impl NotificationClient {
         })
     }
 
+    pub async fn set_badge(&self, count: u32) -> Result<bool> {
+        if count > i32::MAX as u32 {
+            return Err(Error::from_reason("Badge count out of range"));
+        }
+        let response = self
+            .bridge
+            .call_async::<NotificationBridgePlugin, SetBadgeRequest, NotificationAcknowledgement>(
+                "set-badge",
+                SetBadgeRequest { count },
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
+    }
+
     pub async fn show(&self, request: ShowNotificationRequest) -> Result<bool> {
         request.validate()?;
         let response = self
@@ -158,6 +192,23 @@ impl NotificationClient {
         Ok(response.accepted)
     }
 
+    pub async fn show_with_avatar(&self, request: ShowNotificationAvatarRequest) -> Result<bool> {
+        if request.avatar.len() > 16 * 1024 * 1024 || request.options.image.len() > 16 * 1024 * 1024
+        {
+            return Err(Error::from_reason("Notification image exceeds 16 MiB"));
+        }
+        ShowNotificationRequest {
+            tag: request.options.tag.clone(),
+            title: request.options.title.clone(),
+            body: request.options.body.clone(),
+            actions: request.options.actions.clone(),
+        }
+        .validate()?;
+        let response = self.bridge.call_async::<NotificationBridgePlugin, ShowNotificationAvatarRequest, NotificationAcknowledgement>(
+            "show-with-avatar", request, BridgeCallOptions::default().with_timeout_ms(120_000)).await?;
+        Ok(response.accepted)
+    }
+
     pub async fn parse_response(&self, uri: String) -> Result<NotificationResponse> {
         self.bridge.call_async::<NotificationBridgePlugin, NotificationResponseRequest, NotificationResponse>("parse-response", NotificationResponseRequest { uri }, BridgeCallOptions::default()).await
     }
@@ -180,6 +231,14 @@ impl NotificationClient {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn badge_contract_is_named() {
+        assert_eq!(<super::ShowNotificationAvatarRequest as openharmony_ability::BridgeNapiType>::TYPE_NAME, "ohos.notification.ShowAvatarRequest");
+        assert_eq!(
+            <super::SetBadgeRequest as openharmony_ability::BridgeNapiType>::TYPE_NAME,
+            "ohos.notification.SetBadgeRequest"
+        );
+    }
     use super::{
         DismissNotificationRequest, NotificationAcknowledgement, NotificationBridgePlugin,
         ShowNotificationRequest,

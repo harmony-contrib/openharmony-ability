@@ -1,3 +1,5 @@
+import i18n from "@ohos.i18n";
+import connection from "@ohos.net.connection";
 import commonEventManager from "@ohos.commonEventManager";
 import thermal from "@ohos.thermal";
 import runningLock from "@ohos.runningLock";
@@ -22,6 +24,21 @@ const GET_DISPLAYS_REQUEST_TYPE = "ohos.system-state.GetDisplaysRequest";
 const GET_DISPLAYS_RESPONSE_TYPE = "ohos.system-state.GetDisplaysResponse";
 const CHANGED_EVENT_TYPE = "ohos.system-state.ChangedEvent";
 
+class PreferredLanguagesResponse {
+  readonly languages: string[];
+  constructor(languages: string[]) {
+    this.languages = languages;
+  }
+}
+interface ResolveProxyRequest {
+  url: string;
+}
+class ResolveProxyResponse {
+  readonly directives: string;
+  constructor(directives: string) {
+    this.directives = directives;
+  }
+}
 interface PreventSleepRequest {
   reason: string;
 }
@@ -265,6 +282,41 @@ export class SystemStatePlugin extends AsyncPluginBase {
   ): Promise<BridgeTypedValue> {
     if (!context.isActive()) {
       throw new Error("System state bridge session is no longer active");
+    }
+    if (action === "preferred-languages") {
+      expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.PreferredLanguagesRequest",
+      );
+      return {
+        typeName: "ohos.system-state.PreferredLanguagesResponse",
+        value: new PreferredLanguagesResponse(i18n.System.getPreferredLanguageList()),
+      };
+    }
+    if (action === "resolve-proxy") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.ResolveProxyRequest",
+      ) as ResolveProxyRequest;
+      if (
+        typeof request.url !== "string" ||
+        !/^https?:\/\/[^/]+/.test(request.url) ||
+        /[\u0000-\u0020\u007f]/.test(request.url)
+      ) {
+        throw new Error("Invalid proxy target URL");
+      }
+      const directives = connection.findProxyForUrl(request.url);
+      if (!directives.trim()) {
+        throw new Error("System PAC policy unavailable on this device");
+      }
+      return {
+        typeName: "ohos.system-state.ResolveProxyResponse",
+        value: new ResolveProxyResponse(directives),
+      };
     }
     if (action === "prevent-sleep") {
       const request = expectBridgeRequestType(

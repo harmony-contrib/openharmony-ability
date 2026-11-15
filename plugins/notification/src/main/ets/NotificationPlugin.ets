@@ -1,4 +1,4 @@
-import legacyNotification from "@ohos.notification";
+import deviceInfo from "@ohos.deviceInfo";
 import { image } from "@kit.ImageKit";
 import { url } from "@kit.ArkTS";
 import wantAgent, { WantAgent } from "@ohos.app.ability.wantAgent";
@@ -20,6 +20,10 @@ export interface NotificationPluginOptions {
   scheme: string;
 }
 
+interface SetBadgeRequest {
+  count: number;
+}
+
 interface NotificationAction {
   id: string;
   label: string;
@@ -37,6 +41,10 @@ interface ShowOptionsRequest extends ShowRequest {
   group: string;
   image: number[];
   senderName: string;
+}
+interface ShowAvatarRequest {
+  options: ShowOptionsRequest;
+  avatar: number[];
 }
 interface NotificationResponseRequest {
   uri: string;
@@ -102,6 +110,19 @@ export class NotificationPlugin extends AsyncPluginBase {
     if (!context.isActive()) {
       throw new Error("Notification bridge session is no longer active");
     }
+    if (action === "set-badge") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.notification.SetBadgeRequest",
+      ) as SetBadgeRequest;
+      if (!Number.isInteger(request.count) || request.count < 0 || request.count > 2147483647) {
+        throw new Error("Invalid badge count");
+      }
+      await notificationManager.setBadgeNumber(request.count);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new NotificationAcknowledgement(true) };
+    }
     if (action === "parse-response") {
       const request = expectBridgeRequestType(
         payload,
@@ -134,14 +155,23 @@ export class NotificationPlugin extends AsyncPluginBase {
       await notificationManager.cancelAll();
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new NotificationAcknowledgement(true) };
     }
-    if (action === "show" || action === "show-with-options") {
-      const request = expectBridgeRequestType(
+    if (action === "show" || action === "show-with-options" || action === "show-with-avatar") {
+      const value = expectBridgeRequestType(
         payload,
         this.id,
         action,
-        action === "show" ? SHOW_REQUEST_TYPE : "ohos.notification.ShowOptionsRequest",
-      ) as ShowRequest;
+        action === "show"
+          ? SHOW_REQUEST_TYPE
+          : action === "show-with-avatar"
+            ? "ohos.notification.ShowAvatarRequest"
+            : "ohos.notification.ShowOptionsRequest",
+      ) as ShowRequest | ShowAvatarRequest;
+      const request: ShowRequest =
+        action === "show-with-avatar"
+          ? (value as ShowAvatarRequest).options
+          : (value as ShowRequest);
       if (
+        !request ||
         typeof request.tag !== "string" ||
         !request.tag.trim() ||
         typeof request.title !== "string" ||
@@ -166,6 +196,13 @@ export class NotificationPlugin extends AsyncPluginBase {
         )
       ) {
         throw new Error("Notification actions require an id and label");
+      }
+      if (
+        action !== "show" &&
+        (request as ShowOptionsRequest).silent &&
+        deviceInfo.sdkApiVersion < 23
+      ) {
+        throw new Error("Silent notification flags require API 23 or later");
       }
       if (!(await notificationManager.isNotificationEnabled())) {
         await notificationManager.requestEnableNotification(context.abilityContext);
@@ -205,10 +242,12 @@ export class NotificationPlugin extends AsyncPluginBase {
         wantAgent: await agentFor(responseUri(this.responseScheme, request.tag)),
         actionButtons: buttons,
       };
+      let avatar: image.PixelMap | undefined;
+      let avatarSource: image.ImageSource | undefined;
       let icon: image.PixelMap | undefined;
       let source: image.ImageSource | undefined;
       try {
-        if (action === "show-with-options") {
+        if (action !== "show") {
           const options = request as ShowOptionsRequest;
           if (
             typeof options.silent !== "boolean" ||
@@ -221,8 +260,8 @@ export class NotificationPlugin extends AsyncPluginBase {
           }
           notification.groupName = options.group;
           if (options.silent) {
-            // The SDK NotificationRequest still declares the legacy enum type.
-            notification.slotType = legacyNotification.SlotType.CONTENT_INFORMATION;
+            // API 23+ explicitly disables both audible and vibrating alerts.
+            notification.notificationFlags = { soundEnabled: 2, vibrationEnabled: 2 };
           }
           if (options.senderName) {
             notification.content.normal = {
@@ -237,11 +276,30 @@ export class NotificationPlugin extends AsyncPluginBase {
             notification.largeIcon = icon;
           }
         }
+        if (action === "show-with-avatar") {
+          const bytes = (value as ShowAvatarRequest).avatar;
+          if (!Array.isArray(bytes) || bytes.length > 16 * 1024 * 1024) {
+            throw new Error("Invalid notification avatar");
+          }
+          if (bytes.length > 0) {
+            avatarSource = image.createImageSource(new Uint8Array(bytes).buffer as ArrayBuffer);
+            avatar = await avatarSource.createPixelMap({
+              desiredSize: { width: 128, height: 128 },
+            });
+            notification.smallIcon = avatar;
+          }
+        }
         if (!context.isActive()) {
           throw new Error("Notification session ended before publish");
         }
         await notificationManager.publish(notification);
       } finally {
+        if (avatar !== undefined) {
+          await avatar.release();
+        }
+        if (avatarSource !== undefined) {
+          avatarSource.release();
+        }
         if (icon !== undefined) {
           await icon.release();
         }

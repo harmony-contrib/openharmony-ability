@@ -224,6 +224,10 @@ export { LoginPlugin };
 | `ohos.window` / `set-custom-cursor` | `ohos.window.CustomCursorRequest { windowId, rgba, width, height, hotspotX, hotspotY }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；RGBA8888，尺寸 1–256 px，热点必须位于图像内；PixelMap 在成功、失败和取消后释放 |
 | `ohos.window` / `set-window-icon` | `ohos.window.WindowIconRequest { windowId, rgba, size }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context`；API 22+ PC/2in1 主窗口，正方形 RGBA8888，最大 1024 px；size=0 且 rgba 为空时恢复应用资源图标 |
 | `ohos.notification` / `show` | `ohos.notification.ShowRequest { tag, title, body, actions }` → `ohos.notification.Acknowledgement { accepted }` | async / `ability`；最多 3 个 action；响应 URI scheme 由 ArkTS 工厂的 `NotificationPlugin({ scheme })` 配置 |
+| `ohos.notification` / `set-badge` | `ohos.notification.SetBadgeRequest { count }` → `Acknowledgement` | async / `ability`；0 清除角标，最大 2147483647，不将任意文字当成计数 |
+| `ohos.notification` / `show-with-avatar` | `ohos.notification.ShowAvatarRequest { options: ShowOptionsRequest, avatar }` → `Acknowledgement` | async / `ability`；沿用已有 options，头像为编码图片字节，最大 16 MiB；smallIcon 展示头像，不等同于系统会话身份；silent 使用 API 23+ 的声音／振动关闭标记，旧版本明确失败 |
+| `ohos.system-state` / `resolve-proxy` | `ohos.system-state.ResolveProxyRequest { url }` → `ResolveProxyResponse { directives }` | async / `ability`；HTTP(S)，查询系统已配置 PAC；空结果报错，不降级为 DIRECT；API 20，手机／平板 API 23+ |
+| `ohos.system-state` / `preferred-languages` | `ohos.system-state.PreferredLanguagesRequest {}` → `PreferredLanguagesResponse { languages }` | async / `ability`；返回系统首选语言列表，保留顺序 |
 | `ohos.system-state` | `ohos.system-state.*` 具名类型 | async / `ability`；ID 与 typeName 前缀统一；Rust facade 和 ArkTS HAR 必须配套更新，旧 `ohos.system_state.*` 类型名不再使用 |
 | `ohos.menu` / 入站 `menu-open` | `ohos.menu.MenuOpenEvent { windowId }` → `std.bool` | 菜单打开通道传递完整事件和来源窗口 ID（主窗为 `main`），消费者可按窗口处理 |
 | `ohos.menu` / `set-menubar-items` | `ohos.menu.SetMenubarItemsRequest { items: MenuItemData[], windowId }` → `ohos.menu.Acknowledgement` | async / `ui-context`；保留 `set-menubar`，结构化菜单沿用相同渲染、快捷键提示与窗口路由 |
@@ -236,6 +240,8 @@ export { LoginPlugin };
 | `ohos.window` / `create-os-window` | `ohos.window.CreateRequest { name, width, height, x, y, decorations, transparent, backgroundColor }` → `ohos.window.CreateResponse { windowId }` | async / `ui-context` |
 | `ohos.window` / `set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window` | `ohos.window.*Request { windowId, ... }` → `ohos.window.Acknowledgement { accepted }` | async / `ui-context` |
 | `ohos.window` / `is-maximized`、`is-minimized` | `ohos.window.WindowIdRequest { windowId }` → `ohos.window.StateResponse { value }` | async / `ui-context` |
+| `ohos.webview` / `default-cookies`、`default-clear-cookies` | `ohos.webview.DefaultStoreRequest {}` → `CookiesResponse` / `Acknowledgement` | async / `ui-context`；使用应用默认 Cookie 存储，不要求存在 WebView 控制器；不提供命名隔离数据仓库 |
+| `ohos.webview` / `default-set-cookie` | `ohos.webview.DefaultSetCookieRequest { url, value }` → `Acknowledgement` | async / `ui-context`；显式新 action，保留原 set-cookie ABI；原生 WebCookieManager 负责 Cookie 语法校验 |
 | `ohos.webview` / `create` | `ohos.webview.CreateRequest { id, parentHandle? }` → `ohos.webview.CreateResponse { id }` | async / `ui-context` |
 | `ohos.node`（内置） / `create-container` | `ohos.node.CreateContainerRequest` → `ohos.node.HandleResponse { handle }` | async / `ui-context` |
 | `ohos.node`（内置） / `append-child` | `ohos.node.AppendChildRequest { parentHandle, childHandle }` → `ohos.node.Acknowledgement` | async / `ui-context` |

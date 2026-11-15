@@ -11,6 +11,39 @@ use openharmony_ability::{
 };
 
 pub struct SystemStateBridgePlugin;
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct PreferredLanguagesRequest {}
+impl_bridge_napi_type!(
+    PreferredLanguagesRequest,
+    "ohos.system-state.PreferredLanguagesRequest"
+);
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct PreferredLanguagesResponse {
+    pub languages: Vec<String>,
+}
+impl_bridge_napi_type!(
+    PreferredLanguagesResponse,
+    "ohos.system-state.PreferredLanguagesResponse"
+);
+
+/// Resolves the system-configured PAC policy. Empty/missing policies are errors.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ResolveProxyRequest {
+    pub url: String,
+}
+impl_bridge_napi_type!(ResolveProxyRequest, "ohos.system-state.ResolveProxyRequest");
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct ResolveProxyResponse {
+    pub directives: String,
+}
+impl_bridge_napi_type!(
+    ResolveProxyResponse,
+    "ohos.system-state.ResolveProxyResponse"
+);
 
 /// Hold an idle-system sleep inhibitor without keeping the display on (API 23+).
 #[napi(object)]
@@ -196,6 +229,31 @@ impl SystemStateClient {
         })
     }
 
+    pub async fn preferred_languages(&self) -> Result<Vec<String>> {
+        let response = self.bridge.call_async::<SystemStateBridgePlugin, PreferredLanguagesRequest, PreferredLanguagesResponse>(
+            "preferred-languages", PreferredLanguagesRequest {}, BridgeCallOptions::default()).await?;
+        Ok(response.languages)
+    }
+    pub async fn resolve_proxy(&self, url: String) -> Result<String> {
+        if !(url.starts_with("http://") || url.starts_with("https://"))
+            || url.chars().any(char::is_control)
+        {
+            return Err(Error::from_reason("Invalid proxy target URL"));
+        }
+        let response = self
+            .bridge
+            .call_async::<SystemStateBridgePlugin, ResolveProxyRequest, ResolveProxyResponse>(
+                "resolve-proxy",
+                ResolveProxyRequest { url },
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        if response.directives.trim().is_empty() {
+            return Err(Error::from_reason("System PAC policy unavailable"));
+        }
+        Ok(response.directives)
+    }
+
     pub async fn thermal_level(&self) -> Result<i32> {
         let response = self
             .bridge
@@ -289,6 +347,22 @@ mod tests {
 
     #[test]
     fn bridge_types_are_named() {
+        assert_eq!(
+            super::PreferredLanguagesRequest::TYPE_NAME,
+            "ohos.system-state.PreferredLanguagesRequest"
+        );
+        assert_eq!(
+            super::PreferredLanguagesResponse::TYPE_NAME,
+            "ohos.system-state.PreferredLanguagesResponse"
+        );
+        assert_eq!(
+            super::ResolveProxyRequest::TYPE_NAME,
+            "ohos.system-state.ResolveProxyRequest"
+        );
+        assert_eq!(
+            super::ResolveProxyResponse::TYPE_NAME,
+            "ohos.system-state.ResolveProxyResponse"
+        );
         assert_eq!(SystemStateBridgePlugin::ID, "ohos.system-state");
         assert_eq!(
             SystemStateBridgePlugin::REQUIRED_CONTEXTS,
