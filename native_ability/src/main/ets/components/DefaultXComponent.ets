@@ -364,6 +364,9 @@ class BridgeRootNodeController extends NodeController {
   makeNode(uiContext: UIContext): FrameNode {
     if (this.root === null) {
       this.root = new FrameNode(uiContext);
+      // An empty custom FrameNode otherwise measures to zero even when its
+      // NodeContainer fills the surface. Keep the plugin root in that same box.
+      this.root.commonAttribute.width("100%").height("100%");
     }
     return this.root;
   }
