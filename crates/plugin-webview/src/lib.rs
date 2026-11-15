@@ -997,6 +997,44 @@ impl WebviewDefaultStoreClient {
             .await?;
         Ok(response.accepted)
     }
+    /// Deletes the default resource cache in RAM and on disk (API 18+).
+    /// Does not promise CacheStorage, service worker registrations or HSTS deletion.
+    pub async fn clear_resource_cache(&self) -> Result<bool> {
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
+                "default-clear-resource-cache",
+                WebviewDefaultStoreRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
+    }
+    /// Deletes JavaScript storage using WebStorage.deleteAllData(false).
+    /// This is one platform-wide operation, not a selective per-storage-type mask.
+    pub async fn clear_web_storage(&self) -> Result<bool> {
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
+                "default-clear-web-storage",
+                WebviewDefaultStoreRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
+    }
+    /// Deletes saved HTTP authentication credentials, without deleting cookies.
+    pub async fn clear_http_auth(&self) -> Result<bool> {
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
+                "default-clear-http-auth",
+                WebviewDefaultStoreRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
+    }
     pub async fn set_cookie(&self, url: String, value: String) -> Result<bool> {
         if url.trim().is_empty()
             || url.chars().any(char::is_control)
@@ -1752,6 +1790,8 @@ impl WebviewHandle {
             .await
     }
 
+    /// Clears cookies, JavaScript storage, HTTP auth, resource cache and this view
+    /// history. The legacy name does not imply HSTS, DRM or service worker removal.
     pub async fn clear_all_browsing_data(&self) -> Result<()> {
         self.acknowledge("clear-all-browsing-data", self.controller_request())
             .await

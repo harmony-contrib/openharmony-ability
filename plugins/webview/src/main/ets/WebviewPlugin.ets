@@ -3431,13 +3431,19 @@ export class WebviewPlugin extends AsyncPluginBase {
       throw new Error("Bridge session is no longer active");
     }
     const surface = this.requireSurface();
-    if (action === "default-cookies" || action === "default-clear-cookies") {
+    if (
+      action === "default-cookies" ||
+      action === "default-clear-cookies" ||
+      action === "default-clear-resource-cache" ||
+      action === "default-clear-web-storage" ||
+      action === "default-clear-http-auth"
+    ) {
       if (
         payload.typeName !== "ohos.webview.DefaultStoreRequest" ||
         !payload.value ||
         typeof payload.value !== "object"
       ) {
-        throw new Error("Default cookie store requires ohos.webview.DefaultStoreRequest");
+        throw new Error("Default store requires ohos.webview.DefaultStoreRequest");
       }
       if (action === "default-cookies") {
         return {
@@ -3445,7 +3451,21 @@ export class WebviewPlugin extends AsyncPluginBase {
           value: await surface.cookiesDetails("", context),
         };
       }
-      await surface.clearCookies("", context);
+      if (action === "default-clear-cookies") {
+        await surface.clearCookies("", context);
+      } else if (action === "default-clear-resource-cache") {
+        if (deviceInfo.sdkApiVersion < 18) {
+          throw new Error("Default resource cache deletion requires API 18");
+        }
+        webview.WebviewController.removeAllCache(true);
+      } else if (action === "default-clear-web-storage") {
+        webview.WebStorage.deleteAllData(false);
+      } else {
+        webview.WebDataBase.deleteHttpAuthCredentials();
+      }
+      if (!context.isActive()) {
+        throw new Error("Default store operation was cancelled");
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
     }
     if (action === "create-native") {
