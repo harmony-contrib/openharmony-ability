@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.6](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-notification-v1.0.0-beta.5...openharmony-ability-plugin-notification-v1.0.0-beta.6) - 2026-11-15
+
+### Added
+- add PAC, badges, notification avatars and default cookie actions
+
+### Other
+- Add typed viewport, cookie, notification and prompt choice capabilities
+
 ## [1.0.0-beta.5](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-notification-v1.0.0-beta.4...openharmony-ability-plugin-notification-v1.0.0-beta.5) - 2026-11-02
 
 ### Other

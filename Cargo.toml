@@ -17,13 +17,13 @@ openharmony-ability-plugin-clipboard = { version = "1.0.0-beta.5", path = "crate
 openharmony-ability-plugin-files = { version = "1.0.0-beta.5", path = "crates/plugin-files" }
 openharmony-ability-plugin-permission = { version = "1.0.0-beta.5", path = "crates/plugin-permission" }
 openharmony-ability-plugin-resource = { version = "1.0.0-beta.5", path = "crates/plugin-resource" }
-openharmony-ability-plugin-screenshot = { version = "1.0.0-beta.5", path = "crates/plugin-screenshot" }
+openharmony-ability-plugin-screenshot = { version = "1.0.0-beta.6", path = "crates/plugin-screenshot" }
 openharmony-ability-plugin-url = { version = "1.0.0-beta.5", path = "crates/plugin-url" }
-openharmony-ability-plugin-webview = { version = "1.0.0-beta.5", path = "crates/plugin-webview" }
-openharmony-ability-plugin-window = { version = "1.0.0-beta.5", path = "crates/plugin-window" }
+openharmony-ability-plugin-webview = { version = "1.0.0-beta.6", path = "crates/plugin-webview" }
+openharmony-ability-plugin-window = { version = "1.0.0-beta.6", path = "crates/plugin-window" }
 openharmony-ability-plugin-statusbar = { version = "1.0.0-beta.5", path = "crates/plugin-statusbar" }
 openharmony-ability-plugin-menu = { version = "1.0.0-beta.5", path = "crates/plugin-menu" }
-openharmony-ability-plugin-notification = { version = "1.0.0-beta.5", path = "crates/plugin-notification" }
+openharmony-ability-plugin-notification = { version = "1.0.0-beta.6", path = "crates/plugin-notification" }
 openharmony-ability-plugin-global-shortcut = { version = "1.0.0-beta.5", path = "crates/plugin-global-shortcut" }
 openharmony-ability-plugin-deep-link = { version = "1.0.0-beta.5", path = "crates/plugin-deep-link" }
 openharmony-ability-plugin-autostart = { version = "1.0.0-beta.5", path = "crates/plugin-autostart" }
@@ -31,7 +31,7 @@ openharmony-ability-plugin-continuation = { version = "1.0.0-beta.5", path = "cr
 openharmony-ability-plugin-fault-injection = { version = "1.0.0-beta.5", path = "crates/plugin-fault-injection" }
 openharmony-ability-plugin-account = { version = "1.0.0-beta.5", path = "crates/plugin-account" }
 openharmony-ability-plugin-process = { version = "1.0.0-beta.5", path = "crates/plugin-process" }
-openharmony-ability-plugin-system-state = { version = "1.0.0-beta.5", path = "crates/plugin-system-state" }
+openharmony-ability-plugin-system-state = { version = "1.0.0-beta.6", path = "crates/plugin-system-state" }
 openharmony-ability-plugin-updater = { version = "1.0.0-beta.5", path = "crates/plugin-updater" }
 
 napi-ohos = { version = "1.2" }

@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-notification"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-screenshot"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "napi-ohos",
  "openharmony-ability",
@@ -996,7 +996,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-system-state"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "crossbeam-channel",
  "napi-derive-ohos",
@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-webview"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "crossbeam-channel",
  "http",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "openharmony-ability-plugin-window"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 dependencies = [
  "napi-derive-ohos",
  "napi-ohos",

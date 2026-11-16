@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [1.0.0-beta.6] - 2026-11-15
+
+- Add typed viewport, cookie, notification and prompt choice capabilities
+- fix(window)!: use system prompt dialogs (#127)
+
 ## [1.0.0-beta.5] - 2026-11-02
 
 - fix(release): keep ohpm lockfiles in sync with manifest versions (#116)

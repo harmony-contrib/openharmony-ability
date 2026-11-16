@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+
+## [1.0.0-beta.6] - 2026-11-15
+
+- feat: add PAC, badges, notification avatars and default cookie actions
+- Add typed viewport, cookie, notification and prompt choice capabilities
+
 ## [1.0.0-beta.5] - 2026-11-02
 
 - fix(release): keep ohpm lockfiles in sync with manifest versions (#116)
