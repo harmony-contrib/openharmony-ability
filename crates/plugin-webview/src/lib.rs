@@ -167,7 +167,7 @@ impl WebviewBridgePlugin {
             "native-node-ready" => {
                 event
                     .decode::<openharmony_ability::NativeNodeReady>()?
-                    .attach(&event)?;
+                    .attach(event)?;
                 event.respond(openharmony_ability::NodeAcknowledgement { accepted: true })
             }
             "native-node-retiring" => {
