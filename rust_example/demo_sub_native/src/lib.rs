@@ -1,3 +1,7 @@
+//! Sub-window native module demo: a second `#[ability]` module that hosts a
+//! transparent SubWindow webview, used by the manual multi-window tests to
+//! verify per-window rect, keyboard inset and close-handshake behavior.
+
 use std::sync::{LazyLock, RwLock};
 
 use napi_derive_ohos::napi;
@@ -9,6 +13,8 @@ use openharmony_ability_plugin_window::{WindowBridgePlugin, WindowExt};
 
 static APP: LazyLock<RwLock<Option<OpenHarmonyApp>>> = LazyLock::new(|| RwLock::new(None));
 
+/// Resolves the sub-window demo application state, failing with a clear
+/// reason when the module has not been initialized yet.
 fn current_app() -> Result<OpenHarmonyApp> {
     APP.read()
         .map_err(|_| Error::from_reason("Failed to read sub-window application state"))?
@@ -17,6 +23,8 @@ fn current_app() -> Result<OpenHarmonyApp> {
         .ok_or_else(|| Error::from_reason("Sub-window native module is not initialized"))
 }
 
+/// Creates the demo transparent SubWindow webview bound to this
+/// module's render surface (manual multi-window test entry).
 #[napi]
 pub async fn create_sub_window_webview() -> Result<()> {
     current_app()?

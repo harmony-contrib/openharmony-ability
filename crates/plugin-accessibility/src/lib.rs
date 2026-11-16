@@ -121,6 +121,7 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
+/// Request payload for the `get-font-scale` action (empty).
 pub struct AccessibilityGetFontScaleRequest {}
 
 impl_bridge_napi_type!(
@@ -133,7 +134,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Response for the system font scale query.
 pub struct AccessibilityGetFontScaleResponse {
+    /// Current system font scale factor (1.0 = default size).
     pub font_scale: f64,
 }
 
@@ -146,6 +149,7 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
+/// Request payload for the `is-open-accessibility` probe (empty).
 pub struct AccessibilityIsOpenRequest {}
 
 impl_bridge_napi_type!(
@@ -155,7 +159,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Response for the screen-reader enabled query.
 pub struct AccessibilityIsOpenResponse {
+    /// `true` when the accessibility (screen reader) feature is enabled.
     pub enabled: bool,
 }
 
@@ -168,6 +174,7 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
+/// Request payload for the `is-touch-explore-enabled` probe (empty).
 pub struct AccessibilityIsTouchExploreRequest {}
 
 impl_bridge_napi_type!(
@@ -177,7 +184,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Response for the touch-explore mode query.
 pub struct AccessibilityIsTouchExploreResponse {
+    /// `true` when touch-explore (explore-by-touch) mode is active.
     pub enabled: bool,
 }
 
@@ -190,6 +199,7 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
+/// Request payload for subscribing to accessibility state changes (empty).
 pub struct AccessibilitySubscribeRequest {}
 
 impl_bridge_napi_type!(
@@ -199,7 +209,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Acknowledgement for the state-change subscription.
 pub struct AccessibilitySubscribeResponse {
+    /// `true` when the state-change subscription was installed.
     pub accepted: bool,
 }
 
@@ -210,6 +222,7 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
+/// Request payload for cancelling the accessibility state subscription (empty).
 pub struct AccessibilityUnsubscribeRequest {}
 
 impl_bridge_napi_type!(
@@ -219,7 +232,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Acknowledgement for removing the state-change subscription.
 pub struct AccessibilityUnsubscribeResponse {
+    /// `true` when the subscription was removed.
     pub accepted: bool,
 }
 
@@ -234,7 +249,9 @@ impl_bridge_napi_type!(
 /// `accessibility.on("screenReaderStateChange")` callback via `invokeNativeSync`.
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Payload of the `accessibility-state-changed` event (wire shape).
 pub struct AccessibilityStateChangedEvent {
+    /// New screen-reader enabled state after the change.
     pub enabled: bool,
 }
 
@@ -245,7 +262,9 @@ impl_bridge_napi_type!(
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+/// Acknowledgement returned by the state-change subscriber callback.
 pub struct AccessibilityEventAcknowledgement {
+    /// `true` when the subscriber accepted the state-change event.
     pub accepted: bool,
 }
 
@@ -264,9 +283,19 @@ impl_bridge_napi_type!(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AccessibilityError {
     /// The system denied the query (BusinessError code 201 — `ohos.permission.ACCESSIBILITY`).
-    PermissionDenied { code: i32, message: String },
+    PermissionDenied {
+        /// Raw BusinessError code (201).
+        code: i32,
+        /// Raw error message text from the system callback.
+        message: String,
+    },
     /// The query itself failed for any other reason.
-    Unavailable { code: i32, message: String },
+    Unavailable {
+        /// Raw BusinessError code carried through from the ArkTS throw.
+        code: i32,
+        /// Raw error message text from the system callback.
+        message: String,
+    },
 }
 
 /// BusinessError code embedded in ArkTS `throw new Error("... code=<n> msg=<...>")`.
@@ -274,7 +303,7 @@ const BRIDGE_ERR_PERMISSION: i32 = 201;
 
 impl AccessibilityError {
     fn from_reason(reason: &str) -> Self {
-        let code = extract_code(reason).unwrap_or(0);
+        let code = extract_code(reason).unwrap_or(0_i32);
         let message = reason.to_string();
         if code == BRIDGE_ERR_PERMISSION {
             Self::PermissionDenied { code, message }
@@ -331,6 +360,10 @@ pub struct AccessibilityClient {
 }
 
 impl AccessibilityClient {
+    /// Builds an accessibility client bound to the app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
@@ -485,7 +518,12 @@ impl AccessibilityClient {
     }
 }
 
+/// Extension trait that adds [`AccessibilityClient`] access to the app handle.
 pub trait AccessibilityExt {
+    /// Returns the accessibility client bound to this app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     fn accessibility(&self) -> Result<AccessibilityClient>;
 }
 
@@ -579,7 +617,7 @@ mod tests {
         assert_eq!(
             err,
             AccessibilityError::PermissionDenied {
-                code: 201,
+                code: 201_i32,
                 message: "isScreenReaderOpenSync failed: code=201 msg=permission denied"
                     .to_string()
             }
@@ -590,14 +628,17 @@ mod tests {
         );
         assert!(matches!(
             err,
-            AccessibilityError::Unavailable { code: 9300001, .. }
+            AccessibilityError::Unavailable {
+                code: 9_300_001_i32,
+                ..
+            }
         ));
     }
 
     #[test]
     fn extract_code_handles_missing_and_negative() {
         assert_eq!(extract_code("no code here"), None);
-        assert_eq!(extract_code("failed: code=-1 msg=x"), Some(-1));
-        assert_eq!(extract_code("code=201"), Some(201));
+        assert_eq!(extract_code("failed: code=-1 msg=x"), Some(-1_i32));
+        assert_eq!(extract_code("code=201"), Some(201_i32));
     }
 }

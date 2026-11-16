@@ -81,7 +81,7 @@ pub fn sdk_api_version() -> i32 {
 /// use openharmony_ability::version;
 ///
 /// // Check for HarmonyOS 5.0.1 (50001)
-/// if version::distribution_api_version() >= 50001 {
+/// if openharmony_ability::version::distribution_api_version() >= 50001 {
 ///     // Use HarmonyOS 5.0.1+ feature
 /// }
 /// ```
@@ -137,8 +137,8 @@ mod tests {
         assert!(v50001 >= 50001);
         assert!(v50001 < 60000);
 
-        let sdk_v14 = 14;
-        let sdk_v12 = 12;
+        let sdk_v14 = 14_i32;
+        let sdk_v12 = 12_i32;
 
         assert!(sdk_v14 >= 14);
         assert!(sdk_v12 >= 12);

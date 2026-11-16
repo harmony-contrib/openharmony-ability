@@ -269,6 +269,12 @@ export class UrlPlugin extends AsyncPluginBase {
       // types and silently falls back to the notepad handler.
       // Sandbox/unmappable-prefix paths throw before startAbility, so they can
       // never fall through to a wrong handler.
+      // No fallback is attempted: on systems without the Huawei file manager
+      // (non-Huawei environments, or a package rename) startAbility throws and
+      // the error below is propagated to the caller. The OHOS SDK (checked
+      // against 6.1.1 / API 24) exposes no system-generic "reveal in folder"
+      // API — the HMS filePreview kit is content preview only — so this
+      // explicit Want is the only workable form.
       //
       // ⚠️ Want parameter placement (2026-08-28 device experiment): FM MainAbility
       // reads the target from `want.parameters.fileUri` + `want.parameters.external_storage_uuid`,

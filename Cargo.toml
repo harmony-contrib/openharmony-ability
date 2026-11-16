@@ -30,7 +30,6 @@ openharmony-ability-plugin-autostart = { version = "1.0.0-beta.5", path = "crate
 openharmony-ability-plugin-continuation = { version = "1.0.0-beta.5", path = "crates/plugin-continuation" }
 openharmony-ability-plugin-fault-injection = { version = "1.0.0-beta.5", path = "crates/plugin-fault-injection" }
 openharmony-ability-plugin-account = { version = "1.0.0-beta.5", path = "crates/plugin-account" }
-openharmony-ability-plugin-process = { version = "1.0.0-beta.5", path = "crates/plugin-process" }
 openharmony-ability-plugin-system-state = { version = "1.0.0-beta.5", path = "crates/plugin-system-state" }
 openharmony-ability-plugin-updater = { version = "1.0.0-beta.5", path = "crates/plugin-updater" }
 
@@ -68,3 +67,4 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync", "time"] }
 png = "0.17"
+base64 = "0.22"

@@ -13,6 +13,7 @@ impl BridgePlugin for DemoTypedPlugin {
     type Mode = AsyncBridge;
 
     const ID: &'static str = "demo.raw";
+    // Mirrors the ArkTS DemoTypedPlugin's `requires: ["ability"]` (class in DemoRawPlugin.ets).
     const REQUIRED_CONTEXTS: &'static [BridgeContextRequirement] =
         &[BridgeContextRequirement::Ability];
 }

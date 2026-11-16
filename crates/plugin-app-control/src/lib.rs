@@ -3,10 +3,15 @@
 use napi_derive_ohos::napi;
 use napi_ohos::{Env, Error, Result};
 use openharmony_ability::{
-    impl_bridge_napi_type, BridgeContextRequirement, BridgePlugin, MainThreadSyncBridge,
+    impl_bridge_napi_type, version, BridgeContextRequirement, BridgePlugin, MainThreadSyncBridge,
     OpenHarmonyApp,
 };
 
+/// Minimum API level for `ApplicationContext.restartApp()`.
+const MIN_RESTART_API_VERSION: i32 = 12;
+
+/// Rust facade marker for the built-in `ohos.app-control` plugin
+/// (main-thread-synchronous; requires the Ability context).
 pub struct AppControlBridgePlugin;
 
 impl BridgePlugin for AppControlBridgePlugin {
@@ -17,17 +22,21 @@ impl BridgePlugin for AppControlBridgePlugin {
         &[BridgeContextRequirement::Ability];
 }
 
+/// Request to terminate the application gracefully.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct TerminateRequest {
+    /// Advisory exit code (OHOS ability termination has no exit-code channel).
     pub code: i32,
 }
 
 impl_bridge_napi_type!(TerminateRequest, "ohos.app_control.TerminateRequest");
 
+/// Acknowledgement for `terminate`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct TerminateResponse {
+    /// `true` when the ArkTS side accepted the termination request.
     pub accepted: bool,
 }
 
@@ -40,9 +49,11 @@ pub struct RestartRequest {}
 
 impl_bridge_napi_type!(RestartRequest, "ohos.app_control.RestartRequest");
 
+/// Acknowledgement for `restart`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct RestartResponse {
+    /// `true` when the ArkTS side accepted the restart request.
     pub accepted: bool,
 }
 
@@ -57,9 +68,11 @@ pub struct HideAbilityRequest {}
 
 impl_bridge_napi_type!(HideAbilityRequest, "ohos.app_control.HideAbilityRequest");
 
+/// Acknowledgement for `hide-ability`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct HideAbilityResponse {
+    /// `true` when the ArkTS side accepted the hide request.
     pub accepted: bool,
 }
 
@@ -74,14 +87,17 @@ pub struct ShowAbilityRequest {}
 
 impl_bridge_napi_type!(ShowAbilityRequest, "ohos.app_control.ShowAbilityRequest");
 
+/// Acknowledgement for `show-ability`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ShowAbilityResponse {
+    /// `true` when the ArkTS side accepted the show request.
     pub accepted: bool,
 }
 
 impl_bridge_napi_type!(ShowAbilityResponse, "ohos.app_control.ShowAbilityResponse");
 
+/// Request to change the system color mode.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct SetColorModeRequest {
@@ -91,9 +107,11 @@ pub struct SetColorModeRequest {
 
 impl_bridge_napi_type!(SetColorModeRequest, "ohos.app_control.SetColorModeRequest");
 
+/// Acknowledgement for `set-color-mode`.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct SetColorModeResponse {
+    /// `true` when the ArkTS side accepted the color mode change.
     pub accepted: bool,
 }
 
@@ -102,16 +120,169 @@ impl_bridge_napi_type!(
     "ohos.app_control.SetColorModeResponse"
 );
 
+// ── start-ui-ability ────────────────────────────────────────────────────────────
+
+/// Request to spawn a new UIAbility instance carrying a pre-allocated window id
+/// (multi-UIAbility windows, openspec multi-uiability-windows D1).
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct StartUiAbilityRequest {
+    /// Pre-allocated window id (`next_window_id()` on the tao side). Travelled
+    /// to the new instance via `want.parameters.tauri_window_id`.
+    pub window_id: i64,
+    /// Window label (tauri window registry key).
+    pub label: String,
+    /// Initial webview URL; empty string leaves the instance on its default
+    /// page (OQ5 — delivered separately by wry's WebviewCreateRequest).
+    pub url: String,
+    /// Window transparency flag (mirrors `WebviewWindowBuilder` semantics).
+    pub transparent: bool,
+    /// Optional creation-time window width, physical px (tao#26 review
+    /// follow-up F5): applied via `StartOptions.windowWidth` on
+    /// `startAbility` (API 11+). `None` keeps the OS default. StartOptions
+    /// sizes the window rectangle (frame included) — same contract as the
+    /// sub-window path's `WindowCreateParams`.
+    pub width: Option<i32>,
+    /// Optional creation-time window height, physical px — see `width`.
+    pub height: Option<i32>,
+    /// Optional creation-time window left, physical px — applied via
+    /// `StartOptions.windowLeft`. `None` keeps the OS default placement.
+    pub left: Option<i32>,
+    /// Optional creation-time window top, physical px — see `left`.
+    pub top: Option<i32>,
+}
+
+impl_bridge_napi_type!(
+    StartUiAbilityRequest,
+    "ohos.app_control.StartUiAbilityRequest"
+);
+
+/// Acknowledgement for `start-ui-ability`.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct StartUiAbilityResponse {
+    /// `true` when the ArkTS handler validated the payload and queued
+    /// `startAbility` (the spawn result itself is only observable through
+    /// the D7 handshake registry).
+    pub accepted: bool,
+}
+
+impl_bridge_napi_type!(
+    StartUiAbilityResponse,
+    "ohos.app_control.StartUiAbilityResponse"
+);
+
+/// Dispatches `startAbility` for a new UIAbility instance (fire-and-forget).
+///
+/// Worker-thread facade for tao's `Window::new` (multi-UIAbility path, design
+/// D1): the window id is allocated synchronously by the caller and registered
+/// in the pending-ability registry *before* this call, so the handshake stays
+/// event-driven (D7) — no blocking wait for the new instance's
+/// `register_ui_ability_stage` (HC-5).
+///
+/// `accepted` only means the ArkTS handler validated the payload and queued
+/// `context.startAbility` via `setTimeout(…, 0)`; the actual spawn result is
+/// observable only through the D7 registry (`register_ui_ability_stage` /
+/// hilog), not through this response.
+///
+/// `inner_size` / `position` (physical px tuples) carry the builder's
+/// creation-time geometry through to the `startAbility` StartOptions
+/// (tao#26 review follow-up F5); `None` leaves the OS default for that
+/// axis pair.
+///
+/// Must be awaited off the N-API main thread (e.g. from tao's
+/// `BridgeExecutor` worker) — `call_sync_from_worker` rejects main-thread
+/// callers outright to avoid the self-deadlock.
+pub async fn start_ui_ability(
+    app: &OpenHarmonyApp,
+    window_id: i64,
+    label: String,
+    url: String,
+    transparent: bool,
+    inner_size: Option<(i32, i32)>,
+    position: Option<(i32, i32)>,
+) -> Result<()> {
+    // Record the label→id pairing so deep-link's per-window resolution can map a
+    // calling Window's label back to its instance's want-URI storage (design D9).
+    ::openharmony_ability::register_window_label(&label, window_id);
+    let (width, height) = match inner_size {
+        Some((w, h)) => (Some(w), Some(h)),
+        None => (None, None),
+    };
+    let (left, top) = match position {
+        Some((x, y)) => (Some(x), Some(y)),
+        None => (None, None),
+    };
+    let result = match app.bridge() {
+        Ok(bridge) => {
+            bridge
+                .call_sync_from_worker::<AppControlBridgePlugin, StartUiAbilityRequest, StartUiAbilityResponse>(
+                    "start-ui-ability",
+                    StartUiAbilityRequest {
+                        window_id,
+                        label,
+                        url,
+                        transparent,
+                        width,
+                        height,
+                        left,
+                        top,
+                    },
+                )
+                .await
+        }
+        Err(e) => Err(e),
+    };
+    // Roll the pairing back on every failure path (G15): a label whose start
+    // never completed must not keep resolving to a dead id — deep-link's
+    // "never spawned → primary (id 0)" contract (D9) would silently break.
+    match result {
+        Ok(response) if response.accepted => Ok(()),
+        Ok(_) => {
+            ::openharmony_ability::unregister_window_label(window_id);
+            Err(Error::from_reason(
+                "App-control plugin rejected start-ui-ability",
+            ))
+        }
+        Err(e) => {
+            ::openharmony_ability::unregister_window_label(window_id);
+            Err(e)
+        }
+    }
+}
+
 /// A synchronous capability must be invoked in an exported N-API callback that owns `Env`.
 pub trait AppControlExt {
     fn terminate(&self, env: &Env, code: i32) -> Result<()>;
+    /// Restarts the application via the OS relaunch API
+    /// (`ApplicationContext.restartApp()`, API 12+).
+    ///
+    /// On lower API levels, returns an error naming the required API level.
+    /// The system only honours the request while the app is in the foreground
+    /// with focus.
     fn restart_application(&self, env: &Env) -> Result<()>;
+    /// Hides the application's UIAbility (moves it to the background).
+    ///
+    /// # Errors
+    /// Fails when the bridge rejects the request or the app has no active
+    /// bridge session.
     fn hide_ability(&self, env: &Env) -> Result<()>;
+    /// Restores a hidden UIAbility to the foreground.
+    ///
+    /// # Errors
+    /// Fails when the bridge rejects the request or the app has no active
+    /// bridge session.
     fn show_ability(&self, env: &Env) -> Result<()>;
 }
 
 impl AppControlExt for OpenHarmonyApp {
     fn restart_application(&self, env: &Env) -> Result<()> {
+        if version::sdk_api_version() < MIN_RESTART_API_VERSION {
+            return Err(Error::from_reason(format!(
+                "restart requires API level {MIN_RESTART_API_VERSION}+ on OpenHarmony (current: {})",
+                version::sdk_api_version()
+            )));
+        }
         self.with_main_thread_bridge(env, |bridge| {
             let response = bridge
                 .call_sync::<AppControlBridgePlugin, RestartRequest, RestartResponse>(
@@ -181,7 +352,25 @@ impl AppControlExt for OpenHarmonyApp {
 /// `ConfigurationConstant.ColorMode` via a switch/default and defers the actual
 /// `setColorMode` call with `setTimeout(…, 0)` to avoid re-entrant
 /// `onConfigurationUpdate` deadlocks (see ohos-constraints 4.3).
+///
+/// `accepted` therefore means "queued", not "executed": a deferred execution
+/// failure (e.g. 16000011 teardown race) can no longer reach the synchronous
+/// `!accepted` leg — it is surfaced through the notify channel instead, where
+/// the ArkTS deferred catch calls `notify_set_color_mode_failed` and the
+/// latest failure is readable via
+/// `openharmony_ability::take_color_mode_failure()` (issue #222 / C85). No
+/// polling is wired in tao/tauri yet — the visible failure surface today is
+/// the error log (ArkTS console.error + the ability crate's error!); the slot
+/// API is there for an embedder that wants programmatic access. The sync
+/// `Err` paths here only cover bridge/payload failures.
 pub trait ColorModeExt {
+    /// Sets the system color mode (`0 = Dark`, `1 = Light`, `2 = NoSet`).
+    ///
+    /// Must be called from an exported N-API callback (synchronous bridge);
+    /// see the trait-level docs for the ArkTS-side deferral rationale.
+    ///
+    /// # Errors
+    /// Fails when the bridge rejects the color mode change.
     fn set_color_mode(&self, env: &Env, color_mode: i32) -> Result<()>;
 }
 
@@ -208,7 +397,7 @@ mod tests {
     use super::{
         HideAbilityRequest, HideAbilityResponse, RestartRequest, RestartResponse,
         SetColorModeRequest, SetColorModeResponse, ShowAbilityRequest, ShowAbilityResponse,
-        TerminateRequest, TerminateResponse,
+        StartUiAbilityRequest, StartUiAbilityResponse, TerminateRequest, TerminateResponse,
     };
     use openharmony_ability::BridgeNapiType;
 
@@ -235,7 +424,7 @@ mod tests {
             <TerminateResponse as BridgeNapiType>::TYPE_NAME,
             "ohos.app_control.TerminateResponse"
         );
-        assert_eq!(TerminateRequest { code: -1 }.code, -1);
+        assert_eq!(TerminateRequest { code: -1 }.code, -1_i32);
         assert!(TerminateResponse { accepted: true }.accepted);
     }
 
@@ -249,7 +438,7 @@ mod tests {
             <SetColorModeResponse as BridgeNapiType>::TYPE_NAME,
             "ohos.app_control.SetColorModeResponse"
         );
-        assert_eq!(SetColorModeRequest { color_mode: 0 }.color_mode, 0);
+        assert_eq!(SetColorModeRequest { color_mode: 0 }.color_mode, 0_i32);
         assert!(SetColorModeResponse { accepted: true }.accepted);
     }
 
@@ -277,5 +466,52 @@ mod tests {
             "ohos.app_control.ShowAbilityResponse"
         );
         assert!(ShowAbilityResponse { accepted: true }.accepted);
+    }
+
+    #[test]
+    fn start_ui_ability_uses_a_stable_named_napi_contract() {
+        assert_eq!(
+            <StartUiAbilityRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.app_control.StartUiAbilityRequest"
+        );
+        assert_eq!(
+            <StartUiAbilityResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.app_control.StartUiAbilityResponse"
+        );
+        // NAPI wire names are camelCase (window_id → windowId); the Rust-side
+        // field stays snake_case. Round-trip the payload shape the ArkTS
+        // parser expects (integer id, string label/url, boolean transparent,
+        // optional physical-px geometry — absent reads as undefined).
+        let request = StartUiAbilityRequest {
+            window_id: 1,
+            label: "uiability-1".into(),
+            url: String::new(),
+            transparent: false,
+            width: Some(700_i32),
+            height: Some(500_i32),
+            left: Some(90_i32),
+            top: Some(70_i32),
+        };
+        assert_eq!(request.window_id, 1);
+        assert_eq!(request.label, "uiability-1");
+        assert!(request.url.is_empty());
+        assert!(!request.transparent);
+        assert_eq!(request.width, Some(700_i32));
+        assert_eq!(request.height, Some(500_i32));
+        assert_eq!(request.left, Some(90_i32));
+        assert_eq!(request.top, Some(70_i32));
+        let unset = StartUiAbilityRequest {
+            window_id: 2,
+            label: "uiability-2".into(),
+            url: String::new(),
+            transparent: true,
+            width: None,
+            height: None,
+            left: None,
+            top: None,
+        };
+        assert!(unset.width.is_none() && unset.height.is_none());
+        assert!(unset.left.is_none() && unset.top.is_none());
+        assert!(StartUiAbilityResponse { accepted: true }.accepted);
     }
 }

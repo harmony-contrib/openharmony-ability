@@ -3,10 +3,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     rc::Rc,
-    sync::{
-        atomic::{AtomicBool, AtomicI64},
-        Arc, Mutex, RwLock,
-    },
+    sync::{atomic::AtomicI64, Arc, LazyLock, Mutex, RwLock},
 };
 
 use napi_derive_ohos::napi;
@@ -19,18 +16,17 @@ use ohos_display_binding::{
     default_display_width,
 };
 use ohos_ime_binding::{EnterKey, InputType, Rect as ImeCursorRect, TextState, IME};
-use ohos_xcomponent_binding::RawWindow;
+use ohos_xcomponent_binding::{KeyEventData, RawWindow};
 
 use crate::{
     bridge::MainThreadBridgeEndpoint, AbilityInitConfiguration, AvoidArea, AvoidAreaType,
     BridgeMainThread, BridgeMainThreadEvent, BridgePlugin, BridgePluginDeclaration,
-    BridgePluginRegistry, BridgeRuntime, Configuration, Event, KeyboardInputDelivery,
+    BridgePluginRegistry, BridgeRuntime, Configuration, Event, InputEvent, KeyboardInputDelivery,
     MainThreadScheduler, OpenHarmonyWaker, PluginLifecycleEvent, Rect, TouchInputDelivery,
+    XComponentInputEvent,
 };
 
 static ID: AtomicI64 = AtomicI64::new(0);
-
-pub(crate) static HAS_EVENT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Default)]
 struct RenderGestures {
@@ -54,15 +50,34 @@ impl RenderGestures {
 
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
+/// Initialization context pushed by the ArkTS entry during `openharmony()`.
 pub struct AbilityInitContext {
+    /// Ability-scoped base directory (ArkTS `context.filesDir` domain).
     pub base_path: Option<String>,
+    /// Preferences directory for key-value stores (ArkTS `preferences` domain).
     pub pref_path: Option<String>,
+    /// Comma-separated preferred locale list from the system.
     pub preferred_locales: Option<String>,
+    /// HAP module name the ability belongs to.
     pub module_name: Option<String>,
+    /// HAP module name (`currentHapModuleInfo.name`, e.g. `entry_desktop`) --
+    /// distinct from [`Self::module_name`], which carries the `.so` library name.
+    #[napi(js_name = "hapModuleName")]
+    pub hap_module_name: Option<String>,
+    /// OpenHarmony SDK API level of the running device.
+    pub sdk_api_version: Option<i32>,
+    /// HarmonyOS distribution API version (`M*10000 + S*100 + F`).
+    #[napi(js_name = "distributionOSApiVersion")]
+    pub distribution_api_version: Option<i32>,
     pub configuration: Option<AbilityInitConfiguration>,
 }
 
 impl AbilityInitContext {
+    /// Decodes the init context from the ArkTS options object; missing keys
+    /// yield `None` fields.
+    ///
+    /// # Errors
+    /// Returns an error when a present property cannot be read as its expected type.
     pub fn from_object(context: Option<&Object<'_>>) -> Result<Self> {
         let Some(context) = context else {
             return Ok(Self::default());
@@ -77,12 +92,16 @@ impl AbilityInitContext {
             pref_path: context.get("prefPath")?,
             preferred_locales: context.get("preferredLocales")?,
             module_name: context.get("moduleName")?,
+            hap_module_name: context.get("hapModuleName")?,
+            sdk_api_version: context.get("sdkApiVersion")?,
+            distribution_api_version: context.get("distributionOSApiVersion")?,
             configuration,
         })
     }
 }
 
 #[derive(Clone)]
+/// Per-process shared application state (the inner half of `OpenHarmonyApp`).
 pub struct OpenHarmonyAppInner {
     pub(crate) raw_window: Option<RawWindow>,
     pub(crate) xcomponent: Option<XComponent>,
@@ -101,37 +120,27 @@ pub struct OpenHarmonyAppInner {
     id: i64,
     pub(crate) configuration: Configuration,
     pub(crate) rect: Rect,
-    /// Per-window rect cache keyed by windowId (0 = main window, >0 = Float sub-window).
+    /// Per-window rect cache keyed by windowId (0 = primary main window, >0 =
+    /// sub-window or spawned UIAbility instance).
     /// Written by the `window_rect_change` lifecycle closure (lifecycle.rs) from ArkTS
     /// windowRectChange callbacks; read by tao's inner_size/outer_position/etc via
     /// `window_rect_for(window_id)`. See design.md D1/D4 (openspec change
     /// p1-window-state-per-window-rect).
     pub(crate) window_rects: HashMap<i64, Rect>,
-    /// Cached main-window decoration (title bar) height, physical px, ≥0.
-    /// Latched ONLY on surface events (`latch_decor_height`) where the
-    /// XComponent rect is fresh and the WM rect has already been delivered.
-    /// Consumers (tao inner_size/set_inner_size/inner_position) must use
-    /// `decor_height()` instead of live-diffing window_rect − content_rect:
-    /// the WM rect (windowRectChange) and the surface rect (XComponent
-    /// onSurfaceChanged) update ASYNCHRONOUSLY — a read in the gap between
-    /// them computes a garbage decor (observed 824/770/292 instead of the
-    /// real 146), which corrupted inner_size reads and compounded through
-    /// save/restore cycles into the shrinking-window bug.
-    pub(crate) decor_height: i32,
-    /// Listeners fired by `latch_decor_height` whenever the latched decor value
-    /// actually changes. Each listener returns `false` to have itself removed
-    /// after the call. tao uses this for event-driven set_inner_size
-    /// self-correction (startup decor convergence) instead of polling.
-    ///
-    /// INVARIANT: listeners run while the app RwLock is HELD (write) — they
-    /// must not re-enter any OpenHarmonyApp API (deadlock). Keep them lock-free:
-    /// channel sends / atomics only. Expected to stay LOW-COUNT (one per tao
-    /// window); every listener runs on every decor change under the lock.
-    pub(crate) decor_change_callbacks: Vec<(u64, DecorChangeListener)>,
-    next_decor_cb_id: u64,
-    pub(crate) avoid_areas: HashMap<(i64, AvoidAreaType), AvoidArea>,
+    /// Per-window drawable (content-area) rect, physical px, pushed by the ArkTS
+    /// `windowRectChange` handlers alongside the WM rect (issue Eulogizethesun/
+    /// tauri#97). Source: `win.getWindowProperties().drawableRect` -- the system's
+    /// own inner-rect snapshot (left/top relative to the window, size = drawable
+    /// area), read synchronously inside the event handler so the two rects in one
+    /// wrap can never tear. This replaced the former `decor_height` latched
+    /// window-rect - content-rect diff, whose async-update races produced garbage
+    /// decor (observed 824/770/292 instead of the real 146) and compounded
+    /// through save/restore cycles into the shrinking-window bug. Consumers read
+    /// it through `inner_rect_for(window_id)` -- never hand-roll the conversion.
+    pub(crate) inner_rects: HashMap<i64, Rect>,
+    pub(crate) avoid_areas: HashMap<AvoidAreaType, AvoidArea>,
     pub(crate) init_context: AbilityInitContext,
-    // ─── Session state (migrated from module-level statics, issue #87 major-9) ───
+    // --- Session state (migrated from module-level statics, issue #87 major-9) ---
     // These four carried session semantics while living at module scope, which is
     // only correct under a single UIAbility instance. They now ride the app's
     // inner RwLock, so they follow the app instance like every other field.
@@ -196,6 +205,7 @@ impl Default for OpenHarmonyAppInner {
 }
 
 impl OpenHarmonyAppInner {
+    /// Creates a zero-initialized inner state with a fresh app id.
     pub fn new() -> Self {
         let id = ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         OpenHarmonyAppInner {
@@ -214,9 +224,7 @@ impl OpenHarmonyAppInner {
             configuration: Default::default(),
             rect: Default::default(),
             window_rects: HashMap::new(),
-            decor_height: 0,
-            decor_change_callbacks: Vec::new(),
-            next_decor_cb_id: 0,
+            inner_rects: HashMap::new(),
             avoid_areas: HashMap::new(),
             init_context: AbilityInitContext::default(),
             want_parameters: String::new(),
@@ -243,8 +251,8 @@ impl OpenHarmonyAppInner {
     pub fn save(&mut self, state: Vec<u8>) {
         self.state = state;
         // Make save/load symmetric (issue #87 major-3): without this, load()
-        // gates on a save_state that is never set and always returns None —
-        // the write side (ArkTS onSaveState → Event::SaveState → app.save)
+        // gates on a save_state that is never set and always returns None --
+        // the write side (ArkTS onSaveState -> Event::SaveState -> app.save)
         // was live while the read side silently produced nothing.
         self.save_state = true;
     }
@@ -256,14 +264,18 @@ impl OpenHarmonyAppInner {
         OpenHarmonyWaker::new()
     }
 
+    /// Returns the latest device configuration snapshot.
     pub fn config(&self) -> Configuration {
         self.configuration.clone()
     }
 
+    /// Sets the XComponent frame rate range (min/max/expected FPS).
+    ///
+    /// No-op when no XComponent is mounted; failures are logged, not fatal.
     pub fn set_frame_rate(&self, min: i32, max: i32, expected: i32) {
         if let Some(xcomponent) = self.xcomponent.as_ref() {
             // Callable from embedding apps; a failure here must not abort the
-            // process (issue #87 minor-2 — this used to .expect).
+            // process (issue #87 minor-2 -- this used to .expect).
             if let Err(e) = xcomponent
                 .native_xcomponent()
                 .set_frame_rate(min, max, expected)
@@ -298,44 +310,6 @@ impl OpenHarmonyAppInner {
         self.render_owner.as_deref() == Some(owner)
     }
 
-    /// Latch the main-window decoration (title bar) height estimate.
-    ///
-    /// Called only from surface events (activate/update), the one point where
-    /// the XComponent rect is guaranteed fresh. The WM rect (windowRectChange)
-    /// is delivered before the surface relayout completes (observed ordering on
-    /// every resize in the DBG-D2 probe logs), so window_rects[0] is also
-    /// current here — the diff is the real title-bar inset. Out-of-range diffs
-    /// (surface mid-relayout, or window_rect not yet delivered) are rejected so
-    /// the cache keeps the last plausible value instead of transient garbage.
-    fn latch_decor_height(&mut self) {
-        // Physically impossible title-bar ceiling: real decor is ~146 px on the
-        // 2in1 reference device. Anything larger is a stale-rect diff.
-        const DECOR_HEIGHT_MAX: i32 = 320;
-        let Some(window) = self.window_rects.get(&0) else {
-            return;
-        };
-        let diff = window.height - self.rect.height;
-        let new_decor = if diff == 0 {
-            // Decorations hidden (fullscreen / setDecorations(false)): the
-            // surface fills the window exactly.
-            0
-        } else if diff > 0 && diff <= DECOR_HEIGHT_MAX {
-            diff
-        } else {
-            // diff < 0 or diff > MAX: transient — keep the previous estimate
-            // (and don't notify listeners).
-            return;
-        };
-        if new_decor == self.decor_height {
-            return;
-        }
-        self.decor_height = new_decor;
-        // Notify listeners (lock-free by contract — see field docs). Returning
-        // false removes the listener after this call.
-        self.decor_change_callbacks
-            .retain_mut(|(_, cb)| cb(new_decor));
-    }
-
     fn activate_surface(&mut self, owner: &str, raw_window: Option<RawWindow>, rect: Rect) -> bool {
         if !self.owns_render(owner) || self.surface_active {
             return false;
@@ -343,7 +317,6 @@ impl OpenHarmonyAppInner {
         self.raw_window = raw_window;
         self.rect = rect;
         self.surface_active = true;
-        self.latch_decor_height();
         true
     }
 
@@ -352,7 +325,6 @@ impl OpenHarmonyAppInner {
             return false;
         }
         self.rect = rect;
-        self.latch_decor_height();
         true
     }
 
@@ -382,22 +354,41 @@ impl OpenHarmonyAppInner {
         self.raw_window = None;
         self.xcomponent = None;
         self.rect = Rect::default();
-        // Clear only the main-window (key 0) rect: release_render_owner tears down the
-        // main window's DefaultXComponent render surface. Sub-window rects (key >0) are
-        // owned by their own Float sub-window lifetimes and cleared via separate paths.
-        // NOTE: deactivate_surface intentionally does NOT reset window_rects — that
-        // preserves the asymmetric semantics (only full release clears the rect cache).
+        // Clear only the main-window (key 0) rects: release_render_owner tears down the
+        // main window's DefaultXComponent render surface. Two families share the
+        // key >0 space, with different lifecycles:
+        // - Spawned UIAbility instances (NativeAbility onCreate reads a non-zero
+        //   tauri_window_id from want.parameters) ARE cleaned up: their
+        //   onAbilityDestroy path reaches unregister_ui_ability_state, which
+        //   removes this id's entries from window_rects and inner_rects.
+        // - True sub-window entries (key >0, WindowKind.SubWindow) are
+        //   cleaned when the window's render surface is released
+        //   (`release_render`'s sub-surface path removes both tables'
+        //   entries as a pair); a window whose render is never released
+        //   keeps its entries -- that residual leak is the known
+        //   cross-repo limitation.
+        // NOTE: deactivate_surface intentionally does NOT reset either rect table
+        // (neither window_rects nor inner_rects). That preserves the asymmetric
+        // teardown semantics: surface deactivation clears no entries - the rect
+        // tables are emptied only along their own lifecycles. The main-window
+        // (id 0) entries are cleared by the full release below (the two
+        // remove(&0) lines), the spawned UIAbility id entries by
+        // unregister_ui_ability_state (see the bullet above), and the true
+        // sub-window entries by `release_render`'s sub-surface pair-out (see
+        // the bullet above).
         self.window_rects.remove(&0);
-        self.avoid_areas.retain(|(window_id, _), _| *window_id != 0);
+        self.inner_rects.remove(&0);
+        self.avoid_areas.clear();
         Some(surface_was_active)
     }
 
+    /// Returns the primary window's content (safe-area-adjusted) rect.
     pub fn content_rect(&self) -> Rect {
         self.rect
     }
 
     /// Per-window rect lookup. Returns Rect::default() for an unregistered window id
-    /// (e.g. before the first windowRectChange callback fires) — same fallback semantics
+    /// (e.g. before the first windowRectChange callback fires) -- same fallback semantics
     /// as the old single-field window_rect (design.md D4).
     pub fn window_rect_for(&self, window_id: i64) -> Rect {
         self.window_rects
@@ -406,27 +397,69 @@ impl OpenHarmonyAppInner {
             .unwrap_or_default()
     }
 
-    /// Per-window rect setter. Called by the `window_rect_change` lifecycle closure
-    /// (lifecycle.rs) with the windowId parsed from the ArkTS-wrapped options.
+    /// Per-window outer-rect setter. Reached through `set_window_rects`
+    /// (pair-in/pair-out with the drawable snapshot, review R14); kept public
+    /// for direct snapshot manipulation in tests.
     pub fn set_window_rect(&mut self, window_id: i64, rect: Rect) {
         self.window_rects.insert(window_id, rect);
     }
 
+    /// Per-window drawable-rect setter (issue Eulogizethesun/tauri#97). Called by
+    /// the same `window_rect_change` lifecycle closure with the `drawable` field
+    /// of the ArkTS wrap (`getWindowProperties().drawableRect`, pushed whenever
+    /// the system reports a rect change). A missing/failed read never reaches
+    /// this setter -- see `set_window_rects` for the pair-in/pair-out contract.
+    pub fn set_inner_rect(&mut self, window_id: i64, rect: Rect) {
+        self.inner_rects.insert(window_id, rect);
+    }
+
+    /// Store one rect-change event's outer AND drawable rects under the single
+    /// `&mut self` borrow the caller already holds (issue Eulogizethesun/tauri#97
+    /// review: two separate lock acquisitions could let a concurrent
+    /// `inner_rect_for` read compose a NEW outer with a STALE/absent drawable).
+    ///
+    /// `drawable = None` (the wrap's drawableRect read failed -- see
+    /// `set_inner_rect`) skips the update entirely: the previous outer AND
+    /// drawable snapshots BOTH stay (pair-in/pair-out, review R14). Storing the
+    /// new outer alone would let `inner_rect_for` compose a new origin with a
+    /// stale offset/size (torn inner rect: wrong position after a decor change,
+    /// stale size after a resize) until the next readable event. Skipping both
+    /// keeps the pair consistently at the last readable event instead.
+    pub fn set_window_rects(&mut self, window_id: i64, outer: Rect, drawable: Option<Rect>) {
+        if let Some(rect) = drawable {
+            self.set_window_rect(window_id, outer);
+            self.set_inner_rect(window_id, rect);
+        }
+    }
+
+    /// Inner (content-area) rect for the given window, physical px. Composes the
+    /// WM rect with the pushed drawable snapshot -- see
+    /// [`OpenHarmonyApp::inner_rect_for`] (the public wrapper) for the full
+    /// semantics/fallback contract.
+    pub fn inner_rect_for(&self, window_id: i64) -> Rect {
+        let window = self.window_rect_for(window_id);
+        match self.inner_rects.get(&window_id) {
+            Some(drawable) => Rect {
+                left: window.left + drawable.left,
+                top: window.top + drawable.top,
+                width: drawable.width,
+                height: drawable.height,
+            },
+            None => window,
+        }
+    }
+
+    /// Returns the latest avoid area of the given type, if reported.
     pub fn avoid_area(&self, area_type: AvoidAreaType) -> Option<AvoidArea> {
-        self.avoid_area_for(0, area_type)
+        self.avoid_areas.get(&area_type).copied()
     }
 
-    pub fn avoid_area_for(&self, window_id: i64, area_type: AvoidAreaType) -> Option<AvoidArea> {
-        self.avoid_areas.get(&(window_id, area_type)).copied()
-    }
-
+    /// Returns a snapshot of all reported avoid areas by type.
     pub fn avoid_areas(&self) -> HashMap<AvoidAreaType, AvoidArea> {
-        self.avoid_areas
-            .iter()
-            .filter_map(|(&(window_id, kind), &area)| (window_id == 0).then_some((kind, area)))
-            .collect()
+        self.avoid_areas.clone()
     }
 
+    /// Returns the raw native window handle, if the surface is mounted.
     pub fn native_window(&self) -> Option<RawWindow> {
         self.raw_window
     }
@@ -452,13 +485,14 @@ impl OpenHarmonyAppInner {
         }
     }
 
+    /// Returns the default display's scaled density (font scale basis).
     pub fn scale(&self) -> f32 {
         default_display_scaled_density()
     }
 
     /// Physical dimensions of the default display, in pixels.
     ///
-    /// This is the real screen size — as opposed to `content_rect()`/`window_rect_for()`,
+    /// This is the real screen size -- as opposed to `content_rect()`/`window_rect_for()`,
     /// which return the *window's own* rect. Consumers that need the screen size
     /// (e.g. the windowing backend's `MonitorHandle::size()` for window centering) must use this,
     /// otherwise computations like positioner `Center` collapse to ~(0,0) because
@@ -488,15 +522,17 @@ impl OpenHarmonyAppInner {
         default_display_height() as u32
     }
 
+    /// Returns the init context pushed by the ArkTS entry.
     pub fn init_context(&self) -> AbilityInitContext {
         self.init_context.clone()
     }
 
+    /// Overwrites the init context (ArkTS entry may refresh it during setup).
     pub fn set_init_context(&mut self, context: AbilityInitContext) {
         self.init_context = context;
     }
 
-    // ─── Session-state accessors (issue #87 major-9; migrated from module statics) ───
+    // --- Session-state accessors (issue #87 major-9; migrated from module statics) ---
 
     pub(crate) fn store_want_parameters(&mut self, json: &str) {
         self.want_parameters = json.to_string();
@@ -515,7 +551,7 @@ impl OpenHarmonyAppInner {
     }
 
     /// `is_continuation == true` writes both the flag and the payload (passed
-    /// through verbatim — the wantParam schema is an application-level contract).
+    /// through verbatim -- the wantParam schema is an application-level contract).
     /// `is_continuation == false` clears both: a plain relaunch must not observe
     /// the previous session's continuation payload.
     pub(crate) fn store_continuation(&mut self, is_continuation: bool, parameters_json: &str) {
@@ -539,7 +575,6 @@ impl OpenHarmonyAppInner {
 type EventLoop = Arc<RefCell<Option<Box<dyn FnMut(Event)>>>>;
 type PostInputQueue = Arc<RefCell<Vec<Box<dyn FnOnce()>>>>;
 type BackPressInterceptor = Arc<RefCell<Option<Box<dyn FnMut() -> bool>>>>;
-type DecorChangeListener = std::sync::Arc<dyn Fn(i32) -> bool + Send + Sync>;
 
 /// Transport endpoints owned by one NativeAbility/module session. This lifetime is deliberately
 /// independent from the module's optional DefaultXComponent render surface.
@@ -549,10 +584,20 @@ struct ActiveBridgeSession {
     main_thread_endpoint: MainThreadBridgeEndpoint,
 }
 
+/// Cloneable handle to one NativeAbility/module session's application state.
+///
+/// Clones share the same inner state (compared by `Arc` pointer identity);
+/// this is the primary facade embedding apps use (`app.updater()`,
+/// `app.bridge()`, `app.node()`, ...).
 #[derive(Clone)]
 pub struct OpenHarmonyApp {
     pub(crate) inner: Arc<RwLock<OpenHarmonyAppInner>>,
     pub(crate) event_loop: EventLoop,
+    /// Per-app latch replacing the old process-global `HAS_EVENT` (design.md
+    /// D10, openspec multi-uiability-windows): `run_loop` installs the event
+    /// handler at most once per app. Shared through `Arc` so every clone of
+    /// the app observes the same latch.
+    pub(crate) event_loop_installed: Arc<Cell<bool>>,
     post_input: PostInputQueue,
     pub(crate) input_queue: Arc<crate::input::queue::InputQueue<crate::InputEvent>>,
     pub(crate) waker: Arc<RwLock<Option<Arc<crate::waker::InputWake>>>>,
@@ -602,12 +647,15 @@ impl Ord for OpenHarmonyApp {
 }
 
 impl OpenHarmonyApp {
+    /// Creates a fresh app handle with no session state attached yet.
     pub fn new() -> Self {
         Self {
             #[allow(clippy::arc_with_non_send_sync)]
             inner: Arc::new(RwLock::new(OpenHarmonyAppInner::new())),
             #[allow(clippy::arc_with_non_send_sync)]
             event_loop: Arc::new(RefCell::new(None)),
+            #[allow(clippy::arc_with_non_send_sync)]
+            event_loop_installed: Arc::new(Cell::new(false)),
             // Native drag can reenter XComponent input synchronously. Run it
             // only after the current event-loop handler releases its borrow.
             #[allow(clippy::arc_with_non_send_sync)]
@@ -644,14 +692,17 @@ impl OpenHarmonyApp {
         }
     }
 
+    /// Stores the app state saved via the ArkTS `onSaveState` chain.
     pub fn save(&self, state: Vec<u8>) {
         self.inner.write().unwrap().save(state);
     }
 
+    /// Loads the previously saved app state (peek-only; `None` before first save).
     pub fn load(&self) -> Option<Vec<u8>> {
         self.inner.read().unwrap().load()
     }
 
+    /// Sets the XComponent frame rate range (min/max/expected FPS).
     pub fn set_frame_rate(&self, min: i32, max: i32, expected: i32) {
         self.inner
             .read()
@@ -659,6 +710,7 @@ impl OpenHarmonyApp {
             .set_frame_rate(min, max, expected);
     }
 
+    /// Overwrites the init context pushed by the ArkTS entry (test hook).
     #[doc(hidden)]
     pub fn set_init_context(&self, context: AbilityInitContext) {
         // Seed `inner.configuration` synchronously during cold-start `module.init`, before the
@@ -678,32 +730,46 @@ impl OpenHarmonyApp {
         inner.set_init_context(context);
     }
 
+    /// Returns the init context pushed by the ArkTS entry.
     pub fn init_context(&self) -> AbilityInitContext {
         self.inner.read().unwrap().init_context()
     }
 
+    /// Returns the HAP module name, when the ArkTS entry provided one.
     pub fn module_name(&self) -> Option<String> {
         self.init_context().module_name
     }
 
+    /// HAP module name (e.g. `entry_desktop`), as opposed to the `.so` library
+    /// name returned by [`Self::module_name`].
+    pub fn hap_module_name(&self) -> Option<String> {
+        self.init_context().hap_module_name
+    }
+
+    /// Returns the ability-scoped base directory, when provided.
     pub fn base_path(&self) -> Option<String> {
         self.init_context().base_path
     }
 
+    /// Returns the preferences directory, when provided.
     pub fn pref_path(&self) -> Option<String> {
         self.init_context().pref_path
     }
 
+    /// Returns the system's preferred locale list, when provided.
     pub fn preferred_locales(&self) -> Option<String> {
         self.init_context().preferred_locales
     }
 
-    // ─── Session-state facades (issue #87 major-9) ───
+    // --- Session-state facades (issue #87 major-9) ---
     // Mirror the old module-static free functions (lock-poisoning degrades to a
     // default instead of unwinding; the NAPI/lifecycle writers call these from
     // inside already-tolerant callback contexts).
 
     /// Stores the latest `want.parameters` JSON from `onNewWant`.
+    /// Test-only facade: production code goes through the module-level
+    /// window-id-keyed free functions (same names, taking a leading
+    /// `window_id`); kept for unit tests.
     pub fn store_want_parameters(&self, json: &str) {
         if let Ok(mut inner) = self.inner.write() {
             inner.store_want_parameters(json);
@@ -711,7 +777,9 @@ impl OpenHarmonyApp {
     }
 
     /// Takes the latest `want.parameters` JSON (draining the stored value).
-    /// Consumed by the `plugin-deep-link` facade (`DeepLinkClient`).
+    /// Test-only facade: production code goes through the window-id-keyed free
+    /// functions (`take_want_parameters_for_window` and siblings); kept for
+    /// unit tests.
     pub fn take_want_parameters(&self) -> String {
         self.inner
             .write()
@@ -721,6 +789,9 @@ impl OpenHarmonyApp {
     }
 
     /// Stores the initial `want.uri` from `onCreate` (cold start).
+    /// Test-only facade: production code goes through the module-level
+    /// window-id-keyed free functions (same names, taking a leading
+    /// `window_id`); kept for unit tests.
     pub fn store_initial_want_uri(&self, uri: &str) {
         if let Ok(mut inner) = self.inner.write() {
             inner.store_initial_want_uri(uri);
@@ -728,7 +799,9 @@ impl OpenHarmonyApp {
     }
 
     /// Takes the initial `want.uri` from `onCreate` (draining the stored value).
-    /// Consumed by the `plugin-deep-link` facade to surface the cold-start deep link.
+    /// Test-only facade: production code goes through the window-id-keyed free
+    /// functions (`take_initial_want_uri_for_window` and siblings); kept for
+    /// unit tests.
     pub fn take_initial_want_uri(&self) -> String {
         self.inner
             .write()
@@ -739,6 +812,10 @@ impl OpenHarmonyApp {
 
     /// Stores the continuation signal from a lifecycle callback
     /// (see `OpenHarmonyAppInner::store_continuation` for the clear-on-false contract).
+    /// Test-only facade: production code goes through the module-level free
+    /// function `store_continuation` (its doc is the public entry point, and
+    /// external tests -- e.g. plugin-continuation -- must call it instead of
+    /// this app-instance store); kept for unit tests.
     pub fn store_continuation(&self, is_continuation: bool, parameters_json: &str) {
         if let Ok(mut inner) = self.inner.write() {
             inner.store_continuation(is_continuation, parameters_json);
@@ -746,7 +823,9 @@ impl OpenHarmonyApp {
     }
 
     /// Returns whether the current launch is an app-continuation restore.
-    /// Peek-only. Consumed by the `plugin-continuation` facade (`ContinuationClient`).
+    /// Peek-only. Test-only facade: production code goes through the
+    /// module-level free functions (`is_continuation_restore` and siblings);
+    /// kept for unit tests.
     pub fn is_continuation_restore(&self) -> bool {
         self.inner
             .read()
@@ -756,7 +835,8 @@ impl OpenHarmonyApp {
     }
 
     /// Takes the continuation payload JSON (draining the stored value).
-    /// Consumed by the `plugin-continuation` facade (`ContinuationClient`).
+    /// Test-only facade: production code goes through the module-level free
+    /// functions (`take_continuation_data` and siblings); kept for unit tests.
     pub fn take_continuation_data(&self) -> String {
         self.inner
             .write()
@@ -1115,11 +1195,15 @@ impl OpenHarmonyApp {
                     .xcomponent
                     .native_xcomponent()
                     .unregister_callbacks();
+                // Pair-out with `set_window_rects` (review R14): the outer and
+                // drawable entries leave together when the sub-window's render
+                // surface is released. (The upstream tuple-key avoid-area
+                // retain died with the single-key `avoid_areas` field;
+                // app-level avoid areas are cleared only by
+                // `release_render_owner`.)
                 inner.window_rects.remove(&id);
+                inner.inner_rects.remove(&id);
                 inner.frame_input_delivery.remove(&id);
-                inner
-                    .avoid_areas
-                    .retain(|(window_id, _), _| *window_id != id);
                 Some((id, surface.active))
             }
         });
@@ -1228,6 +1312,8 @@ impl OpenHarmonyApp {
         self.bridge_plugins.declarations()
     }
 
+    /// Dispatches a synchronous ArkTS platform callback into the bridge
+    /// main-thread endpoint (generated-code port; see `on_bridge_sync_event`).
     #[doc(hidden)]
     pub fn dispatch_bridge_main_thread_event<'env>(
         &self,
@@ -1236,9 +1322,51 @@ impl OpenHarmonyApp {
         self.bridge_plugins.dispatch_main_thread_event(event)
     }
 
+    /// Forwards an ArkTS-only lifecycle transition (UI-context readiness) to
+    /// the registered plugins (generated-code port; see `on_bridge_lifecycle`).
     #[doc(hidden)]
     pub fn dispatch_plugin_lifecycle(&self, event: PluginLifecycleEvent) -> Result<()> {
         self.bridge_plugins.dispatch_lifecycle(event)
+    }
+
+    /// Tears down every per-window registry entry for a destroyed UIAbility
+    /// instance (design.md D13): the D7 handshake entry, the D9 want-URI
+    /// storage, the label -> id registry and the cached window rects. Called
+    /// from the `on_ability_destroy` lifecycle callback after
+    /// `AbilityDestroyed` has been dispatched to bridge plugins (which drop
+    /// the session partition themselves).
+    ///
+    /// Sub-windows never reach this path -- they are torn down through
+    /// `notify_window_close` -> the downstream runtime's `Destroyed` --
+    /// and window ids are monotonic (never reused), so removing by id
+    /// cannot touch a live window. The primary (id 0) also passes
+    /// through on process exit: harmless, its handshake entry never
+    /// existed and `release_render_owner` already cleared its rect.
+    ///
+    /// The rect teardown is symmetric with `set_window_rects`' pair-in: the
+    /// outer (`window_rects`) and drawable (`inner_rects`) snapshots for this
+    /// id are removed together, and because ids are monotonic and never
+    /// reused the paired removal cannot touch a live window.
+    pub fn unregister_ui_ability_state(&self, window_id: i64) {
+        let pending_len = crate::window::unregister_pending_ui_ability(window_id);
+        remove_want_uri_storage(window_id);
+        unregister_window_label(window_id);
+        if let Ok(mut inner) = self.inner.write() {
+            inner.window_rects.remove(&window_id);
+            inner.inner_rects.remove(&window_id);
+        }
+        // Registry-size observability for the teardown path: log AFTER the
+        // mutations and outside any lock (lock discipline -- see
+        // set_ui_ability_waker). Debug level: per-window teardown is routine.
+        let want_params_len = WANT_PARAMETERS.lock().map(|m| m.len()).unwrap_or(0);
+        let want_uris_len = INITIAL_WANT_URI.lock().map(|m| m.len()).unwrap_or(0);
+        crate::debug!(
+            "unregister_ui_ability_state id={} — pending={} want_params={} want_uris={}",
+            window_id,
+            pending_len,
+            want_params_len,
+            want_uris_len
+        );
     }
 
     pub(crate) fn begin_bridge_session(
@@ -1284,6 +1412,11 @@ impl OpenHarmonyApp {
         }
     }
 
+    /// Shows the soft keyboard for the focused text input.
+    ///
+    /// Guards against re-entrant invocation with the `is_keyboard_show`
+    /// mutex and is a no-op when no IME has been attached to this module
+    /// (no `attach_ime` call from the generated entry or tests).
     pub fn show_keyboard(&self) {
         self.show_keyboard_for(0);
     }
@@ -1387,6 +1520,11 @@ impl OpenHarmonyApp {
         })?;
         Ok(callback(&ime))
     }
+
+    /// Hides the soft keyboard.
+    ///
+    /// Same re-entrancy guard and no-IME no-op behavior as
+    /// [`OpenHarmonyApp::show_keyboard`].
     pub fn hide_keyboard(&self) {
         self.hide_keyboard_for(0);
     }
@@ -1408,51 +1546,31 @@ impl OpenHarmonyApp {
             }
         }
     }
+    /// Creates a [`OpenHarmonyWaker`] bound to this app's waker slot.
+    ///
+    /// The slot lives on the app wrapper rather than the inner state so
+    /// that `wake()` always reads the *current* TSFN (live-read rationale
+    /// in `waker.rs`); the returned handle stays valid across UIAbility
+    /// restarts that swap the underlying `ThreadsafeFunction`.
     pub fn create_waker(&self) -> OpenHarmonyWaker {
+        // The waker slot lives on the app (wrapper), not the inner state --
+        // see `waker.rs` for the live-read rationale.
         OpenHarmonyWaker::from_slot(self.waker.clone())
     }
+    /// Returns the current UI configuration snapshot (color mode, direction,
+    /// screen density, font scale).
+    ///
+    /// The snapshot is refreshed by the ArkTS `onConfigurationUpdate`
+    /// callback; callers see the values from the most recent callback.
     pub fn config(&self) -> Configuration {
         self.inner.read().unwrap().config()
     }
+    /// Returns the content rect of the primary window in physical px.
+    ///
+    /// Empty (`0,0,0,0`) until the first `windowRectChange` callback fires;
+    /// per-window variants: [`OpenHarmonyApp::window_rect_for`].
     pub fn content_rect(&self) -> Rect {
         self.inner.read().unwrap().content_rect()
-    }
-
-    /// Cached main-window decoration (title bar) height in physical px.
-    /// Latched on surface events only — see `OpenHarmonyAppInner::decor_height`.
-    /// tao's inner_size/set_inner_size/inner_position must read this instead of
-    /// live-diffing window_rect − content_rect (async update race).
-    pub fn decor_height(&self) -> i32 {
-        self.inner
-            .read()
-            .map(|inner| inner.decor_height)
-            .unwrap_or(0)
-    }
-
-    /// Register a listener fired whenever the latched main-window decor height
-    /// changes (see `OpenHarmonyAppInner::decor_change_callbacks`). Returns an
-    /// id for `remove_decor_change_callback`. The listener runs on the thread
-    /// that latched the decor, with the app RwLock held — it must not call back
-    /// into OpenHarmonyApp APIs (deadlock); channel sends / atomics only.
-    pub fn register_decor_change_callback(&self, listener: DecorChangeListener) -> u64 {
-        self.inner
-            .write()
-            .map(|mut inner| {
-                let id = inner.next_decor_cb_id;
-                inner.next_decor_cb_id += 1;
-                inner.decor_change_callbacks.push((id, listener));
-                id
-            })
-            .unwrap_or(u64::MAX)
-    }
-
-    /// Remove a previously registered decor-change listener by id.
-    pub fn remove_decor_change_callback(&self, id: u64) {
-        if let Ok(mut inner) = self.inner.write() {
-            inner
-                .decor_change_callbacks
-                .retain(|(cb_id, _)| *cb_id != id);
-        }
     }
 
     /// Per-window rect lookup (key = windowId; 0 = main window). See
@@ -1462,92 +1580,116 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().window_rect_for(window_id)
     }
 
-    /// Per-window rect setter. Called from the lifecycle closure with the windowId
-    /// parsed from the ArkTS-wrapped windowRectChange options.
-    pub fn set_window_rect(&self, window_id: i64, rect: Rect) {
-        self.inner.write().unwrap().set_window_rect(window_id, rect);
+    /// Store one rect-change event's outer rect AND drawable-rect snapshot for a
+    /// window under ONE RwLock write acquisition (issue Eulogizethesun/tauri#97)
+    /// -- the pair from a single event can never be observed torn by a concurrent
+    /// `inner_rect_for`. `drawable = None` (the wrap's drawableRect read failed)
+    /// skips both writes: the previous outer AND drawable snapshots stay
+    /// (pair-in/pair-out, review R14). Called from the `window_rect_change`
+    /// lifecycle closure with the windowId parsed from the ArkTS-wrapped options.
+    pub fn set_window_rects(&self, window_id: i64, outer: Rect, drawable: Option<Rect>) {
+        self.inner
+            .write()
+            .unwrap()
+            .set_window_rects(window_id, outer, drawable);
     }
 
-    /// Last known cursor position in physical px (vp stored by the ArkTS
-    /// `MainPage.onMouse` handler × current scale). Issue #87 major-10: the
-    /// f64-bit-packed `CURSOR_POSITION_X/Y` statics are an implementation
-    /// detail — consumers read them through this method instead of unpacking
-    /// the bits by hand.
-    pub fn cursor_position(&self) -> (f64, f64) {
-        let scale = self.scale() as f64;
-        (
-            f64::from_bits(CURSOR_POSITION_X.load(std::sync::atomic::Ordering::Relaxed)) * scale,
-            f64::from_bits(CURSOR_POSITION_Y.load(std::sync::atomic::Ordering::Relaxed)) * scale,
+    /// Last known cursor position in physical px (screen-global vp fed by the
+    /// ArkTS `onMouse` handlers x current scale -- ohos-cursor-passthrough D1).
+    /// Issue #87 major-10: the f64-bit-packed `CURSOR_POSITION_X/Y` statics are
+    /// an implementation detail -- consumers read them through this method
+    /// instead of unpacking the bits by hand.
+    ///
+    /// Untracked fail-safe contract (ohos-cursor-passthrough D3; spec
+    /// "cold start, never fed -> reject"): when NO feed was ever recorded the
+    /// read is the typed
+    /// [`CursorUntracked`] error -- NOT the (0,0) zero-init sentinel, which is
+    /// indistinguishable from a real screen-origin feed and would let a
+    /// hit-test "succeed" on garbage. `Ok` therefore always equals a real fed
+    /// screen-global coordinate. tao maps the error to
+    /// `ExternalError::NotSupported`; runtime-wry turns that into
+    /// `FailedToGetCursorPosition`, so the tauri command -- and the JS
+    /// `cursorPosition()` promise -- reject.
+    pub fn cursor_position(&self) -> std::result::Result<(f64, f64), CursorUntracked> {
+        // Memory-order discipline (task 2.1, mandatory): the Acquire load of
+        // EVER_FED must precede the X/Y loads. Paired with the feed-side
+        // ordering (X.store(Relaxed) -> Y.store(Relaxed) -> EVER_FED
+        // .store(true, Release)) this guarantees: observing ever_fed=true
+        // makes that feed's (and any earlier feed's) X/Y values visible to
+        // this reader. Without it a concurrent first feed could yield
+        // ever_fed=true with stale (0,0) X/Y -- returning the very sentinel
+        // `Ok((0,0))` this contract removes.
+        let ever_fed = EVER_FED.load(std::sync::atomic::Ordering::Acquire);
+        // Explicit `std::result::Result` (same pattern as `set_cursor_grab`):
+        // the napi `Result` alias in scope would wrap the error in
+        // `napi::Error<CursorUntracked>` and demand an `AsRef<str>` bound --
+        // this error stays a typed value for tao to map, it never crosses
+        // the NAPI boundary itself.
+        cursor_position_with(
+            ever_fed,
+            f64::from_bits(CURSOR_POSITION_X.load(std::sync::atomic::Ordering::Relaxed)),
+            f64::from_bits(CURSOR_POSITION_Y.load(std::sync::atomic::Ordering::Relaxed)),
+            self.scale(),
         )
     }
 
-    /// Decor (title-bar) height to compensate for the given window, in physical px.
-    ///
-    /// Invariant: window 0 is the one UIAbility main window; every id > 0 is a
-    /// Float sub-window (created via `create_os_window`, ids handed out from 1).
-    /// Float sub-windows ship their own title bar (FloatPage) and have no system
-    /// title bar, so their compensation is 0; the main window gets the cached
-    /// latched decor (see [`Self::decor_height`]).
-    pub fn decor_height_for(&self, window_id: i64) -> i32 {
-        if window_id == 0 {
-            self.decor_height().max(0)
-        } else {
-            0
-        }
-    }
-
-    /// Inner (content-area) rect for the given window, in physical px, with the
-    /// decor compensation applied internally (issue #87 major-10 — consumers no
-    /// longer hand-roll it). The window rect comes from the WM
-    /// (`windowRectChange`), the content offset from the XComponent surface,
-    /// and the title-bar inset from the cached decor — all read under ONE lock
-    /// so the three can't tear.
+    /// Inner (content-area) rect for the given window, in physical px (issue
+    /// Eulogizethesun/tauri#97). Composed from two system snapshots pushed by the
+    /// same `windowRectChange` event -- the WM rect (outer) and the drawable rect
+    /// (system-defined inner, position relative to the window) -- read under ONE lock so
+    /// they can't tear. The former hand-rolled `window_rect - latched decor`
+    /// conversion (and its estimate) is gone: the size/offset comes from the
+    /// system's own drawableRect.
     ///
     /// Semantics:
-    /// - `left/top` = window position + content offset (+ decor on the main window)
-    /// - `width` = window width (the title bar only affects height)
-    /// - `height` = window height − decor, saturating (≥ 0)
+    /// - `left/top` = window position + drawable offset (below the title bar on
+    ///   decorated windows; (0,0) for sub-windows)
+    /// - `width`/`height` = drawable (content) area size
+    ///
+    /// Fallback: the two snapshot tables are only written in pairs
+    /// (`set_window_rects`, review R14) and the ArkTS side seeds them right
+    /// after content load (review R13), so "outer present, drawable absent" is
+    /// unreachable through the public API in production -- the `None` arm below
+    /// stays as a defensive fallback for a future writer that seeds
+    /// `window_rects` directly, returning the outer rect as-is (decor assumed
+    /// 0). Before the first readable event both lookups return `(0,0,0,0)`. A
+    /// runtime decor change that fires no windowRectChange leaves the snapshot
+    /// stale until the next rect change; re-reading/re-setting inner size after
+    /// such changes is the caller's responsibility (per issue #97, compensation
+    /// duty belongs to the app).
     pub fn inner_rect_for(&self, window_id: i64) -> Rect {
         self.inner
             .read()
-            .map(|inner| {
-                let window = inner.window_rect_for(window_id);
-                let content = inner.content_rect();
-                let decor = if window_id == 0 {
-                    inner.decor_height
-                } else {
-                    0
-                };
-                Rect {
-                    left: window.left + content.left,
-                    top: window.top + content.top + decor,
-                    width: window.width,
-                    height: (window.height as u32).saturating_sub(decor.max(0) as u32) as i32,
-                }
-            })
+            .map(|inner| inner.inner_rect_for(window_id))
             .unwrap_or_default()
     }
 
-    /// Outer (WM) rect for the given window, in physical px — the raw
+    /// Outer (WM) rect for the given window, in physical px -- the raw
     /// `windowRectChange` payload; `(0,0,0,0)` before the first callback fires.
     pub fn outer_rect_for(&self, window_id: i64) -> Rect {
         self.window_rect_for(window_id)
     }
 
+    /// Returns the latest system avoid-area snapshot for one area type.
+    ///
+    /// `None` before the ArkTS side has delivered any `onAvoidAreaChange`
+    /// payload for `area_type`. The full map variant:
+    /// [`OpenHarmonyApp::avoid_areas`].
     pub fn avoid_area(&self, area_type: AvoidAreaType) -> Option<AvoidArea> {
         self.inner.read().unwrap().avoid_area(area_type)
     }
 
-    pub fn avoid_area_for(&self, window_id: i64, area_type: AvoidAreaType) -> Option<AvoidArea> {
-        self.inner
-            .read()
-            .unwrap()
-            .avoid_area_for(window_id, area_type)
-    }
-
+    /// Returns the full latest avoid-area map (all known area types).
+    ///
+    /// Populated by ArkTS `onAvoidAreaChange` callbacks; see
+    /// [`OpenHarmonyApp::avoid_area`] for the per-type accessor.
     pub fn avoid_areas(&self) -> HashMap<AvoidAreaType, AvoidArea> {
         self.inner.read().unwrap().avoid_areas()
     }
+    /// Returns the raw native window handle registered by the render node.
+    ///
+    /// `None` before the XComponent surface is created (and after it is
+    /// destroyed). The handle is only valid for use on the main thread.
     pub fn native_window(&self) -> Option<RawWindow> {
         self.inner.read().unwrap().native_window()
     }
@@ -1630,19 +1772,64 @@ impl OpenHarmonyApp {
         self.inner.read().unwrap().display_height()
     }
 
+    /// Installs the app-wide event loop handler and enters the loop.
+    ///
+    /// All UIAbility instances of one app share a single event loop by
+    /// design (multi-UIAbility NG4): the first `run_loop` call wins and
+    /// installs the handler; a second call on the same app logs an error
+    /// and keeps the original handler (per-app latch, design.md D10 --
+    /// replaces the old process-global silent no-op).
+    ///
+    /// The handler must be `'static` because it is stored in the
+    /// `Box<dyn FnMut(Event)>` slot without lifetime erasure, so it cannot
+    /// borrow from `self` or any non-`'static` data.
     pub fn run_loop<F: FnMut(Event) + 'static>(&self, event_handle: F) {
-        if HAS_EVENT.load(std::sync::atomic::Ordering::SeqCst) {
+        // Per-app latch (design.md D10, openspec multi-uiability-windows --
+        // replaces the old process-global HAS_EVENT silent no-op). All
+        // UIAbility instances of one app share ONE event loop by design
+        // (NG4): a second run_loop call means a caller mis-assumed one loop
+        // per instance. Keep the first handler (the shared loop stays
+        // coherent) but make the anomaly visible instead of silent.
+        if self.event_loop_installed.get() {
+            crate::error!(
+                "run_loop called twice on the same OpenHarmonyApp — keeping the first \
+                 handler (multi-UIAbility instances share one app/event loop, NG4)"
+            );
             return;
         }
 
         // The handler is required to be `'static` (no borrows of `self` or other
         // non-'static data), so it can be stored in the `Box<dyn FnMut(Event)>`
-        // slot without any lifetime erasure. The `HAS_EVENT` guard ensures
-        // `run_loop` is called exactly once and the app outlives all event
+        // slot without any lifetime erasure. The latch ensures `run_loop`
+        // installs exactly one handler and the app outlives all event
         // dispatch.
         let static_handler: Box<dyn FnMut(Event) + 'static> = Box::new(event_handle);
         self.event_loop.replace(Some(static_handler));
-        HAS_EVENT.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.event_loop_installed.set(true);
+    }
+
+    /// Dispatch a key event into the tao event loop from the ArkTS pre-IME
+    /// handler (issue Eulogizethesun/tauri#109).
+    ///
+    /// The NDK XComponent key callback is structurally unreachable in webview
+    /// apps: the render node created by `render()` is never in the ArkUI focus
+    /// chain (no `focusable(true)` -- official NAPI XComponent samples require
+    /// it -- and the Web component grabs focus on load while overlaying the
+    /// render surface), so `WindowEvent::KeyboardInput` never fired. ArkTS
+    /// `onKeyPreIme` sees every key the web sees; this entry feeds them to
+    /// the exact same `Event::Input` dispatch the NDK path uses
+    /// (xcomponent.rs `on_key_event`), so tao's repeat detection, modifier
+    /// tracking and keycode mapping all apply unchanged.
+    pub fn dispatch_key_event(&self, data: KeyEventData) {
+        if let Some(ref mut h) = *self.event_loop.borrow_mut() {
+            // window_id = 0 (primary): MainPage.onKeyPreIme forwards pre-IME
+            // keys only for the main window -- sub-UIAbility instances are
+            // gated out upstream (no suppression shim -> double dispatch), so
+            // this dispatch is always the primary's render surface.
+            h(Event::Input(InputEvent::XComponent(
+                XComponentInputEvent::Key(data),
+            )));
+        }
     }
 
     /// Register back press interceptor. Return `true` to intercept back action, `false` to pass through.
@@ -1682,17 +1869,20 @@ impl Default for OpenHarmonyApp {
 //    thread-local that returns `None` off the main thread, so worker contexts
 //    never touch native handles directly.
 // 3. All interior mutability is provided by `Arc<RwLock>`/`Arc<RefCell>`/
-//    `Arc<Mutex>` guards — there is no `&mut` aliasing of `OpenHarmonyAppInner`.
+//    `Arc<Mutex>` guards -- there is no `&mut` aliasing of `OpenHarmonyAppInner`.
 //
-// This impl cannot be removed yet: `tauri/crates/tauri/src/ohos.rs:18` holds a
+// This impl cannot be removed yet: `tauri/crates/tauri/src/ohos.rs:33` holds a
 // `static APP: Mutex<Option<OpenHarmonyApp>>` (requires `Send`), and
-// `crates/derive/src/lib.rs:85` constructs a `LazyLock<OpenHarmonyApp>` (requires
+// `crates/derive/src/lib.rs:98-99` constructs a `LazyLock<OpenHarmonyApp>` (requires
 // `Send + Sync`). Fully eliminating the unsafe impl would require splitting the
 // native handles out of `OpenHarmonyAppInner` into a main-thread-only /
-// thread-local structure — tracked as future work.
+// thread-local structure -- tracked as future work.
 unsafe impl Send for OpenHarmonyApp {}
 unsafe impl Sync for OpenHarmonyApp {}
 
+/// `true` when the host device is a 2-in-1 / PC-class OHOS device (as opposed
+/// to a phone/tablet). The generated entry uses this to gate desktop-only
+/// behaviors (e.g. tray-style window chrome); see the `#[ability]` derive.
 #[napi]
 pub fn is_desktop_device() -> bool {
     cfg!(desktop)
@@ -1718,7 +1908,7 @@ pub fn is_desktop_device() -> bool {
 /// When ArkTS intercepts a close-window URL, it pushes the OHOS window ID here
 /// instead of directly destroying the window. The runtime event loop drains this
 /// queue and processes closes through the proper Rust lifecycle
-/// (close-requested → destroyed lifecycle, defined by the embedding runtime).
+/// (close-requested -> destroyed lifecycle, defined by the embedding runtime).
 static PENDING_WINDOW_CLOSES: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 
 /// NAPI function called from ArkTS to request a window close.
@@ -1728,7 +1918,7 @@ static PENDING_WINDOW_CLOSES: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 /// Timing: ArkTS calls this synchronously before `destroyWindow()` (async).
 /// The Rust event loop drains the queue at the start of the next iteration,
 /// processing window IDs before the async OHOS destruction completes.
-/// The Rust side only uses the ID to look up the matching window —
+/// The Rust side only uses the ID to look up the matching window --
 /// it never accesses the OHOS window object directly, so destroyed windows are safe.
 #[napi]
 pub fn notify_window_close(window_id: i32) {
@@ -1744,7 +1934,7 @@ pub fn notify_window_close(window_id: i32) {
     }
     // Wake the embedding runtime's event loop so it drains the queue promptly.
     // Without this, a sub-window close produces no `MainEvent` to drive the next
-    // iteration, so the queued close (and the downstream `CloseRequested` →
+    // iteration, so the queued close (and the downstream `CloseRequested` ->
     // `Destroyed` events) would sit undrained indefinitely. The main-window
     // path wakes via `tao::EventLoopProxy::send_event` → `waker.wake()`; this
     // mirrors that for the NAPI-driven sub-window path. `OpenHarmonyWaker::new()`
@@ -1768,32 +1958,85 @@ pub fn drain_pending_window_closes() -> Vec<i32> {
         .unwrap_or_default()
 }
 
-// ─── Cursor position tracking ─────────────────────────────────────────────
-// ArkTS `MainPage.onMouse` calls `update_cursor_position` via NAPI because the
-// NDK `DispatchMouseEvent` path does not fire while the cursor is over the
+// --- Cursor position tracking ---------------------------------------------
+// ArkTS `onMouse` handlers (MainPage AND SubWindowPage -- ohos-cursor-passthrough
+// D2) call `update_cursor_position` via NAPI because the NDK
+// `DispatchMouseEvent` path does not fire while the cursor is over the
 // WebView (which covers the window). tao's `cursor_position()` reads these
 // atomics. Dropped during the pluginize refactor (restored from 5941dfb).
 
-/// Last known cursor X position, in vp relative to the MainPage component
-/// (f64 stored as u64 bits). Read through [`OpenHarmonyApp::cursor_position`].
+/// Last known cursor X position, in **screen-global vp** (f64 stored as u64
+/// bits; ohos-cursor-passthrough D1 -- the fed value is the ArkUI event's
+/// `displayX`/`globalDisplayX`, i.e. device-screen-frame, NOT
+/// component-relative). Read through [`OpenHarmonyApp::cursor_position`].
 pub(crate) static CURSOR_POSITION_X: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-/// Last known cursor Y position, in vp relative to the MainPage component
-/// (f64 stored as u64 bits). Read through [`OpenHarmonyApp::cursor_position`].
+/// Last known cursor Y position, in **screen-global vp** (f64 stored as u64
+/// bits). Read through [`OpenHarmonyApp::cursor_position`].
 pub(crate) static CURSOR_POSITION_Y: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-/// NAPI function called from the ArkTS `onMouse` handler (Move/Press) to
-/// update the tracked cursor position. Coordinates are MainPage-relative vp.
+/// Whether ANY feed was ever recorded (ohos-cursor-passthrough D3). The
+/// (0,0) zero-init of the X/Y statics is indistinguishable from a real
+/// screen-origin feed, so "untracked" is carried by this flag instead: until
+/// it is set, `cursor_position` fails with [`CursorUntracked`].
+pub(crate) static EVER_FED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// NAPI function called from the ArkTS `onMouse` handlers (Move/Press) to
+/// update the tracked cursor position. Coordinates are **screen-global vp**
+/// (the event's `displayX`/`globalDisplayX` -- ohos-cursor-passthrough D1;
+/// the NAPI signature is unchanged, only the value semantics were upgraded
+/// from MainPage-component-relative to screen-global).
+///
+/// Memory-order discipline (task 2.1, mandatory): X -> Y -> EVER_FED(Release).
+/// The Release store is placed AFTER the X/Y stores so a reader that
+/// observes `ever_fed=true` (Acquire) also sees this feed's X/Y values --
+/// without the ordering, a concurrent first feed could produce
+/// `Ok((0,0))`, the exact sentinel the untracked contract removes. The X/Y
+/// pair itself can still tear under concurrent feeds (new X with old Y);
+/// that is a pre-existing property of the two-statics layout, the hit-test
+/// tolerance absorbs it, and collapsing into a single packed atomic is the
+/// documented alternative (not taken here).
 #[napi]
 pub fn update_cursor_position(x: f64, y: f64) {
     CURSOR_POSITION_X.store(x.to_bits(), std::sync::atomic::Ordering::Relaxed);
     CURSOR_POSITION_Y.store(y.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    EVER_FED.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// Typed "no feed ever recorded" error for [`OpenHarmonyApp::cursor_position`]
+/// (ohos-cursor-passthrough D3). Unit-like by design: it carries no payload --
+/// the only fact it encodes is "untracked" -- and tao maps it 1:1 onto
+/// `ExternalError::NotSupported` (the section 1.5 error-conversion constraint: one
+/// variant, no wrapping).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorUntracked;
+
+/// Pure cursor read-out (ohos-cursor-passthrough 2.1): tracked feed ->
+/// screen-global vp x scale = global physical px (the tao upstream semantic,
+/// Windows `GetCursorPos`); never-fed -> typed [`CursorUntracked`] error.
+/// Split from [`OpenHarmonyApp::cursor_position`] so both branches are UT-able
+/// without touching the process statics (device UT constraint: OHOS UTs can
+/// only exercise pure functions). `pub(crate)` -- the only cross-crate consumer
+/// (tao) reads through `OpenHarmonyApp::cursor_position` and only needs
+/// [`CursorUntracked`] public (audit round 1 suggestion).
+pub(crate) fn cursor_position_with(
+    ever_fed: bool,
+    x_vp: f64,
+    y_vp: f64,
+    scale: f32,
+) -> std::result::Result<(f64, f64), CursorUntracked> {
+    if !ever_fed {
+        return Err(CursorUntracked);
+    }
+    let s = scale as f64;
+    Ok((x_vp * s, y_vp * s))
 }
 
 /// Global queue for pending window status changes from ArkTS
-/// (`windowStatusChange` callbacks — maximize/minimize/fullscreen/floating).
+/// (`windowStatusChange` callbacks -- maximize/minimize/fullscreen/floating).
 /// The runtime event loop drains this queue and feeds each (window_id, status)
 /// into tao's `apply_window_status` mirror bits.
 /// Ported from upstream PR#45 (fc8c3cf/a052d3f): status sync via NAPI direct call
@@ -1824,8 +2067,8 @@ pub fn notify_window_status(window_id: i32, status: i32) {
 }
 
 /// Drain all pending window status changes.
-/// Called by tauri-runtime-wry event loop (alongside `drain_pending_window_closes`)
-/// to回灌 system window status into tao mirror bits.
+/// Called by tao's OHOS event loop (alongside `drain_pending_window_closes`)
+/// to feed system window status back into tao mirror bits.
 pub fn drain_pending_window_status() -> Vec<(i32, i32)> {
     PENDING_WINDOW_STATUS
         .lock()
@@ -1833,26 +2076,258 @@ pub fn drain_pending_window_status() -> Vec<(i32, i32)> {
         .unwrap_or_default()
 }
 
+/// Global queue for pending window focus transitions from ArkTS (#180(1):
+/// `win.on('windowEvent')` WINDOW_ACTIVE/WINDOW_INACTIVE collection --
+/// `windowFocusChange` is absent from the local DevEco SDK `@ohos.window.d.ts`
+/// overload table, so the `WindowEventType` enum behind the `'windowEvent'`
+/// event (@since 10; @since 11 crossplatform/atomicservice) is the equivalent
+/// signal). The runtime event loop drains this queue and feeds each
+/// (window_id, focused) transition into tao's `LAST_FOCUSED_WINDOW_ID`
+/// change-edge guard, which forwards to the existing focus paths and the
+/// WindowStateMirror focused bit (p2 #173 write face).
+static PENDING_WINDOW_FOCUS: Mutex<Vec<(i64, bool)>> = Mutex::new(Vec::new());
+
+/// NAPI function called from ArkTS `windowEvent` handlers to report a window
+/// focus transition (wire name `notifyWindowFocus` -- `#[napi]` camelCase,
+/// mirroring `notify_window_status`). Queues (window_id, focused) for the Rust
+/// event loop; de-duplication happens on the tao side (edge guard), this layer
+/// only transports the raw transition.
+#[napi]
+pub fn notify_window_focus(window_id: i64, focused: bool) {
+    match PENDING_WINDOW_FOCUS.lock() {
+        Ok(mut queue) => queue.push((window_id, focused)),
+        Err(poisoned) => {
+            log::warn!(
+                "[OHOS] PENDING_WINDOW_FOCUS mutex poisoned, recovering. window_id={} focused={}",
+                window_id,
+                focused
+            );
+            poisoned.into_inner().push((window_id, focused));
+        }
+    }
+}
+
+/// Drain all pending window focus transitions.
+/// Called by the tao OHOS event loop (alongside `drain_pending_window_status`)
+/// so sub-window focus edges reach the same mirror bits the stage path
+/// uses (spec ohos-window-focus-state: both paths share one de-dup guard).
+pub fn drain_pending_window_focus() -> Vec<(i64, bool)> {
+    PENDING_WINDOW_FOCUS
+        .lock()
+        .map(|mut q| q.drain(..).collect())
+        .unwrap_or_default()
+}
+
+/// Save-side handle passed with [`Event::SaveState`]; the handler stores the
+/// state bytes the system should persist for this ability instance.
 #[derive(Clone)]
 pub struct SaveSaver<'a> {
     pub(crate) app: &'a OpenHarmonyApp,
 }
 
 impl<'a> SaveSaver<'a> {
+    /// Stores the state bytes to persist for this ability instance.
     pub fn save(&self, state: Vec<u8>) {
         self.app.save(state);
     }
 }
 
+/// Load-side handle passed with [`Event::Resume`]; the handler reads the state
+/// bytes persisted by a previous session (when restoring).
 #[derive(Clone)]
 pub struct SaveLoader<'a> {
     pub(crate) app: &'a OpenHarmonyApp,
 }
 
 impl<'a> SaveLoader<'a> {
+    /// Loads the persisted state bytes, or `None` when nothing was saved.
     pub fn load(&self) -> Option<Vec<u8>> {
         self.app.load()
     }
+}
+
+// --- want.parameters storage (per UIAbility instance, design.md D9) ---
+
+/// Latest `want.parameters` JSON per UIAbility instance, keyed by tauri window id
+/// (0 = the process's first instance). `onNewWant` stores with the originating
+/// instance's id so a spawned instance's deep link never overwrites the primary's.
+pub(crate) static WANT_PARAMETERS: LazyLock<Mutex<HashMap<i64, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub(crate) fn store_want_parameters(window_id: i64, json: &str) {
+    match WANT_PARAMETERS.lock() {
+        Ok(mut params) => {
+            params.insert(window_id, json.to_string());
+        }
+        Err(e) => crate::error!("WANT_PARAMETERS mutex poisoned in store: {}", e),
+    }
+}
+
+/// Takes the `want.parameters` JSON stored for `window_id` (draining that entry).
+///
+/// Safe to call from any thread. The value is consumed (entry removed), so a
+/// second call for the same instance returns `""` until the next `onNewWant`
+/// stores a fresh value. Consumed by the `plugin-deep-link` facade
+/// (`DeepLinkClient`).
+pub fn take_want_parameters_for_window(window_id: i64) -> String {
+    WANT_PARAMETERS
+        .lock()
+        .map(|mut p| p.remove(&window_id).unwrap_or_default())
+        .unwrap_or_default()
+}
+
+/// Primary-instance (window id 0) variant of [`take_want_parameters_for_window`].
+pub fn take_want_parameters() -> String {
+    take_want_parameters_for_window(0)
+}
+
+// --- initial want.uri storage (per UIAbility instance, design.md D9) ---
+
+/// Initial `want.uri` from cold-start `onCreate`, keyed by tauri window id.
+pub(crate) static INITIAL_WANT_URI: LazyLock<Mutex<HashMap<i64, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub(crate) fn store_initial_want_uri(window_id: i64, uri: &str) {
+    match INITIAL_WANT_URI.lock() {
+        Ok(mut uris) => {
+            uris.insert(window_id, uri.to_string());
+        }
+        Err(e) => crate::error!("INITIAL_WANT_URI mutex poisoned in store: {}", e),
+    }
+}
+
+/// Takes the initial `want.uri` stored for `window_id` (draining that entry).
+///
+/// Safe to call from any thread. The value is consumed (entry removed), so a
+/// second call for the same instance returns `""`. Consumed by the
+/// `plugin-deep-link` facade (`DeepLinkClient`) to surface the cold-start deep
+/// link of the calling window.
+pub fn take_initial_want_uri_for_window(window_id: i64) -> String {
+    INITIAL_WANT_URI
+        .lock()
+        .map(|mut u| u.remove(&window_id).unwrap_or_default())
+        .unwrap_or_default()
+}
+
+/// Primary-instance (window id 0) variant of [`take_initial_want_uri_for_window`].
+pub fn take_initial_want_uri() -> String {
+    take_initial_want_uri_for_window(0)
+}
+
+/// Drops the want storage (both maps) for a destroyed UIAbility instance
+/// (design.md D13). The lazy-take accessors above only drain on read, so an
+/// instance that never queried its deep link would otherwise leak its entries.
+/// Ids are never reused, so this cannot race a live instance.
+fn remove_want_uri_storage(window_id: i64) {
+    if let Ok(mut params) = WANT_PARAMETERS.lock() {
+        params.remove(&window_id);
+    }
+    if let Ok(mut uris) = INITIAL_WANT_URI.lock() {
+        uris.remove(&window_id);
+    }
+}
+
+// --- window label -> id registry (deep-link per-instance resolution, D9) ---
+
+/// Maps tauri window labels to their pre-allocated UIAbility window ids.
+///
+/// `start_ui_ability` records every label it spawns so the deep-link facade can
+/// resolve a calling `Window`'s label back to its instance's want-URI storage.
+/// The primary window is never inserted at runtime: `window_id_for_label`
+/// resolves unknown labels to id 0 (`unwrap_or(0)`), which doubles as the
+/// fallback for the un-spawned "main" label -- matching single-instance
+/// behavior.
+static WINDOW_ID_BY_LABEL: LazyLock<Mutex<HashMap<String, i64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Records (or overwrites) the window id owned by `label`.
+pub fn register_window_label(label: &str, window_id: i64) {
+    match WINDOW_ID_BY_LABEL.lock() {
+        Ok(mut labels) => {
+            labels.insert(label.to_owned(), window_id);
+        }
+        Err(e) => crate::error!("WINDOW_ID_BY_LABEL mutex poisoned in store: {}", e),
+    }
+}
+
+/// Resolves the window id previously registered for `label` (primary = 0 when
+/// the label was never registered, matching single-instance behavior).
+pub fn window_id_for_label(label: &str) -> i64 {
+    WINDOW_ID_BY_LABEL
+        .lock()
+        .map(|labels| labels.get(label).copied().unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Removes the label -> id entry for a destroyed UIAbility instance (design.md
+/// D13). The map is keyed by label, so scan for our id -- the registry holds at
+/// most one entry per live spawned window.
+///
+/// Direction note (audit of the E4 plan): after removal, a late
+/// `window_id_for_label` for the dead label resolves to 0 and would read the
+/// primary's memo. A call arriving from a destroyed window's webview is
+/// unreachable in practice, and keeping stale entries breaks the leak check.
+pub fn unregister_window_label(window_id: i64) {
+    if let Ok(mut labels) = WINDOW_ID_BY_LABEL.lock() {
+        labels.retain(|_, id| *id != window_id);
+    }
+}
+
+// --- app-continuation storage (launchReason === CONTINUATION restore) ---
+
+/// Marks whether the current launch is an app-continuation restore.
+///
+/// Peek-only (never drained): queries are idempotent and can be repeated
+/// without consuming the continuation payload.
+pub(crate) static CONTINUATION_RESTORE: Mutex<bool> = Mutex::new(false);
+
+/// Stores the continuation payload JSON (`want.parameters`) from a
+/// continuation-restore launch (cold start `onCreate` or warm `onNewWant`).
+pub(crate) static CONTINUATION_DATA: Mutex<String> = Mutex::new(String::new());
+
+/// Stores the continuation signal from a lifecycle callback.
+///
+/// `is_continuation == true` writes both the flag and the payload (passed
+/// through verbatim -- the wantParam schema is an application-level contract).
+/// `is_continuation == false` clears both: the statics survive across Ability
+/// instances, so a plain relaunch must not observe the previous session's
+/// continuation payload.
+///
+/// Public (not `pub(crate)`) so the `plugin-continuation` crate's unit tests can
+/// drive the statics; production callers are the lifecycle closures.
+pub fn store_continuation(is_continuation: bool, parameters_json: &str) {
+    if let (Ok(mut flag), Ok(mut data)) = (CONTINUATION_RESTORE.lock(), CONTINUATION_DATA.lock()) {
+        *flag = is_continuation;
+        *data = if is_continuation {
+            parameters_json.to_string()
+        } else {
+            String::new()
+        };
+    } else {
+        crate::error!("continuation mutex poisoned in store");
+    }
+}
+
+/// Returns whether the current launch is an app-continuation restore.
+///
+/// Peek-only: does not consume [`take_continuation_data`], safe to call
+/// repeatedly. Consumed by the `plugin-continuation` facade
+/// (`ContinuationClient`).
+pub fn is_continuation_restore() -> bool {
+    CONTINUATION_RESTORE.lock().map(|f| *f).unwrap_or(false)
+}
+
+/// Takes the continuation payload JSON (draining the stored value).
+///
+/// Safe to call from any thread. The value is consumed (replaced with an empty
+/// `String`), so a second call returns `""` -- empty also means the launch was
+/// not a continuation restore. Consumed by the `plugin-continuation` facade
+/// (`ContinuationClient`).
+pub fn take_continuation_data() -> String {
+    CONTINUATION_DATA
+        .lock()
+        .map(|mut d| std::mem::take(&mut *d))
+        .unwrap_or_default()
 }
 
 // --- app-continuation source-side snapshot (onContinue save) ---
@@ -1891,7 +2366,7 @@ pub fn peek_continue_snapshot() -> String {
 /// NAPI function called from the ArkTS `onContinue` lifecycle callback to
 /// synchronously read the source-side continuation snapshot (pre-registered
 /// via `setContinuationData`). `onContinue` is a synchronous callback, so the
-/// read must be a plain NAPI call — no Promise, no bridge round-trip. Empty
+/// read must be a plain NAPI call -- no Promise, no bridge round-trip. Empty
 /// string means "nothing registered" (the caller refuses with MISMATCH).
 #[napi]
 pub fn read_continue_snapshot() -> String {
@@ -1948,7 +2423,7 @@ mod continuation_tests {
     fn test_non_continuation_launch_clears_stale_payload() {
         let app = OpenHarmonyApp::new();
         app.store_continuation(true, r#"{"stale":true}"#);
-        // A plain relaunch stores isContinuation=false — must clear both.
+        // A plain relaunch stores isContinuation=false -- must clear both.
         app.store_continuation(false, r#"{}"#);
         assert!(!app.is_continuation_restore());
         assert_eq!(app.take_continuation_data(), "");
@@ -1981,7 +2456,7 @@ mod continuation_tests {
         assert_eq!(app_a.take_want_parameters(), "");
     }
 
-    // ─── CONTINUATION_SNAPSHOT stays process-level (NAPI reader) ───
+    // --- CONTINUATION_SNAPSHOT stays process-level (NAPI reader) ---
     // These tests share the one static, so serialize them explicitly.
     static SERIALIZE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -2065,8 +2540,8 @@ mod want_parameters_tests {
 mod tests {
     use super::{OpenHarmonyApp, OpenHarmonyAppInner};
     use crate::{
-        update_cursor_position, AvoidArea, AvoidAreaType, Rect, TouchInputDelivery,
-        CURSOR_POSITION_X, CURSOR_POSITION_Y,
+        cursor_position_with, update_cursor_position, AvoidArea, AvoidAreaType, CursorUntracked,
+        Rect, TouchInputDelivery, CURSOR_POSITION_X, CURSOR_POSITION_Y,
     };
 
     #[test]
@@ -2096,6 +2571,140 @@ mod tests {
         app.set_touch_input_delivery(TouchInputDelivery::Both)
             .unwrap();
         assert_eq!(app.touch_input_delivery(), TouchInputDelivery::Both);
+    }
+
+    #[test]
+    fn d13_teardown_drops_per_window_registry_entries() {
+        use crate::window::{
+            is_ui_ability_stage_ready, register_pending_ui_ability, unregister_pending_ui_ability,
+        };
+        use crate::{register_window_label, window_id_for_label};
+
+        // Pending-ability handshake: once torn down the id reads as unknown, and
+        // unknown ids read as "ready" (see is_ui_ability_stage_ready) -- a future
+        // spawn opens a fresh entry via register_pending_ui_ability.
+        register_pending_ui_ability(11);
+        assert!(!is_ui_ability_stage_ready(11));
+        assert_eq!(unregister_pending_ui_ability(11), 0);
+        assert!(is_ui_ability_stage_ready(11));
+        // Tearing down an id that never existed is a no-op.
+        assert_eq!(unregister_pending_ui_ability(404), 0);
+
+        // Want storage: the D13 teardown drains entries the instance never read
+        // (the lazy-take accessors only clear on read).
+        super::store_want_parameters(11, "{}");
+        super::store_initial_want_uri(11, "tauri://never-read");
+        super::remove_want_uri_storage(11);
+        assert_eq!(crate::take_want_parameters_for_window(11), "");
+        assert_eq!(crate::take_initial_want_uri_for_window(11), "");
+
+        // Label registry: removing our id leaves other labels untouched, and the
+        // dead label resolves back to 0 (primary) -- see the direction note on
+        // unregister_window_label.
+        register_window_label("d13-spawned", 11);
+        register_window_label("d13-other", 12);
+        super::unregister_window_label(11);
+        assert_eq!(window_id_for_label("d13-spawned"), 0);
+        assert_eq!(window_id_for_label("d13-other"), 12);
+    }
+
+    #[test]
+    fn ui_ability_teardown_pair_out_removes_both_rect_table_entries() {
+        // Contract (release_render_owner note + unregister_ui_ability_state doc):
+        // a spawned UIAbility instance's onAbilityDestroy path reaches
+        // unregister_ui_ability_state, which removes that id's entries from the
+        // per-window rect caches -- BOTH tables, pair-out symmetric with
+        // set_window_rects' pair-in (outer + drawable go in together, so they
+        // go out together). The rect entries are seeded through the
+        // registry directly (same style as
+        // releasing_a_component_clears_its_window_scoped_cache) because the
+        // production writer is the windowRectChange lifecycle closure, which no
+        // host test can drive.
+        let app = super::OpenHarmonyApp::new();
+        let spawned_id = 33;
+        {
+            let mut inner = app.inner.write().unwrap();
+            inner.window_rects.insert(
+                spawned_id,
+                Rect {
+                    top: 12,
+                    left: 34,
+                    width: 560,
+                    height: 320,
+                },
+            );
+            inner.inner_rects.insert(
+                spawned_id,
+                Rect {
+                    top: 14,
+                    left: 3,
+                    width: 560,
+                    height: 306,
+                },
+            );
+            // A different spawned window's entries must survive this teardown
+            // in BOTH tables (window ids are monotonic and removal is by id
+            // only). Seeded as a near-miss pair (top/left transposed) and
+            // pinned at value level, not presence-only.
+            inner.window_rects.insert(
+                34,
+                Rect {
+                    top: 1,
+                    left: 2,
+                    width: 3,
+                    height: 4,
+                },
+            );
+            inner.inner_rects.insert(
+                34,
+                Rect {
+                    top: 2,
+                    left: 1,
+                    width: 3,
+                    height: 4,
+                },
+            );
+        }
+
+        app.unregister_ui_ability_state(spawned_id);
+
+        let inner = app.inner.read().unwrap();
+        assert!(
+            !inner.window_rects.contains_key(&spawned_id),
+            "unregister_ui_ability_state must remove the destroyed UIAbility's \
+             window_rects entry (id {})",
+            spawned_id
+        );
+        assert!(
+            !inner.inner_rects.contains_key(&spawned_id),
+            "unregister_ui_ability_state must also remove the destroyed \
+             UIAbility's inner_rects entry (id {}): set_window_rects writes \
+             the outer+drawable pair into both tables together, so teardown \
+             must clear them as a pair too (no bounded-leak dead entries)",
+            spawned_id
+        );
+        assert_eq!(
+            inner.window_rects.get(&34),
+            Some(&Rect {
+                top: 1,
+                left: 2,
+                width: 3,
+                height: 4,
+            }),
+            "unregister_ui_ability_state must not touch other windows' \
+             window_rects entries"
+        );
+        assert_eq!(
+            inner.inner_rects.get(&34),
+            Some(&Rect {
+                top: 2,
+                left: 1,
+                width: 3,
+                height: 4,
+            }),
+            "unregister_ui_ability_state must not touch other windows' \
+             inner_rects entries"
+        );
     }
 
     #[test]
@@ -2142,6 +2751,111 @@ mod tests {
     }
 
     #[test]
+    fn deactivating_a_surface_keeps_both_rect_tables() {
+        // Pin for the release_render_owner NOTE: deactivate_surface clears the
+        // surface-level fields only (raw_window/rect/surface_active) and
+        // intentionally does NOT reset either rect table - window_rects and
+        // inner_rects entries are emptied only along their own lifecycles
+        // (release_render_owner for the main-window key 0,
+        // unregister_ui_ability_state for spawned UIAbility ids). Seeded the
+        // same way as ui_ability_teardown_pair_out_removes_both_rect_table_entries
+        // because the production writer is the windowRectChange lifecycle
+        // closure, which no host test can drive.
+        let mut inner = OpenHarmonyAppInner::new();
+        inner.claim_render_owner("owner").unwrap();
+        assert!(inner.activate_surface("owner", None, Rect::default()));
+
+        // Seed both tables with the main window (0) and a second window (2):
+        // four entries total, all of which must survive deactivation.
+        inner.window_rects.insert(
+            0,
+            Rect {
+                top: 1,
+                left: 2,
+                width: 3,
+                height: 4,
+            },
+        );
+        inner.inner_rects.insert(
+            0,
+            Rect {
+                top: 5,
+                left: 6,
+                width: 7,
+                height: 8,
+            },
+        );
+        inner.window_rects.insert(
+            2,
+            Rect {
+                top: 11,
+                left: 12,
+                width: 13,
+                height: 14,
+            },
+        );
+        inner.inner_rects.insert(
+            2,
+            Rect {
+                top: 15,
+                left: 16,
+                width: 17,
+                height: 18,
+            },
+        );
+
+        assert!(inner.deactivate_surface("owner"));
+
+        // All four entries survive untouched in BOTH tables - pinned at value
+        // level, not presence-only: deactivation must not remove, replace, or
+        // overwrite any seeded entry.
+        assert_eq!(
+            inner.window_rects.get(&0),
+            Some(&Rect {
+                top: 1,
+                left: 2,
+                width: 3,
+                height: 4,
+            }),
+            "deactivate_surface must not touch window_rects: the main-window \
+             (id 0) entry is emptied only by release_render_owner"
+        );
+        assert_eq!(
+            inner.inner_rects.get(&0),
+            Some(&Rect {
+                top: 5,
+                left: 6,
+                width: 7,
+                height: 8,
+            }),
+            "deactivate_surface must not touch inner_rects: the main-window \
+             (id 0) entry is emptied only by release_render_owner"
+        );
+        assert_eq!(
+            inner.window_rects.get(&2),
+            Some(&Rect {
+                top: 11,
+                left: 12,
+                width: 13,
+                height: 14,
+            }),
+            "deactivate_surface must not touch window_rects: the id 2 entry \
+             is emptied only along its own teardown lifecycle"
+        );
+        assert_eq!(
+            inner.inner_rects.get(&2),
+            Some(&Rect {
+                top: 15,
+                left: 16,
+                width: 17,
+                height: 18,
+            }),
+            "deactivate_surface must not touch inner_rects: the id 2 entry \
+             is emptied only along its own teardown lifecycle"
+        );
+    }
+
+    #[test]
     fn releasing_a_component_clears_its_window_scoped_cache() {
         let mut inner = OpenHarmonyAppInner::new();
         inner.claim_render_owner("owner").unwrap();
@@ -2158,114 +2872,252 @@ mod tests {
         );
         inner
             .avoid_areas
-            .insert((0, AvoidAreaType::Keyboard), AvoidArea::default());
+            .insert(AvoidAreaType::Keyboard, AvoidArea::default());
 
         assert_eq!(inner.release_render_owner("owner"), Some(false));
-        // release_render_owner clears key 0 (main window); sub-window rects would persist
-        // until their own destruction path runs. Assert key 0 is gone.
+        // release_render_owner clears key 0 (main window) only; sub-window
+        // entries are not touched by it - spawned UIAbility ids are removed
+        // only by unregister_ui_ability_state (their onAbilityDestroy path),
+        // and true sub-window entries have no destroy-notification path in
+        // this registry at all (see the NOTE above release_render_owner).
+        // Assert key 0 is gone.
         assert!(!inner.window_rects.contains_key(&0));
         assert!(inner.avoid_areas.is_empty());
     }
 
     #[test]
-    fn avoid_areas_are_isolated_by_window_id() {
+    fn inner_rect_for_composes_outer_position_with_drawable_offset() {
+        // Issue Eulogizethesun/tauri#97: inner reads come from the system's
+        // drawableRect snapshot (pushed alongside the WM rect by the same
+        // windowRectChange event), NOT from a window_rect - decor estimate.
         let mut inner = OpenHarmonyAppInner::new();
-        let main = AvoidArea {
-            visible: true,
-            ..Default::default()
-        };
-        let child = AvoidArea::default();
-        inner.avoid_areas.insert((0, AvoidAreaType::Keyboard), main);
-        inner
-            .avoid_areas
-            .insert((7, AvoidAreaType::Keyboard), child);
-
-        assert_eq!(inner.avoid_area(AvoidAreaType::Keyboard), Some(main));
-        assert_eq!(
-            inner.avoid_area_for(7, AvoidAreaType::Keyboard),
-            Some(child)
-        );
-        assert_eq!(
-            inner.avoid_areas(),
-            [(AvoidAreaType::Keyboard, main)].into()
-        );
-    }
-
-    #[test]
-    fn decor_height_latches_only_plausible_surface_diffs() {
-        let mut inner = OpenHarmonyAppInner::new();
-        inner.claim_render_owner("owner").unwrap();
         inner.window_rects.insert(
             0,
             Rect {
-                top: 0,
-                left: 0,
+                top: 76,
+                left: 76,
                 width: 2090,
                 height: 1394,
             },
         );
-        // Surface event: content 146px shorter than the window → latch 146.
-        assert!(inner.activate_surface(
-            "owner",
-            None,
+        // Real reference-device shape: title bar 146px, content below it.
+        inner.inner_rects.insert(
+            0,
             Rect {
-                top: 0,
+                top: 146,
                 left: 0,
                 width: 2090,
                 height: 1248,
-            }
-        ));
-        assert_eq!(inner.decor_height, 146);
-
-        // Garbage diffs (surface mid-relayout while the WM rect already moved, or
-        // vice versa) are rejected — the cache keeps the last plausible value.
-        assert!(inner.update_surface_rect(
-            "owner",
+            },
+        );
+        assert_eq!(
+            inner.inner_rect_for(0),
             Rect {
-                top: 0,
+                top: 76 + 146,
+                left: 76,
+                width: 2090,
+                height: 1248,
+            }
+        );
+    }
+
+    #[test]
+    fn inner_rect_for_falls_back_to_outer_rect_before_first_drawable() {
+        // Pins the DEFENSIVE fallback arm of inner_rect_for (None => outer).
+        // Since review R14 the snapshot tables are only written in pairs via
+        // set_window_rects, so "outer present, drawable absent" is unreachable
+        // through production paths -- this seeds window_rects directly to pin
+        // the arm for any future writer that does the same. Never a guessed
+        // decor value.
+        let mut inner = OpenHarmonyAppInner::new();
+        inner.window_rects.insert(
+            3,
+            Rect {
+                top: 10,
+                left: 20,
+                width: 800,
+                height: 600,
+            },
+        );
+        assert_eq!(
+            inner.inner_rect_for(3),
+            Rect {
+                top: 10,
+                left: 20,
+                width: 800,
+                height: 600,
+            }
+        );
+        // And (0,0,0,0) for an entirely unobserved window, like the old default.
+        assert_eq!(inner.inner_rect_for(7), Rect::default());
+    }
+
+    #[test]
+    fn set_window_rects_with_missing_drawable_skips_outer_too() {
+        // Review R14: a rect-change event whose drawableRect read failed
+        // (drawable = None -- getWindowProperties threw, or the rect was
+        // degenerate: minimized / content not loaded / abnormal state) must not
+        // update the outer snapshot either. Storing the new outer alone would
+        // let inner_rect_for compose a NEW origin with the STALE offset/size
+        // (torn inner rect) until the next readable event.
+        let mut inner = OpenHarmonyAppInner::new();
+        // Reference-device shape (title bar 146px): a good pair first.
+        inner.set_window_rects(
+            2,
+            Rect {
+                top: 76,
+                left: 76,
+                width: 2090,
+                height: 1394,
+            },
+            Some(Rect {
+                top: 146,
                 left: 0,
                 width: 2090,
-                height: 570,
-            }
-        ));
-        assert_eq!(inner.decor_height, 146, "824px diff must be rejected");
-        assert!(inner.update_surface_rect(
-            "owner",
+                height: 1248,
+            }),
+        );
+        // Next event reports a moved+resized outer, but its drawableRect read
+        // failed. Pair-in/pair-out: neither table moves.
+        inner.set_window_rects(
+            2,
             Rect {
-                top: 0,
-                left: 0,
-                width: 2090,
-                height: 1468,
-            }
-        ));
-        assert_eq!(inner.decor_height, 146, "negative diff must be rejected");
-
-        // Decorations hidden (fullscreen / setDecorations(false)): surface fills
-        // the window exactly → latch 0.
-        assert!(inner.update_surface_rect(
-            "owner",
+                top: 100,
+                left: 200,
+                width: 640,
+                height: 480,
+            },
+            None,
+        );
+        assert_eq!(
+            inner.window_rect_for(2),
             Rect {
-                top: 0,
-                left: 0,
+                top: 76,
+                left: 76,
                 width: 2090,
                 height: 1394,
             }
-        ));
-        assert_eq!(inner.decor_height, 0);
-
-        // No main-window rect yet (before the first windowRectChange): the latch
-        // is a no-op and keeps the previous value.
-        inner.window_rects.remove(&0);
-        assert!(inner.update_surface_rect(
-            "owner",
+        );
+        assert_eq!(
+            inner.inner_rect_for(2),
             Rect {
-                top: 0,
-                left: 0,
+                top: 76 + 146,
+                left: 76,
                 width: 2090,
                 height: 1248,
             }
-        ));
-        assert_eq!(inner.decor_height, 0);
+        );
+    }
+
+    #[test]
+    fn inner_rects_are_per_window_and_survive_main_surface_release_for_subwindows() {
+        let mut inner = OpenHarmonyAppInner::new();
+        inner.claim_render_owner("owner").unwrap();
+        inner.set_inner_rect(
+            0,
+            Rect {
+                top: 146,
+                left: 0,
+                width: 2090,
+                height: 1248,
+            },
+        );
+        inner.set_inner_rect(
+            2,
+            Rect {
+                top: 0,
+                left: 0,
+                width: 760,
+                height: 1100,
+            },
+        );
+        // Seed the sub-window's outer rect too, with values distinct from the
+        // drawable seed: a table swap would flip the two and the pins below
+        // would catch it. width/height of the composed read come from the
+        // drawable, so the pre-release composed asserts still hold.
+        inner.set_window_rect(
+            2,
+            Rect {
+                top: 40,
+                left: 30,
+                width: 800,
+                height: 1200,
+            },
+        );
+        assert_eq!(inner.inner_rect_for(2).width, 760_i32);
+        assert_eq!(inner.inner_rect_for(2).height, 1_100_i32);
+        // release_render_owner tears down the MAIN window surface: key 0's
+        // cached rects go with it; sub-window snapshots are unaffected. Both
+        // tables' sub-window entries are pinned at value level here, mirroring
+        // the sibling survival tests.
+        assert_eq!(inner.release_render_owner("owner"), Some(false));
+        assert!(!inner.inner_rects.contains_key(&0));
+        assert_eq!(
+            inner.window_rects.get(&2),
+            Some(&Rect {
+                top: 40,
+                left: 30,
+                width: 800,
+                height: 1_200,
+            }),
+            "release_render_owner must not touch sub-window window_rects entries"
+        );
+        assert_eq!(
+            inner.inner_rects.get(&2),
+            Some(&Rect {
+                top: 0,
+                left: 0,
+                width: 760,
+                height: 1_100,
+            }),
+            "release_render_owner must not touch sub-window inner_rects entries"
+        );
+        // Composed read pinned end-to-end: inner_rect_for offsets the drawable
+        // origin by the outer rect (window {40,30} + drawable {0,0}) and takes
+        // width/height from the drawable.
+        assert_eq!(
+            inner.inner_rect_for(2),
+            Rect {
+                top: 40,
+                left: 30,
+                width: 760,
+                height: 1_100,
+            }
+        );
+    }
+
+    #[test]
+    fn inner_rect_read_is_exactly_the_pushed_snapshot_no_estimate_arithmetic() {
+        // Zero-drift guarantee for save/restore (issue #97 test requirement 3):
+        // inner reads must reproduce the pushed system snapshot exactly -- there
+        // is no estimate arithmetic between the snapshot and the read that
+        // could accumulate error across cycles.
+        let mut inner = OpenHarmonyAppInner::new();
+        for cycle in 0_i32..8_i32 {
+            let (w, h) = (1_000_i32 + cycle, 700_i32 - cycle);
+            inner.window_rects.insert(
+                0,
+                Rect {
+                    top: 76,
+                    left: 76,
+                    width: w,
+                    height: h,
+                },
+            );
+            inner.set_inner_rect(
+                0,
+                Rect {
+                    top: 146,
+                    left: 0,
+                    width: w,
+                    height: h - 146,
+                },
+            );
+            let read = inner.inner_rect_for(0);
+            assert_eq!((read.width, read.height), (w, h - 146_i32));
+            // save->restore would push the same drawable back next cycle; the
+            // read never feeds arithmetic that could shift it.
+        }
     }
 
     #[test]
@@ -2274,116 +3126,54 @@ mod tests {
         update_cursor_position(10.5, 20.25);
         assert_eq!(
             f64::from_bits(CURSOR_POSITION_X.load(Ordering::Relaxed)),
-            10.5
+            10.5_f64
         );
         assert_eq!(
             f64::from_bits(CURSOR_POSITION_Y.load(Ordering::Relaxed)),
-            20.25
+            20.25_f64
         );
     }
 
+    /// UT for the tracked read-out branch (ohos-cursor-passthrough D1/D3, spec
+    /// "main-window Move feed"): a fed screen-global vp coordinate x scale must
+    /// come out as global physical px -- the tao upstream `cursor_position`
+    /// semantic (Windows `GetCursorPos`). `ever_fed=true` -> `Ok`.
     #[test]
-    fn decor_change_callbacks_fire_only_on_real_changes() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::{Arc, Mutex};
-        let mut inner = OpenHarmonyAppInner::new();
-        inner.claim_render_owner("owner").unwrap();
-        inner.window_rects.insert(
-            0,
-            Rect {
-                top: 0,
-                left: 0,
-                width: 2090,
-                height: 1394,
-            },
-        );
-
-        let seen: Arc<Mutex<Vec<i32>>> = Arc::new(Mutex::new(vec![]));
-        // Listener A: stays registered, records every value.
-        let calls_a = Arc::new(AtomicUsize::new(0));
-        let seen_a = seen.clone();
-        let a = {
-            let calls_a = calls_a.clone();
-            Arc::new(move |decor: i32| -> bool {
-                calls_a.fetch_add(1, Ordering::SeqCst);
-                seen_a.lock().unwrap().push(decor);
-                true
-            })
-        };
-        // Listener B: one-shot — removes itself after the first fire.
-        let calls_b = Arc::new(AtomicUsize::new(0));
-        let seen_b = seen.clone();
-        let b = {
-            let calls_b = calls_b.clone();
-            Arc::new(move |decor: i32| -> bool {
-                calls_b.fetch_add(1, Ordering::SeqCst);
-                seen_b.lock().unwrap().push(decor);
-                false
-            })
-        };
-        inner.decor_change_callbacks.push((0, a));
-        inner.decor_change_callbacks.push((1, b));
-        inner.next_decor_cb_id = 2;
-
-        // Latch 146 → both listeners fire once with the new value.
-        assert!(inner.activate_surface(
-            "owner",
-            None,
-            Rect {
-                top: 0,
-                left: 0,
-                width: 2090,
-                height: 1248
-            },
-        ));
-        assert_eq!(inner.decor_height, 146);
-        assert_eq!(calls_a.load(Ordering::SeqCst), 1);
-        assert_eq!(calls_b.load(Ordering::SeqCst), 1);
-
-        // Same value again (surface rect re-delivered with the same diff): no
-        // listener fires, one-shot B is already gone.
-        assert!(inner.update_surface_rect(
-            "owner",
-            Rect {
-                top: 0,
-                left: 0,
-                width: 2090,
-                height: 1248
-            },
-        ));
-        assert_eq!(calls_a.load(Ordering::SeqCst), 1);
-        assert_eq!(calls_b.load(Ordering::SeqCst), 1);
-
-        // Transient garbage (824px diff): rejected, no notification.
-        assert!(inner.update_surface_rect(
-            "owner",
-            Rect {
-                top: 0,
-                left: 0,
-                width: 2090,
-                height: 570
-            },
-        ));
-        assert_eq!(calls_a.load(Ordering::SeqCst), 1);
-
-        // Real change (decorations hidden → 0): only A remains and fires.
-        assert!(inner.update_surface_rect(
-            "owner",
-            Rect {
-                top: 0,
-                left: 0,
-                width: 2090,
-                height: 1394
-            },
-        ));
-        assert_eq!(inner.decor_height, 0);
-        assert_eq!(calls_a.load(Ordering::SeqCst), 2);
-        assert_eq!(calls_b.load(Ordering::SeqCst), 1);
-        assert_eq!(*seen.lock().unwrap(), vec![146, 146, 0]);
+    fn cursor_position_with_tracked_feed_multiplies_scale_by_scale() {
         assert_eq!(
-            inner.decor_change_callbacks.len(),
-            1,
-            "one-shot listener must be removed"
+            cursor_position_with(true, 100.5, 50.25, 2.0),
+            Ok((201.0_f64, 100.5_f64))
+        );
+    }
+
+    /// UT for the untracked fail-safe contract (ohos-cursor-passthrough D3,
+    /// spec "cold start, never fed -> reject"): with no feed ever recorded the
+    /// read-out
+    /// must be the typed `CursorUntracked` error -- NOT the (0,0) zero-init
+    /// sentinel, which is indistinguishable from a real screen-origin feed
+    /// and would let a hit-test "succeed" on garbage. Authoritative
+    /// verification for the cold-start reject contract (the suite has no
+    /// cold-start face: mouse interaction always precedes a suite run).
+    #[test]
+    fn cursor_position_with_untracked_feed_returns_untracked_error() {
+        assert_eq!(
+            cursor_position_with(false, 0.0, 0.0, 2.0),
+            Err(CursorUntracked)
+        );
+    }
+
+    /// UT guard-matrix negative bits (ohos-cursor-passthrough 1.1): the
+    /// scale=1.0 identity branch, and a fed (0.0, 0.0) -- after a real feed
+    /// the screen origin is a legal coordinate, not "untracked".
+    #[test]
+    fn cursor_position_with_scale_one_identity_and_fed_zero_is_legal() {
+        assert_eq!(
+            cursor_position_with(true, 100.5, 50.25, 1.0),
+            Ok((100.5_f64, 50.25_f64))
+        );
+        assert_eq!(
+            cursor_position_with(true, 0.0, 0.0, 2.0),
+            Ok((0.0_f64, 0.0_f64))
         );
     }
 

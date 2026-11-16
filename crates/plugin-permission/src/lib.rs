@@ -11,6 +11,7 @@ use openharmony_ability::{
     OpenHarmonyApp,
 };
 
+/// Bridge plugin exposing the `ohos.permission` actions.
 pub struct PermissionBridgePlugin;
 
 impl BridgePlugin for PermissionBridgePlugin {
@@ -22,12 +23,16 @@ impl BridgePlugin for PermissionBridgePlugin {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// A permission request: a single permission name or a batch.
 pub enum PermissionRequest {
+    /// Request one permission.
     One(String),
+    /// Request several permissions in one dialog round-trip.
     Many(Vec<String>),
 }
 
 impl PermissionRequest {
+    /// Flattens the request into the permission name list sent to ArkTS.
     pub fn permissions(self) -> Vec<String> {
         match self {
             Self::One(permission) => vec![permission],
@@ -61,14 +66,19 @@ impl<'a> From<Vec<&'a str>> for PermissionRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Grant result for one requested permission.
 pub struct PermissionRequestCode {
+    /// The permission name this result belongs to.
     pub permission: String,
+    /// ArkTS grant code (0 = granted; see `requestPermissionsFromUser`).
     pub code: i32,
 }
 
+/// `request-permission` request payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct PermissionRequestPayload {
+    /// Permission names to request, non-empty.
     pub permissions: Vec<String>,
 }
 
@@ -77,9 +87,11 @@ impl_bridge_napi_type!(
     "ohos.permission.PermissionRequest"
 );
 
+/// `request-permission` response payload.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct PermissionResponsePayload {
+    /// Grant codes aligned index-for-index with the requested permissions.
     pub codes: Vec<i32>,
 }
 
@@ -103,6 +115,8 @@ fn validate_request(permissions: &[String]) -> Result<()> {
 
 /// Extension trait supplied by the capability package, never by `openharmony-ability` core.
 pub trait PermissionExt {
+    /// Requests the given permission(s) from the user and returns per-permission
+    /// grant codes.
     fn request_permission<P>(
         &self,
         permission: P,

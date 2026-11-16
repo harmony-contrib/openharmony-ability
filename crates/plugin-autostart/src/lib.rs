@@ -20,6 +20,8 @@ const MIN_AUTOSTART_API_VERSION: i32 = 21;
 
 // ── Bridge plugin declaration ─────────────────────────────────────────────────
 
+/// Rust facade marker for the built-in `ohos.autostart` plugin (async;
+/// requires the Ability context).
 pub struct AutostartBridgePlugin;
 
 impl BridgePlugin for AutostartBridgePlugin {
@@ -32,6 +34,7 @@ impl BridgePlugin for AutostartBridgePlugin {
 
 // ── enable ────────────────────────────────────────────────────────────────────
 
+/// Empty request marker for `enable`.
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct AutostartEnableRequest {}
@@ -40,6 +43,7 @@ impl_bridge_napi_type!(AutostartEnableRequest, "ohos.autostart.EnableRequest");
 
 // ── disable ───────────────────────────────────────────────────────────────────
 
+/// Empty request marker for `disable`.
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct AutostartDisableRequest {}
@@ -48,6 +52,7 @@ impl_bridge_napi_type!(AutostartDisableRequest, "ohos.autostart.DisableRequest")
 
 // ── is-enabled ─────────────────────────────────────────────────────────────────
 
+/// Empty request marker for `is-enabled`.
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct AutostartIsEnabledRequest {}
@@ -56,9 +61,11 @@ impl_bridge_napi_type!(AutostartIsEnabledRequest, "ohos.autostart.IsEnabledReque
 
 // ── acknowledgement ───────────────────────────────────────────────────────────
 
+/// Generic acknowledgement for autostart operations.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct AutostartAcknowledgement {
+    /// `true` when the ArkTS side accepted the operation.
     pub accepted: bool,
 }
 
@@ -78,9 +85,11 @@ impl AutostartAcknowledgement {
 
 // ── is-enabled response ───────────────────────────────────────────────────────
 
+/// Response for the `is-enabled` status query.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct AutostartIsEnabledResponse {
+    /// `true` when autostart is enabled for this application (API 21+ only).
     pub enabled: bool,
 }
 
@@ -98,6 +107,10 @@ pub struct AutostartClient {
 }
 
 impl AutostartClient {
+    /// Builds an autostart client bound to the app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
@@ -167,7 +180,12 @@ impl AutostartClient {
     }
 }
 
+/// Extension trait that adds [`AutostartClient`] access to the app handle.
 pub trait AutostartExt {
+    /// Returns the autostart client bound to this app's bridge session.
+    ///
+    /// # Errors
+    /// Fails when the app has no active bridge session yet.
     fn autostart(&self) -> Result<AutostartClient>;
 }
 

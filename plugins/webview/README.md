@@ -61,12 +61,16 @@ full-screen by default. For composition, Rust creates an `ohos.node` container a
 handle as `parentHandle`; the WebView mounts below it. Rust mounts the container as a whole
 with `mount-into-root`.
 
-Place application content before/after `DefaultXComponent` in a `Stack` for lower/upper layers:
+Place application content before/after `DefaultXComponent` in a `Stack` for lower/upper layers.
+`DefaultXComponent` requires `bridgeSessionId` (the component refuses to mount without it):
+use `@LocalStorageProp('bridgeSessionId')` inside MainPage routing, or
+`@StorageProp("bridgeSessionId")` on standalone pages — `NativeAbility` publishes the
+session id to AppStorage after creating the session; the demo pages use this form:
 
 ```ts
 Stack() {
   this.BusinessUnderlay()                        // Below the plugin tree
-  DefaultXComponent({ moduleName: "demo_native" })
+  DefaultXComponent({ moduleName: "demo_native", bridgeSessionId: this.bridgeSessionId })
   this.BusinessForeground()                      // Above the plugin tree
 }
 ```

@@ -10,6 +10,10 @@
 # Check the whole workspace
 cargo check --workspace
 
+# Windows host, before any `cargo test`/doctest (LNK1181 otherwise): generate the
+# device-library link stubs once per clone. See host-stubs/README.md.
+powershell -ExecutionPolicy Bypass -File host-stubs/generate.ps1
+
 # Host unit tests for a plugin crate (typeName / validation / mode+context assertions)
 cargo test -p openharmony-ability-plugin-<name> --lib
 
@@ -65,7 +69,6 @@ Rust plugin facades (BridgePlugin) + application business code (run_loop)
 | `crates/plugin-fault-injection` | `ohos.fault-injection` — coverage-testing fault injection through the generic `BridgeHost` dispatch-hook seam (`registerDispatchHook`) |
 | `crates/plugin-account` | `ohos.account` — Huawei Account one-tap login (login / silentLogin / logout) |
 | `crates/plugin-audio` | `ohos.audio` — reusable `AVPlayer` media-file playback with borrowed descriptor duplication |
-| `crates/plugin-process` | `ohos.process` — app process control (`appRecovery.restartApp`) |
 | `crates/plugin-updater` | `ohos.updater` — AppGallery update check and download+install |
 
 Every `crates/plugin-<name>` is paired with an ArkTS HAR in `plugins/<name>` that exports the matching `BridgePluginFactory`; core (`crates/ability`) never imports any `plugin-*` crate. The dependency direction is mirrored on the ArkTS side: the core HAR (`native_ability`) never imports any `@ohos-rs/ability-plugin-*` package — plugin HARs depend on `@ohos-rs/ability` and on sibling plugin HARs exactly when their Rust crates do (e.g. `plugins/statusbar` -> `plugins/menu`, matching `crates/plugin-statusbar` -> `crates/plugin-menu`), never the reverse. Cross-cutting interception (fault injection) is not a built-in: a plugin registers a `BridgeDispatchHook` via `BridgePluginContext.registerDispatchHook` during `onInstall`, and `BridgeHost` consults the session's hooks before every plugin invocation.

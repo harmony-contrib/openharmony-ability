@@ -1,6 +1,6 @@
 {
   "module": {
-    "name": "plugin_process",
+    "name": "plugin_webview_cookie",
     "type": "har",
     "deviceTypes": ["default", "tablet", "2in1"],
   },

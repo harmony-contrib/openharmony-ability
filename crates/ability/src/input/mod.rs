@@ -27,9 +27,13 @@ pub use keyboard::{KeyboardEventData, KeyboardEventResponse};
 pub use text_input::*;
 
 #[derive(Clone)]
+/// An input event delivered from the ArkTS/XComponent layer.
 pub enum InputEvent {
+    /// Raw input delivered through the native XComponent callbacks.
     XComponent(XComponentInputEvent),
+    /// Owned ArkUI input and gesture semantics attached to the XComponent node.
     ArkUi(ArkUiInputEvent),
+    /// IME composition/keyboard-status event.
     Ime(ImeEvent),
 }
 
@@ -268,13 +272,22 @@ pub struct SwipeGestureEvent {
 #[derive(Clone)]
 pub enum ImeEvent {
     TextInputEvent(TextInputEventData),
-    PreviewTextEvent { text: String, start: i32, end: i32 },
+    PreviewTextEvent {
+        text: String,
+        start: i32,
+        end: i32,
+    },
     FinishPreviewEvent,
+    /// Backspace pressed; carries the deletion length.
     BackspaceEvent(i32),
     DeleteForwardEvent(i32),
     MoveCursorEvent(Direction),
-    SelectionEvent { start: i32, end: i32 },
+    SelectionEvent {
+        start: i32,
+        end: i32,
+    },
     ExtendActionEvent(Action),
+    /// Keyboard show/hide status changed; carries the new `KeyboardStatus`.
     ImeStatusEvent(KeyboardStatus),
     EnterEvent(i32),
 }

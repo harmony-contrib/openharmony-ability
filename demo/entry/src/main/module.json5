@@ -54,6 +54,18 @@
       {
         "name": "ohos.permission.INTERNET",
       },
+      // Window-level capabilities the demo exercises through the
+      // source-dependency native_ability (transparent windows, cursor lock).
+      // Moved from native_ability/src/main/module.json5: a HAR's permissions
+      // are not carried by the packed har, so the app module is the real
+      // declaration point (issue Eulogizethesun/tauri#220/C81). Both are
+      // system_grant — no reason/usedScene, no ACL risk.
+      {
+        "name": "ohos.permission.SET_WINDOW_TRANSPARENT",
+      },
+      {
+        "name": "ohos.permission.LOCK_WINDOW_CURSOR",
+      },
     ],
   },
 }
