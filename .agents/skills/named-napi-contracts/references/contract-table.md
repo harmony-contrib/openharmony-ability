@@ -24,6 +24,9 @@
 | `ohos.window` / `set-window-icon` | `ohos.window.WindowIconRequest` → `{ windowId, rgba, size }` | `ohos.window.Acknowledgement` → `{ accepted }` | async / `ui-context`；API 22+ PC/2in1 主窗口；size=0 恢复打包图标 |
 | `ohos.window` / `create-os-window`、`set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window`、`is-maximized`、`is-minimized` | `ohos.window.CreateRequest` / `WindowIdRequest` / `DecorationsRequest` / `ColorRequest` / `BlurRequest` / `MoveRequest` / `ResizeRequest` / `FocusableRequest` | `ohos.window.CreateResponse` → `{ windowId }` / `Acknowledgement` → `{ accepted }` / `StateResponse` → `{ value }` | async / `ui-context` |
 | `ohos.webview` / `create` | `ohos.webview.CreateRequest` → `{ id, parentHandle?, ... }` | `ohos.webview.CreateResponse` → `{ id }` | async / `ui-context` |
+| `ohos.webview` / `create-with-native-keyboard` | `ohos.webview.CreateRequest` → `ohos.webview.CreateResponse` | async / `ui-context`; same named create ABI, native keyboard path for custom hosts; no MainPage-only suppression shim or synthesis-controller registration |
+| `ohos.webview` / `set-pointer-events` | `ohos.webview.PointerEventsRequest { id, enabled }` | `ohos.webview.Acknowledgement` | async / `ui-context` |
+| `ohos.webview` / `pointer-down` | `ohos.webview.PointerEvent { id, nativeTag, x, y, button, modifiers }` | `ohos.webview.EventAcknowledgement` | scoped reverse event; component-local vp, buttons 0–4, Shift=1/Ctrl=2/Alt=4 |
 | `ohos.webview` / `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`clear-all-browsing-data` | `ohos.webview.ControllerRequest` → `{ id, visible?, color?, url?, html?, headers?, zoom? }` | `ohos.webview.Acknowledgement` → `{ accepted }` | async / `ui-context` |
 | `ohos.webview` / `get-url`、`cookies-with-url` | `ohos.webview.ControllerRequest` → `{ id, url? }` | `ohos.webview.StringResponse` → `{ value }` | async / `ui-context` |
 | `ohos.webview` / `evaluate-script` | `ohos.webview.ScriptRequest` → `{ id, script }` | `ohos.webview.ScriptResponse` → `{ result }` | async / `ui-context` |
@@ -38,7 +41,8 @@
 | `ohos.webview` / `cookies-details` | `ohos.webview.ControllerRequest` | `ohos.webview.CookiesResponse` | API 23+ 全部普通 Cookie，保留 domain/path/secure/httpOnly/sameSite/到期 Unix 毫秒 |
 | `ohos.webview` / `clear-cookies` | `ohos.webview.ControllerRequest` | `ohos.webview.Acknowledgement` | 仅清理普通 Cookie；不删除其他浏览数据 |
 | `ohos.window` / `show-prompt-choice` | `ohos.window.PromptChoiceRequest` | `ohos.window.PromptChoiceResponse` | 实际窗口中的 ArkUI Checkbox；index 与 checked 一起返回；取消和销毁关闭对话框 |
-| `ohos.notification` / `show-with-options` | `ohos.notification.ShowOptionsRequest` | `ohos.notification.Acknowledgement` | 保留原 show；图片按 192×192 解码且释放，分组、发件人显示名、静默 CONTENT_INFORMATION 槽位 |
+| `ohos.notification` / `show-with-options` | `ohos.notification.ShowOptionsRequest` | `ohos.notification.Acknowledgement` | 保留原 show；图片等比限边 512 像素后以 PictureContent 展示且释放，分组、发件人显示名、API 23+ 静默声音／振动关闭标记 |
+| `ohos.notification` / `show-social` | `ohos.notification.ShowAvatarRequest` | `ohos.notification.Acknowledgement` | 社交通信槽位，头像可为空；silent 使用 API 23+ 声音／振动关闭标记；不声明联系人或系统会话身份 |
 | `ohos.notification` / `parse-response` | `ohos.notification.ResponseRequest` | `ohos.notification.Response` | 仅识别配置 scheme 的 response URI，包含 matched/tag/action；普通深链不匹配 |
 | `ohos.notification` / `dismiss-all` | `ohos.notification.EmptyRequest` | `ohos.notification.Acknowledgement` | 撤销本应用通知，包含以前启动发布的通知 |
 

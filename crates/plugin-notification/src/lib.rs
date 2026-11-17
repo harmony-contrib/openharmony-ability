@@ -99,6 +99,21 @@ impl_bridge_napi_type!(
     "ohos.notification.ShowAvatarRequest"
 );
 
+impl ShowNotificationAvatarRequest {
+    fn validate(&self) -> Result<()> {
+        if self.avatar.len() > 16 * 1024 * 1024 || self.options.image.len() > 16 * 1024 * 1024 {
+            return Err(Error::from_reason("Notification image exceeds 16 MiB"));
+        }
+        ShowNotificationRequest {
+            tag: self.options.tag.clone(),
+            title: self.options.title.clone(),
+            body: self.options.body.clone(),
+            actions: self.options.actions.clone(),
+        }
+        .validate()
+    }
+}
+
 /// Extended presentation uses a new action so existing ShowRequest callers retain their ABI.
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -193,19 +208,18 @@ impl NotificationClient {
     }
 
     pub async fn show_with_avatar(&self, request: ShowNotificationAvatarRequest) -> Result<bool> {
-        if request.avatar.len() > 16 * 1024 * 1024 || request.options.image.len() > 16 * 1024 * 1024
-        {
-            return Err(Error::from_reason("Notification image exceeds 16 MiB"));
-        }
-        ShowNotificationRequest {
-            tag: request.options.tag.clone(),
-            title: request.options.title.clone(),
-            body: request.options.body.clone(),
-            actions: request.options.actions.clone(),
-        }
-        .validate()?;
+        request.validate()?;
         let response = self.bridge.call_async::<NotificationBridgePlugin, ShowNotificationAvatarRequest, NotificationAcknowledgement>(
             "show-with-avatar", request, BridgeCallOptions::default().with_timeout_ms(120_000)).await?;
+        Ok(response.accepted)
+    }
+
+    /// Publish to the social communication slot. An avatar is optional; this does
+    /// not establish a system contact or conversation identity.
+    pub async fn show_social(&self, request: ShowNotificationAvatarRequest) -> Result<bool> {
+        request.validate()?;
+        let response = self.bridge.call_async::<NotificationBridgePlugin, ShowNotificationAvatarRequest, NotificationAcknowledgement>(
+            "show-social", request, BridgeCallOptions::default().with_timeout_ms(120_000)).await?;
         Ok(response.accepted)
     }
 
@@ -247,6 +261,8 @@ mod tests {
 
     #[test]
     fn bridge_types_are_named() {
+        fn assert_async<T: BridgePlugin<Mode = super::AsyncBridge>>() {}
+        assert_async::<NotificationBridgePlugin>();
         assert_eq!(NotificationBridgePlugin::ID, "ohos.notification");
         assert_eq!(
             NotificationBridgePlugin::REQUIRED_CONTEXTS,
@@ -264,6 +280,32 @@ mod tests {
             NotificationAcknowledgement::TYPE_NAME,
             "ohos.notification.Acknowledgement"
         );
+    }
+
+    #[test]
+    fn social_notification_accepts_no_avatar_and_validates_nested_options() {
+        let mut request = super::ShowNotificationAvatarRequest {
+            options: super::ShowNotificationOptionsRequest {
+                tag: "message".into(),
+                title: "Title".into(),
+                body: "Body".into(),
+                actions: vec![],
+                silent: true,
+                group: "chat".into(),
+                image: vec![],
+                sender_name: String::new(),
+            },
+            avatar: vec![],
+        };
+        assert!(request.validate().is_ok());
+        request.options.tag = " ".into();
+        assert!(request.validate().is_err());
+        request.options.tag = "message".into();
+        request.avatar = vec![0; 16 * 1024 * 1024 + 1];
+        assert!(request.validate().is_err());
+        request.avatar.clear();
+        request.options.image = vec![0; 16 * 1024 * 1024 + 1];
+        assert!(request.validate().is_err());
     }
 
     #[test]

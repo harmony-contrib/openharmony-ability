@@ -118,3 +118,28 @@ Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
 ## Toolkit contract additions
 
 Embedded toolkit views can opt into `set-viewport` with a window-relative frame, local clip, and up to 256 local input rectangles. Empty input rectangles disable hit testing. Existing `set-bounds` retains its full-container behavior. `cookies-details` (API 23+) returns cookie attributes; `clear-cookies` does not clear storage or cache. All-data clearing targets the regular store, including its cookies.
+
+### Passive pointer notifications
+
+Register `WebviewCallbacksBuilder::on_pointer_down`, create the WebView, then await
+`handle.set_pointer_events(true)`. The separate action leaves the existing create
+and callback-options contracts unchanged. `pointer-down` reports mouse buttons
+(primary 0, secondary 1, middle 2, back 3, forward 4) or the first touchscreen
+contact in component-local vp. Shift/Ctrl/Alt use bits 1/2/4; ArkUI does not expose
+Super through this public pointer callback. Events do not cancel browser input.
+Disabling, removing the view, retiring its controller, or disposing the session
+stops notifications. Pointer notifications do not implement Tab-out or unhandled
+keyboard forwarding.
+
+### Custom hosts and keyboard input
+
+Use `WebviewClient::create_with_native_keyboard` (action
+`create-with-native-keyboard`, existing named `CreateRequest`/`CreateResponse`)
+when hosting WebViews outside Ability's MainPage. MainPage's legacy creation
+path pairs a document-start suppression shim with its pre-IME DOM synthesizer.
+Injecting that shim into a custom host without the synthesizer hides physical
+keyboard events from page listeners. The new action leaves ArkWeb input intact,
+preserves application initialization scripts on creation and later updates, and
+does not register the controller with MainPage's synthetic event dispatcher.
+It does not fabricate missing ArkWeb key identities or implement unhandled-key
+notifications / Tab-out. The existing `create` action retains its legacy behavior.

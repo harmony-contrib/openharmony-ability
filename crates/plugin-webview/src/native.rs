@@ -50,12 +50,69 @@ pub struct NativeWebviewEvent {
 }
 impl_bridge_napi_type!(NativeWebviewEvent, "ohos.webview.NativeEvent");
 
+/// Keyboard boundary / unhandled-key notification from an embedded WebView.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct NativeWebviewKeyEvent {
+    pub id: String,
+    pub target_id: u32,
+    /// `"tab-out"` or `"key"`.
+    pub kind: String,
+    pub key: String,
+    pub code: String,
+    pub key_code: i32,
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub meta: bool,
+    pub repeat: bool,
+}
+impl_bridge_napi_type!(NativeWebviewKeyEvent, "ohos.webview.NativeKeyEvent");
+
 /// Owns a callback declaration for one native attachment target.
 /// A new declaration replaces the previous one; an old guard cannot remove it.
 pub struct NativeWebviewEvents {
     target_id: u32,
     routes: Arc<NativeEvents<NativeWebviewEvent>>,
     registration: Arc<Registration<NativeWebviewEvent>>,
+}
+
+/// Owns keyboard boundary / unhandled-key subscriptions for one native attachment target.
+pub struct NativeWebviewKeyEvents {
+    target_id: u32,
+    routes: Arc<NativeEvents<NativeWebviewKeyEvent>>,
+    registration: Arc<Registration<NativeWebviewKeyEvent>>,
+}
+
+impl NativeWebviewKeyEvents {
+    pub fn new(
+        app: &OpenHarmonyApp,
+        id: String,
+        target_id: u32,
+        callback: impl Fn(NativeWebviewKeyEvent) + Send + Sync + 'static,
+    ) -> Result<Self> {
+        if id.trim().is_empty() || target_id == 0 {
+            return Err(Error::from_reason(
+                "native WebView key events require an ID and attachment target",
+            ));
+        }
+        let plugin = app
+            .registered_plugin::<WebviewBridgePlugin>()?
+            .ok_or_else(|| Error::from_reason("WebView plugin is not registered"))?;
+        let routes = plugin.native_key_events.clone();
+        let registration = routes.register(target_id, callback);
+        Ok(Self {
+            target_id,
+            routes,
+            registration,
+        })
+    }
+}
+
+impl Drop for NativeWebviewKeyEvents {
+    fn drop(&mut self) {
+        self.routes.remove(self.target_id, &self.registration);
+    }
 }
 impl NativeWebviewEvents {
     /// Registers before creating the matching native controller.

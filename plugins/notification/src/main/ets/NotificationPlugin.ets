@@ -155,21 +155,26 @@ export class NotificationPlugin extends AsyncPluginBase {
       await notificationManager.cancelAll();
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new NotificationAcknowledgement(true) };
     }
-    if (action === "show" || action === "show-with-options" || action === "show-with-avatar") {
+    if (
+      action === "show" ||
+      action === "show-with-options" ||
+      action === "show-with-avatar" ||
+      action === "show-social"
+    ) {
+      const hasAvatar = action === "show-with-avatar" || action === "show-social";
       const value = expectBridgeRequestType(
         payload,
         this.id,
         action,
         action === "show"
           ? SHOW_REQUEST_TYPE
-          : action === "show-with-avatar"
+          : hasAvatar
             ? "ohos.notification.ShowAvatarRequest"
             : "ohos.notification.ShowOptionsRequest",
       ) as ShowRequest | ShowAvatarRequest;
-      const request: ShowRequest =
-        action === "show-with-avatar"
-          ? (value as ShowAvatarRequest).options
-          : (value as ShowRequest);
+      const request: ShowRequest = hasAvatar
+        ? (value as ShowAvatarRequest).options
+        : (value as ShowRequest);
       if (
         !request ||
         typeof request.tag !== "string" ||
@@ -242,6 +247,9 @@ export class NotificationPlugin extends AsyncPluginBase {
         wantAgent: await agentFor(responseUri(this.responseScheme, request.tag)),
         actionButtons: buttons,
       };
+      if (action === "show-social") {
+        notification.notificationSlotType = notificationManager.SlotType.SOCIAL_COMMUNICATION;
+      }
       let avatar: image.PixelMap | undefined;
       let avatarSource: image.ImageSource | undefined;
       let icon: image.PixelMap | undefined;
@@ -263,20 +271,47 @@ export class NotificationPlugin extends AsyncPluginBase {
             // API 23+ explicitly disables both audible and vibrating alerts.
             notification.notificationFlags = { soundEnabled: 2, vibrationEnabled: 2 };
           }
-          if (options.senderName) {
-            notification.content.normal = {
-              title: request.title,
-              text: request.body,
-              additionalText: options.senderName,
-            };
-          }
+          // additionalText is not rendered by the notification center. Keep
+          // the sender visible without repeating a name already in the title.
+          const normal: notificationManager.NotificationBasicContent = {
+            title: request.title,
+            text:
+              options.senderName && options.senderName !== request.title
+                ? `${options.senderName}\n${request.body}`
+                : request.body,
+            additionalText: options.senderName,
+          };
+          notification.content.normal = normal;
           if (options.image.length > 0) {
             source = image.createImageSource(new Uint8Array(options.image).buffer as ArrayBuffer);
-            icon = await source.createPixelMap({ desiredSize: { width: 192, height: 192 } });
-            notification.largeIcon = icon;
+            const info = await source.getImageInfo();
+            if (info.size.width <= 0 || info.size.height <= 0) {
+              throw new Error("Invalid notification image dimensions");
+            }
+            const scale = Math.min(1, 512 / info.size.width, 512 / info.size.height);
+            icon = await source.createPixelMap({
+              desiredSize: {
+                width: Math.max(1, Math.floor(info.size.width * scale)),
+                height: Math.max(1, Math.floor(info.size.height * scale)),
+              },
+              desiredPixelFormat: image.PixelMapFormat.RGBA_8888,
+            });
+            // Picture content is the public attachment presentation. It avoids
+            // relying on the optional large application icon's device policy.
+            notification.content = {
+              notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_PICTURE,
+              picture: {
+                title: normal.title,
+                text: normal.text,
+                additionalText: normal.additionalText,
+                briefText: request.body,
+                expandedTitle: request.title,
+                picture: icon,
+              },
+            };
           }
         }
-        if (action === "show-with-avatar") {
+        if (hasAvatar) {
           const bytes = (value as ShowAvatarRequest).avatar;
           if (!Array.isArray(bytes) || bytes.length > 16 * 1024 * 1024) {
             throw new Error("Invalid notification avatar");

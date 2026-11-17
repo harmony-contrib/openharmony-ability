@@ -96,6 +96,13 @@ impl BridgePlugin for SystemStateBridgePlugin {
                 }
                 event.respond(true)
             }
+            "media-command" => {
+                let cmd: MediaCommandEvent = event.decode()?;
+                if let Some(sender) = MEDIA_COMMAND_EVENT_SENDER.get() {
+                    let _ = sender.send(cmd);
+                }
+                event.respond(true)
+            }
             other => Err(Error::from_reason(format!(
                 "Unsupported ohos.system-state event '{other}'"
             ))),
@@ -211,10 +218,151 @@ pub struct GetDisplaysResponse {
 
 impl_bridge_napi_type!(GetDisplaysResponse, "ohos.system-state.GetDisplaysResponse");
 
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct GetLocaleRegionRequest {}
+impl_bridge_napi_type!(
+    GetLocaleRegionRequest,
+    "ohos.system-state.GetLocaleRegionRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct GetLocaleRegionResponse {
+    pub locale: String,
+    pub first_weekday: i32,
+    pub hour_cycle: i32,
+    pub app_preferred_language: String,
+}
+impl_bridge_napi_type!(
+    GetLocaleRegionResponse,
+    "ohos.system-state.GetLocaleRegionResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct SetAppPreferredLanguageRequest {
+    pub tag: String,
+}
+impl_bridge_napi_type!(
+    SetAppPreferredLanguageRequest,
+    "ohos.system-state.SetAppPreferredLanguageRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct SetAppPreferredLanguageResponse {
+    pub kept: bool,
+}
+impl_bridge_napi_type!(
+    SetAppPreferredLanguageResponse,
+    "ohos.system-state.SetAppPreferredLanguageResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct GetPackageInfoRequest {}
+impl_bridge_napi_type!(
+    GetPackageInfoRequest,
+    "ohos.system-state.GetPackageInfoRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct GetPackageInfoResponse {
+    pub identifier: String,
+    pub name: String,
+    pub version: String,
+}
+impl_bridge_napi_type!(
+    GetPackageInfoResponse,
+    "ohos.system-state.GetPackageInfoResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct GetNetworkStatusRequest {}
+impl_bridge_napi_type!(
+    GetNetworkStatusRequest,
+    "ohos.system-state.GetNetworkStatusRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct GetNetworkStatusResponse {
+    pub online: bool,
+    pub metered: bool,
+}
+impl_bridge_napi_type!(
+    GetNetworkStatusResponse,
+    "ohos.system-state.GetNetworkStatusResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug, Default)]
+pub struct GetPowerStatusRequest {}
+impl_bridge_napi_type!(
+    GetPowerStatusRequest,
+    "ohos.system-state.GetPowerStatusRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct GetPowerStatusResponse {
+    pub on_battery: bool,
+    pub has_battery: bool,
+}
+impl_bridge_napi_type!(
+    GetPowerStatusResponse,
+    "ohos.system-state.GetPowerStatusResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct SetNowPlayingRequest {
+    pub active: bool,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub artwork: Option<Vec<u8>>,
+    pub state: String,
+    pub duration_ms: i64,
+    pub position_ms: i64,
+    pub rate: f64,
+    pub commands: u32,
+}
+impl_bridge_napi_type!(
+    SetNowPlayingRequest,
+    "ohos.system-state.SetNowPlayingRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct SetNowPlayingResponse {
+    pub accepted: bool,
+}
+impl_bridge_napi_type!(
+    SetNowPlayingResponse,
+    "ohos.system-state.SetNowPlayingResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct MediaCommandEvent {
+    pub command: String,
+    pub position_ms: i64,
+}
+impl_bridge_napi_type!(MediaCommandEvent, "ohos.system-state.MediaCommandEvent");
+
 static SYSTEM_STATE_EVENT_SENDER: OnceLock<Sender<SystemStateChangedEvent>> = OnceLock::new();
+static MEDIA_COMMAND_EVENT_SENDER: OnceLock<Sender<MediaCommandEvent>> = OnceLock::new();
 
 pub fn register_system_state_event_sender(sender: Sender<SystemStateChangedEvent>) {
     let _ = SYSTEM_STATE_EVENT_SENDER.set(sender);
+}
+
+pub fn register_media_command_event_sender(sender: Sender<MediaCommandEvent>) {
+    let _ = MEDIA_COMMAND_EVENT_SENDER.set(sender);
 }
 
 #[derive(Clone)]
@@ -333,6 +481,103 @@ impl SystemStateClient {
             )
             .await?;
         Ok(response.displays)
+    }
+
+    pub async fn locale_region(&self) -> Result<GetLocaleRegionResponse> {
+        self.bridge
+            .call_async::<SystemStateBridgePlugin, GetLocaleRegionRequest, GetLocaleRegionResponse>(
+                "get-locale-region",
+                GetLocaleRegionRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await
+    }
+
+    pub async fn set_app_preferred_language(&self, tag: String) -> Result<bool> {
+        let response = self
+            .bridge
+            .call_async::<SystemStateBridgePlugin, SetAppPreferredLanguageRequest, SetAppPreferredLanguageResponse>(
+                "set-app-preferred-language",
+                SetAppPreferredLanguageRequest { tag },
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.kept)
+    }
+
+    pub async fn package_info(&self) -> Result<GetPackageInfoResponse> {
+        self.bridge
+            .call_async::<SystemStateBridgePlugin, GetPackageInfoRequest, GetPackageInfoResponse>(
+                "get-package-info",
+                GetPackageInfoRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await
+    }
+
+    pub async fn network_status(&self) -> Result<GetNetworkStatusResponse> {
+        self.bridge
+            .call_async::<SystemStateBridgePlugin, GetNetworkStatusRequest, GetNetworkStatusResponse>(
+                "get-network-status",
+                GetNetworkStatusRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await
+    }
+
+    pub async fn power_status(&self) -> Result<GetPowerStatusResponse> {
+        self.bridge
+            .call_async::<SystemStateBridgePlugin, GetPowerStatusRequest, GetPowerStatusResponse>(
+                "get-power-status",
+                GetPowerStatusRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await
+    }
+
+    pub async fn request_suspend_delay(&self, reason: String) -> Result<String> {
+        if reason.trim().is_empty()
+            || reason.chars().count() > 256
+            || reason.chars().any(char::is_control)
+        {
+            return Err(Error::from_reason("Invalid suspend delay reason"));
+        }
+        let response = self
+            .bridge
+            .call_async::<SystemStateBridgePlugin, PreventSleepRequest, PreventSleepResponse>(
+                "request-suspend-delay",
+                PreventSleepRequest { reason },
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.id)
+    }
+
+    pub async fn cancel_suspend_delay(&self, id: String) -> Result<()> {
+        let response = self
+            .bridge
+            .call_async::<SystemStateBridgePlugin, ReleaseSleepRequest, ReleaseSleepResponse>(
+                "cancel-suspend-delay",
+                ReleaseSleepRequest { id },
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        if !response.accepted {
+            return Err(Error::from_reason("Suspend delay cancellation rejected"));
+        }
+        Ok(())
+    }
+
+    pub async fn set_now_playing(&self, request: SetNowPlayingRequest) -> Result<bool> {
+        let response = self
+            .bridge
+            .call_async::<SystemStateBridgePlugin, SetNowPlayingRequest, SetNowPlayingResponse>(
+                "set-now-playing",
+                request,
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
     }
 }
 

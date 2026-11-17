@@ -133,6 +133,19 @@ export class StatusbarPlugin extends AsyncPluginBase {
       }
       const abilityContext = context.abilityContext;
 
+      // API 26 can accept addToStatusBar without displaying anything on an
+      // unsupported device. Check before allocating icons or changing handlers.
+      // Older systems do not expose this query and retain their existing path.
+      if (typeof statusBarManager.isStatusBarCapabilitySupported === "function") {
+        const supported = await statusBarManager.isStatusBarCapabilitySupported(abilityContext);
+        if (!context.isActive()) {
+          throw new Error("Statusbar bridge session ended during capability query");
+        }
+        if (!supported) {
+          throw new Error("Status bar capability is not supported in the current device state");
+        }
+      }
+
       // Inject the live UIAbilityContext into StatusBarUtils' module-level
       // globals. iconClickHandler (registered via reRegisterStatusBarClickHandlers
       // below) has no BridgeCallContext, so it reads these globals at event-firing
