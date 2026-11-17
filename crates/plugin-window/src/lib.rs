@@ -468,6 +468,49 @@ impl_bridge_napi_type!(DecorationFlagsRequest, "ohos.window.DecorationFlagsReque
 
 #[napi(object)]
 #[derive(Clone, Debug)]
+pub struct WindowPrivacyRequest {
+    pub window_id: i64,
+    pub enabled: bool,
+}
+
+impl_bridge_napi_type!(WindowPrivacyRequest, "ohos.window.PrivacyRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowShadowRequest {
+    pub window_id: i64,
+    pub enabled: bool,
+    pub radius: f64,
+}
+
+impl_bridge_napi_type!(WindowShadowRequest, "ohos.window.ShadowRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowTitleButtonRectResponse {
+    pub right: i32,
+    pub top: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl_bridge_napi_type!(
+    WindowTitleButtonRectResponse,
+    "ohos.window.TitleButtonRectResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WindowInputRegionRequest {
+    pub window_id: i64,
+    pub rects: Vec<RawRect>,
+    pub reset: bool,
+}
+
+impl_bridge_napi_type!(WindowInputRegionRequest, "ohos.window.InputRegionRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
 pub struct RealWindowIdResponse {
     pub window_id: i64,
 }
@@ -990,6 +1033,78 @@ impl WindowClient {
             .window_id;
         validate_window_id(real_id)?;
         Ok(real_id)
+    }
+
+    pub async fn set_window_privacy_mode(&self, window_id: i64, enabled: bool) -> Result<()> {
+        validate_window_id(window_id)?;
+        self.call::<WindowPrivacyRequest, WindowAcknowledgement>(
+            "set-privacy-mode",
+            WindowPrivacyRequest { window_id, enabled },
+        )
+        .await?
+        .ensure()
+    }
+
+    pub async fn set_window_shadow(
+        &self,
+        window_id: i64,
+        enabled: bool,
+        radius: f64,
+    ) -> Result<()> {
+        validate_window_id(window_id)?;
+        if !radius.is_finite() || radius < 0.0 {
+            return Err(Error::from_reason(
+                "window shadow radius must be a non-negative finite number",
+            ));
+        }
+        self.call::<WindowShadowRequest, WindowAcknowledgement>(
+            "set-shadow-radius",
+            WindowShadowRequest {
+                window_id,
+                enabled,
+                radius,
+            },
+        )
+        .await?
+        .ensure()
+    }
+
+    pub async fn title_button_rect(&self, window_id: i64) -> Result<WindowTitleButtonRectResponse> {
+        validate_window_id(window_id)?;
+        self.call::<WindowIdRequest, WindowTitleButtonRectResponse>(
+            "get-title-button-rect",
+            WindowIdRequest { window_id },
+        )
+        .await
+    }
+
+    pub async fn set_window_input_region(
+        &self,
+        window_id: i64,
+        rects: Vec<RawRect>,
+        reset: bool,
+    ) -> Result<()> {
+        validate_window_id(window_id)?;
+        if rects.len() > 256 {
+            return Err(Error::from_reason("too many input region rectangles"));
+        }
+        for rect in &rects {
+            if rect.width < 0 || rect.height < 0 {
+                return Err(Error::from_reason(
+                    "input region rectangle width and height must be non-negative",
+                ));
+            }
+        }
+        self.call::<WindowInputRegionRequest, WindowAcknowledgement>(
+            "set-input-region",
+            WindowInputRegionRequest {
+                window_id,
+                rects,
+                reset,
+            },
+        )
+        .await?
+        .ensure()
     }
 
     async fn window_command(&self, action: &str, window_id: i64) -> Result<()> {

@@ -12,11 +12,13 @@ use std::{
 use napi_ohos::{Error, Result};
 
 use super::{
-    controller, WebviewCallbackOptions, WebviewDownloadEndEvent, WebviewDownloadStartRequest,
-    WebviewDownloadStartResponse, WebviewDragEvent, WebviewDropEvent, WebviewHttpsInterceptRequest,
-    WebviewHttpsInterceptResponse, WebviewNavigationRequest, WebviewNavigationResponse,
-    WebviewNewWindowRequest, WebviewNewWindowResponse, WebviewPageEvent, WebviewPointerEvent,
-    WebviewTitleChangeEvent,
+    controller, NativeWebviewKeyEvent, WebviewAudioStateEvent, WebviewCallbackOptions,
+    WebviewControllerEvent, WebviewDownloadEndEvent, WebviewDownloadStartRequest,
+    WebviewDownloadStartResponse, WebviewDragEvent, WebviewDropEvent, WebviewHttpAuthRequestEvent,
+    WebviewHttpsInterceptRequest, WebviewHttpsInterceptResponse, WebviewLoadErrorEvent,
+    WebviewNavigationRequest, WebviewNavigationResponse, WebviewNewWindowRequest,
+    WebviewNewWindowResponse, WebviewPageEvent, WebviewPermissionRequestEvent, WebviewPointerEvent,
+    WebviewRenderExitedEvent, WebviewSslErrorEvent, WebviewTitleChangeEvent,
 };
 
 type NavigationCallback = Arc<dyn Fn(WebviewNavigationRequest) -> bool + Send + Sync + 'static>;
@@ -37,6 +39,14 @@ type CloseWindowCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 type HttpsInterceptCallback = Arc<
     dyn Fn(WebviewHttpsInterceptRequest) -> WebviewHttpsInterceptResponse + Send + Sync + 'static,
 >;
+type LoadErrorCallback = Arc<dyn Fn(WebviewLoadErrorEvent) + Send + Sync + 'static>;
+type KeyEventCallback = Arc<dyn Fn(NativeWebviewKeyEvent) + Send + Sync + 'static>;
+type AudioStateCallback = Arc<dyn Fn(WebviewAudioStateEvent) + Send + Sync + 'static>;
+type WindowExitCallback = Arc<dyn Fn(WebviewControllerEvent) + Send + Sync + 'static>;
+type RenderExitedCallback = Arc<dyn Fn(WebviewRenderExitedEvent) + Send + Sync + 'static>;
+type PermissionRequestCallback = Arc<dyn Fn(WebviewPermissionRequestEvent) + Send + Sync + 'static>;
+type HttpAuthRequestCallback = Arc<dyn Fn(WebviewHttpAuthRequestEvent) + Send + Sync + 'static>;
+type SslErrorCallback = Arc<dyn Fn(WebviewSslErrorEvent) + Send + Sync + 'static>;
 
 /// URL prefixes that route to the close-window callback instead of the navigation callback.
 const CLOSE_WINDOW_URL_PREFIXES: &[&str] = &["close-window.invalid", "http://close-window.invalid"];
@@ -57,6 +67,14 @@ struct WebviewCallbacks {
     page_end: Option<PageEndCallback>,
     close_window: Option<CloseWindowCallback>,
     https_intercept: Option<HttpsInterceptCallback>,
+    load_error: Option<LoadErrorCallback>,
+    key_event: Option<KeyEventCallback>,
+    audio_state: Option<AudioStateCallback>,
+    window_exit: Option<WindowExitCallback>,
+    render_exited: Option<RenderExitedCallback>,
+    permission_request: Option<PermissionRequestCallback>,
+    http_auth_request: Option<HttpAuthRequestCallback>,
+    ssl_error: Option<SslErrorCallback>,
 }
 
 impl WebviewCallbacks {
@@ -73,6 +91,14 @@ impl WebviewCallbacks {
             new_window: self.new_window.is_some(),
             page_begin: self.page_begin.is_some(),
             page_end: self.page_end.is_some(),
+            load_error: self.load_error.is_some(),
+            key_event: self.key_event.is_some(),
+            audio_state: self.audio_state.is_some(),
+            window_exit: self.window_exit.is_some(),
+            render_exited: self.render_exited.is_some(),
+            permission_request: self.permission_request.is_some(),
+            http_auth_request: self.http_auth_request.is_some(),
+            ssl_error: self.ssl_error.is_some(),
         }
     }
 
@@ -91,6 +117,14 @@ impl WebviewCallbacks {
             && self.page_end.is_none()
             && self.close_window.is_none()
             && self.https_intercept.is_none()
+            && self.load_error.is_none()
+            && self.key_event.is_none()
+            && self.audio_state.is_none()
+            && self.window_exit.is_none()
+            && self.render_exited.is_none()
+            && self.permission_request.is_none()
+            && self.http_auth_request.is_none()
+            && self.ssl_error.is_none()
     }
 }
 
@@ -252,6 +286,70 @@ impl WebviewCallbacksBuilder {
             + 'static,
     {
         self.callbacks.https_intercept = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_load_error<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewLoadErrorEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.load_error = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_key_event<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(NativeWebviewKeyEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.key_event = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_audio_state<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewAudioStateEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.audio_state = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_window_exit<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewControllerEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.window_exit = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_render_exited<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewRenderExitedEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.render_exited = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_permission_request<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewPermissionRequestEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.permission_request = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_http_auth_request<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewHttpAuthRequestEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.http_auth_request = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_ssl_error<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewSslErrorEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.ssl_error = Some(Arc::new(callback));
         self
     }
 
@@ -553,6 +651,131 @@ pub(crate) fn dispatch_title_change(event: WebviewTitleChangeEvent) -> Result<()
     Ok(())
 }
 
+pub(crate) fn dispatch_load_error(event: WebviewLoadErrorEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.load_error.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_key_event(event: NativeWebviewKeyEvent) -> Result<()> {
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.key_event.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_audio_state(event: WebviewAudioStateEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.audio_state.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_window_exit(event: WebviewControllerEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.window_exit.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_render_exited(event: WebviewRenderExitedEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.render_exited.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_permission_request(event: WebviewPermissionRequestEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.permission_request.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_http_auth_request(event: WebviewHttpAuthRequestEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.http_auth_request.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
+pub(crate) fn dispatch_ssl_error(event: WebviewSslErrorEvent) -> Result<()> {
+    if !controller::is_current(&event.id, &event.native_tag)? {
+        return Ok(());
+    }
+    let callback = CALLBACKS
+        .read()
+        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
+        .get(&event.id)
+        .and_then(|callbacks| callbacks.ssl_error.as_ref())
+        .cloned();
+    if let Some(callback) = callback {
+        callback(event);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -804,6 +1027,8 @@ mod tests {
             native_tag: "native-old".to_owned(),
             url: "https://stale.example".to_owned(),
             temp_path: None,
+            suggested_name: None,
+            download_id: None,
         })
         .unwrap();
         assert!(!stale.allow);
@@ -814,6 +1039,8 @@ mod tests {
             native_tag: "native-d1".to_owned(),
             url: "https://current.example".to_owned(),
             temp_path: None,
+            suggested_name: None,
+            download_id: None,
         })
         .unwrap();
         assert!(!no_cb.allow);
@@ -833,6 +1060,8 @@ mod tests {
             native_tag: "native-d2".to_owned(),
             url: "https://dl.example/file".to_owned(),
             temp_path: None,
+            suggested_name: None,
+            download_id: None,
         })
         .unwrap();
         assert!(allowed.allow);
