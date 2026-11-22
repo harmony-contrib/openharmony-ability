@@ -564,9 +564,11 @@ export class NativeAbility extends UIAbility {
         );
       });
       WindowManager.getInstance().registerFocusChangeCallback((wrapped: WindowFocusEventWrap) => {
-        this.forEachLifecycle((lifecycle) =>
-          lifecycle.windowStageEventCallback.onWindowFocusChange(wrapped),
-        );
+        this.forEachLifecycle((lifecycle) => {
+          if (typeof lifecycle.windowStageEventCallback.onWindowFocusChange === "function") {
+            lifecycle.windowStageEventCallback.onWindowFocusChange(wrapped);
+          }
+        });
       });
       WindowManager.getInstance().registerAvoidAreaChangeCallback(
         (wrapped: WindowAvoidAreaEventWrap) => {

@@ -365,14 +365,13 @@ export class MenuPlugin extends AsyncPluginBase {
       const appWebsite = metadata.website ?? "";
 
       const lines: string[] = [];
-      if (appName) lines.push(appName);
       if (appVersion) lines.push(`Version: ${appVersion}`);
       if (appCopyright) lines.push(appCopyright);
       if (appAuthors) lines.push(`Authors: ${appAuthors}`);
       if (appComments) lines.push(appComments);
       if (appWebsite) lines.push(appWebsite);
-      const message = lines.join("\n");
       const title = appName || "About";
+      const message = lines.length > 0 ? lines.join("\n") : title;
 
       try {
         const uiContext = mainWindow.getUIContext();

@@ -20,9 +20,6 @@ export {
   isMenubarVisible,
 } from "./src/main/ets/MenuBarComponent";
 export type { MenuDataCallback } from "./src/main/ets/MenuBarComponent";
-// MenuPopup.ets ships unreferenced, exactly as in the core package before the
-// split (nothing imported it and the core index never exported it) — the file
-// migrates verbatim, so its unexported status migrates too.
 export {
   setPredefinedActionExecutor,
   getPredefinedActionExecutor,

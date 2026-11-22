@@ -4,7 +4,7 @@ import { window } from "@kit.ArkUI";
  * Core-side extension seam for the menu plugin.
  *
  * rs<->ets correspondence: `crates/plugin-menu` (Rust facade) ↔ `plugins/menu`
- * (ArkTS har). The menu UI cluster (MenuBarComponent / MenuPopup / menu.ets /
+ * (ArkTS har). The menu UI cluster (MenuBarComponent / menu.ets /
  * menu_types / accelerator matcher) lives in the menu package; core pages never
  * import it. Instead they compose the menubar through a registered builder
  * slot, and forward pre-IME key events plus fullscreen-driven visibility

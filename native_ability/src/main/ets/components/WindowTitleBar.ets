@@ -1,3 +1,5 @@
+import { LengthMetrics } from "@kit.ArkUI";
+
 // Match OpenHarmony's container-modal title and control-button layout:
 // frameworks/core/components_ng/pattern/container_modal/interfaces/customtitle.js
 export const WINDOW_TITLE_BAR_HEIGHT: number = 37;
@@ -10,14 +12,14 @@ struct WindowControlButton {
   @Prop icon: Resource = $r("app.media.window_minimize");
   @Prop label: Resource = $r("app.string.window_minimize");
   @Prop @Watch("resetInteraction") available: boolean = true;
-  @Prop @Watch("resetInteraction") windowFocused: boolean = true;
+  @Prop windowFocused: boolean = true;
   @Prop closeButton: boolean = false;
   onActivate: () => void = () => {};
   @State private hovered: boolean = false;
   @State private pressed: boolean = false;
 
   resetInteraction(): void {
-    if (!this.available || !this.windowFocused) {
+    if (!this.available) {
       this.hovered = false;
       this.pressed = false;
     }
@@ -25,7 +27,7 @@ struct WindowControlButton {
 
   private buttonBackgroundColor(): ResourceColor {
     if (this.available && this.pressed) {
-      return this.closeButton ? $r("sys.color.warning") : $r("sys.color.interactive_click");
+      return this.closeButton ? $r("sys.color.alert") : $r("sys.color.interactive_click");
     }
     if (this.available && this.hovered) {
       return this.closeButton
@@ -49,6 +51,7 @@ struct WindowControlButton {
         .height(CONTROL_ICON_SIZE)
         .fillColor(this.iconColor())
         .scale({ x: this.hovered ? 1.1 : 1, y: this.hovered ? 1.1 : 1 })
+        .animation({ duration: 120, curve: Curve.EaseOut })
         .draggable(false)
         .focusable(false)
     }
@@ -59,12 +62,17 @@ struct WindowControlButton {
     .backgroundColor(this.buttonBackgroundColor())
     .hoverEffect(HoverEffect.None)
     .enabled(this.available)
-    .opacity(this.available && this.windowFocused ? 1 : $r("sys.float.interactive_disable"))
+    .opacity(
+      this.available && (this.windowFocused || this.hovered)
+        ? 1
+        : $r("sys.float.interactive_disable"),
+    )
     .focusable(false)
     .accessibilityText(this.label)
-    // Enlarge the hit target into the gaps without overlapping another button
-    // or extending below the title bar into the menu/content.
+    // Enlarge both touch and mouse hit targets into the gaps without overlapping
+    // another button or extending below the title bar into the menu/content.
     .responseRegion({ x: -6, y: -4.5, width: 40, height: WINDOW_TITLE_BAR_HEIGHT })
+    .mouseResponseRegion({ x: -6, y: -4.5, width: 40, height: WINDOW_TITLE_BAR_HEIGHT })
     .onHover((hovered: boolean) => {
       this.hovered = hovered;
       if (!hovered) {
@@ -84,7 +92,6 @@ struct WindowControlButton {
 @Component
 export struct WindowTitleBar {
   @Prop title: string = "";
-  @Prop decorations: boolean = true;
   @Prop windowFocused: boolean = true;
   @Prop maximized: boolean = false;
   @Prop minimizable: boolean = true;
@@ -98,67 +105,68 @@ export struct WindowTitleBar {
   build() {
     Row() {
       Row() {
-        if (this.decorations) {
-          Text(this.title)
-            .fontSize($r("sys.float.Title_S"))
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r("sys.color.font_primary"))
-            .opacity(this.windowFocused ? 1 : $r("sys.float.interactive_disable"))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
-            .focusable(false);
-        }
+        Text(this.title)
+          .fontSize($r("sys.float.Title_S"))
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r("sys.color.font_primary"))
+          .opacity(this.windowFocused ? 1 : $r("sys.float.interactive_disable"))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+          .focusable(false)
       }
       .layoutWeight(1)
       .height("100%")
-      .padding({ left: 20, right: 12 })
+      .padding({ start: LengthMetrics.vp(20), end: LengthMetrics.vp(12) })
       .clip(true)
       .onTouch((event: TouchEvent) => this.onDrag(event))
+      .gesture(
+        TapGesture({ count: 2 }).onAction(() => {
+          if (this.maximizable) {
+            this.onMaximize();
+          }
+        }),
+      )
       .focusable(false)
-
-      if (this.decorations) {
-        Row({ space: CONTROL_SPACING }) {
-          WindowControlButton({
-            icon: this.maximized ? $r("app.media.window_restore") : $r("app.media.window_maximize"),
-            label: this.maximized
-              ? $r("app.string.window_restore")
-              : $r("app.string.window_maximize"),
-            available: this.maximizable,
-            windowFocused: this.windowFocused,
-            onActivate: () => this.onMaximize(),
-          })
-          WindowControlButton({
-            icon: $r("app.media.window_minimize"),
-            label: $r("app.string.window_minimize"),
-            available: this.minimizable,
-            windowFocused: this.windowFocused,
-            onActivate: () => this.onMinimize(),
-          })
-          WindowControlButton({
-            icon: $r("app.media.window_close"),
-            label: $r("app.string.window_close"),
-            available: this.closable,
-            windowFocused: this.windowFocused,
-            closeButton: true,
-            onActivate: () => this.onClose(),
-          })
-        }
-        .height("100%")
-        .padding({ left: 12, right: 20 })
-        .focusable(false);
+      Row({ space: CONTROL_SPACING }) {
+        WindowControlButton({
+          icon: this.maximized ? $r("app.media.window_restore") : $r("app.media.window_maximize"),
+          label: this.maximized
+            ? $r("app.string.window_restore")
+            : $r("app.string.window_maximize"),
+          available: this.maximizable,
+          windowFocused: this.windowFocused,
+          onActivate: () => this.onMaximize(),
+        })
+        WindowControlButton({
+          icon: $r("app.media.window_minimize"),
+          label: $r("app.string.window_minimize"),
+          available: this.minimizable,
+          windowFocused: this.windowFocused,
+          onActivate: () => this.onMinimize(),
+        })
+        WindowControlButton({
+          icon: $r("app.media.window_close"),
+          label: $r("app.string.window_close"),
+          available: this.closable,
+          windowFocused: this.windowFocused,
+          closeButton: true,
+          onActivate: () => this.onClose(),
+        })
       }
+      .height("100%")
+      .padding({ start: LengthMetrics.vp(12), end: LengthMetrics.vp(20) })
+      .focusable(false)
     }
     .width("100%")
     .height(WINDOW_TITLE_BAR_HEIGHT)
     .alignItems(VerticalAlign.Center)
     .backgroundColor(
-      this.decorations
-        ? this.windowFocused
-          ? $r("sys.color.container_modal_background")
-          : $r("sys.color.container_modal_unfocus_background")
-        : Color.Transparent,
+      this.windowFocused
+        ? $r("sys.color.container_modal_background")
+        : $r("sys.color.container_modal_unfocus_background"),
     )
+    .border({ width: { bottom: "1px" }, color: $r("sys.color.comp_divider") })
     .focusable(false);
   }
 }

@@ -1,5 +1,5 @@
 import { DefaultXComponent } from "./DefaultXComponent";
-import { WindowTitleBar } from "./WindowTitleBar";
+import { WINDOW_TITLE_BAR_HEIGHT, WindowTitleBar } from "./WindowTitleBar";
 import { Module } from "../ability/type";
 import { getMenuBarPort, MenuBarSlotHost } from "./MenuBarSlot";
 import { pointer } from "@kit.InputKit";
@@ -121,7 +121,7 @@ struct FloatPage {
         "FloatPage",
         "aboutToDisappear cleanup failed for window %{public}d: %{public}s",
         this.windowId,
-        JSON.stringify(e),
+        String(e),
       );
     }
   }
@@ -132,11 +132,24 @@ struct FloatPage {
     }
     try {
       this.windowClass?.startMoving()?.catch((err: BusinessError) => {
-        hilog.warn(DOMAIN, "FloatPage", "startMoving failed: %{public}s", JSON.stringify(err));
+        hilog.warn(DOMAIN, "FloatPage", "startMoving failed: %{public}s", String(err));
       });
     } catch (err) {
       hilog.warn(DOMAIN, "FloatPage", "startMoving exception: %{public}s", String(err));
     }
+  }
+
+  private readInitialWindowRect(win: arkWindow.Window): arkWindow.Rect {
+    if (deviceInfo.sdkApiVersion >= 13 && typeof win.getGlobalRect === "function") {
+      try {
+        return win.getGlobalRect();
+      } catch (err) {
+        if ((err as BusinessError).code !== 801) {
+          throw err as Error;
+        }
+      }
+    }
+    return win.getWindowProperties().windowRect;
   }
 
   aboutToAppear(): void {
@@ -160,7 +173,7 @@ struct FloatPage {
         this.windowClass = arkWindow.findWindow(winName);
         if (this.windowClass) {
           try {
-            const rect = this.windowClass.getGlobalRect();
+            const rect = this.readInitialWindowRect(this.windowClass);
             if (rect.width > 0) this.currentWidth = rect.width;
             if (rect.height > 0) this.currentHeight = rect.height;
             hilog.info(
@@ -173,12 +186,7 @@ struct FloatPage {
               this.currentHeight,
             );
           } catch (e) {
-            hilog.error(
-              DOMAIN,
-              "FloatPage",
-              "Failed to get window rect: %{public}s",
-              JSON.stringify(e),
-            );
+            hilog.error(DOMAIN, "FloatPage", "Failed to get window rect: %{public}s", String(e));
           }
           // 回灌系统窗口状态到 tao 镜像位(问题五 5.3)。
           // Float 子窗口的 maximize/minimize/fullscreen 系统状态变化经
@@ -216,26 +224,21 @@ struct FloatPage {
         }
       }
     } catch (e) {
-      hilog.error(DOMAIN, "FloatPage", "Failed to get windowClass: %{public}s", JSON.stringify(e));
+      hilog.error(DOMAIN, "FloatPage", "Failed to get windowClass: %{public}s", String(e));
     }
 
     try {
       this.cursorController = this.getUIContext().getCursorController();
     } catch (e) {
-      hilog.warn(
-        DOMAIN,
-        "FloatPage",
-        "Failed to get CursorController: %{public}s",
-        JSON.stringify(e),
-      );
+      hilog.warn(DOMAIN, "FloatPage", "Failed to get CursorController: %{public}s", String(e));
     }
 
     try {
       const defaultDisplay = display.getDefaultDisplaySync();
       this.dpiScale = defaultDisplay.densityPixels;
-      hilog.info(DOMAIN, "FloatPage", "Display densityPixels: %{public}f", this.dpiScale);
+      hilog.info(DOMAIN, "FloatPage", "Display densityPixels: %{public}s", String(this.dpiScale));
     } catch (e) {
-      hilog.warn(DOMAIN, "FloatPage", "Failed to get display scale: %{public}s", JSON.stringify(e));
+      hilog.warn(DOMAIN, "FloatPage", "Failed to get display scale: %{public}s", String(e));
     }
   }
 
@@ -332,7 +335,6 @@ struct FloatPage {
         if (this.windowClass && this.decorations) {
           WindowTitleBar({
             title: this.title,
-            decorations: this.decorations,
             windowFocused: this.windowFocused,
             maximized: this.isMaximized,
             minimizable: this.minimizable,
@@ -368,48 +370,56 @@ struct FloatPage {
 
       // Desktop resize handles remain available without decorations in floating mode.
       if (this.isDesktop && this.windowClass && this.resizable && !this.isMaximized) {
-        // Right edge resize handle
-        Row()
-          .width(10)
-          .height("100%")
-          .position({ right: 0 })
-          .backgroundColor(Color.Transparent)
-          .onHover((isHover: boolean) => {
-            if (isHover) {
-              this.cursorController?.setCursor(pointer.PointerStyle.WEST_EAST);
-            } else {
-              this.cursorController?.restoreDefault();
-            }
-          })
-          .gesture(
-            PanGesture({ direction: PanDirection.Horizontal })
-              .onActionStart(() => {
-                this.startWidth = this.currentWidth;
-              })
-              .onActionUpdate((event: GestureEvent) => {
-                if (!this.windowClass) return;
-                try {
-                  this.currentWidth = Math.round(
-                    Math.max(200, this.startWidth + event.offsetX * this.dpiScale),
-                  );
-                  this.windowClass.resize(this.currentWidth, this.currentHeight);
-                } catch (e) {
-                  hilog.error(
-                    DOMAIN,
-                    "FloatPage",
-                    "Right resize failed: w=%{public}d, h=%{public}d, err=%{public}s",
-                    this.currentWidth,
-                    this.currentHeight,
-                    JSON.stringify(e),
-                  );
-                }
-              }),
-          );
+        // Right edge resize handle (offset below the title bar so it never overlaps close button)
+        Column() {
+          if (this.decorations) {
+            Blank().height(WINDOW_TITLE_BAR_HEIGHT);
+          }
+          Row()
+            .width(6)
+            .layoutWeight(1)
+            .backgroundColor(Color.Transparent)
+            .onHover((isHover: boolean) => {
+              if (isHover) {
+                this.cursorController?.setCursor(pointer.PointerStyle.WEST_EAST);
+              } else {
+                this.cursorController?.restoreDefault();
+              }
+            })
+            .gesture(
+              PanGesture({ direction: PanDirection.Horizontal })
+                .onActionStart(() => {
+                  this.startWidth = this.currentWidth;
+                })
+                .onActionUpdate((event: GestureEvent) => {
+                  if (!this.windowClass) return;
+                  try {
+                    this.currentWidth = Math.round(
+                      Math.max(200, this.startWidth + event.offsetX * this.dpiScale),
+                    );
+                    this.windowClass.resize(this.currentWidth, this.currentHeight);
+                  } catch (e) {
+                    hilog.error(
+                      DOMAIN,
+                      "FloatPage",
+                      "Right resize failed: w=%{public}d, h=%{public}d, err=%{public}s",
+                      this.currentWidth,
+                      this.currentHeight,
+                      String(e),
+                    );
+                  }
+                }),
+            )
+        }
+        .width(6)
+        .height("100%")
+        .position({ right: 0 })
+        .hitTestBehavior(HitTestMode.Transparent);
 
         // Bottom edge resize handle
         Row()
           .width("100%")
-          .height(10)
+          .height(6)
           .position({ bottom: 0 })
           .backgroundColor(Color.Transparent)
           .onHover((isHover: boolean) => {
@@ -438,7 +448,7 @@ struct FloatPage {
                     "Bottom resize failed: w=%{public}d, h=%{public}d, err=%{public}s",
                     this.currentWidth,
                     this.currentHeight,
-                    JSON.stringify(e),
+                    String(e),
                   );
                 }
               }),
@@ -446,8 +456,8 @@ struct FloatPage {
 
         // Bottom-right corner resize handle
         Row()
-          .width(15)
-          .height(15)
+          .width(12)
+          .height(12)
           .position({ right: 0, bottom: 0 })
           .backgroundColor(Color.Transparent)
           .onHover((isHover: boolean) => {
@@ -480,7 +490,7 @@ struct FloatPage {
                     "Corner resize failed: w=%{public}d, h=%{public}d, err=%{public}s",
                     this.currentWidth,
                     this.currentHeight,
-                    JSON.stringify(e),
+                    String(e),
                   );
                 }
               }),

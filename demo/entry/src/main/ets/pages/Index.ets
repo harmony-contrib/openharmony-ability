@@ -1,3 +1,4 @@
+import { NodeContent } from "@kit.ArkUI";
 import { DefaultXComponent, invokeNativeBackPressInterceptor } from "@ohos-rs/ability";
 import { demoWindowStage, SUB_WINDOW_NATIVE_MODULE } from "../entryability/EntryAbility";
 import { SUB_WINDOW_NAME } from "./SubWindowPage";
