@@ -59,6 +59,33 @@ class ReleaseSleepResponse {
   readonly accepted: boolean = true;
 }
 
+interface SuspendDelayRequest {
+  reason: string;
+}
+class SuspendDelayResponse {
+  readonly id: string;
+  constructor(id: string) {
+    this.id = id;
+  }
+}
+interface CancelSuspendDelayRequest {
+  id: string;
+}
+class CancelSuspendDelayResponse {
+  readonly accepted: boolean = true;
+}
+
+function validateReason(reason: string, label: string): void {
+  if (
+    typeof reason !== "string" ||
+    !reason.trim() ||
+    Array.from(reason).length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(reason)
+  ) {
+    throw new Error(`Invalid ${label} reason`);
+  }
+}
+
 class GetThermalLevelResponse {
   readonly level: number;
 
@@ -216,6 +243,7 @@ export class SystemStatePlugin extends AsyncPluginBase {
     }
     this.active = true;
     this.hookContext = context;
+    this.nowPlaying.reset();
     try {
       this.unsubscribeThermal = ThermalSubscriptions.subscribe(
         (level: thermal.ThermalLevel): void => {
@@ -459,14 +487,7 @@ export class SystemStatePlugin extends AsyncPluginBase {
         action,
         "ohos.system-state.PreventSleepRequest",
       ) as PreventSleepRequest;
-      if (
-        typeof request.reason !== "string" ||
-        !request.reason.trim() ||
-        Array.from(request.reason).length > 256 ||
-        /[\u0000-\u001f\u007f]/.test(request.reason)
-      ) {
-        throw new Error("Invalid sleep prevention reason");
-      }
+      validateReason(request.reason, "sleep prevention");
       // A forced-sleep listener is required by the running-lock contract.
       const epoch = this.sleepEpoch;
       if (
@@ -648,7 +669,10 @@ export class SystemStatePlugin extends AsyncPluginBase {
     }
     if (action === "get-power-status") {
       expectBridgeRequestType(payload, this.id, action, "ohos.system-state.GetPowerStatusRequest");
-      const hasBattery = batteryInfo.batterySOC >= 0;
+      const hasBattery =
+        typeof batteryInfo.isBatteryPresent === "boolean"
+          ? batteryInfo.isBatteryPresent
+          : batteryInfo.batterySOC >= 0;
       const onBattery =
         hasBattery && batteryInfo.pluggedType === batteryInfo.BatteryPluggedType.NONE;
       return {
@@ -661,16 +685,28 @@ export class SystemStatePlugin extends AsyncPluginBase {
         payload,
         this.id,
         action,
-        "ohos.system-state.PreventSleepRequest",
-      ) as PreventSleepRequest;
+        "ohos.system-state.SuspendDelayRequest",
+      ) as SuspendDelayRequest;
+      validateReason(req.reason, "suspend delay");
       const key = `suspend-${++this.nextSleepLock}`;
+      let requestId = -1;
       const info = backgroundTaskManager.requestSuspendDelay(req.reason, () => {
+        const activeId = this.suspendDelays.get(key) ?? requestId;
         this.suspendDelays.delete(key);
+        if (activeId >= 0) {
+          try {
+            backgroundTaskManager.cancelSuspendDelay(activeId);
+          } catch {}
+        }
+        if (this.hookContext !== null) {
+          this.emit(this.hookContext, "suspend-delay-expired");
+        }
       });
+      requestId = info.requestId;
       this.suspendDelays.set(key, info.requestId);
       return {
-        typeName: "ohos.system-state.PreventSleepResponse",
-        value: new PreventSleepResponse(key),
+        typeName: "ohos.system-state.SuspendDelayResponse",
+        value: new SuspendDelayResponse(key),
       };
     }
     if (action === "cancel-suspend-delay") {
@@ -678,16 +714,19 @@ export class SystemStatePlugin extends AsyncPluginBase {
         payload,
         this.id,
         action,
-        "ohos.system-state.ReleaseSleepRequest",
-      ) as ReleaseSleepRequest;
+        "ohos.system-state.CancelSuspendDelayRequest",
+      ) as CancelSuspendDelayRequest;
+      if (typeof req.id !== "string" || !req.id) {
+        throw new Error("Invalid suspend delay id");
+      }
       const reqId = this.suspendDelays.get(req.id);
       if (reqId !== undefined) {
         this.suspendDelays.delete(req.id);
         backgroundTaskManager.cancelSuspendDelay(reqId);
       }
       return {
-        typeName: "ohos.system-state.ReleaseSleepResponse",
-        value: new ReleaseSleepResponse(),
+        typeName: "ohos.system-state.CancelSuspendDelayResponse",
+        value: new CancelSuspendDelayResponse(),
       };
     }
     if (action === "set-now-playing") {

@@ -87,4 +87,4 @@ client 绑定创建时的 bridge session；session 关闭后重新从当前 app 
 
 ## Toolkit contract additions
 
-`show-with-options` 补充分组、解码图片、发件人显示名和静默内容资讯槽位；最终展示仍遵循系统通知设置。`parse-response` 按配置的 scheme 识别冷启动或后续点击 URI；`dismiss-all` 同时撤销旧启动发布的通知。不模拟发件人身份/头像与通讯通知语义。
+统一的 `show` 动作（`ohos.notification.ShowRequest`）支持可选 `silent`（API 23+ 静默声音/振动关闭标记）、`group`、`sender_name`、`image`、`avatar` 与 `slot`（`"default"` 或 `"social"`）。`parse-response` 按配置的 scheme 识别冷启动或后续点击 URI；`dismiss-all` 同时撤销旧启动发布的通知。不模拟发件人身份或系统通讯会话语义。

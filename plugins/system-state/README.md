@@ -57,7 +57,9 @@ Call through the Rust facade. The host dispatches named N-API requests/responses
 
 - Construct the client with `SystemStateClient::new(app)?`. There is no `SystemStateExt` trait.
 - Thermal values follow platform `ThermalLevel` (0–7). Display sizes/areas retain platform numeric values; density is provided separately as `density_pixels`.
-- Inject a consumer-owned crossbeam sender with `register_system_state_event_sender`; the first registration wins. Event `kind` is `thermal`, `sleep`, `wake`, `available-area` or `displays`; inspect the corresponding optional fields.
+- Inject consumer-owned crossbeam senders with `register_system_state_event_sender` / `register_media_command_event_sender` (re-registration replaces the active sender; call the `unregister_*` helpers on teardown). Event `kind` is one of `thermal`, `sleep`, `wake`, `lock-screen`, `unlock-screen`, `locale`, `power-source`, `network`, `available-area`, `displays`, or `suspend-delay-expired`.
+- `request-suspend-delay` / `cancel-suspend-delay` use dedicated `SuspendDelayRequest`/`Response` and `CancelSuspendDelayRequest`/`Response` types; the timeout callback automatically calls `backgroundTaskManager.cancelSuspendDelay` and emits `"suspend-delay-expired"`.
+- `set-now-playing` uses `media_command` bitmask flags (`PLAY`, `PAUSE`, `STOP`, `NEXT`, `PREVIOUS`, `SEEK`, `ALL`) to toggle AVSession transport control listeners dynamically.
 - ArkTS subscribes to thermal, display and screen/sleep events during installation and releases listeners on disposal. Some subscription failures are logged; not every event source is guaranteed.
 
 See the [plugin source](src/main/ets/SystemStatePlugin.ets) and the [plugin development standard](../../docs/plugin-development-standard.md).

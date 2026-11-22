@@ -235,7 +235,11 @@ pub trait FilesExt {
         path: impl Into<String>,
     ) -> Pin<Box<dyn Future<Output = Result<TrashItemResponse>> + Send>>;
 
-    /// Queries the system icon for a path or file extension as a PNG image.
+    /// Queries the system icon for a local path, `file://` URI, or filename extension as a PNG image.
+    ///
+    /// Requires API 17+, `SystemCapability.FileManagement.FileManagerService.Core`, and the
+    /// `ohos.permission.GET_FILE_ICON` permission in `module.json5` (otherwise the platform
+    /// returns error code 201). Non-square icons preserve their aspect ratio within `size_px`.
     fn file_icon(
         &self,
         request: FileIconRequest,
@@ -306,7 +310,10 @@ impl FilesExt for OpenHarmonyApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{dialog_type, FileDialogFilter, FileDialogOptions, FileDialogResponse};
+    use super::{
+        dialog_type, FileDialogFilter, FileDialogOptions, FileDialogResponse, FileIconRequest,
+        FileIconResponse, TrashItemRequest, TrashItemResponse,
+    };
     use openharmony_ability::BridgeNapiType;
 
     #[test]
@@ -323,6 +330,54 @@ mod tests {
             <FileDialogFilter as BridgeNapiType>::TYPE_NAME,
             "ohos.files.DialogFilter"
         );
+        assert_eq!(
+            <TrashItemRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.files.TrashItemRequest"
+        );
+        assert_eq!(
+            <TrashItemResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.files.TrashItemResponse"
+        );
+        assert_eq!(
+            <FileIconRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.files.FileIconRequest"
+        );
+        assert_eq!(
+            <FileIconResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.files.FileIconResponse"
+        );
+    }
+
+    #[test]
+    fn file_icon_request_validation() {
+        assert!(FileIconRequest {
+            path: None,
+            extension: Some("rs".to_owned()),
+            size_px: 64,
+        }
+        .validate()
+        .is_ok());
+        assert!(FileIconRequest {
+            path: None,
+            extension: None,
+            size_px: 64,
+        }
+        .validate()
+        .is_err());
+        assert!(FileIconRequest {
+            path: Some("/tmp/a.txt".to_owned()),
+            extension: None,
+            size_px: 0,
+        }
+        .validate()
+        .is_err());
+        assert!(FileIconRequest {
+            path: Some("/tmp/a.txt".to_owned()),
+            extension: None,
+            size_px: 1025,
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

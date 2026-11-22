@@ -1,7 +1,11 @@
 import window from "@ohos.window";
 import display from "@ohos.display";
-import { BusinessError } from "@kit.BasicServicesKit";
+import { BusinessError, deviceInfo } from "@kit.BasicServicesKit";
 import { FrameNode } from "@ohos.arkui.node";
+
+interface GlobalRectWindowApi {
+  getGlobalRect?: () => window.Rect;
+}
 
 class DisplayRect {
   readonly left: number;
@@ -27,13 +31,16 @@ export class WindowDisplayGeometry {
     const props = win.getWindowProperties();
     this.displayId = props.displayId ?? display.getDefaultDisplaySync().id;
     let rect = props.windowRect;
-    try {
-      rect = win.getGlobalRect();
-    } catch (error) {
-      // Products without scaled/freeform windows still report their physical
-      // rectangle through WindowProperties. Do not hide other query failures.
-      if ((error as BusinessError).code !== 801) {
-        throw error as Error;
+    const globalRectApi = win as ESObject as GlobalRectWindowApi;
+    if (deviceInfo.sdkApiVersion >= 13 && typeof globalRectApi.getGlobalRect === "function") {
+      try {
+        rect = globalRectApi.getGlobalRect();
+      } catch (error) {
+        // Products without scaled/freeform windows still report their physical
+        // rectangle through WindowProperties. Do not hide other query failures.
+        if ((error as BusinessError).code !== 801) {
+          throw error as Error;
+        }
       }
     }
     this.bounds = new DisplayRect(rect.left, rect.top, rect.width, rect.height);

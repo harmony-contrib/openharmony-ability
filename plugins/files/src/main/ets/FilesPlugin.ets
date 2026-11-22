@@ -3,8 +3,6 @@ import common from "@ohos.app.ability.common";
 import { BusinessError } from "@ohos.base";
 import deviceInfo from "@ohos.deviceInfo";
 import picker from "@ohos.file.picker";
-import { BuilderNode } from "@ohos.arkui.node";
-import { DrawableDescriptor } from "@ohos.arkui.drawableDescriptor";
 import { UIContext } from "@ohos.arkui.UIContext";
 import { fileIo, fileUri } from "@kit.CoreFileKit";
 import { uniformTypeDescriptor } from "@kit.ArkData";
@@ -18,6 +16,7 @@ import {
   AsyncPluginBase,
   BridgeContextRequirement,
   WindowManager,
+  expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
 const DIALOG_OPTIONS_TYPE = "ohos.files.DialogOptions";
@@ -27,6 +26,7 @@ const TRASH_ITEM_RESPONSE_TYPE = "ohos.files.TrashItemResponse";
 const FILE_ICON_REQUEST_TYPE = "ohos.files.FileIconRequest";
 const FILE_ICON_RESPONSE_TYPE = "ohos.files.FileIconResponse";
 const FILE_MANAGER_SERVICE_SYSCAP = "SystemCapability.FileManagement.FileManagerService.Core";
+const MAX_ICON_CACHE_ENTRIES = 64;
 
 // This SysCap guards getSelectedIndex(), not opening the folder picker.
 const SELECTED_FILTER_INDEX_SYSCAP =
@@ -90,17 +90,30 @@ class FileIconResponse {
   }
 }
 
+function normalizeLocalPath(raw: string): string {
+  if (!raw.startsWith("file://")) {
+    return raw;
+  }
+  try {
+    return new fileUri.FileUri(raw).path;
+  } catch {
+    return raw.slice("file://".length);
+  }
+}
+
 function resolveUtdForIcon(req: FileIconRequest): string {
   const rawPath = req.path?.trim() ?? "";
   if (rawPath.length > 0) {
+    const localPath = normalizeLocalPath(rawPath);
     try {
-      if (fileIo.statSync(rawPath).isDirectory()) {
+      if (fileIo.statSync(localPath).isDirectory()) {
         return uniformTypeDescriptor.UniformDataType.FOLDER;
       }
     } catch {
       // Fall back to filename extension if stat fails.
     }
-    const base = rawPath.slice(rawPath.lastIndexOf("/") + 1);
+    const cleanPath = localPath.split("?")[0].split("#")[0];
+    const base = cleanPath.slice(cleanPath.lastIndexOf("/") + 1);
     const dot = base.lastIndexOf(".");
     if (dot > 0 && dot < base.length - 1) {
       const ext = base.slice(dot).toLowerCase();
@@ -130,30 +143,10 @@ function resolveUtdForIcon(req: FileIconRequest): string {
   return uniformTypeDescriptor.UniformDataType.FILE;
 }
 
-interface FileIconSnapshotSpec {
-  icon: Resource;
-  componentId: string;
-  sizePx: number;
-}
-
 @Builder
-function BuildFileIconSnapshot(spec: FileIconSnapshotSpec) {
-  Stack() {
-    Image(spec.icon)
-      .id(spec.componentId)
-      .width(`${spec.sizePx}px`)
-      .height(`${spec.sizePx}px`)
-      .objectFit(ImageFit.Contain)
-      .syncLoad(true)
-  }
-  .width(`${spec.sizePx}px`)
-  .height(`${spec.sizePx}px`)
-  .position({ x: -4096, y: -4096 })
-  .hitTestBehavior(HitTestMode.None);
+function buildOffscreenFileIcon(icon: Resource, sizePx: number) {
+  Image(icon).width(`${sizePx}px`).height(`${sizePx}px`).objectFit(ImageFit.Contain).syncLoad(true);
 }
-
-const fileIconSnapshotBuilder = wrapBuilder<[FileIconSnapshotSpec]>(BuildFileIconSnapshot);
-let nextFileIconSnapshotSeq = 0;
 
 async function packPixelMapToPngBase64(
   pixelMap: image.PixelMap,
@@ -161,12 +154,11 @@ async function packPixelMapToPngBase64(
   base64: util.Base64Helper,
 ): Promise<string> {
   const info = await pixelMap.getImageInfo();
-  if (
-    info.size.width > 0 &&
-    info.size.height > 0 &&
-    (info.size.width !== sizePx || info.size.height !== sizePx)
-  ) {
-    await pixelMap.scale(sizePx / info.size.width, sizePx / info.size.height);
+  if (info.size.width > 0 && info.size.height > 0) {
+    const ratio = Math.min(sizePx / info.size.width, sizePx / info.size.height);
+    if (Math.abs(ratio - 1) > 1e-3) {
+      await pixelMap.scale(ratio, ratio);
+    }
   }
   let packer: image.ImagePacker | null = null;
   try {
@@ -192,9 +184,16 @@ async function decodeBytesToPngBase64(
   const source = image.createImageSource(exactBuffer);
   let pixelMap: image.PixelMap | null = null;
   try {
-    pixelMap = await source.createPixelMap({
-      desiredSize: { width: sizePx, height: sizePx },
-    });
+    const info = await source.getImageInfo();
+    let desiredSize: image.Size = { width: sizePx, height: sizePx };
+    if (info.size.width > 0 && info.size.height > 0) {
+      const ratio = Math.min(sizePx / info.size.width, sizePx / info.size.height);
+      desiredSize = {
+        width: Math.max(1, Math.round(info.size.width * ratio)),
+        height: Math.max(1, Math.round(info.size.height * ratio)),
+      };
+    }
+    pixelMap = await source.createPixelMap({ desiredSize });
     return await packPixelMapToPngBase64(pixelMap, sizePx, base64);
   } finally {
     try {
@@ -263,6 +262,49 @@ async function collectIconResourceManagers(
   return managers;
 }
 
+async function tryDecodeBytes(
+  label: string,
+  loader: () => Uint8Array,
+  sizePx: number,
+  base64: util.Base64Helper,
+  errors: string[],
+): Promise<string | null> {
+  try {
+    const raw = loader();
+    if (raw.byteLength === 0) {
+      return null;
+    }
+    return await decodeBytesToPngBase64(raw, sizePx, base64);
+  } catch (error) {
+    errors.push(`${label}: ${String(error)}`);
+    return null;
+  }
+}
+
+async function tryDecodeDrawable(
+  label: string,
+  loader: () => image.PixelMap | null,
+  sizePx: number,
+  base64: util.Base64Helper,
+  errors: string[],
+): Promise<string | null> {
+  let pixelMap: image.PixelMap | null = null;
+  try {
+    pixelMap = loader();
+    if (pixelMap === null) {
+      return null;
+    }
+    return await packPixelMapToPngBase64(pixelMap, sizePx, base64);
+  } catch (error) {
+    errors.push(`${label}: ${String(error)}`);
+    return null;
+  } finally {
+    try {
+      await pixelMap?.release();
+    } catch {}
+  }
+}
+
 async function tryLoadBytesOrDrawable(
   rm: resourceManager.ResourceManager,
   icon: Resource,
@@ -271,181 +313,177 @@ async function tryLoadBytesOrDrawable(
   base64: util.Base64Helper,
   errors: string[],
 ): Promise<string | null> {
-  const byteCandidates: Uint8Array[] = [];
-  try {
-    byteCandidates.push(rm.getMediaContentSync(icon));
-  } catch (error) {
-    errors.push(`media(res): ${String(error)}`);
-  }
-  if (Number.isInteger(icon.id) && icon.id > 0) {
-    try {
-      byteCandidates.push(rm.getMediaContentSync(icon.id));
-    } catch (error) {
-      errors.push(`media(id): ${String(error)}`);
-    }
-  }
-  for (const name of names) {
-    try {
-      byteCandidates.push(rm.getMediaByNameSync(name));
-    } catch (error) {
-      errors.push(`media(name=${name}): ${String(error)}`);
-    }
-  }
-  for (const raw of byteCandidates) {
-    if (raw.byteLength === 0) {
-      continue;
-    }
-    try {
-      return await decodeBytesToPngBase64(raw, sizePx, base64);
-    } catch (error) {
-      errors.push(`decodeBytes: ${String(error)}`);
-    }
+  const hasId = Number.isInteger(icon.id) && icon.id > 0;
+  const fromRes = await tryDecodeBytes(
+    "media(res)",
+    (): Uint8Array => rm.getMediaContentSync(icon),
+    sizePx,
+    base64,
+    errors,
+  );
+  if (fromRes !== null) return fromRes;
+
+  if (hasId) {
+    const fromId = await tryDecodeBytes(
+      "media(id)",
+      (): Uint8Array => rm.getMediaContentSync(icon.id),
+      sizePx,
+      base64,
+      errors,
+    );
+    if (fromId !== null) return fromId;
   }
 
-  const drawables: DrawableDescriptor[] = [];
-  try {
-    drawables.push(rm.getDrawableDescriptor(icon));
-  } catch (error) {
-    errors.push(`drawable(res): ${String(error)}`);
-  }
-  if (Number.isInteger(icon.id) && icon.id > 0) {
-    try {
-      drawables.push(rm.getDrawableDescriptor(icon.id));
-    } catch (error) {
-      errors.push(`drawable(id): ${String(error)}`);
-    }
-  }
   for (const name of names) {
-    try {
-      drawables.push(rm.getDrawableDescriptorByName(name));
-    } catch (error) {
-      errors.push(`drawable(name=${name}): ${String(error)}`);
-    }
+    const fromName = await tryDecodeBytes(
+      `media(name=${name})`,
+      (): Uint8Array => rm.getMediaByNameSync(name),
+      sizePx,
+      base64,
+      errors,
+    );
+    if (fromName !== null) return fromName;
   }
-  for (const dd of drawables) {
-    let pixelMap: image.PixelMap | null = null;
-    try {
-      pixelMap = dd.getPixelMap();
-      if (pixelMap) {
-        return await packPixelMapToPngBase64(pixelMap, sizePx, base64);
-      }
-    } catch (error) {
-      errors.push(`drawablePixelMap: ${String(error)}`);
-    } finally {
-      try {
-        await pixelMap?.release();
-      } catch {}
-    }
+
+  const fromDrawableRes = await tryDecodeDrawable(
+    "drawable(res)",
+    (): image.PixelMap | null => rm.getDrawableDescriptor(icon).getPixelMap(),
+    sizePx,
+    base64,
+    errors,
+  );
+  if (fromDrawableRes !== null) return fromDrawableRes;
+
+  if (hasId) {
+    const fromDrawableId = await tryDecodeDrawable(
+      "drawable(id)",
+      (): image.PixelMap | null => rm.getDrawableDescriptor(icon.id).getPixelMap(),
+      sizePx,
+      base64,
+      errors,
+    );
+    if (fromDrawableId !== null) return fromDrawableId;
   }
+
+  for (const name of names) {
+    const fromDrawableName = await tryDecodeDrawable(
+      `drawable(name=${name})`,
+      (): image.PixelMap | null => rm.getDrawableDescriptorByName(name).getPixelMap(),
+      sizePx,
+      base64,
+      errors,
+    );
+    if (fromDrawableName !== null) return fromDrawableName;
+  }
+
   return null;
 }
 
-async function loadIconViaSnapshot(
+async function loadIconViaOffscreenBuilder(
   context: BridgeCallContext,
   icon: Resource,
   sizePx: number,
   base64: util.Base64Helper,
   errors: string[],
 ): Promise<string | null> {
-  nextFileIconSnapshotSeq += 1;
-  const seq = nextFileIconSnapshotSeq;
-  const componentId = `__ability_file_icon_${seq}`;
-  const mountKey = `ohos.files.icon-snapshot.${seq}`;
   let uiCtx: UIContext;
   try {
     uiCtx = context.getUIContext();
   } catch {
-    uiCtx = (await context.getWindowStage().getMainWindow()).getUIContext();
-  }
-  const node = new BuilderNode<[FileIconSnapshotSpec]>(uiCtx);
-  let mounted = false;
-  try {
-    node.build(fileIconSnapshotBuilder, { icon, componentId, sizePx });
-    const frameNode = node.getFrameNode();
-    if (frameNode === null) {
-      errors.push("snapshot: missing FrameNode");
+    try {
+      uiCtx = (await context.getWindowStage().getMainWindow()).getUIContext();
+    } catch (error) {
+      errors.push(`uiContext: ${String(error)}`);
       return null;
     }
-    context.appendChild(mountKey, frameNode, (): void => {
-      try {
-        frameNode.dispose();
-      } catch {}
-    });
-    mounted = true;
-    const delays = [16, 50, 100];
-    for (const delayMs of delays) {
-      await new Promise<void>((resolve) => {
-        setTimeout((): void => resolve(), delayMs);
-      });
-      if (!context.isActive() || context.isCancelled()) {
-        return null;
-      }
-      let snap: image.PixelMap | null = null;
-      try {
-        snap = await uiCtx.getComponentSnapshot().get(componentId, {
-          waitUntilRenderFinished: true,
-        });
-        return await packPixelMapToPngBase64(snap, sizePx, base64);
-      } catch (error) {
-        errors.push(`snapshot(${delayMs}ms): ${String(error)}`);
-      } finally {
-        try {
-          await snap?.release();
-        } catch {}
-      }
-    }
+  }
+  if (!context.isActive() || context.isCancelled()) {
+    return null;
+  }
+  let snap: image.PixelMap | null = null;
+  try {
+    snap = await uiCtx.getComponentSnapshot().createFromBuilder(
+      (): void => {
+        buildOffscreenFileIcon(icon, sizePx);
+      },
+      0,
+      true,
+    );
+    return await packPixelMapToPngBase64(snap, sizePx, base64);
   } catch (error) {
-    errors.push(`snapshotMount: ${String(error)}`);
+    errors.push(`createFromBuilder: ${String(error)}`);
+    return null;
   } finally {
-    if (mounted) {
-      try {
-        context.removeChild(mountKey);
-      } catch {}
-    }
     try {
-      node.dispose();
+      await snap?.release();
     } catch {}
   }
-  return null;
 }
 
 async function loadFileIconPngBase64(
   context: BridgeCallContext,
   req: FileIconRequest,
   sizePx: number,
+  cache: Map<string, string>,
 ): Promise<string> {
   const utd = resolveUtdForIcon(req);
+  const cacheKey = `${utd}@${sizePx}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) {
+    cache.delete(cacheKey);
+    cache.set(cacheKey, cached);
+    return cached;
+  }
+
   const icon = await fileManagerService.getFileIcon(utd);
   const base64 = new util.Base64Helper();
+  let encoded: string | null = null;
+  const errors: string[] = [];
+
   if (typeof icon === "string") {
     const comma = icon.indexOf(",");
     const payload = icon.startsWith("data:") && comma >= 0 ? icon.slice(comma + 1) : icon;
     const rawBytes = base64.decodeSync(payload);
-    return await decodeBytesToPngBase64(rawBytes, sizePx, base64);
-  }
-  const errors: string[] = [];
-  const names = extractResourceNames(icon);
-  const managers = await collectIconResourceManagers(context, icon, errors);
-  for (const rm of managers) {
-    const resolved = await tryLoadBytesOrDrawable(rm, icon, names, sizePx, base64, errors);
-    if (resolved !== null) {
-      return resolved;
+    encoded = await decodeBytesToPngBase64(rawBytes, sizePx, base64);
+  } else {
+    const names = extractResourceNames(icon);
+    const managers = await collectIconResourceManagers(context, icon, errors);
+    for (const rm of managers) {
+      const resolved = await tryLoadBytesOrDrawable(rm, icon, names, sizePx, base64, errors);
+      if (resolved !== null) {
+        encoded = resolved;
+        break;
+      }
+    }
+    if (encoded === null) {
+      encoded = await loadIconViaOffscreenBuilder(context, icon, sizePx, base64, errors);
     }
   }
-  const snapped = await loadIconViaSnapshot(context, icon, sizePx, base64, errors);
-  if (snapped !== null) {
-    return snapped;
+
+  if (encoded === null) {
+    const res = icon as Resource;
+    throw new Error(
+      `Unable to decode file icon for utd=${utd} resource(id=${res.id}, bundle=${res.bundleName}, module=${res.moduleName}, type=${res.type ?? -1}): ${errors.slice(0, 6).join("; ")}`,
+    );
   }
-  throw new Error(
-    `Unable to decode file icon for utd=${utd} resource(id=${icon.id}, bundle=${icon.bundleName}, module=${icon.moduleName}, type=${icon.type ?? -1}): ${errors.slice(0, 6).join("; ")}`,
-  );
+
+  if (cache.size >= MAX_ICON_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (oldest !== undefined) {
+      cache.delete(oldest);
+    }
+  }
+  cache.set(cacheKey, encoded);
+  return encoded;
 }
 
 function parseDialogOptions(payload: BridgeTypedValue): FileDialogOptions {
-  if (payload.typeName !== DIALOG_OPTIONS_TYPE || typeof payload.value !== "object") {
-    throw new Error(`ohos.files.file-dialog requires bridge type ${DIALOG_OPTIONS_TYPE}`);
-  }
-  const request = payload.value as FileDialogOptions;
+  const request = expectBridgeRequestType(
+    payload,
+    "ohos.files",
+    "file-dialog",
+    DIALOG_OPTIONS_TYPE,
+  ) as FileDialogOptions;
   if (
     request.parentWindowId != null &&
     (!Number.isSafeInteger(request.parentWindowId) || request.parentWindowId < 0)
@@ -460,7 +498,7 @@ function parseDialogOptions(payload: BridgeTypedValue): FileDialogOptions {
   ) {
     throw new Error(`file-dialog.dialogType '${request.dialogType}' is unsupported`);
   }
-  if (typeof request.filters !== "object") {
+  if (!Array.isArray(request.filters)) {
     throw new Error("file-dialog.filters must be an array");
   }
   if (request.suggestedName != null) {
@@ -603,10 +641,15 @@ export class FilesPlugin extends AsyncPluginBase {
   readonly id = "ohos.files";
   readonly requires: BridgeContextRequirement[] = ["ability"];
   private readonly autoCreateEmptyFile: boolean;
+  private readonly iconCache: Map<string, string> = new Map();
 
   constructor(autoCreateEmptyFile: boolean = true) {
     super();
     this.autoCreateEmptyFile = autoCreateEmptyFile;
+  }
+
+  override onDispose(): void {
+    this.iconCache.clear();
   }
 
   async invokeAsync(
@@ -618,14 +661,12 @@ export class FilesPlugin extends AsyncPluginBase {
       throw new Error("File dialog plugin is not active");
     }
     if (action === "trash-item") {
-      if (
-        payload.typeName !== TRASH_ITEM_REQUEST_TYPE ||
-        !payload.value ||
-        typeof payload.value !== "object"
-      ) {
-        throw new Error(`ohos.files.trash-item requires bridge type ${TRASH_ITEM_REQUEST_TYPE}`);
-      }
-      const req = payload.value as TrashItemRequest;
+      const req = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        TRASH_ITEM_REQUEST_TYPE,
+      ) as TrashItemRequest;
       if (typeof req.path !== "string" || !req.path.trim()) {
         throw new Error("trash-item.path must not be empty");
       }
@@ -640,14 +681,12 @@ export class FilesPlugin extends AsyncPluginBase {
       return { typeName: TRASH_ITEM_RESPONSE_TYPE, value: new TrashItemResponse(trashedUri) };
     }
     if (action === "get-file-icon") {
-      if (
-        payload.typeName !== FILE_ICON_REQUEST_TYPE ||
-        !payload.value ||
-        typeof payload.value !== "object"
-      ) {
-        throw new Error(`ohos.files.get-file-icon requires bridge type ${FILE_ICON_REQUEST_TYPE}`);
-      }
-      const req = payload.value as FileIconRequest;
+      const req = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        FILE_ICON_REQUEST_TYPE,
+      ) as FileIconRequest;
       const sizePx = req.sizePx;
       if (!Number.isInteger(sizePx) || sizePx <= 0 || sizePx > 1024) {
         throw new Error("get-file-icon.sizePx must be 1..1024");
@@ -655,7 +694,7 @@ export class FilesPlugin extends AsyncPluginBase {
       if (!canIUse(FILE_MANAGER_SERVICE_SYSCAP) || deviceInfo.sdkApiVersion < 17) {
         throw new Error("Unsupported: FileManagerService file icon is unavailable on this device");
       }
-      const pngBase64 = await loadFileIconPngBase64(context, req, sizePx);
+      const pngBase64 = await loadFileIconPngBase64(context, req, sizePx, this.iconCache);
       if (!context.isActive() || context.isCancelled()) {
         throw new Error("get-file-icon was cancelled or its Ability was destroyed");
       }

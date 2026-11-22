@@ -113,7 +113,7 @@ function notificationHarness() {
     "@kit.NotificationKit": { notificationManager: manager },
   });
   const plugin = new NotificationPlugin({ scheme: "messages" });
-  const options = {
+  const request = {
     tag: "m/1",
     title: "Title",
     body: "Body",
@@ -122,12 +122,13 @@ function notificationHarness() {
     group: "chat",
     image: [1],
     senderName: "Sender",
+    avatar: [2],
+    slot: "social",
   };
-  const request = { options, avatar: [2] };
   const invoke = (
-    action = "show-social",
+    action = "show",
     value = request,
-    typeName = "ohos.notification.ShowAvatarRequest",
+    typeName = "ohos.notification.ShowRequest",
   ) => plugin.invokeAsync(action, { typeName, value }, ctx);
   return {
     ctx,
@@ -135,7 +136,6 @@ function notificationHarness() {
     device,
     published,
     resources,
-    options,
     request,
     invoke,
     imageState,
@@ -183,10 +183,10 @@ for (const [width, height, expectedWidth, expectedHeight] of [
 }
 test("sender name is visible in plain text and not repeated when already the title", async () => {
   const h = notificationHarness();
-  h.options.image = [];
+  h.request.image = [];
   await h.invoke();
   assert.equal(h.published[0].content.normal.text, "Sender\nBody");
-  h.options.senderName = h.options.title;
+  h.request.senderName = h.request.title;
   await h.invoke();
   assert.equal(h.published[1].content.normal.text, "Body");
 });
@@ -209,32 +209,34 @@ test("session ending during image decode releases pixel maps without publishing"
 });
 test("social notification does not require a display name or avatar", async () => {
   const h = notificationHarness();
-  h.options.senderName = "";
-  h.options.image = [];
+  h.request.senderName = "";
+  h.request.image = [];
   h.request.avatar = [];
   await h.invoke();
   assert.equal(h.published[0].notificationSlotType, 1);
   assert.equal(h.published[0].smallIcon, undefined);
   assert.equal(h.resources.length, 0);
 });
-for (const action of ["show", "show-with-options", "show-with-avatar"]) {
-  test(`${action} keeps its existing category behavior`, async () => {
-    const h = notificationHarness();
-    await h.invoke(
-      action,
-      action === "show-with-avatar" ? h.request : h.options,
-      `ohos.notification.${action === "show" ? "ShowRequest" : action === "show-with-options" ? "ShowOptionsRequest" : "ShowAvatarRequest"}`,
-    );
-    assert.equal(h.published[0].notificationSlotType, undefined);
-  });
-}
-test("invalid nested options, avatar and type names never publish", async () => {
+test("default slot omits notificationSlotType", async () => {
+  const h = notificationHarness();
+  h.request.slot = "default";
+  await h.invoke();
+  assert.equal(h.published[0].notificationSlotType, undefined);
+  h.request.slot = undefined;
+  await h.invoke();
+  assert.equal(h.published[1].notificationSlotType, undefined);
+});
+test("invalid request fields, slot, avatar, and legacy actions never publish", async () => {
   const h = notificationHarness();
   h.request.avatar = "invalid";
-  await assert.rejects(h.invoke(), /Invalid notification avatar/);
-  h.options.tag = " ";
+  await assert.rejects(h.invoke(), /Invalid notification presentation options/);
+  h.request.avatar = undefined;
+  h.request.slot = "unknown";
+  await assert.rejects(h.invoke(), /Invalid notification presentation options/);
+  h.request.slot = "social";
+  h.request.tag = " ";
   await assert.rejects(h.invoke(), /requires a tag/);
-  await assert.rejects(h.invoke("show-social", h.options, "ohos.notification.ShowOptionsRequest"));
+  await assert.rejects(h.invoke("show-social", h.request, "ohos.notification.ShowRequest"));
   assert.equal(h.published.length, 0);
   assert.ok(h.resources.every((r) => r.released === 1));
 });
@@ -261,7 +263,7 @@ test("older API rejects silent social requests but supports ordinary social deli
   const h = notificationHarness();
   h.device.sdkApiVersion = 22;
   await assert.rejects(h.invoke(), /require API 23/);
-  h.options.silent = false;
+  h.request.silent = false;
   await h.invoke();
   assert.equal(h.published[0].notificationSlotType, 1);
   assert.equal(h.published[0].notificationFlags, undefined);

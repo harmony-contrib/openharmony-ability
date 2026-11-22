@@ -485,9 +485,15 @@ pub struct WindowShadowRequest {
 
 impl_bridge_napi_type!(WindowShadowRequest, "ohos.window.ShadowRequest");
 
+/// Title-bar button cluster rectangle in virtual pixels (`vp`).
+///
+/// `right` is the distance from the window's right edge (per OHOS `TitleButtonRect`).
+/// When `available` is `false`, the device or window type does not expose title buttons
+/// and the geometry fields are zero.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct WindowTitleButtonRectResponse {
+    pub available: bool,
     pub right: i32,
     pub top: i32,
     pub width: i32,
@@ -1045,28 +1051,57 @@ impl WindowClient {
         .ensure()
     }
 
+    /// Configures the window shadow.
+    ///
+    /// Main windows use `setWindowShadowEnabled(enabled)` (API 20+, requires
+    /// `ohos.permission.SET_WINDOW_TRANSPARENT`; `radius` is ignored). Sub-windows
+    /// and floating windows use `setWindowShadowRadius(enabled ? radius : 0.0)`
+    /// (API 17+). Returns an error when rejected as unsupported or unpermitted;
+    /// use [`Self::try_set_window_shadow`] when graceful degradation is desired.
     pub async fn set_window_shadow(
         &self,
         window_id: i64,
         enabled: bool,
         radius: f64,
     ) -> Result<()> {
+        if self
+            .try_set_window_shadow(window_id, enabled, radius)
+            .await?
+        {
+            Ok(())
+        } else {
+            Err(Error::from_reason(
+                "Window plugin rejected the requested operation",
+            ))
+        }
+    }
+
+    /// Best-effort variant of [`Self::set_window_shadow`]. Returns `Ok(false)` when
+    /// the device, API level, window type, or permissions do not support window
+    /// shadow configuration.
+    pub async fn try_set_window_shadow(
+        &self,
+        window_id: i64,
+        enabled: bool,
+        radius: f64,
+    ) -> Result<bool> {
         validate_window_id(window_id)?;
         if !radius.is_finite() || radius < 0.0 {
             return Err(Error::from_reason(
                 "window shadow radius must be a non-negative finite number",
             ));
         }
-        self.call::<WindowShadowRequest, WindowAcknowledgement>(
-            "set-shadow-radius",
-            WindowShadowRequest {
-                window_id,
-                enabled,
-                radius,
-            },
-        )
-        .await?
-        .ensure()
+        Ok(self
+            .call::<WindowShadowRequest, WindowAcknowledgement>(
+                "set-shadow",
+                WindowShadowRequest {
+                    window_id,
+                    enabled,
+                    radius,
+                },
+            )
+            .await?
+            .accepted)
     }
 
     pub async fn title_button_rect(&self, window_id: i64) -> Result<WindowTitleButtonRectResponse> {
@@ -1078,12 +1113,42 @@ impl WindowClient {
         .await
     }
 
+    /// Restricts pointer/touch input on a window to `rects` (physical pixels `px`
+    /// relative to the window). Passing `reset = false` with an empty `rects`
+    /// makes the window pass-through (`setWindowTouchable(false)`). Passing
+    /// `reset = true` restores full-window hit testing.
+    ///
+    /// On API 26+ with `ohos.permission.SET_WINDOW_TOUCH_AREAS` (and `<= 10`
+    /// rectangles), applies window-level `setTouchableAreas`; otherwise converts
+    /// `px` to `vp` and applies ArkUI `responseRegion` / `mouseResponseRegion` on
+    /// the window's root frame node.
     pub async fn set_window_input_region(
         &self,
         window_id: i64,
         rects: Vec<RawRect>,
         reset: bool,
     ) -> Result<()> {
+        if self
+            .try_set_window_input_region(window_id, rects, reset)
+            .await?
+        {
+            Ok(())
+        } else {
+            Err(Error::from_reason(
+                "Window plugin rejected the requested operation",
+            ))
+        }
+    }
+
+    /// Best-effort variant of [`Self::set_window_input_region`]. Returns `Ok(false)`
+    /// when neither window-level touchable areas nor a root ArkUI frame node are
+    /// available to apply non-empty rectangles.
+    pub async fn try_set_window_input_region(
+        &self,
+        window_id: i64,
+        rects: Vec<RawRect>,
+        reset: bool,
+    ) -> Result<bool> {
         validate_window_id(window_id)?;
         if rects.len() > 256 {
             return Err(Error::from_reason("too many input region rectangles"));
@@ -1095,16 +1160,17 @@ impl WindowClient {
                 ));
             }
         }
-        self.call::<WindowInputRegionRequest, WindowAcknowledgement>(
-            "set-input-region",
-            WindowInputRegionRequest {
-                window_id,
-                rects,
-                reset,
-            },
-        )
-        .await?
-        .ensure()
+        Ok(self
+            .call::<WindowInputRegionRequest, WindowAcknowledgement>(
+                "set-input-region",
+                WindowInputRegionRequest {
+                    window_id,
+                    rects,
+                    reset,
+                },
+            )
+            .await?
+            .accepted)
     }
 
     async fn window_command(&self, action: &str, window_id: i64) -> Result<()> {
@@ -1361,5 +1427,25 @@ mod tests {
         assert!(validate_window_id(MAX_SAFE_JAVASCRIPT_INTEGER + 1).is_err());
         assert!(validate_platform_integer("x", -MAX_SAFE_JAVASCRIPT_INTEGER).is_ok());
         assert!(validate_platform_integer("x", MAX_SAFE_JAVASCRIPT_INTEGER + 1).is_err());
+    }
+
+    #[test]
+    fn privacy_shadow_title_button_and_input_region_contracts_are_named() {
+        assert_eq!(
+            <super::WindowPrivacyRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.PrivacyRequest"
+        );
+        assert_eq!(
+            <super::WindowShadowRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.ShadowRequest"
+        );
+        assert_eq!(
+            <super::WindowTitleButtonRectResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.TitleButtonRectResponse"
+        );
+        assert_eq!(
+            <super::WindowInputRegionRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.window.InputRegionRequest"
+        );
     }
 }

@@ -24,6 +24,7 @@ import {
   AsyncPluginBase,
   DOMAIN,
   WindowManager,
+  expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
 import { PromptDialogs, WindowPromptRequest } from "./PromptDialogs";
@@ -209,12 +210,14 @@ interface WindowShadowRequest {
 }
 
 class TitleButtonRectResponse {
+  readonly available: boolean;
   readonly right: number;
   readonly top: number;
   readonly width: number;
   readonly height: number;
 
-  constructor(right: number, top: number, width: number, height: number) {
+  constructor(available: boolean, right: number, top: number, width: number, height: number) {
+    this.available = available;
     this.right = right;
     this.top = top;
     this.width = width;
@@ -235,8 +238,13 @@ interface WindowInputRegionRequest {
   reset: boolean;
 }
 
-interface ShadowRadiusWindowApi {
+interface WindowShadowApi {
+  setWindowShadowEnabled?: (enable: boolean) => Promise<void>;
   setWindowShadowRadius?: (radius: number) => void;
+}
+
+interface WindowTouchableAreasApi {
+  setTouchableAreas?: (rects: window.Rect[]) => Promise<void>;
 }
 
 interface WindowTopmostRequest {
@@ -1102,8 +1110,9 @@ export class WindowPlugin extends AsyncPluginBase {
       }
       // An unknown target otherwise silently falls back to the current display.
       display.getDisplayByIdSync(request.displayId);
+      const manager = WindowManager.getInstance();
       if (
-        WindowManager.getInstance().configureDeferredWindow(request.windowId, (options): void => {
+        manager.configureDeferredWindow(request.windowId, (options): void => {
           options.displayId = request.displayId;
           options.x = request.x;
           options.y = request.y;
@@ -1115,9 +1124,16 @@ export class WindowPlugin extends AsyncPluginBase {
       }
       const win = await this.requireWindow(request.windowId, context);
       this.assertCallActive(context);
-      await win.moveWindowToGlobal(request.x, request.y, { displayId: request.displayId });
-      this.assertCallActive(context);
-      await win.resize(request.width, request.height);
+      await manager.serializeOp(
+        request.windowId,
+        async (): Promise<void> => {
+          this.assertCallActive(context);
+          await win.moveWindowToGlobal(request.x, request.y, { displayId: request.displayId });
+          this.assertCallActive(context);
+          await win.resize(request.width, request.height);
+        },
+        win,
+      );
       this.assertCallActive(context);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
@@ -1278,7 +1294,7 @@ export class WindowPlugin extends AsyncPluginBase {
                 DOMAIN,
                 TAG,
                 "request-user-attention: requestEnableNotification failed: %{public}s",
-                JSON.stringify(e2),
+                String(e2),
               );
             }
           }
@@ -1447,12 +1463,12 @@ export class WindowPlugin extends AsyncPluginBase {
     }
 
     if (action === "set-privacy-mode") {
-      if (payload.typeName !== PRIVACY_REQUEST_TYPE || typeof payload.value !== "object") {
-        throw new Error(
-          `ohos.window.set-privacy-mode requires bridge type ${PRIVACY_REQUEST_TYPE}`,
-        );
-      }
-      const request = payload.value as WindowPrivacyRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        PRIVACY_REQUEST_TYPE,
+      ) as WindowPrivacyRequest;
       if (!isWindowId(request?.windowId) || typeof request?.enabled !== "boolean") {
         throw new Error("set-privacy-mode requires a valid windowId and boolean enabled");
       }
@@ -1462,13 +1478,13 @@ export class WindowPlugin extends AsyncPluginBase {
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
     }
 
-    if (action === "set-shadow-radius") {
-      if (payload.typeName !== SHADOW_REQUEST_TYPE || typeof payload.value !== "object") {
-        throw new Error(
-          `ohos.window.set-shadow-radius requires bridge type ${SHADOW_REQUEST_TYPE}`,
-        );
-      }
-      const request = payload.value as WindowShadowRequest;
+    if (action === "set-shadow") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        SHADOW_REQUEST_TYPE,
+      ) as WindowShadowRequest;
       if (
         !isWindowId(request?.windowId) ||
         typeof request?.enabled !== "boolean" ||
@@ -1476,29 +1492,43 @@ export class WindowPlugin extends AsyncPluginBase {
         !Number.isFinite(request.radius) ||
         request.radius < 0
       ) {
-        throw new Error("set-shadow-radius requires a valid windowId, enabled, and radius >= 0");
-      }
-      if (deviceInfo.sdkApiVersion < 17) {
-        throw new Error(`set-shadow-radius requires API 17+, current ${deviceInfo.sdkApiVersion}`);
+        throw new Error("set-shadow requires a valid windowId, enabled, and radius >= 0");
       }
       const win = await this.requireWindow(request.windowId, context);
       this.assertCallActive(context);
+      const shadowApi = win as ESObject as WindowShadowApi;
+      let accepted = false;
       if (WindowManager.getInstance().isUIAbilityMainWindow(request.windowId)) {
-        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
-      }
-      const shadowApi = win as ESObject as ShadowRadiusWindowApi;
-      if (typeof shadowApi.setWindowShadowRadius !== "function") {
-        throw new Error("setWindowShadowRadius is unavailable on this device");
-      }
-      try {
-        shadowApi.setWindowShadowRadius(request.enabled ? request.radius : 0.0);
-      } catch (error) {
-        const code = (error as BusinessError).code;
-        if (code !== 1300004 && code !== 801) {
-          throw error as Error;
+        if (
+          deviceInfo.sdkApiVersion >= 20 &&
+          typeof shadowApi.setWindowShadowEnabled === "function"
+        ) {
+          try {
+            await shadowApi.setWindowShadowEnabled(request.enabled);
+            this.assertCallActive(context);
+            accepted = true;
+          } catch (error) {
+            const code = (error as BusinessError).code;
+            if (code !== 201 && code !== 801 && code !== 1300004) {
+              throw error as Error;
+            }
+          }
+        }
+      } else if (
+        deviceInfo.sdkApiVersion >= 17 &&
+        typeof shadowApi.setWindowShadowRadius === "function"
+      ) {
+        try {
+          shadowApi.setWindowShadowRadius(request.enabled ? request.radius : 0.0);
+          accepted = true;
+        } catch (error) {
+          const code = (error as BusinessError).code;
+          if (code !== 801 && code !== 1300004) {
+            throw error as Error;
+          }
         }
       }
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(accepted) };
     }
 
     if (action === "get-title-button-rect") {
@@ -1509,14 +1539,14 @@ export class WindowPlugin extends AsyncPluginBase {
         const rect = win.getTitleButtonRect();
         return {
           typeName: TITLE_BUTTON_RECT_RESPONSE_TYPE,
-          value: new TitleButtonRectResponse(rect.right, rect.top, rect.width, rect.height),
+          value: new TitleButtonRectResponse(true, rect.right, rect.top, rect.width, rect.height),
         };
       } catch (error) {
         const code = (error as BusinessError).code;
         if (code === 801 || code === 1300004) {
           return {
             typeName: TITLE_BUTTON_RECT_RESPONSE_TYPE,
-            value: new TitleButtonRectResponse(0, 0, 0, 0),
+            value: new TitleButtonRectResponse(false, 0, 0, 0, 0),
           };
         }
         throw error as Error;
@@ -1524,12 +1554,12 @@ export class WindowPlugin extends AsyncPluginBase {
     }
 
     if (action === "set-input-region") {
-      if (payload.typeName !== INPUT_REGION_REQUEST_TYPE || typeof payload.value !== "object") {
-        throw new Error(
-          `ohos.window.set-input-region requires bridge type ${INPUT_REGION_REQUEST_TYPE}`,
-        );
-      }
-      const request = payload.value as WindowInputRegionRequest;
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        INPUT_REGION_REQUEST_TYPE,
+      ) as WindowInputRegionRequest;
       if (
         !isWindowId(request?.windowId) ||
         !Array.isArray(request?.rects) ||
@@ -1538,7 +1568,23 @@ export class WindowPlugin extends AsyncPluginBase {
       ) {
         throw new Error("set-input-region requires a valid windowId, rects array, and reset");
       }
+      for (const rect of request.rects) {
+        if (
+          !rect ||
+          !Number.isInteger(rect.left) ||
+          !Number.isInteger(rect.top) ||
+          !Number.isInteger(rect.width) ||
+          !Number.isInteger(rect.height) ||
+          rect.width < 0 ||
+          rect.height < 0
+        ) {
+          throw new Error(
+            "set-input-region rectangles require integer coordinates and non-negative sizes",
+          );
+        }
+      }
       const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
       if (!request.reset && request.rects.length === 0) {
         await win.setWindowTouchable(false);
         this.assertCallActive(context);
@@ -1551,20 +1597,57 @@ export class WindowPlugin extends AsyncPluginBase {
         request.windowId === 0
           ? context.getRootFrameNode?.()
           : manager.getComponentRoot(request.windowId);
-      if (rootNode !== undefined) {
-        const regions: Rectangle[] = request.reset
-          ? [{ x: 0, y: 0, width: "100%", height: "100%" }]
+      const touchAreasApi = win as ESObject as WindowTouchableAreasApi;
+      if (
+        deviceInfo.sdkApiVersion >= 26 &&
+        typeof touchAreasApi.setTouchableAreas === "function" &&
+        (request.reset || request.rects.length <= 10)
+      ) {
+        const windowRect = win.getWindowProperties().windowRect;
+        const areas: window.Rect[] = request.reset
+          ? [{ left: 0, top: 0, width: windowRect.width, height: windowRect.height }]
           : request.rects.map(
-              (r: InputRawRect): Rectangle => ({
-                x: r.left,
-                y: r.top,
+              (r: InputRawRect): window.Rect => ({
+                left: r.left,
+                top: r.top,
                 width: r.width,
                 height: r.height,
               }),
             );
-        rootNode.commonAttribute.responseRegion(regions).mouseResponseRegion(regions);
+        try {
+          await touchAreasApi.setTouchableAreas(areas);
+          this.assertCallActive(context);
+          if (rootNode !== undefined) {
+            const fullRegion: Rectangle[] = [{ x: 0, y: 0, width: "100%", height: "100%" }];
+            rootNode.commonAttribute.responseRegion(fullRegion).mouseResponseRegion(fullRegion);
+          }
+          return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+        } catch (error) {
+          const code = (error as BusinessError).code;
+          if (code !== 201 && code !== 801) {
+            throw error as Error;
+          }
+        }
       }
-      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      if (rootNode !== undefined) {
+        let regions: Rectangle[];
+        if (request.reset) {
+          regions = [{ x: 0, y: 0, width: "100%", height: "100%" }];
+        } else {
+          const uiCtx = win.getUIContext();
+          regions = request.rects.map(
+            (r: InputRawRect): Rectangle => ({
+              x: uiCtx.px2vp(r.left),
+              y: uiCtx.px2vp(r.top),
+              width: uiCtx.px2vp(r.width),
+              height: uiCtx.px2vp(r.height),
+            }),
+          );
+        }
+        rootNode.commonAttribute.responseRegion(regions).mouseResponseRegion(regions);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(request.reset) };
     }
 
     throw new Error(`Unsupported ohos.window action '${action}'`);
