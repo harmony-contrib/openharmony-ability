@@ -20,6 +20,10 @@ pub struct NativeWebviewSettings {
     pub injected_javascript: Option<String>,
     /// Base URL used for relative resources in inline HTML.
     pub html_base_url: Option<String>,
+    /// Opt in to forwarding unhandled keys and Tab focus-boundary events via
+    /// [`NativeWebviewKeyEvents`]. Defaults to disabled so ordinary pages avoid
+    /// injecting the key-forwarding shim and JS proxy.
+    pub forward_key_events: Option<bool>,
 }
 impl_bridge_napi_type!(NativeWebviewSettings, "ohos.webview.NativeSettings");
 
@@ -55,6 +59,8 @@ impl_bridge_napi_type!(NativeWebviewEvent, "ohos.webview.NativeEvent");
 #[derive(Clone, Debug)]
 pub struct NativeWebviewKeyEvent {
     pub id: String,
+    /// Process-unique controller generation used to reject events from a replaced WebView.
+    pub native_tag: String,
     pub target_id: u32,
     /// `"tab-out"` or `"key"`.
     pub kind: String,
@@ -100,7 +106,11 @@ impl NativeWebviewKeyEvents {
             .registered_plugin::<WebviewBridgePlugin>()?
             .ok_or_else(|| Error::from_reason("WebView plugin is not registered"))?;
         let routes = plugin.native_key_events.clone();
-        let registration = routes.register(target_id, callback);
+        let registration = routes.register(target_id, move |event: NativeWebviewKeyEvent| {
+            if event.id == id {
+                callback(event);
+            }
+        });
         Ok(Self {
             target_id,
             routes,

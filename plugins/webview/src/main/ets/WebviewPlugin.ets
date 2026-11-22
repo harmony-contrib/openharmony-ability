@@ -30,6 +30,7 @@ import {
   NATIVE_MODULE_STORAGE_KEY,
   Module,
   WindowManager,
+  expectBridgeRequestType,
   notifyPrimaryWebviewController,
   notifyKeySynthesisController,
 } from "@ohos-rs/ability";
@@ -46,6 +47,33 @@ import {
   usesLegacyWebviewKeyboard,
   webviewKeyboardScripts,
 } from "./WebviewKeyboardPolicy";
+
+import {
+  NATIVE_KEY_EVENT_TYPE,
+  NATIVE_KEY_INIT_SCRIPT,
+  NATIVE_KEY_PROXY_NAME,
+  NativeKeyJsProxy,
+  WebviewNativeKeyEventPayload,
+  shouldForwardWebviewKeys,
+} from "./WebviewKeyForwarding";
+
+import {
+  WebviewPendingHandlers,
+  WebviewResolveDownloadPayload,
+  WebviewResolveHttpAuthPayload,
+  WebviewResolvePermissionPayload,
+  WebviewResolveSslErrorPayload,
+  parseResolveDownloadPayload,
+  parseResolveHttpAuthPayload,
+  parseResolvePermissionPayload,
+  parseResolveSslErrorPayload,
+} from "./WebviewPendingHandlers";
+
+import {
+  ASYNC_SCRIPT_RESPONSE_TYPE,
+  WebviewAsyncEvaluator,
+  WebviewAsyncScriptResponse,
+} from "./WebviewAsyncEval";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
 const NATIVE_CREATE_REQUEST_TYPE = "ohos.webview.NativeCreateRequest";
@@ -106,21 +134,15 @@ const HTTPS_INTERCEPT_REQUEST_TYPE = "ohos.webview.HttpsInterceptRequest";
 const HTTPS_INTERCEPT_RESPONSE_TYPE = "ohos.webview.HttpsInterceptResponse";
 const REGISTER_HTTPS_INTERCEPT_REQUEST_TYPE = "ohos.webview.RegisterHttpsInterceptRequest";
 const SET_COOKIE_REQUEST_TYPE = "ohos.webview.SetCookieRequest";
-const ASYNC_SCRIPT_RESPONSE_TYPE = "ohos.webview.AsyncScriptResponse";
 const STATE_RESPONSE_TYPE = "ohos.webview.StateResponse";
 const RESTORE_STATE_REQUEST_TYPE = "ohos.webview.RestoreStateRequest";
 const AUDIO_MUTED_REQUEST_TYPE = "ohos.webview.AudioMutedRequest";
 const LOAD_ERROR_EVENT_TYPE = "ohos.webview.LoadErrorEvent";
-const NATIVE_KEY_EVENT_TYPE = "ohos.webview.NativeKeyEvent";
 const AUDIO_STATE_EVENT_TYPE = "ohos.webview.AudioStateEvent";
 const RENDER_EXITED_EVENT_TYPE = "ohos.webview.RenderExitedEvent";
 const PERMISSION_REQUEST_EVENT_TYPE = "ohos.webview.PermissionRequestEvent";
-const RESOLVE_PERMISSION_REQUEST_TYPE = "ohos.webview.ResolvePermissionRequest";
 const HTTP_AUTH_REQUEST_EVENT_TYPE = "ohos.webview.HttpAuthRequestEvent";
-const RESOLVE_HTTP_AUTH_REQUEST_TYPE = "ohos.webview.ResolveHttpAuthRequest";
 const SSL_ERROR_EVENT_TYPE = "ohos.webview.SslErrorEvent";
-const RESOLVE_SSL_ERROR_REQUEST_TYPE = "ohos.webview.ResolveSslErrorRequest";
-const RESOLVE_DOWNLOAD_REQUEST_TYPE = "ohos.webview.ResolveDownloadRequest";
 
 /** Shape of the Web component onInterceptRequest callback event. */
 interface WebInterceptRequestEvent {
@@ -265,6 +287,7 @@ interface WebviewCreatePayload {
    *  Wire payload uses an array (napi object); ManagedWebview stores it as a Set. */
   httpsInterceptProtocolList?: string[] | null;
   incognito?: boolean | null;
+  nativeKeyboard?: boolean | null;
   eventOptions?: WebviewEventOptions | null;
 }
 
@@ -285,76 +308,19 @@ interface ControllerPayload {
 interface ScriptPayload {
   id: string;
   script: string;
-}
-
-class NativeKeyJsProxy {
-  private readonly dispatch: (
-    kind: string,
-    key: string,
-    code: string,
-    keyCode: number,
-    shift: boolean,
-    ctrl: boolean,
-    alt: boolean,
-    meta: boolean,
-    repeat: boolean,
-  ) => void;
-
-  constructor(
-    dispatch: (
-      kind: string,
-      key: string,
-      code: string,
-      keyCode: number,
-      shift: boolean,
-      ctrl: boolean,
-      alt: boolean,
-      meta: boolean,
-      repeat: boolean,
-    ) => void,
-  ) {
-    this.dispatch = dispatch;
-  }
-
-  onTabOut(shift: boolean): void {
-    this.dispatch("tab-out", "Tab", "Tab", 9, Boolean(shift), false, false, false, false);
-  }
-
-  onKey(
-    key: string,
-    code: string,
-    keyCode: number,
-    shift: boolean,
-    ctrl: boolean,
-    alt: boolean,
-    meta: boolean,
-    repeat: boolean,
-  ): void {
-    this.dispatch(
-      "key",
-      typeof key === "string" ? key : "",
-      typeof code === "string" ? code : "",
-      Number.isFinite(keyCode) ? Math.trunc(keyCode) : 0,
-      Boolean(shift),
-      Boolean(ctrl),
-      Boolean(alt),
-      Boolean(meta),
-      Boolean(repeat),
-    );
-  }
+  timeoutMs?: number | null;
 }
 
 interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
   pointerEvents: WebviewPointerEvents;
   nativeKeyboard: boolean;
+  forwardKeys: boolean;
   incognito: boolean;
   allowedFileUrl: string | null;
   keyProxyRegistered: boolean;
   keyProxy?: NativeKeyJsProxy;
-  pendingDownloads: Map<string, webview.WebDownloadItem>;
-  pendingPermissions: Map<string, PermissionRequest>;
-  pendingHttpAuth: Map<string, HttpAuthHandler>;
-  pendingSslErrors: Map<string, SslErrorHandler>;
+  pending: WebviewPendingHandlers;
+  asyncEvaluator: WebviewAsyncEvaluator;
   viewport?: WebviewViewportRequest;
   getHostWindow: () => window.Window;
   nativeNotify: (phase: string, message?: string, code?: number) => void;
@@ -386,17 +352,6 @@ interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
   onPageBegin: (url: string) => void;
   onPageEnd: (url: string) => void;
   onLoadError?: (url: string, code: number, description: string) => void;
-  onNativeKey?: (
-    kind: string,
-    key: string,
-    code: string,
-    keyCode: number,
-    shift: boolean,
-    ctrl: boolean,
-    alt: boolean,
-    meta: boolean,
-    repeat: boolean,
-  ) => void;
   onAudioStateChanged?: (playing: boolean) => void;
   onWindowExit?: () => void;
   onRenderExited?: (reasonCode: number) => void;
@@ -898,29 +853,6 @@ interface WebviewUserAgentRequest {
   userAgent: string;
 }
 
-class WebviewAsyncScriptResponse {
-  readonly ok: boolean;
-  readonly value?: string;
-  readonly error?: string;
-  readonly isSyntaxError: boolean;
-
-  constructor(
-    ok: boolean,
-    value: string | undefined,
-    error: string | undefined,
-    isSyntaxError: boolean,
-  ) {
-    this.ok = ok;
-    if (value !== undefined) {
-      this.value = value;
-    }
-    if (error !== undefined) {
-      this.error = error;
-    }
-    this.isSyntaxError = isSyntaxError;
-  }
-}
-
 class WebviewStateResponse {
   readonly stateBase64?: string;
 
@@ -954,46 +886,6 @@ class WebviewLoadErrorEventPayload {
     this.url = url;
     this.code = code;
     this.description = description;
-  }
-}
-
-class WebviewNativeKeyEventPayload {
-  readonly id: string;
-  readonly targetId: number;
-  readonly kind: string;
-  readonly key: string;
-  readonly code: string;
-  readonly keyCode: number;
-  readonly shift: boolean;
-  readonly ctrl: boolean;
-  readonly alt: boolean;
-  readonly meta: boolean;
-  readonly repeat: boolean;
-
-  constructor(
-    id: string,
-    targetId: number,
-    kind: string,
-    key: string,
-    code: string,
-    keyCode: number,
-    shift: boolean,
-    ctrl: boolean,
-    alt: boolean,
-    meta: boolean,
-    repeat: boolean,
-  ) {
-    this.id = id;
-    this.targetId = targetId;
-    this.kind = kind;
-    this.key = key;
-    this.code = code;
-    this.keyCode = keyCode;
-    this.shift = shift;
-    this.ctrl = ctrl;
-    this.alt = alt;
-    this.meta = meta;
-    this.repeat = repeat;
   }
 }
 
@@ -1045,13 +937,6 @@ class WebviewPermissionRequestEventPayload {
   }
 }
 
-interface WebviewResolvePermissionPayload {
-  id: string;
-  requestId: string;
-  allow: boolean;
-  resources: string[];
-}
-
 class WebviewHttpAuthRequestEventPayload {
   readonly id: string;
   readonly nativeTag: string;
@@ -1066,14 +951,6 @@ class WebviewHttpAuthRequestEventPayload {
     this.host = host;
     this.realm = realm;
   }
-}
-
-interface WebviewResolveHttpAuthPayload {
-  id: string;
-  requestId: string;
-  action: string;
-  username?: string | null;
-  password?: string | null;
 }
 
 class WebviewSslErrorEventPayload {
@@ -1107,19 +984,6 @@ class WebviewSslErrorEventPayload {
       this.certDerBase64 = certDerBase64;
     }
   }
-}
-
-interface WebviewResolveSslErrorPayload {
-  id: string;
-  requestId: string;
-  allow: boolean;
-}
-
-interface WebviewResolveDownloadPayload {
-  id: string;
-  downloadId: string;
-  allow: boolean;
-  path?: string | null;
 }
 
 interface WebviewSchemeDeclaration {
@@ -1249,19 +1113,26 @@ function parseControllerPayload(payload: BridgeTypedValue, action: string): Cont
 }
 
 function parseScriptPayload(payload: BridgeTypedValue): ScriptPayload {
-  if (
-    payload.typeName !== SCRIPT_REQUEST_TYPE ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(`ohos.webview.evaluate-script requires bridge type ${SCRIPT_REQUEST_TYPE}`);
-  }
-  const request = payload.value as ScriptPayload;
+  const request = expectBridgeRequestType(
+    payload,
+    "ohos.webview",
+    "evaluate-script",
+    SCRIPT_REQUEST_TYPE,
+  ) as ScriptPayload;
   if (!request?.id?.trim()) {
     throw new Error("WebView script controller id must not be empty");
   }
   if (typeof request.script !== "string") {
     throw new Error("WebView script must be a string");
+  }
+  if (
+    request.timeoutMs !== undefined &&
+    request.timeoutMs !== null &&
+    (typeof request.timeoutMs !== "number" ||
+      !Number.isFinite(request.timeoutMs) ||
+      request.timeoutMs <= 0)
+  ) {
+    throw new Error("WebView script timeoutMs must be a positive finite number");
   }
   return request;
 }
@@ -1331,16 +1202,12 @@ function nextBridgeRequestId(prefix: string): string {
 }
 
 function parseRestoreStatePayload(payload: BridgeTypedValue): WebviewRestoreStatePayload {
-  if (
-    payload.typeName !== RESTORE_STATE_REQUEST_TYPE ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(
-      `ohos.webview.restore-state requires bridge type ${RESTORE_STATE_REQUEST_TYPE}`,
-    );
-  }
-  const request = payload.value as WebviewRestoreStatePayload;
+  const request = expectBridgeRequestType(
+    payload,
+    "ohos.webview",
+    "restore-state",
+    RESTORE_STATE_REQUEST_TYPE,
+  ) as WebviewRestoreStatePayload;
   if (!request?.id?.trim() || typeof request.stateBase64 !== "string") {
     throw new Error("WebView restore-state requires id and stateBase64");
   }
@@ -1348,93 +1215,14 @@ function parseRestoreStatePayload(payload: BridgeTypedValue): WebviewRestoreStat
 }
 
 function parseAudioMutedPayload(payload: BridgeTypedValue): WebviewAudioMutedPayload {
-  if (
-    payload.typeName !== AUDIO_MUTED_REQUEST_TYPE ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(
-      `ohos.webview.set-audio-muted requires bridge type ${AUDIO_MUTED_REQUEST_TYPE}`,
-    );
-  }
-  const request = payload.value as WebviewAudioMutedPayload;
+  const request = expectBridgeRequestType(
+    payload,
+    "ohos.webview",
+    "set-audio-muted",
+    AUDIO_MUTED_REQUEST_TYPE,
+  ) as WebviewAudioMutedPayload;
   if (!request?.id?.trim() || typeof request.muted !== "boolean") {
     throw new Error("WebView set-audio-muted requires id and boolean muted");
-  }
-  return request;
-}
-
-function parseResolveDownloadPayload(payload: BridgeTypedValue): WebviewResolveDownloadPayload {
-  if (
-    payload.typeName !== RESOLVE_DOWNLOAD_REQUEST_TYPE ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(
-      `ohos.webview.resolve-download requires bridge type ${RESOLVE_DOWNLOAD_REQUEST_TYPE}`,
-    );
-  }
-  const request = payload.value as WebviewResolveDownloadPayload;
-  if (!request?.id?.trim() || !request?.downloadId?.trim() || typeof request.allow !== "boolean") {
-    throw new Error("WebView resolve-download requires id, downloadId, and allow");
-  }
-  return request;
-}
-
-function parseResolvePermissionPayload(payload: BridgeTypedValue): WebviewResolvePermissionPayload {
-  if (
-    payload.typeName !== RESOLVE_PERMISSION_REQUEST_TYPE ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(
-      `ohos.webview.resolve-permission-request requires bridge type ${RESOLVE_PERMISSION_REQUEST_TYPE}`,
-    );
-  }
-  const request = payload.value as WebviewResolvePermissionPayload;
-  if (
-    !request?.id?.trim() ||
-    !request?.requestId?.trim() ||
-    typeof request.allow !== "boolean" ||
-    !Array.isArray(request.resources)
-  ) {
-    throw new Error(
-      "WebView resolve-permission-request requires id, requestId, allow, and resources",
-    );
-  }
-  return request;
-}
-
-function parseResolveHttpAuthPayload(payload: BridgeTypedValue): WebviewResolveHttpAuthPayload {
-  if (
-    payload.typeName !== RESOLVE_HTTP_AUTH_REQUEST_TYPE ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(
-      `ohos.webview.resolve-http-auth requires bridge type ${RESOLVE_HTTP_AUTH_REQUEST_TYPE}`,
-    );
-  }
-  const request = payload.value as WebviewResolveHttpAuthPayload;
-  if (!request?.id?.trim() || !request?.requestId?.trim() || typeof request.action !== "string") {
-    throw new Error("WebView resolve-http-auth requires id, requestId, and action");
-  }
-  return request;
-}
-
-function parseResolveSslErrorPayload(payload: BridgeTypedValue): WebviewResolveSslErrorPayload {
-  if (
-    payload.typeName !== RESOLVE_SSL_ERROR_REQUEST_TYPE ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(
-      `ohos.webview.resolve-ssl-error requires bridge type ${RESOLVE_SSL_ERROR_REQUEST_TYPE}`,
-    );
-  }
-  const request = payload.value as WebviewResolveSslErrorPayload;
-  if (!request?.id?.trim() || !request?.requestId?.trim() || typeof request.allow !== "boolean") {
-    throw new Error("WebView resolve-ssl-error requires id, requestId, and allow");
   }
   return request;
 }
@@ -1461,6 +1249,13 @@ function ensureCreatePayload(payload: WebviewCreatePayload): WebviewCreatePayloa
     typeof payload.transparent !== "boolean"
   ) {
     throw new Error("WebView transparent must be a boolean");
+  }
+  if (
+    payload.nativeKeyboard !== undefined &&
+    payload.nativeKeyboard !== null &&
+    typeof payload.nativeKeyboard !== "boolean"
+  ) {
+    throw new Error("WebView nativeKeyboard must be a boolean");
   }
   if (
     payload.parentHandle !== undefined &&
@@ -1986,7 +1781,7 @@ function setupDownloadDelegate(data: ManagedWebview): void {
       }
       const response = data.onDownloadStart(event.getUrl(), tempPath, suggestedName, guid);
       if (response.deferStart === true) {
-        data.pendingDownloads.set(guid, event);
+        data.pending.trackDownload(guid, event);
         return;
       }
       if (response.allow) {
@@ -1998,21 +1793,11 @@ function setupDownloadDelegate(data: ManagedWebview): void {
   }
   if (data.eventOptions.downloadEnd === true) {
     download.onDownloadFinish((event) => {
-      try {
-        const guid = event.getGuid();
-        if (guid) {
-          data.pendingDownloads.delete(guid);
-        }
-      } catch {}
+      data.pending.untrackDownload(event);
       data.onDownloadEnd(event.getUrl(), event.getFullPath(), true);
     });
     download.onDownloadFailed((event) => {
-      try {
-        const guid = event.getGuid();
-        if (guid) {
-          data.pendingDownloads.delete(guid);
-        }
-      } catch {}
+      data.pending.untrackDownload(event);
       data.onDownloadEnd(event.getUrl(), null, false);
     });
   }
@@ -2267,40 +2052,17 @@ function BuildWebview(data: ManagedWebview) {
  * suppressing their native key events without synthetic replacement would
  * drop ALL key events there.
  */
-const NATIVE_KEY_INIT_SCRIPT = [
-  "(function(){",
-  "if(window.__abilityKeyInstalled)return;",
-  "window.__abilityKeyInstalled=true;",
-  "var M={Shift:1,Control:1,Alt:1,AltGraph:1,Meta:1,OS:1,Super:1,Hyper:1,Fn:1,FnLock:1,CapsLock:1,NumLock:1,ScrollLock:1,Symbol:1,SymbolLock:1};",
-  "var V={ArrowUp:1,ArrowDown:1,ArrowLeft:1,ArrowRight:1,Home:1,End:1,PageUp:1,PageDown:1};",
-  "var E={65:1,67:1,86:1,88:1,89:1,90:1};",
-  "var NT={button:1,checkbox:1,color:1,file:1,hidden:1,image:1,radio:1,range:1,reset:1,submit:1};",
-  'var CT=\'a[href],area[href],button,summary,input,[role="button"],[role="link"],[role="checkbox"],[role="tab"]\';',
-  'var AD=\'input[type="range"],input[type="radio"],audio[controls],video[controls],[role="slider"],[role="radiogroup"]\';',
-  'var FQ=\'a[href],area[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),summary,iframe,[tabindex]:not([tabindex="-1"]),[contenteditable]:not([contenteditable="false"])\';',
-  "var pr=null;",
-  "addEventListener('pointerdown',function(e){var p=e.composedPath?e.composedPath()[0]:e.target;pr=p instanceof Element?p:null;},true);",
-  "function tg(el){if(!el)return'other';if(el.isContentEditable||el instanceof HTMLTextAreaElement||el instanceof HTMLSelectElement)return'text';if(el instanceof HTMLInputElement&&!NT[el.type])return'text';return el.closest(AD)?'adjustable':el.closest(CT)?'control':'other';}",
-  "function sd(e){if(e.altKey||e.metaKey)return null;if(e.ctrlKey)return e.key==='Home'?'up':e.key==='End'?'down':null;switch(e.key){case 'ArrowUp':case 'PageUp':case 'Home':return 'up';case 'ArrowDown':case 'PageDown':case 'End':return 'down';case 'ArrowLeft':return 'left';case 'ArrowRight':return 'right';case ' ':return e.shiftKey?'up':'down';}return null;}",
-  "function rm(n,d){if(d==='up')return n.scrollTop>0;if(d==='down')return n.scrollTop+n.clientHeight<n.scrollHeight-1;return n.scrollWidth>n.clientWidth+1;}",
-  "function sc(f,d){var rt=document.scrollingElement;for(var n=f;n&&n!==rt&&n!==document.body;){var st=getComputedStyle(n);var ov=(d==='up'||d==='down')?st.overflowY:st.overflowX;if((ov==='auto'||ov==='scroll'||ov==='overlay')&&rm(n,d))return true;n=n.parentElement||(n.getRootNode&&n.getRootNode().host)||null;}if(!rt||!rm(rt,d))return false;var hd=function(el){return !!el&&getComputedStyle(el)[(d==='up'||d==='down')?'overflowY':'overflowX']==='hidden';};return !hd(document.documentElement)&&!hd(document.body);}",
-  "function md(){if(document.fullscreenElement)return true;var q=document.querySelectorAll('[aria-modal=\"true\"],dialog[open]');return q.length>0;}",
-  "function fw(e,t,s,m){if((e.isComposing||e.keyCode===229)||(e.getModifierState&&e.getModifierState('AltGraph'))||e.key==='Tab'||e.key==='Dead'||e.key==='Process'||M[e.key])return false;if(e.key==='Escape')return !m;if(/^F\\d+$/.test(e.key))return true;var ch=(e.ctrlKey||e.metaKey)&&!(e.ctrlKey&&e.altKey);if(ch&&E[e.keyCode])return false;if(t==='text')return ch&&!V[e.key]&&e.key!=='Backspace'&&e.key!=='Delete'&&e.key!=='Insert';if(t!=='other'&&!ch&&!e.altKey&&(e.key==='Enter'||e.key===' '))return false;if(t==='adjustable'&&!ch&&!e.altKey&&V[e.key])return false;var d=sd(e);return !d||!s(d);}",
-  "addEventListener('keydown',function(e){if(!e.isTrusted||e.defaultPrevented||!window.__abilityNativeKey)return;",
-  "var el=e.composedPath?e.composedPath()[0]:document.activeElement;if(!(el instanceof Element))el=document.activeElement;for(var a=el&&el.shadowRoot&&el.shadowRoot.activeElement;a;a=a.shadowRoot&&a.shadowRoot.activeElement)el=a;",
-  "if(e.key==='Tab'&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!e.isComposing){var all=Array.prototype.slice.call(document.querySelectorAll(FQ)).filter(function(n){return n.offsetWidth>0||n.offsetHeight>0||n.getClientRects().length>0;});var idx=el?all.indexOf(el):-1;if(all.length===0||(e.shiftKey?idx<=0:(idx===-1||idx>=all.length-1))){e.preventDefault();e.stopPropagation();window.__abilityNativeKey.onTabOut(!!e.shiftKey);}return;}",
-  "if(el===document.body||el===document.documentElement)el=null;var from=el||pr;if(!fw(e,tg(el),function(d){return sc(from,d);},md()))return;",
-  "var k=e.key||'',c=e.code||'',kc=e.keyCode||0,sh=!!e.shiftKey,ct=!!e.ctrlKey,al=!!e.altKey,mt=!!e.metaKey,rp=!!e.repeat;",
-  "setTimeout(function(){if(!e.defaultPrevented&&window.__abilityNativeKey)window.__abilityNativeKey.onKey(k,c,kc,sh,ct,al,mt,rp);},0);},false);",
-  "})();",
-].join("\n");
-
 function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[] {
   const base = webviewKeyboardScripts(
     data.initializationScripts ?? [],
-    usesLegacyWebviewKeyboard(data.nativeKeyboard, data.nativeTarget, data.windowId ?? 0),
+    usesLegacyWebviewKeyboard(
+      data.nativeKeyboard,
+      data.nativeTarget,
+      data.windowId ?? 0,
+      data.forwardKeys,
+    ),
   );
-  if (data.nativeTarget === null && data.eventOptions.keyEvent !== true) {
+  if (!data.forwardKeys) {
     return base;
   }
   const rules: Set<string> = new Set();
@@ -2330,8 +2092,9 @@ function handleControllerAttached(data: ManagedWebview): void {
     if (data.userAgent !== undefined && data.userAgent !== null) {
       data.controller.setCustomUserAgent(data.userAgent);
     }
-    if ((data.nativeTarget !== null || data.eventOptions.keyEvent === true) && data.keyProxy) {
-      data.controller.registerJavaScriptProxy(data.keyProxy, "__abilityNativeKey", [
+    data.asyncEvaluator.attach(data.controller);
+    if (data.forwardKeys && data.keyProxy) {
+      data.controller.registerJavaScriptProxy(data.keyProxy, NATIVE_KEY_PROXY_NAME, [
         "onTabOut",
         "onKey",
       ]);
@@ -2370,10 +2133,9 @@ function handleControllerAttached(data: ManagedWebview): void {
       );
     }
 
-    // ohos-webview-key-synthesis: register the controller (ALL windows incl.
-    // main — unlike the sub-window-only WindowManager map above) so
-    // MainPage.onKeyPreIme can dispatch synthetic DOM key events into it.
-    if (!data.nativeKeyboard && data.nativeTarget === null) {
+    // ohos-webview-key-synthesis: register the controller (legacy main-window
+    // hosts only) so MainPage.onKeyPreIme can dispatch synthetic DOM key events into it.
+    if (usesLegacyWebviewKeyboard(data.nativeKeyboard, data.nativeTarget, wid, data.forwardKeys)) {
       notifyKeySynthesisController(wid, data.controller as webview.WebviewController);
     }
 
@@ -2422,15 +2184,18 @@ function handleLoadIntercept(data: ManagedWebview, url: string): boolean {
   }
   // file:// interception: ArkWeb consumes OS file drops by navigating to
   // file://<dropped file>, which preempts onDrop. Allow explicit loadUrl("file://...")
-  // while blocking OS drops when dragDrop is enabled.
+  // while blocking unapproved file:// navigations (or routing them to onDrop / navigation callback).
   if (url && url.startsWith("file://")) {
-    if (data.allowedFileUrl !== url && data.eventOptions.dragDrop === true) {
-      const path = pathFromFileUrl(url);
-      data.onDrop(0, 0, [path]);
-      return true; // block navigation
-    }
     if (data.allowedFileUrl !== url) {
-      return false;
+      if (data.eventOptions.dragDrop === true) {
+        const path = pathFromFileUrl(url);
+        data.onDrop(0, 0, [path]);
+        return true; // block navigation
+      }
+      if (data.eventOptions.navigationIntercept === true) {
+        return data.onNavigationRequest(url);
+      }
+      return true;
     }
   }
   return data.onNavigationRequest(url);
@@ -2496,6 +2261,8 @@ function handleWebviewInterceptRequest(
 
 /** pageBegin/pageEnd JS-callback dispatch, gated on the event options. */
 function handleWebviewPageBegin(data: ManagedWebview, url: string): void {
+  data.pending.clearNavigationPending();
+  data.asyncEvaluator.onNavigationStart();
   data.nativeNotify("start");
   if (data.eventOptions.pageBegin === true) {
     data.onPageBegin(url);
@@ -2694,6 +2461,10 @@ class WebviewSurface {
     // onWindowNew Allow branch, which lives in a `@Builder` free function with no `this`.
     // Same source as the BuilderNode construction below (`this.pluginContext.getUIContext()`).
     const newWindowUiCtx = this.pluginContext.getUIContext();
+    const forwardKeys = shouldForwardWebviewKeys(
+      eventOptions.keyEvent,
+      nativeSettings?.forwardKeyEvents,
+    );
     const nativeKeyDispatch = (
       kind: string,
       key: string,
@@ -2705,6 +2476,9 @@ class WebviewSurface {
       meta: boolean,
       repeat: boolean,
     ): void => {
+      if (this.disposed || this.entries.get(payload.id)?.data !== data || !data.nativeActive) {
+        return;
+      }
       try {
         notifyNative(
           this.pluginContext,
@@ -2712,6 +2486,7 @@ class WebviewSurface {
           NATIVE_KEY_EVENT_TYPE,
           new WebviewNativeKeyEventPayload(
             payload.id,
+            nativeTag,
             nativeTarget ?? 0,
             kind,
             key,
@@ -2730,14 +2505,13 @@ class WebviewSurface {
     };
     const data: ManagedWebview = {
       nativeKeyboard,
+      forwardKeys,
       incognito: payload.incognito === true,
       allowedFileUrl: payload.url && payload.url.startsWith("file://") ? payload.url : null,
       keyProxyRegistered: false,
-      keyProxy: new NativeKeyJsProxy(nativeKeyDispatch),
-      pendingDownloads: new Map<string, webview.WebDownloadItem>(),
-      pendingPermissions: new Map<string, PermissionRequest>(),
-      pendingHttpAuth: new Map<string, HttpAuthHandler>(),
-      pendingSslErrors: new Map<string, SslErrorHandler>(),
+      keyProxy: forwardKeys ? new NativeKeyJsProxy(nativeKeyDispatch) : undefined,
+      pending: new WebviewPendingHandlers(),
+      asyncEvaluator: new WebviewAsyncEvaluator(),
       pointerEvents: new WebviewPointerEvents(
         payload.id,
         nativeTag,
@@ -2914,7 +2688,6 @@ class WebviewSurface {
           console.error("WebView load-error notification failed: " + String(error));
         }
       },
-      onNativeKey: nativeKeyDispatch,
       onAudioStateChanged: (playing: boolean): void => {
         try {
           notifyNative(
@@ -2968,7 +2741,7 @@ class WebviewSurface {
       },
       onPermissionRequest: (request: PermissionRequest): void => {
         const requestId = nextBridgeRequestId("perm");
-        data.pendingPermissions.set(requestId, request);
+        data.pending.trackPermission(requestId, request);
         try {
           const origin = request.getOrigin() ?? "";
           const resources = request.getAccessibleResource() ?? [];
@@ -2985,7 +2758,7 @@ class WebviewSurface {
             ) as ESObject,
           );
         } catch (error) {
-          data.pendingPermissions.delete(requestId);
+          data.pending.deletePermission(requestId);
           try {
             request.deny();
           } catch {}
@@ -2994,7 +2767,7 @@ class WebviewSurface {
       },
       onHttpAuthRequest: (host: string, realm: string, handler: HttpAuthHandler): boolean => {
         const requestId = nextBridgeRequestId("auth");
-        data.pendingHttpAuth.set(requestId, handler);
+        data.pending.trackHttpAuth(requestId, handler);
         try {
           notifyNative(
             this.pluginContext,
@@ -3010,14 +2783,14 @@ class WebviewSurface {
           );
           return true;
         } catch (error) {
-          data.pendingHttpAuth.delete(requestId);
+          data.pending.deleteHttpAuth(requestId);
           console.error("WebView http-auth-request notification failed: " + String(error));
           return false;
         }
       },
       onSslError: (event: SslErrorEvent): void => {
         const requestId = nextBridgeRequestId("ssl");
-        data.pendingSslErrors.set(requestId, event.handler);
+        data.pending.trackSslError(requestId, event.handler);
         const errorCode = Number(event.error ?? 0);
         let errorName = "invalid";
         if (errorCode === 1) {
@@ -3059,7 +2832,7 @@ class WebviewSurface {
             ) as ESObject,
           );
         } catch (error) {
-          data.pendingSslErrors.delete(requestId);
+          data.pending.deleteSslError(requestId);
           try {
             event.handler.handleCancel();
           } catch {}
@@ -3209,7 +2982,7 @@ class WebviewSurface {
         windowId,
       );
       WindowManager.onComponentRootRegistered(windowId, (): void => {
-        this.create(payload, callContext);
+        this.create(payload, callContext, nativeTarget, nativeSettings, nativeKeyboard);
       });
       return;
     }
@@ -3416,6 +3189,7 @@ class WebviewSurface {
   ): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
     try {
+      const needsFileAccessEnable = entry.data.allowedFileUrl === null && url.startsWith("file://");
       if (url.startsWith("file://")) {
         if (entry.data.allowedFileUrl !== url) {
           entry.data.allowedFileUrl = url;
@@ -3424,6 +3198,13 @@ class WebviewSurface {
       } else if (entry.data.allowedFileUrl !== null) {
         entry.data.allowedFileUrl = null;
         entry.node.update(entry.data);
+      }
+      if (needsFileAccessEnable) {
+        // Yield one frame so ArkUI flushes `.fileAccess(true)` before loadUrl runs.
+        await new Promise<void>((resolve) => {
+          setTimeout(() => resolve(), 16);
+        });
+        this.assertCurrentEntry(id, entry, callContext);
       }
       entry.data.controller.loadUrl(url, headersOf(headers));
     } catch (error) {
@@ -3510,6 +3291,9 @@ class WebviewSurface {
     callContext: BridgeCallContext,
     incognitoOverride?: boolean,
   ): Promise<WebviewCookiesResponse> {
+    if (deviceInfo.sdkApiVersion < 23) {
+      throw new Error("fetchAllCookies requires API 23 or later");
+    }
     let incognito = incognitoOverride === true;
     if (id) {
       const entry = await this.controllerEntry(id, callContext);
@@ -3585,36 +3369,14 @@ class WebviewSurface {
   }
 
   private cleanupPending(data: ManagedWebview): void {
+    data.asyncEvaluator.detach(data.controller);
     if (data.keyProxyRegistered) {
       data.keyProxyRegistered = false;
       try {
-        data.controller.deleteJavaScriptRegister("__abilityNativeKey");
+        data.controller.deleteJavaScriptRegister(NATIVE_KEY_PROXY_NAME);
       } catch {}
     }
-    for (const item of data.pendingDownloads.values()) {
-      try {
-        item.cancel();
-      } catch {}
-    }
-    data.pendingDownloads.clear();
-    for (const req of data.pendingPermissions.values()) {
-      try {
-        req.deny();
-      } catch {}
-    }
-    data.pendingPermissions.clear();
-    for (const handler of data.pendingHttpAuth.values()) {
-      try {
-        handler.cancel();
-      } catch {}
-    }
-    data.pendingHttpAuth.clear();
-    for (const handler of data.pendingSslErrors.values()) {
-      try {
-        handler.handleCancel();
-      } catch {}
-    }
-    data.pendingSslErrors.clear();
+    data.pending.clearAll();
   }
 
   private async removeEntry(
@@ -3693,99 +3455,19 @@ class WebviewSurface {
     }
   }
 
-  private decodeRunJavaScriptString(raw: string): string | null {
-    if (raw === "null" || raw === "undefined") {
-      return null;
-    }
-    if (raw.startsWith('"') && raw.endsWith('"')) {
-      try {
-        const parsed: ESObject = JSON.parse(raw) as ESObject;
-        if (typeof parsed === "string") {
-          return parsed;
-        }
-      } catch {}
-    }
-    return raw;
-  }
-
   async evaluateAsyncScript(
     id: string,
     script: string,
     callContext: BridgeCallContext,
+    timeoutMs?: number | null,
   ): Promise<WebviewAsyncScriptResponse> {
     const entry = await this.controllerEntry(id, callContext);
-    const controller = entry.data.controller;
-    const token = nextBridgeRequestId("__aeval");
-    const starter =
-      `(function(){var s=globalThis.__abilityEval||(globalThis.__abilityEval=Object.create(null));` +
-      `s["${token}"]={d:false,o:false,v:""};` +
-      `Promise.resolve().then(async function(){\n${script}\n}).then(` +
-      `function(v){s["${token}"]={d:true,o:true,v:v===undefined?"":String(v)};},` +
-      `function(e){s["${token}"]={d:true,o:false,v:e&&e.stack?String(e.stack):String(e)};});` +
-      `return "started";})();`;
-    let started = false;
-    let startError = "";
-    let rawStarted = "";
-    let probeRaw = "";
-    try {
-      rawStarted = await controller.runJavaScript(starter);
-      started = this.decodeRunJavaScriptString(rawStarted) === "started";
-    } catch (error) {
-      startError = String(error);
-    }
-    if (!started) {
-      let sanityOk = false;
-      try {
-        probeRaw = await controller.runJavaScript('"ok"');
-        sanityOk = this.decodeRunJavaScriptString(probeRaw) === "ok";
-      } catch {}
-      if (sanityOk) {
-        return new WebviewAsyncScriptResponse(
-          false,
-          undefined,
-          `SyntaxError: ${startError || "failed to compile async script"}`,
-          true,
-        );
-      }
-      throw new Error(
-        `Unable to start async WebView script: ${startError || `rawStarted=${rawStarted} probe=${probeRaw}`}`,
-      );
-    }
-    const pollScript =
-      `(function(){var s=globalThis.__abilityEval;if(!s)return "m";var e=s["${token}"];` +
-      `if(!e)return "m";if(!e.d)return "p";delete s["${token}"];return (e.o?"1":"0")+e.v;})();`;
-    const deadline = Date.now() + 55000;
-    while (callContext.isActive() && this.entries.get(id) === entry && Date.now() < deadline) {
-      const pollRaw = await controller.runJavaScript(pollScript);
-      const raw = this.decodeRunJavaScriptString(pollRaw);
-      if (raw !== null) {
-        if (raw === "m") {
-          return new WebviewAsyncScriptResponse(
-            false,
-            undefined,
-            "async script state cleared during navigation",
-            false,
-          );
-        }
-        if (raw.startsWith("1")) {
-          return new WebviewAsyncScriptResponse(true, raw.substring(1), undefined, false);
-        }
-        if (raw.startsWith("0")) {
-          return new WebviewAsyncScriptResponse(false, undefined, raw.substring(1), false);
-        }
-      }
-      await new Promise<void>((resolve) => {
-        setTimeout(() => resolve(), 5);
-      });
-    }
-    try {
-      await controller.runJavaScript(`delete (globalThis.__abilityEval||{})["${token}"];`);
-    } catch {}
-    return new WebviewAsyncScriptResponse(
-      false,
-      undefined,
-      callContext.isActive() ? "async script timed out" : "async script cancelled",
-      false,
+    return await entry.data.asyncEvaluator.evaluate(
+      entry.data.controller,
+      script,
+      (): boolean => callContext.isActive() && this.entries.get(id) === entry,
+      callContext.onCancel,
+      timeoutMs,
     );
   }
 
@@ -3849,96 +3531,22 @@ class WebviewSurface {
 
   resolveDownload(request: WebviewResolveDownloadPayload): boolean {
     const entry = this.entries.get(request.id);
-    if (!entry) {
-      return false;
-    }
-    const item = entry.data.pendingDownloads.get(request.downloadId);
-    if (!item) {
-      return false;
-    }
-    entry.data.pendingDownloads.delete(request.downloadId);
-    try {
-      if (request.allow && request.path && request.path.trim().length > 0) {
-        item.start(request.path);
-      } else {
-        item.cancel();
-      }
-      return true;
-    } catch (error) {
-      console.error("WebView resolve-download failed: " + String(error));
-      return false;
-    }
+    return entry ? entry.data.pending.resolveDownload(request) : false;
   }
 
   resolvePermissionRequest(request: WebviewResolvePermissionPayload): boolean {
     const entry = this.entries.get(request.id);
-    if (!entry) {
-      return false;
-    }
-    const perm = entry.data.pendingPermissions.get(request.requestId);
-    if (!perm) {
-      return false;
-    }
-    entry.data.pendingPermissions.delete(request.requestId);
-    try {
-      if (request.allow) {
-        const resources =
-          request.resources.length > 0 ? request.resources : perm.getAccessibleResource();
-        perm.grant(resources);
-      } else {
-        perm.deny();
-      }
-      return true;
-    } catch (error) {
-      console.error("WebView resolve-permission-request failed: " + String(error));
-      return false;
-    }
+    return entry ? entry.data.pending.resolvePermission(request) : false;
   }
 
   resolveHttpAuth(request: WebviewResolveHttpAuthPayload): boolean {
     const entry = this.entries.get(request.id);
-    if (!entry) {
-      return false;
-    }
-    const handler = entry.data.pendingHttpAuth.get(request.requestId);
-    if (!handler) {
-      return false;
-    }
-    entry.data.pendingHttpAuth.delete(request.requestId);
-    try {
-      if (request.action === "confirm") {
-        handler.confirm(request.username ?? "", request.password ?? "");
-      } else {
-        handler.cancel();
-      }
-      return true;
-    } catch (error) {
-      console.error("WebView resolve-http-auth failed: " + String(error));
-      return false;
-    }
+    return entry ? entry.data.pending.resolveHttpAuth(request) : false;
   }
 
   resolveSslError(request: WebviewResolveSslErrorPayload): boolean {
     const entry = this.entries.get(request.id);
-    if (!entry) {
-      return false;
-    }
-    const handler = entry.data.pendingSslErrors.get(request.requestId);
-    if (!handler) {
-      return false;
-    }
-    entry.data.pendingSslErrors.delete(request.requestId);
-    try {
-      if (request.allow) {
-        handler.handleConfirm();
-      } else {
-        handler.handleCancel();
-      }
-      return true;
-    } catch (error) {
-      console.error("WebView resolve-ssl-error failed: " + String(error));
-      return false;
-    }
+    return entry ? entry.data.pending.resolveSslError(request) : false;
   }
 
   async createPdf(
@@ -4228,7 +3836,11 @@ class WebviewSurface {
 
   setCookie(url: string, value: string, incognito: boolean = false): boolean {
     try {
-      webview.WebCookieManager.configCookieSync(url, value, incognito, true);
+      if (deviceInfo.sdkApiVersion >= 14) {
+        webview.WebCookieManager.configCookieSync(url, value, incognito, true);
+      } else {
+        webview.WebCookieManager.configCookieSync(url, value, incognito);
+      }
       return true;
     } catch (error) {
       console.error("WebView set-cookie failed: " + String(error));
@@ -4665,6 +4277,9 @@ export class WebviewPlugin extends AsyncPluginBase {
       if (action === "default-clear-cookies") {
         await surface.clearCookies("", context, incognito);
       } else if (action === "default-clear-resource-cache") {
+        if (incognito) {
+          throw new Error("Incognito resource cache deletion is not supported separately");
+        }
         if (deviceInfo.sdkApiVersion < 18) {
           throw new Error("Default resource cache deletion requires API 18");
         }
@@ -4672,6 +4287,9 @@ export class WebviewPlugin extends AsyncPluginBase {
       } else if (action === "default-clear-web-storage") {
         webview.WebStorage.deleteAllData(incognito);
       } else {
+        if (incognito) {
+          throw new Error("Incognito HTTP auth deletion is not supported separately");
+        }
         webview.WebDataBase.deleteHttpAuthCredentials();
       }
       if (!context.isActive()) {
@@ -4725,14 +4343,14 @@ export class WebviewPlugin extends AsyncPluginBase {
       );
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
     }
-    if (action === "create" || action === "create-with-native-keyboard") {
+    if (action === "create") {
       const createPayload = ensureCreatePayload(parseCreatePayload(payload));
       await surface.create(
         createPayload,
         context,
         null,
         null,
-        action === "create-with-native-keyboard",
+        createPayload.nativeKeyboard === true,
       );
       if (!context.isActive()) {
         throw new Error(
@@ -4758,7 +4376,12 @@ export class WebviewPlugin extends AsyncPluginBase {
       const scriptPayload = parseScriptPayload(payload);
       return {
         typeName: ASYNC_SCRIPT_RESPONSE_TYPE,
-        value: await surface.evaluateAsyncScript(scriptPayload.id, scriptPayload.script, context),
+        value: await surface.evaluateAsyncScript(
+          scriptPayload.id,
+          scriptPayload.script,
+          context,
+          scriptPayload.timeoutMs,
+        ),
       };
     }
 

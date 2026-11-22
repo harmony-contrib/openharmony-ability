@@ -104,14 +104,16 @@ impl BridgePlugin for WebviewBridgePlugin {
             }
             "native-key-event" => {
                 let notification = event.decode::<NativeWebviewKeyEvent>()?;
-                if notification.target_id != 0 {
-                    let target_id = notification.target_id;
-                    let dispatched = notification.clone();
-                    NativeAttachment::dispatch(target_id, || {
-                        self.native_key_events.dispatch(target_id, dispatched)
-                    })?;
+                if controller::is_current(&notification.id, &notification.native_tag)? {
+                    if notification.target_id != 0 {
+                        let target_id = notification.target_id;
+                        let dispatched = notification.clone();
+                        NativeAttachment::dispatch(target_id, || {
+                            self.native_key_events.dispatch(target_id, dispatched)
+                        })?;
+                    }
+                    callbacks::dispatch_key_event(notification)?;
                 }
-                callbacks::dispatch_key_event(notification)?;
                 event.respond(WebviewEventAcknowledgement { accepted: true })
             }
             "native-controller-attached" | "native-controller-removed" => {
@@ -531,6 +533,10 @@ pub struct WebviewCreateRequest {
     pub https_intercept_protocol_list: Option<Vec<String>>,
     /// Enables ArkWeb ephemeral/incognito browsing mode (`incognitoMode: true`).
     pub incognito: Option<bool>,
+    /// Uses ArkWeb's native keyboard input directly instead of MainPage's legacy
+    /// pre-IME synthetic key shim. Custom hosts without MainPage's synthesizer
+    /// should set this to `true`.
+    pub native_keyboard: Option<bool>,
     #[doc(hidden)]
     pub event_options: WebviewCallbackOptions,
 }
@@ -572,6 +578,7 @@ impl WebviewCreateRequest {
             drag_drop_overlay: None,
             https_intercept_protocol_list: None,
             incognito: None,
+            native_keyboard: None,
             event_options: WebviewCallbackOptions::default(),
         }
     }
@@ -612,6 +619,11 @@ impl WebviewCreateRequest {
 
     pub fn incognito(mut self, incognito: bool) -> Self {
         self.incognito = Some(incognito);
+        self
+    }
+
+    pub fn native_keyboard(mut self, enabled: bool) -> Self {
+        self.native_keyboard = Some(enabled);
         self
     }
 
@@ -1181,48 +1193,77 @@ impl_bridge_napi_type!(
 #[derive(Clone)]
 pub struct WebviewDefaultStoreClient {
     bridge: BridgeRuntime,
+    incognito: bool,
 }
 impl WebviewDefaultStoreClient {
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
+            incognito: false,
         })
     }
+
+    /// Targets ArkWeb's incognito cookie and web-storage store when `true`.
+    pub fn incognito(mut self, incognito: bool) -> Self {
+        self.incognito = incognito;
+        self
+    }
+
+    pub fn is_incognito(&self) -> bool {
+        self.incognito
+    }
+
+    fn store_request(&self) -> WebviewDefaultStoreRequest {
+        WebviewDefaultStoreRequest {
+            incognito: self.incognito.then_some(true),
+        }
+    }
+
     pub async fn cookies(&self) -> Result<Vec<WebviewCookie>> {
         let response = self
             .bridge
             .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewCookiesResponse>(
                 "default-cookies",
-                WebviewDefaultStoreRequest::default(),
+                self.store_request(),
                 BridgeCallOptions::default(),
             )
             .await?;
         Ok(response.cookies)
     }
+
     pub async fn clear_cookies(&self) -> Result<bool> {
         let response = self
             .bridge
             .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
                 "default-clear-cookies",
-                WebviewDefaultStoreRequest::default(),
+                self.store_request(),
                 BridgeCallOptions::default(),
             )
             .await?;
         Ok(response.accepted)
     }
+
     /// Deletes the default resource cache in RAM and on disk (API 18+).
     /// Does not promise CacheStorage, service worker registrations or HSTS deletion.
+    /// Rejects when targeting an incognito store because ArkWeb does not expose
+    /// separate incognito resource cache deletion.
     pub async fn clear_resource_cache(&self) -> Result<bool> {
+        if self.incognito {
+            return Err(Error::from_reason(
+                "Incognito resource cache deletion is not supported separately by ArkWeb",
+            ));
+        }
         let response = self
             .bridge
             .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
                 "default-clear-resource-cache",
-                WebviewDefaultStoreRequest::default(),
+                self.store_request(),
                 BridgeCallOptions::default(),
             )
             .await?;
         Ok(response.accepted)
     }
+
     /// Deletes JavaScript storage using WebStorage.deleteAllData(incognito).
     /// This is one platform-wide operation, not a selective per-storage-type mask.
     pub async fn clear_web_storage(&self) -> Result<bool> {
@@ -1230,75 +1271,34 @@ impl WebviewDefaultStoreClient {
             .bridge
             .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
                 "default-clear-web-storage",
-                WebviewDefaultStoreRequest::default(),
+                self.store_request(),
                 BridgeCallOptions::default(),
             )
             .await?;
         Ok(response.accepted)
     }
+
     /// Deletes saved HTTP authentication credentials, without deleting cookies.
+    /// Rejects when targeting an incognito store because ArkWeb does not expose
+    /// separate incognito HTTP auth credential deletion.
     pub async fn clear_http_auth(&self) -> Result<bool> {
+        if self.incognito {
+            return Err(Error::from_reason(
+                "Incognito HTTP auth deletion is not supported separately by ArkWeb",
+            ));
+        }
         let response = self
             .bridge
             .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
                 "default-clear-http-auth",
-                WebviewDefaultStoreRequest::default(),
+                self.store_request(),
                 BridgeCallOptions::default(),
             )
             .await?;
         Ok(response.accepted)
     }
+
     pub async fn set_cookie(&self, url: String, value: String) -> Result<bool> {
-        if url.trim().is_empty()
-            || url.chars().any(char::is_control)
-            || value.chars().any(char::is_control)
-        {
-            return Err(Error::from_reason("Invalid default-store cookie"));
-        }
-        let response = self.bridge.call_async::<WebviewBridgePlugin, WebviewDefaultSetCookieRequest, WebviewAcknowledgement>(
-            "default-set-cookie", WebviewDefaultSetCookieRequest { url, value, incognito: None }, BridgeCallOptions::default()).await?;
-        Ok(response.accepted)
-    }
-    pub async fn cookies_in(&self, incognito: bool) -> Result<Vec<WebviewCookie>> {
-        let response = self
-            .bridge
-            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewCookiesResponse>(
-                "default-cookies",
-                WebviewDefaultStoreRequest {
-                    incognito: Some(incognito),
-                },
-                BridgeCallOptions::default(),
-            )
-            .await?;
-        Ok(response.cookies)
-    }
-    pub async fn clear_cookies_in(&self, incognito: bool) -> Result<bool> {
-        let response = self
-            .bridge
-            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
-                "default-clear-cookies",
-                WebviewDefaultStoreRequest {
-                    incognito: Some(incognito),
-                },
-                BridgeCallOptions::default(),
-            )
-            .await?;
-        Ok(response.accepted)
-    }
-    pub async fn clear_web_storage_in(&self, incognito: bool) -> Result<bool> {
-        let response = self
-            .bridge
-            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
-                "default-clear-web-storage",
-                WebviewDefaultStoreRequest {
-                    incognito: Some(incognito),
-                },
-                BridgeCallOptions::default(),
-            )
-            .await?;
-        Ok(response.accepted)
-    }
-    pub async fn set_cookie_in(&self, url: String, value: String, incognito: bool) -> Result<bool> {
         if url.trim().is_empty()
             || url.chars().any(char::is_control)
             || value.chars().any(char::is_control)
@@ -1312,7 +1312,7 @@ impl WebviewDefaultStoreClient {
                 WebviewDefaultSetCookieRequest {
                     url,
                     value,
-                    incognito: Some(incognito),
+                    incognito: self.incognito.then_some(true),
                 },
                 BridgeCallOptions::default(),
             )
@@ -1527,41 +1527,15 @@ impl WebviewClient {
         Self { bridge }
     }
 
-    pub async fn create(&self, request: WebviewCreateRequest) -> Result<WebviewHandle> {
-        self.create_with_keyboard_mode(request, false).await
-    }
-
-    /// Creates a WebView using ArkWeb's native keyboard input, without the
-    /// MainPage-only synthetic DOM event shim. Custom hosts must use this path
-    /// because they do not provide MainPage's paired pre-IME synthesizer.
-    /// This does not change ArkWeb's own key identity/IME behavior.
-    pub async fn create_with_native_keyboard(
-        &self,
-        request: WebviewCreateRequest,
-    ) -> Result<WebviewHandle> {
-        self.create_with_keyboard_mode(request, true).await
-    }
-
-    async fn create_with_keyboard_mode(
-        &self,
-        mut request: WebviewCreateRequest,
-        native_keyboard: bool,
-    ) -> Result<WebviewHandle> {
+    pub async fn create(&self, mut request: WebviewCreateRequest) -> Result<WebviewHandle> {
         request.validate()?;
         // Callback declarations live solely in Rust. Snapshot their event subscriptions into the
         // named create request so ArkTS can bind ArkWeb hooks without retaining Rust closures.
         request.event_options = callbacks::options_for(&request.id)?;
         let request_id = request.id.clone();
-        let response: WebviewCreateResponse = if native_keyboard {
-            self.call::<WebviewCreateRequest, WebviewCreateResponse>(
-                "create-with-native-keyboard",
-                request,
-            )
-            .await?
-        } else {
-            self.call::<WebviewCreateRequest, WebviewCreateResponse>("create", request)
-                .await?
-        };
+        let response: WebviewCreateResponse = self
+            .call::<WebviewCreateRequest, WebviewCreateResponse>("create", request)
+            .await?;
         if response.id != request_id {
             return Err(Error::from_reason(
                 "WebView plugin returned a mismatched controller ID",
@@ -1571,6 +1545,17 @@ impl WebviewClient {
             client: self.clone(),
             id: response.id,
         })
+    }
+
+    /// Creates a WebView using ArkWeb's native keyboard input, without the
+    /// MainPage-only synthetic DOM event shim. Custom hosts must use this path
+    /// (or set [`WebviewCreateRequest::native_keyboard`]) because they do not
+    /// provide MainPage's paired pre-IME synthesizer.
+    pub async fn create_with_native_keyboard(
+        &self,
+        request: WebviewCreateRequest,
+    ) -> Result<WebviewHandle> {
+        self.create(request.native_keyboard(true)).await
     }
 
     /// Reopens a controller-ID facade for a WebView already created in this module/session.
@@ -1739,6 +1724,10 @@ impl WebviewClient {
 /// precedent of 60s for heavy actions).
 fn snapshot_call_options() -> BridgeCallOptions {
     BridgeCallOptions::default().with_timeout_ms(60_000)
+}
+
+fn async_script_call_options(js_timeout_ms: u32) -> BridgeCallOptions {
+    BridgeCallOptions::default().with_timeout_ms(js_timeout_ms.saturating_add(5_000))
 }
 
 /// Returns the active ArkWeb engine version, e.g. `"M132"` / `"M132 (evergreen)"`.
@@ -2378,6 +2367,7 @@ impl WebviewHandle {
                 WebviewScriptRequest {
                     id: self.id.clone(),
                     script: script.into(),
+                    timeout_ms: None,
                 },
             )
             .await?;
@@ -2401,14 +2391,30 @@ impl WebviewHandle {
         &self,
         script: impl Into<String>,
     ) -> Result<WebviewAsyncScriptResponse> {
+        self.evaluate_async_script_with_timeout(script, 55_000)
+            .await
+    }
+
+    pub async fn evaluate_async_script_with_timeout(
+        &self,
+        script: impl Into<String>,
+        timeout_ms: u32,
+    ) -> Result<WebviewAsyncScriptResponse> {
+        if timeout_ms == 0 {
+            return Err(Error::from_reason(
+                "WebView async script timeout must be positive",
+            ));
+        }
+        let clamped = timeout_ms.clamp(100, 300_000);
         self.client
             .call_with_options::<WebviewScriptRequest, WebviewAsyncScriptResponse>(
                 "evaluate-async-script",
                 WebviewScriptRequest {
                     id: self.id.clone(),
                     script: script.into(),
+                    timeout_ms: Some(clamped),
                 },
-                snapshot_call_options(),
+                async_script_call_options(clamped),
             )
             .await
     }
@@ -2470,6 +2476,8 @@ impl_bridge_napi_type!(WebviewCreateResponse, "ohos.webview.CreateResponse");
 pub struct WebviewScriptRequest {
     pub id: String,
     pub script: String,
+    /// Optional execution timeout in milliseconds (used by `evaluate-async-script`).
+    pub timeout_ms: Option<u32>,
 }
 
 impl_bridge_napi_type!(WebviewScriptRequest, "ohos.webview.ScriptRequest");
@@ -2644,6 +2652,8 @@ mod tests {
             .parent_node(7)
             .transparent(true)
             .dom_storage_access(true)
+            .incognito(true)
+            .native_keyboard(true)
             .url("https://example.test");
         assert_eq!(request.id, "webview");
         assert_eq!(request.parent_handle, Some(7));
@@ -2652,6 +2662,8 @@ mod tests {
         assert!(request.headers.is_none());
         assert_eq!(request.transparent, Some(true));
         assert_eq!(request.dom_storage_access, Some(true));
+        assert_eq!(request.incognito, Some(true));
+        assert_eq!(request.native_keyboard, Some(true));
     }
 
     #[test]
@@ -2845,6 +2857,66 @@ mod tests {
         assert_eq!(
             <WebviewRegisterHttpsInterceptRequest as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.RegisterHttpsInterceptRequest"
+        );
+        assert_eq!(
+            <WebviewAsyncScriptResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.AsyncScriptResponse"
+        );
+        assert_eq!(
+            <WebviewStateResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.StateResponse"
+        );
+        assert_eq!(
+            <WebviewRestoreStateRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.RestoreStateRequest"
+        );
+        assert_eq!(
+            <WebviewAudioMutedRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.AudioMutedRequest"
+        );
+        assert_eq!(
+            <WebviewLoadErrorEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.LoadErrorEvent"
+        );
+        assert_eq!(
+            <NativeWebviewKeyEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.NativeKeyEvent"
+        );
+        assert_eq!(
+            <WebviewAudioStateEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.AudioStateEvent"
+        );
+        assert_eq!(
+            <WebviewRenderExitedEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.RenderExitedEvent"
+        );
+        assert_eq!(
+            <WebviewPermissionRequestEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PermissionRequestEvent"
+        );
+        assert_eq!(
+            <WebviewResolvePermissionRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.ResolvePermissionRequest"
+        );
+        assert_eq!(
+            <WebviewHttpAuthRequestEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.HttpAuthRequestEvent"
+        );
+        assert_eq!(
+            <WebviewResolveHttpAuthRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.ResolveHttpAuthRequest"
+        );
+        assert_eq!(
+            <WebviewSslErrorEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.SslErrorEvent"
+        );
+        assert_eq!(
+            <WebviewResolveSslErrorRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.ResolveSslErrorRequest"
+        );
+        assert_eq!(
+            <WebviewResolveDownloadRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.ResolveDownloadRequest"
         );
     }
 

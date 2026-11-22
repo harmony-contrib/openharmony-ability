@@ -10,8 +10,9 @@ export function usesLegacyWebviewKeyboard(
   nativeKeyboard: boolean,
   nativeTarget: number | null,
   windowId: number,
+  forwardKeys: boolean = false,
 ): boolean {
-  return !nativeKeyboard && nativeTarget === null && windowId === 0;
+  return !nativeKeyboard && !forwardKeys && nativeTarget === null && windowId === 0;
 }
 
 export function webviewKeyboardScripts(

@@ -483,68 +483,47 @@ pub(crate) fn https_intercept_decision(
         }))
 }
 
-pub(crate) fn dispatch_drag_enter(event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
+fn dispatch_webview_event<E, F>(id: &str, native_tag: &str, select: F, event: E) -> Result<()>
+where
+    F: FnOnce(&WebviewCallbacks) -> Option<&Arc<dyn Fn(E) + Send + Sync + 'static>>,
+{
+    if !controller::is_current(id, native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.drag_enter.as_ref())
+        .get(id)
+        .and_then(select)
         .cloned();
     if let Some(callback) = callback {
         callback(event);
     }
     Ok(())
+}
+
+pub(crate) fn dispatch_drag_enter(event: WebviewDragEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.drag_enter.as_ref(), event)
 }
 
 pub(crate) fn dispatch_drag_over(event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.drag_over.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.drag_over.as_ref(), event)
 }
 
 pub(crate) fn dispatch_drag_drop(event: WebviewDropEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.drag_drop.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.drag_drop.as_ref(), event)
 }
 
 pub(crate) fn dispatch_drag_leave(event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.drag_leave.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.drag_leave.as_ref(), event)
 }
 
 pub(crate) fn new_window_decision(
@@ -575,205 +554,81 @@ pub(crate) fn dispatch_pointer_down(event: WebviewPointerEvent) -> Result<()> {
     {
         return Err(Error::from_reason("Invalid WebView pointer event"));
     }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.pointer_down.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.pointer_down.as_ref(), event)
 }
 
 pub(crate) fn dispatch_page_begin(event: WebviewPageEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.page_begin.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.page_begin.as_ref(), event)
 }
 
 pub(crate) fn dispatch_page_end(event: WebviewPageEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.page_end.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.page_end.as_ref(), event)
 }
 
 pub(crate) fn dispatch_download_end(event: WebviewDownloadEndEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.download_end.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.download_end.as_ref(), event)
 }
 
 pub(crate) fn dispatch_title_change(event: WebviewTitleChangeEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.title_change.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.title_change.as_ref(), event)
 }
 
 pub(crate) fn dispatch_load_error(event: WebviewLoadErrorEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.load_error.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.load_error.as_ref(), event)
 }
 
 pub(crate) fn dispatch_key_event(event: NativeWebviewKeyEvent) -> Result<()> {
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.key_event.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.key_event.as_ref(), event)
 }
 
 pub(crate) fn dispatch_audio_state(event: WebviewAudioStateEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.audio_state.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.audio_state.as_ref(), event)
 }
 
 pub(crate) fn dispatch_window_exit(event: WebviewControllerEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.window_exit.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.window_exit.as_ref(), event)
 }
 
 pub(crate) fn dispatch_render_exited(event: WebviewRenderExitedEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.render_exited.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.render_exited.as_ref(), event)
 }
 
 pub(crate) fn dispatch_permission_request(event: WebviewPermissionRequestEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.permission_request.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.permission_request.as_ref(), event)
 }
 
 pub(crate) fn dispatch_http_auth_request(event: WebviewHttpAuthRequestEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.http_auth_request.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.http_auth_request.as_ref(), event)
 }
 
 pub(crate) fn dispatch_ssl_error(event: WebviewSslErrorEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.ssl_error.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.ssl_error.as_ref(), event)
 }
 
 #[cfg(test)]
@@ -1109,5 +964,46 @@ mod tests {
         };
         assert!(new_window_decision(req).unwrap().allow);
         controller::on_removed("nw-allow-test", "native-n2").unwrap();
+    }
+
+    #[test]
+    fn key_event_dispatch_rejects_stale_generations() {
+        use super::{dispatch_key_event, remove};
+        use crate::NativeWebviewKeyEvent;
+        let count = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&count);
+        WebviewCallbacksBuilder::new("key-event-test")
+            .on_key_event(move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+            })
+            .build()
+            .unwrap();
+        controller::on_attached("key-event-test", "tag-current").unwrap();
+
+        let make = |tag: &str| NativeWebviewKeyEvent {
+            id: "key-event-test".to_owned(),
+            native_tag: tag.to_owned(),
+            target_id: 0,
+            kind: "key".to_owned(),
+            key: "Escape".to_owned(),
+            code: "Escape".to_owned(),
+            key_code: 27,
+            shift: false,
+            ctrl: false,
+            alt: false,
+            meta: false,
+            repeat: false,
+        };
+
+        dispatch_key_event(make("tag-stale")).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 0);
+
+        dispatch_key_event(make("tag-current")).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+
+        controller::on_removed("key-event-test", "tag-current").unwrap();
+        dispatch_key_event(make("tag-current")).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+        remove("key-event-test").unwrap();
     }
 }

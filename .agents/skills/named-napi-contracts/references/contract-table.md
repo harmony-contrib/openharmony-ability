@@ -23,13 +23,14 @@
 | `ohos.window` / `set-custom-cursor` | `ohos.window.CustomCursorRequest` → `{ windowId, rgba, width, height, hotspotX, hotspotY }` | `ohos.window.Acknowledgement` → `{ accepted }` | async / `ui-context`；静态 RGBA 光标及热点 |
 | `ohos.window` / `set-window-icon` | `ohos.window.WindowIconRequest` → `{ windowId, rgba, size }` | `ohos.window.Acknowledgement` → `{ accepted }` | async / `ui-context`；API 22+ PC/2in1 主窗口；size=0 恢复打包图标 |
 | `ohos.window` / `create-os-window`、`set-decorations`、`set-background-color`、`set-blur`、`focus`、`set-focusable`、`move-to`、`resize`、`minimize`、`maximize`、`restore`、`recover`、`show`、`destroy-window`、`is-maximized`、`is-minimized` | `ohos.window.CreateRequest` / `WindowIdRequest` / `DecorationsRequest` / `ColorRequest` / `BlurRequest` / `MoveRequest` / `ResizeRequest` / `FocusableRequest` | `ohos.window.CreateResponse` → `{ windowId }` / `Acknowledgement` → `{ accepted }` / `StateResponse` → `{ value }` | async / `ui-context` |
-| `ohos.webview` / `create` | `ohos.webview.CreateRequest` → `{ id, parentHandle?, ... }` | `ohos.webview.CreateResponse` → `{ id }` | async / `ui-context` |
-| `ohos.webview` / `create-with-native-keyboard` | `ohos.webview.CreateRequest` → `ohos.webview.CreateResponse` | async / `ui-context`; same named create ABI, native keyboard path for custom hosts; no MainPage-only suppression shim or synthesis-controller registration |
+| `ohos.webview` / `create` | `ohos.webview.CreateRequest` → `{ id, parentHandle?, incognito?, nativeKeyboard?, ... }` | `ohos.webview.CreateResponse` → `{ id }` | async / `ui-context`（`nativeKeyboard: true` 跳过 MainPage 合成键 shim） |
 | `ohos.webview` / `set-pointer-events` | `ohos.webview.PointerEventsRequest { id, enabled }` | `ohos.webview.Acknowledgement` | async / `ui-context` |
 | `ohos.webview` / `pointer-down` | `ohos.webview.PointerEvent { id, nativeTag, x, y, button, modifiers }` | `ohos.webview.EventAcknowledgement` | scoped reverse event; component-local vp, buttons 0–4, Shift=1/Ctrl=2/Alt=4 |
-| `ohos.webview` / `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`focus`、`clear-all-browsing-data` | `ohos.webview.ControllerRequest` → `{ id, visible?, color?, url?, html?, headers?, zoom? }` | `ohos.webview.Acknowledgement` → `{ accepted }` | async / `ui-context` |
+| `ohos.webview` / `set-visible`、`set-background-color`、`remove`、`load-url`、`load-html`、`set-zoom`、`reload`、`reload-ignore-cache`、`focus`、`clear-all-browsing-data` | `ohos.webview.ControllerRequest` → `{ id, visible?, color?, url?, html?, headers?, zoom? }` | `ohos.webview.Acknowledgement` → `{ accepted }` | async / `ui-context` |
 | `ohos.webview` / `get-url`、`cookies-with-url` | `ohos.webview.ControllerRequest` → `{ id, url? }` | `ohos.webview.StringResponse` → `{ value }` | async / `ui-context` |
-| `ohos.webview` / `evaluate-script` | `ohos.webview.ScriptRequest` → `{ id, script }` | `ohos.webview.ScriptResponse` → `{ result }` | async / `ui-context` |
+| `ohos.webview` / `evaluate-script`、`evaluate-async-script` | `ohos.webview.ScriptRequest` → `{ id, script, timeoutMs? }` | `ohos.webview.ScriptResponse` / `ohos.webview.AsyncScriptResponse` | async / `ui-context`（异步脚本基于 JS Proxy 事件回调） |
+| `ohos.webview` / `serialize-state`、`restore-state`、`set-audio-muted` | `ControllerRequest` / `RestoreStateRequest` / `AudioMutedRequest` | `StateResponse` / `BooleanResponse` / `Acknowledgement` | async / `ui-context` |
+| `ohos.webview` / `resolve-download`、`resolve-permission-request`、`resolve-http-auth`、`resolve-ssl-error` | `ResolveDownloadRequest` / `ResolvePermissionRequest` / `ResolveHttpAuthRequest` / `ResolveSslErrorRequest` | `ohos.webview.Acknowledgement` | async / `ui-context` |
 | `ohos.resource` / `resource-manager-ready`（入站） | `ohos.resource.ResourceManagerRef`（ArkTS 直接传 `resourceManager` 对象） | `ohos.resource.ResourceManagerReadyResponse` → `{ accepted }` | 入站事件 / `ability` |
 | `ohos.audio` / `update` | `ohos.audio.UpdateRequest` → `{ player, sourceFd?, replace, release, play, volume, reportErrors, label }` | `ohos.audio.UpdateResponse` → `{ accepted }` | async / `ability` |
 
@@ -38,13 +39,21 @@
 | 插件 / action | request type | response type | 语义与边界 |
 |---|---|---|---|
 | `ohos.webview` / `set-viewport` | `ohos.webview.ViewportRequest` | `ohos.webview.Acknowledgement` | frame 为窗口 vp，clip/inputRegions 为视口内 vp；最多 256 输入区域，空数组禁止命中；保留旧 set-bounds 语义 |
-| `ohos.webview` / `cookies-details` | `ohos.webview.ControllerRequest` | `ohos.webview.CookiesResponse` | API 23+ 全部普通 Cookie，保留 domain/path/secure/httpOnly/sameSite/到期 Unix 毫秒 |
-| `ohos.webview` / `clear-cookies` | `ohos.webview.ControllerRequest` | `ohos.webview.Acknowledgement` | 仅清理普通 Cookie；不删除其他浏览数据 |
-| `ohos.window` / `show-prompt-choice` | `ohos.window.PromptChoiceRequest` | `ohos.window.PromptChoiceResponse` | 实际窗口中的 ArkUI Checkbox；index 与 checked 一起返回；取消和销毁关闭对话框 |
-| `ohos.notification` / `show-with-options` | `ohos.notification.ShowOptionsRequest` | `ohos.notification.Acknowledgement` | 保留原 show；图片等比限边 512 像素后以 PictureContent 展示且释放，分组、发件人显示名、API 23+ 静默声音／振动关闭标记 |
-| `ohos.notification` / `show-social` | `ohos.notification.ShowAvatarRequest` | `ohos.notification.Acknowledgement` | 社交通信槽位，头像可为空；silent 使用 API 23+ 声音／振动关闭标记；不声明联系人或系统会话身份 |
+| `ohos.webview` / `cookies-details` | `ohos.webview.ControllerRequest` | `ohos.webview.CookiesResponse` | API 23+ 全部 Cookie，保留 domain/path/secure/httpOnly/sameSite/到期 Unix 毫秒 |
+| `ohos.webview` / `clear-cookies` | `ohos.webview.ControllerRequest` | `ohos.webview.Acknowledgement` | 仅清理 Cookie；不删除其他浏览数据 |
+| `ohos.window` / `show-prompt-choice` | `ohos.window.PromptChoiceRequest` | `ohos.window.PromptChoiceResponse` | 实际窗口中的 ArkUI Checkbox（API 12+）；index 与 checked 一起返回；取消和销毁关闭对话框 |
+| `ohos.window` / `set-privacy-mode` | `ohos.window.PrivacyRequest` | `ohos.window.Acknowledgement` | 设置窗口防截屏/隐私模式 |
+| `ohos.window` / `set-shadow` | `ohos.window.ShadowRequest` | `ohos.window.Acknowledgement` | 主窗口尝试 API 20+ `setWindowShadowEnabled`；子窗口尝试 API 17+ `setWindowShadowRadius`；不支持或无权限返回 `accepted: false` |
+| `ohos.window` / `get-title-button-rect` | `ohos.window.WindowIdRequest` | `ohos.window.TitleButtonRectResponse` | 返回 `{ available, right, top, width, height }`（单位 vp，`right` 为距窗口右边距） |
+| `ohos.window` / `set-input-region` | `ohos.window.InputRegionRequest` | `ohos.window.Acknowledgement` | 物理像素 `px`；空数组置 `setWindowTouchable(false)`；API 26+ 有权限时优先 `setTouchableAreas`，否则 `px2vp` 降级至根 FrameNode `responseRegion`/`mouseResponseRegion` |
+| `ohos.files` / `trash-item` | `ohos.files.TrashItemRequest` | `ohos.files.TrashItemResponse` | 将文件/目录移入回收站（支持 `file://` 与沙箱路径） |
+| `ohos.files` / `get-file-icon` | `ohos.files.FileIconRequest` | `ohos.files.FileIconResponse` | 获取文件/UTD 图标 PNG（需 `ohos.permission.GET_FILE_ICON` 时有效；离屏快照 + 64 条 LRU 缓存） |
+| `ohos.notification` / `show` | `ohos.notification.ShowRequest` | `ohos.notification.Acknowledgement` | 统一通知入口：支持可选 `silent`（API 23+）、`group`、`senderName`、`image`（等比限边 512px）、`avatar`、`slot`（`"default" \| "social"`） |
 | `ohos.notification` / `parse-response` | `ohos.notification.ResponseRequest` | `ohos.notification.Response` | 仅识别配置 scheme 的 response URI，包含 matched/tag/action；普通深链不匹配 |
 | `ohos.notification` / `dismiss-all` | `ohos.notification.EmptyRequest` | `ohos.notification.Acknowledgement` | 撤销本应用通知，包含以前启动发布的通知 |
+| `ohos.system-state` / `prevent-sleep`、`release-sleep` | `PreventSleepRequest` / `ReleaseSleepRequest` | `PreventSleepResponse` / `ReleaseSleepResponse` | API 23+ `BACKGROUND_USER_IDLE` 运行锁，需 `ohos.permission.RUNNING_LOCK` |
+| `ohos.system-state` / `request-suspend-delay`、`cancel-suspend-delay` | `SuspendDelayRequest` / `CancelSuspendDelayRequest` | `SuspendDelayResponse` / `CancelSuspendDelayResponse` | 后台短时任务；超时回调自动 `cancelSuspendDelay` 并发送 `suspend-delay-expired` |
+| `ohos.system-state` / `get-locale-region`、`set-app-preferred-language`、`get-package-info`、`get-network-status`、`get-power-status`、`set-now-playing` | 对应具名 Request | 对应具名 Response | 系统区域/语言/应用信息/网络/电源（`isBatteryPresent`）/媒体控制位掩码 |
 
 所有新 action 均为 async；WebView 和窗口需要 ui-context，通知需要 ability。不新增全局回调缓存。
 
@@ -71,11 +80,10 @@
 | `download-start` | `ohos.webview.DownloadStartRequest` → `ohos.webview.DownloadStartResponse` | ArkTS → Rust |
 | `download-end` | `ohos.webview.DownloadEndEvent` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
 | `title-change` | `ohos.webview.TitleChangeEvent` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
+| `native-key-event` | `ohos.webview.NativeKeyEvent { id, nativeTag, targetId, ... }` → `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
+| `load-error` / `audio-state-changed` / `window-exit` / `render-exited` / `permission-request` / `http-auth-request` / `ssl-error` | 对应具名 Event（均携带 `id` 与 `nativeTag`）→ `ohos.webview.EventAcknowledgement` | ArkTS → Rust |
 
 ## WebView 规则
 
 下载、导航与标题回调已经使用上述具名 N-API 契约实现。新增 WebView callback 时必须在
 `docs/plugin-development-standard.md` §7.1 记录 request/response 与失败策略，且不得回退到 JSON。
-
-| `ohos.system-state` | `prevent-sleep` | `ohos.system-state.PreventSleepRequest` | `ohos.system-state.PreventSleepResponse` | API 23+ idle running lock; permission and device support required |
-| `ohos.system-state` | `release-sleep` | `ohos.system-state.ReleaseSleepRequest` | `ohos.system-state.ReleaseSleepResponse` | Idempotent lease release; forced sleep/disposal also release |

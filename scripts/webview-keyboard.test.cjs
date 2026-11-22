@@ -111,3 +111,12 @@ test("replacement document scripts retain native mode without injecting suppress
   }
   assert.equal(document(webviewKeyboardScripts(next, false)).window.version, 2);
 });
+test("key forwarding opt-in automatically disables legacy suppression shim", () => {
+  assert.equal(usesLegacyWebviewKeyboard(false, null, 0, true), false);
+  assert.equal(usesLegacyWebviewKeyboard(false, null, 0, false), true);
+  const forwarding = load("plugins/webview/src/main/ets/WebviewKeyForwarding.ets", {});
+  assert.equal(forwarding.shouldForwardWebviewKeys(false, false), false);
+  assert.equal(forwarding.shouldForwardWebviewKeys(true, false), true);
+  assert.equal(forwarding.shouldForwardWebviewKeys(false, true), true);
+  assert.equal(forwarding.shouldForwardWebviewKeys(undefined, undefined), false);
+});

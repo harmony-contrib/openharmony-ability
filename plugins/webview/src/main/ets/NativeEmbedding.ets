@@ -6,6 +6,7 @@ export interface NativeWebviewSettings {
   scrollEnabled: boolean;
   injectedJavascript?: string | null;
   htmlBaseUrl?: string | null;
+  forwardKeyEvents?: boolean | null;
 }
 export function parseNativeSettings(settings: NativeWebviewSettings): NativeWebviewSettings {
   if (
@@ -18,7 +19,10 @@ export function parseNativeSettings(settings: NativeWebviewSettings): NativeWebv
       typeof settings.injectedJavascript !== "string") ||
     (settings.htmlBaseUrl !== undefined &&
       settings.htmlBaseUrl !== null &&
-      typeof settings.htmlBaseUrl !== "string")
+      typeof settings.htmlBaseUrl !== "string") ||
+    (settings.forwardKeyEvents !== undefined &&
+      settings.forwardKeyEvents !== null &&
+      typeof settings.forwardKeyEvents !== "boolean")
   ) {
     throw new Error("Invalid native WebView settings");
   }
