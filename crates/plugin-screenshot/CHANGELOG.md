@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.7](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-screenshot-v1.0.0-beta.6...openharmony-ability-plugin-screenshot-v1.0.0-beta.7) - 2026-11-23
+
+### Other
+- updated the following local packages: openharmony-ability-plugin-webview
+
 ## [1.0.0-beta.6](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-screenshot-v1.0.0-beta.5...openharmony-ability-plugin-screenshot-v1.0.0-beta.6) - 2026-11-15
 
 ### Other

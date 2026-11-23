@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.7](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-window-v1.0.0-beta.6...openharmony-ability-plugin-window-v1.0.0-beta.7) - 2026-11-23
+
+### Added
+- extend WebView input, window geometry and notifications ([#128](https://github.com/harmony-contrib/openharmony-ability/pull/128))
+
 ## [1.0.0-beta.6](https://github.com/harmony-contrib/openharmony-ability/compare/openharmony-ability-plugin-window-v1.0.0-beta.5...openharmony-ability-plugin-window-v1.0.0-beta.6) - 2026-11-15
 
 ### Fixed
