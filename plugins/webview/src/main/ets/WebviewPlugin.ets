@@ -1,5 +1,6 @@
 import { WebHeader, window } from "@kit.ArkUI";
 import { BuilderNode, FrameNode } from "@ohos.arkui.node";
+import { UIContext } from "@ohos.arkui.UIContext";
 import webview from "@ohos.web.webview";
 import { RectShape } from "@ohos.arkui.shape";
 import { image } from "@kit.ImageKit";
@@ -29,10 +30,50 @@ import {
   NATIVE_MODULE_STORAGE_KEY,
   Module,
   WindowManager,
+  expectBridgeRequestType,
   notifyPrimaryWebviewController,
   notifyKeySynthesisController,
-  KEY_SYNTHESIS_SHIM,
 } from "@ohos-rs/ability";
+
+import {
+  WebviewPointerEvents,
+  WebviewPointerEvent,
+  POINTER_EVENT_TYPE,
+  parsePointerEvents,
+} from "./WebviewPointerEvents";
+
+import {
+  WebviewInitializationScript,
+  usesLegacyWebviewKeyboard,
+  webviewKeyboardScripts,
+} from "./WebviewKeyboardPolicy";
+
+import {
+  NATIVE_KEY_EVENT_TYPE,
+  NATIVE_KEY_INIT_SCRIPT,
+  NATIVE_KEY_PROXY_NAME,
+  NativeKeyJsProxy,
+  WebviewNativeKeyEventPayload,
+  shouldForwardWebviewKeys,
+} from "./WebviewKeyForwarding";
+
+import {
+  WebviewPendingHandlers,
+  WebviewResolveDownloadPayload,
+  WebviewResolveHttpAuthPayload,
+  WebviewResolvePermissionPayload,
+  WebviewResolveSslErrorPayload,
+  parseResolveDownloadPayload,
+  parseResolveHttpAuthPayload,
+  parseResolvePermissionPayload,
+  parseResolveSslErrorPayload,
+} from "./WebviewPendingHandlers";
+
+import {
+  ASYNC_SCRIPT_RESPONSE_TYPE,
+  WebviewAsyncEvaluator,
+  WebviewAsyncScriptResponse,
+} from "./WebviewAsyncEval";
 
 const CREATE_REQUEST_TYPE = "ohos.webview.CreateRequest";
 const NATIVE_CREATE_REQUEST_TYPE = "ohos.webview.NativeCreateRequest";
@@ -93,6 +134,15 @@ const HTTPS_INTERCEPT_REQUEST_TYPE = "ohos.webview.HttpsInterceptRequest";
 const HTTPS_INTERCEPT_RESPONSE_TYPE = "ohos.webview.HttpsInterceptResponse";
 const REGISTER_HTTPS_INTERCEPT_REQUEST_TYPE = "ohos.webview.RegisterHttpsInterceptRequest";
 const SET_COOKIE_REQUEST_TYPE = "ohos.webview.SetCookieRequest";
+const STATE_RESPONSE_TYPE = "ohos.webview.StateResponse";
+const RESTORE_STATE_REQUEST_TYPE = "ohos.webview.RestoreStateRequest";
+const AUDIO_MUTED_REQUEST_TYPE = "ohos.webview.AudioMutedRequest";
+const LOAD_ERROR_EVENT_TYPE = "ohos.webview.LoadErrorEvent";
+const AUDIO_STATE_EVENT_TYPE = "ohos.webview.AudioStateEvent";
+const RENDER_EXITED_EVENT_TYPE = "ohos.webview.RenderExitedEvent";
+const PERMISSION_REQUEST_EVENT_TYPE = "ohos.webview.PermissionRequestEvent";
+const HTTP_AUTH_REQUEST_EVENT_TYPE = "ohos.webview.HttpAuthRequestEvent";
+const SSL_ERROR_EVENT_TYPE = "ohos.webview.SslErrorEvent";
 
 /** Shape of the Web component onInterceptRequest callback event. */
 interface WebInterceptRequestEvent {
@@ -103,6 +153,11 @@ interface WebviewSetCookieRequest {
   id: string;
   url: string;
   value: string;
+  incognito?: boolean | null;
+}
+
+interface WebviewDefaultStorePayload {
+  incognito?: boolean | null;
 }
 
 /** Optional static ArkWeb API resolved dynamically to preserve the API-12 package baseline. */
@@ -179,10 +234,6 @@ interface NativeControllerEvent {
   targetId: number;
   nativeTag: string;
 }
-interface WebviewInitializationScript {
-  script: string;
-  scriptRules: string[];
-}
 
 interface WebviewEventOptions {
   navigationIntercept?: boolean | null;
@@ -193,6 +244,14 @@ interface WebviewEventOptions {
   newWindow?: boolean | null;
   pageBegin?: boolean | null;
   pageEnd?: boolean | null;
+  loadError?: boolean | null;
+  keyEvent?: boolean | null;
+  audioState?: boolean | null;
+  windowExit?: boolean | null;
+  renderExited?: boolean | null;
+  permissionRequest?: boolean | null;
+  httpAuthRequest?: boolean | null;
+  sslError?: boolean | null;
 }
 
 interface WebviewCreatePayload {
@@ -227,6 +286,8 @@ interface WebviewCreatePayload {
    *  before first loadUrl, fixing the create-vs-register race that left the set empty).
    *  Wire payload uses an array (napi object); ManagedWebview stores it as a Set. */
   httpsInterceptProtocolList?: string[] | null;
+  incognito?: boolean | null;
+  nativeKeyboard?: boolean | null;
   eventOptions?: WebviewEventOptions | null;
 }
 
@@ -247,9 +308,19 @@ interface ControllerPayload {
 interface ScriptPayload {
   id: string;
   script: string;
+  timeoutMs?: number | null;
 }
 
 interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
+  pointerEvents: WebviewPointerEvents;
+  nativeKeyboard: boolean;
+  forwardKeys: boolean;
+  incognito: boolean;
+  allowedFileUrl: string | null;
+  keyProxyRegistered: boolean;
+  keyProxy?: NativeKeyJsProxy;
+  pending: WebviewPendingHandlers;
+  asyncEvaluator: WebviewAsyncEvaluator;
   viewport?: WebviewViewportRequest;
   getHostWindow: () => window.Window;
   nativeNotify: (phase: string, message?: string, code?: number) => void;
@@ -267,7 +338,12 @@ interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
   onNavigationRequest: (url: string) => boolean;
   onCloseWindow?: () => void;
   onTitleChange: (title: string) => void;
-  onDownloadStart: (url: string, tempPath: string | null) => WebviewDownloadStartResponse;
+  onDownloadStart: (
+    url: string,
+    tempPath: string | null,
+    suggestedName: string | undefined,
+    downloadId: string | undefined,
+  ) => WebviewDownloadStartResponse;
   onDownloadEnd: (url: string, tempPath: string | null, success: boolean) => void;
   onDragEnter: (x: number, y: number) => void;
   onDragMove: (x: number, y: number) => void;
@@ -275,6 +351,13 @@ interface ManagedWebview extends WebviewCreatePayload, NativeWebviewData {
   onDragLeave: (x: number, y: number) => void;
   onPageBegin: (url: string) => void;
   onPageEnd: (url: string) => void;
+  onLoadError?: (url: string, code: number, description: string) => void;
+  onAudioStateChanged?: (playing: boolean) => void;
+  onWindowExit?: () => void;
+  onRenderExited?: (reasonCode: number) => void;
+  onPermissionRequest?: (request: PermissionRequest) => void;
+  onHttpAuthRequest?: (host: string, realm: string, handler: HttpAuthHandler) => boolean;
+  onSslError?: (event: SslErrorEvent) => void;
   onNewWindow: (targetUrl: string, isAlert: boolean, isUserTrigger: boolean) => boolean;
   /**
    * In-page popup shown by the `.onWindowNew` Allow branch. ArkWeb's own popup is
@@ -312,9 +395,14 @@ interface ControllerWaiter {
   reject: (reason: Error) => void;
 }
 
+function webviewComponentId(data: ManagedWebview): string {
+  return `__ability_webview_${data.id}`;
+}
+
 class WebviewEntry {
   readonly data: ManagedWebview;
   readonly node: BuilderNode<[ManagedWebview]>;
+  readonly uiContext: UIContext;
   private attaching = false;
   private attached = false;
   private controllerFailure: Error | null = null;
@@ -322,9 +410,10 @@ class WebviewEntry {
   private controllerObserved = false;
   private readonly controllerWaiters: ControllerWaiter[] = [];
 
-  constructor(data: ManagedWebview, node: BuilderNode<[ManagedWebview]>) {
+  constructor(data: ManagedWebview, node: BuilderNode<[ManagedWebview]>, uiContext: UIContext) {
     this.data = data;
     this.node = node;
+    this.uiContext = uiContext;
     this.nativeReady = data.nativeTarget === null;
   }
 
@@ -491,18 +580,34 @@ class WebviewDownloadStartRequest {
   readonly nativeTag: string;
   readonly url: string;
   readonly tempPath: string | null;
+  readonly suggestedName?: string;
+  readonly downloadId?: string;
 
-  constructor(id: string, nativeTag: string, url: string, tempPath: string | null) {
+  constructor(
+    id: string,
+    nativeTag: string,
+    url: string,
+    tempPath: string | null,
+    suggestedName?: string,
+    downloadId?: string,
+  ) {
     this.id = id;
     this.nativeTag = nativeTag;
     this.url = url;
     this.tempPath = tempPath;
+    if (suggestedName !== undefined) {
+      this.suggestedName = suggestedName;
+    }
+    if (downloadId !== undefined) {
+      this.downloadId = downloadId;
+    }
   }
 }
 
 interface WebviewDownloadStartResponse {
   allow: boolean;
   tempPath: string | null;
+  deferStart?: boolean | null;
 }
 
 class WebviewDownloadEndEvent {
@@ -748,6 +853,139 @@ interface WebviewUserAgentRequest {
   userAgent: string;
 }
 
+class WebviewStateResponse {
+  readonly stateBase64?: string;
+
+  constructor(stateBase64?: string) {
+    if (stateBase64 !== undefined) {
+      this.stateBase64 = stateBase64;
+    }
+  }
+}
+
+interface WebviewRestoreStatePayload {
+  id: string;
+  stateBase64: string;
+}
+
+interface WebviewAudioMutedPayload {
+  id: string;
+  muted: boolean;
+}
+
+class WebviewLoadErrorEventPayload {
+  readonly id: string;
+  readonly nativeTag: string;
+  readonly url: string;
+  readonly code: number;
+  readonly description: string;
+
+  constructor(id: string, nativeTag: string, url: string, code: number, description: string) {
+    this.id = id;
+    this.nativeTag = nativeTag;
+    this.url = url;
+    this.code = code;
+    this.description = description;
+  }
+}
+
+class WebviewAudioStateEventPayload {
+  readonly id: string;
+  readonly nativeTag: string;
+  readonly playing: boolean;
+
+  constructor(id: string, nativeTag: string, playing: boolean) {
+    this.id = id;
+    this.nativeTag = nativeTag;
+    this.playing = playing;
+  }
+}
+
+class WebviewRenderExitedEventPayload {
+  readonly id: string;
+  readonly nativeTag: string;
+  readonly reason: string;
+  readonly reasonCode: number;
+
+  constructor(id: string, nativeTag: string, reason: string, reasonCode: number) {
+    this.id = id;
+    this.nativeTag = nativeTag;
+    this.reason = reason;
+    this.reasonCode = reasonCode;
+  }
+}
+
+class WebviewPermissionRequestEventPayload {
+  readonly id: string;
+  readonly nativeTag: string;
+  readonly requestId: string;
+  readonly origin: string;
+  readonly resources: string[];
+
+  constructor(
+    id: string,
+    nativeTag: string,
+    requestId: string,
+    origin: string,
+    resources: string[],
+  ) {
+    this.id = id;
+    this.nativeTag = nativeTag;
+    this.requestId = requestId;
+    this.origin = origin;
+    this.resources = resources;
+  }
+}
+
+class WebviewHttpAuthRequestEventPayload {
+  readonly id: string;
+  readonly nativeTag: string;
+  readonly requestId: string;
+  readonly host: string;
+  readonly realm: string;
+
+  constructor(id: string, nativeTag: string, requestId: string, host: string, realm: string) {
+    this.id = id;
+    this.nativeTag = nativeTag;
+    this.requestId = requestId;
+    this.host = host;
+    this.realm = realm;
+  }
+}
+
+class WebviewSslErrorEventPayload {
+  readonly id: string;
+  readonly nativeTag: string;
+  readonly requestId: string;
+  readonly url: string;
+  readonly errorCode: number;
+  readonly errorName: string;
+  readonly isMainFrame: boolean;
+  readonly certDerBase64?: string;
+
+  constructor(
+    id: string,
+    nativeTag: string,
+    requestId: string,
+    url: string,
+    errorCode: number,
+    errorName: string,
+    isMainFrame: boolean,
+    certDerBase64?: string,
+  ) {
+    this.id = id;
+    this.nativeTag = nativeTag;
+    this.requestId = requestId;
+    this.url = url;
+    this.errorCode = errorCode;
+    this.errorName = errorName;
+    this.isMainFrame = isMainFrame;
+    if (certDerBase64 !== undefined) {
+      this.certDerBase64 = certDerBase64;
+    }
+  }
+}
+
 interface WebviewSchemeDeclaration {
   scheme: string;
   options: number;
@@ -875,19 +1113,26 @@ function parseControllerPayload(payload: BridgeTypedValue, action: string): Cont
 }
 
 function parseScriptPayload(payload: BridgeTypedValue): ScriptPayload {
-  if (
-    payload.typeName !== SCRIPT_REQUEST_TYPE ||
-    payload.value === null ||
-    typeof payload.value !== "object"
-  ) {
-    throw new Error(`ohos.webview.evaluate-script requires bridge type ${SCRIPT_REQUEST_TYPE}`);
-  }
-  const request = payload.value as ScriptPayload;
+  const request = expectBridgeRequestType(
+    payload,
+    "ohos.webview",
+    "evaluate-script",
+    SCRIPT_REQUEST_TYPE,
+  ) as ScriptPayload;
   if (!request?.id?.trim()) {
     throw new Error("WebView script controller id must not be empty");
   }
   if (typeof request.script !== "string") {
     throw new Error("WebView script must be a string");
+  }
+  if (
+    request.timeoutMs !== undefined &&
+    request.timeoutMs !== null &&
+    (typeof request.timeoutMs !== "number" ||
+      !Number.isFinite(request.timeoutMs) ||
+      request.timeoutMs <= 0)
+  ) {
+    throw new Error("WebView script timeoutMs must be a positive finite number");
   }
   return request;
 }
@@ -950,6 +1195,38 @@ function parseUserAgentRequest(payload: BridgeTypedValue): WebviewUserAgentReque
   return request;
 }
 
+let nextWebviewAsyncId = 1;
+
+function nextBridgeRequestId(prefix: string): string {
+  return prefix + "-" + String(nextWebviewAsyncId++);
+}
+
+function parseRestoreStatePayload(payload: BridgeTypedValue): WebviewRestoreStatePayload {
+  const request = expectBridgeRequestType(
+    payload,
+    "ohos.webview",
+    "restore-state",
+    RESTORE_STATE_REQUEST_TYPE,
+  ) as WebviewRestoreStatePayload;
+  if (!request?.id?.trim() || typeof request.stateBase64 !== "string") {
+    throw new Error("WebView restore-state requires id and stateBase64");
+  }
+  return request;
+}
+
+function parseAudioMutedPayload(payload: BridgeTypedValue): WebviewAudioMutedPayload {
+  const request = expectBridgeRequestType(
+    payload,
+    "ohos.webview",
+    "set-audio-muted",
+    AUDIO_MUTED_REQUEST_TYPE,
+  ) as WebviewAudioMutedPayload;
+  if (!request?.id?.trim() || typeof request.muted !== "boolean") {
+    throw new Error("WebView set-audio-muted requires id and boolean muted");
+  }
+  return request;
+}
+
 function ensureCreatePayload(payload: WebviewCreatePayload): WebviewCreatePayload {
   validateDocumentOptions(payload.javascriptEnabled, payload.initializationScripts);
   if (!payload?.id?.trim()) {
@@ -972,6 +1249,13 @@ function ensureCreatePayload(payload: WebviewCreatePayload): WebviewCreatePayloa
     typeof payload.transparent !== "boolean"
   ) {
     throw new Error("WebView transparent must be a boolean");
+  }
+  if (
+    payload.nativeKeyboard !== undefined &&
+    payload.nativeKeyboard !== null &&
+    typeof payload.nativeKeyboard !== "boolean"
+  ) {
+    throw new Error("WebView nativeKeyboard must be a boolean");
   }
   if (
     payload.parentHandle !== undefined &&
@@ -1011,6 +1295,20 @@ function normalizeEventOptions(
     newWindow: optionalEventFlag(options?.newWindow, "WebView eventOptions.newWindow"),
     pageBegin: optionalEventFlag(options?.pageBegin, "WebView eventOptions.pageBegin"),
     pageEnd: optionalEventFlag(options?.pageEnd, "WebView eventOptions.pageEnd"),
+    loadError: optionalEventFlag(options?.loadError, "WebView eventOptions.loadError"),
+    keyEvent: optionalEventFlag(options?.keyEvent, "WebView eventOptions.keyEvent"),
+    audioState: optionalEventFlag(options?.audioState, "WebView eventOptions.audioState"),
+    windowExit: optionalEventFlag(options?.windowExit, "WebView eventOptions.windowExit"),
+    renderExited: optionalEventFlag(options?.renderExited, "WebView eventOptions.renderExited"),
+    permissionRequest: optionalEventFlag(
+      options?.permissionRequest,
+      "WebView eventOptions.permissionRequest",
+    ),
+    httpAuthRequest: optionalEventFlag(
+      options?.httpAuthRequest,
+      "WebView eventOptions.httpAuthRequest",
+    ),
+    sslError: optionalEventFlag(options?.sslError, "WebView eventOptions.sslError"),
   };
 }
 
@@ -1122,13 +1420,22 @@ function downloadStartDecision(
   nativeTag: string,
   url: string,
   tempPath: string | null,
+  suggestedName?: string,
+  downloadId?: string,
 ): WebviewDownloadStartResponse {
   try {
     const response = context.invokeNativeSync(
       "download-start",
       DOWNLOAD_START_REQUEST_TYPE,
       DOWNLOAD_START_RESPONSE_TYPE,
-      new WebviewDownloadStartRequest(id, nativeTag, url, tempPath) as ESObject,
+      new WebviewDownloadStartRequest(
+        id,
+        nativeTag,
+        url,
+        tempPath,
+        suggestedName,
+        downloadId,
+      ) as ESObject,
     ) as WebviewDownloadStartResponse;
     if (
       response === null ||
@@ -1458,7 +1765,25 @@ function setupDownloadDelegate(data: ManagedWebview): void {
   if (data.eventOptions.downloadStart === true) {
     download.onBeforeDownload((event) => {
       const tempPath = event.getFullPath();
-      const response = data.onDownloadStart(event.getUrl(), tempPath);
+      let suggestedName: string | undefined = undefined;
+      try {
+        const s = event.getSuggestedFileName();
+        if (s) {
+          suggestedName = s;
+        }
+      } catch {}
+      let guid = "";
+      try {
+        guid = event.getGuid();
+      } catch {}
+      if (!guid) {
+        guid = nextBridgeRequestId("dl");
+      }
+      const response = data.onDownloadStart(event.getUrl(), tempPath, suggestedName, guid);
+      if (response.deferStart === true) {
+        data.pending.trackDownload(guid, event);
+        return;
+      }
       if (response.allow) {
         event.start(response.tempPath ?? tempPath);
       } else {
@@ -1468,9 +1793,11 @@ function setupDownloadDelegate(data: ManagedWebview): void {
   }
   if (data.eventOptions.downloadEnd === true) {
     download.onDownloadFinish((event) => {
+      data.pending.untrackDownload(event);
       data.onDownloadEnd(event.getUrl(), event.getFullPath(), true);
     });
     download.onDownloadFailed((event) => {
+      data.pending.untrackDownload(event);
       data.onDownloadEnd(event.getUrl(), null, false);
     });
   }
@@ -1484,6 +1811,8 @@ function setupDownloadDelegate(data: ManagedWebview): void {
 /** Shared declaration-time attributes; the controller callback starts the first navigation. */
 @Extend(Web)
 function managedWebviewAttributes(data: ManagedWebview, interceptContext: string) {
+  .id(webviewComponentId(data))
+  .focusable(true)
   // The default follows its container; explicit viewports are opt-in for embedded toolkit pages.
   .width(data.viewport?.frame.width ?? "100%")
   .height(data.viewport?.frame.height ?? "100%")
@@ -1520,6 +1849,7 @@ function managedWebviewAttributes(data: ManagedWebview, interceptContext: string
   })
   .javaScriptAccess(data.javascriptEnabled ?? true)
   .domStorageAccess(data.domStorageAccess ?? true)
+  .fileAccess(data.allowedFileUrl !== null)
   .mediaPlayGestureAccess(data.autoplay === true ? false : true)
   .multiWindowAccess(data.eventOptions.newWindow === true)
   .allowWindowOpenMethod(data.eventOptions.newWindow === true)
@@ -1534,12 +1864,59 @@ function managedWebviewAttributes(data: ManagedWebview, interceptContext: string
     data.onTitleChange(event.title);
     data.nativeNotify("title");
   })
+  .onMouse((event: MouseEvent) => data.pointerEvents.mouse(event))
+  .onTouch((event: TouchEvent) => data.pointerEvents.touch(event))
   .onFocus(() => data.nativeNotify("focus"))
   .onBlur(() => data.nativeNotify("blur"))
   .onErrorReceive((event) => {
     if (event.request.isMainFrame()) {
-      data.nativeNotify("error", event.error.getErrorInfo(), event.error.getErrorCode());
+      const errUrl = event.request.getRequestUrl() ?? "";
+      const errCode = event.error.getErrorCode();
+      const errDesc = event.error.getErrorInfo() ?? "";
+      data.nativeNotify("error", errDesc, errCode);
+      if (data.eventOptions.loadError === true && data.onLoadError) {
+        data.onLoadError(errUrl, errCode, errDesc);
+      }
     }
+  })
+  .onAudioStateChanged((event) => {
+    if (data.eventOptions.audioState === true && data.onAudioStateChanged) {
+      data.onAudioStateChanged(Boolean(event.playing));
+    }
+  })
+  .onWindowExit(() => {
+    if (data.eventOptions.windowExit === true && data.onWindowExit) {
+      data.onWindowExit();
+    }
+  })
+  .onRenderExited((event) => {
+    if (data.eventOptions.renderExited === true && data.onRenderExited) {
+      data.onRenderExited(event.renderExitReason);
+    }
+  })
+  .onPermissionRequest((event) => {
+    if (data.eventOptions.permissionRequest !== true || !data.onPermissionRequest) {
+      try {
+        event.request.deny();
+      } catch {}
+      return;
+    }
+    data.onPermissionRequest(event.request);
+  })
+  .onHttpAuthRequest((event): boolean => {
+    if (data.eventOptions.httpAuthRequest !== true || !data.onHttpAuthRequest) {
+      return false;
+    }
+    return data.onHttpAuthRequest(event.host ?? "", event.realm ?? "", event.handler);
+  })
+  .onSslErrorEvent((event: SslErrorEvent) => {
+    if (data.eventOptions.sslError !== true || !data.onSslError) {
+      try {
+        event.handler.handleCancel();
+      } catch {}
+      return;
+    }
+    data.onSslError(event);
   })
   .onPageBegin((e) => {
     handleWebviewPageBegin(data, e.url);
@@ -1583,6 +1960,7 @@ function BuildOverlayWebview(data: ManagedWebview) {
         data.nativeTarget !== null || data.transparent === true
           ? RenderMode.SYNC_RENDER
           : RenderMode.ASYNC_RENDER,
+      incognitoMode: data.incognito === true,
     })
       .runJavaScriptOnDocumentStart(keySynthesisScripts(data))
       .managedWebviewAttributes(data, "");
@@ -1594,6 +1972,7 @@ function BuildOverlayWebview(data: ManagedWebview) {
         data.nativeTarget !== null || data.transparent === true
           ? RenderMode.SYNC_RENDER
           : RenderMode.ASYNC_RENDER,
+      incognitoMode: data.incognito === true,
     })
       .javaScriptOnDocumentStart(keySynthesisScripts(data))
       .managedWebviewAttributes(data, "");
@@ -1610,6 +1989,7 @@ function BuildDirectWebview(data: ManagedWebview) {
         data.nativeTarget !== null || data.transparent === true
           ? RenderMode.SYNC_RENDER
           : RenderMode.ASYNC_RENDER,
+      incognitoMode: data.incognito === true,
     })
       .runJavaScriptOnDocumentStart(keySynthesisScripts(data))
       .managedWebviewAttributes(data, "(embedded)")
@@ -1622,6 +2002,7 @@ function BuildDirectWebview(data: ManagedWebview) {
         data.nativeTarget !== null || data.transparent === true
           ? RenderMode.SYNC_RENDER
           : RenderMode.ASYNC_RENDER,
+      incognitoMode: data.incognito === true,
     })
       .javaScriptOnDocumentStart(keySynthesisScripts(data))
       .managedWebviewAttributes(data, "(embedded)")
@@ -1672,16 +2053,18 @@ function BuildWebview(data: ManagedWebview) {
  * drop ALL key events there.
  */
 function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[] {
-  const wid = data.windowId ?? 0;
-  const base = data.initializationScripts ?? [];
-  if (wid !== 0 || data.nativeTarget !== null) {
+  const base = webviewKeyboardScripts(
+    data.initializationScripts ?? [],
+    usesLegacyWebviewKeyboard(
+      data.nativeKeyboard,
+      data.nativeTarget,
+      data.windowId ?? 0,
+      data.forwardKeys,
+    ),
+  );
+  if (!data.forwardKeys) {
     return base;
   }
-  // scriptRules are ArkWeb URL match patterns — an EMPTY array matches no
-  // document (the shim silently never runs; observed 2026-08-28 as unsuppressed
-  // native key events). "*" alone does not match custom protocols
-  // (tauri://localhost), so reuse the UNION of the app's own init-script
-  // rules — the shim must run exactly wherever those run. No init scripts → "*".
   const rules: Set<string> = new Set();
   for (const item of base) {
     for (const rule of item.scriptRules) {
@@ -1691,11 +2074,11 @@ function keySynthesisScripts(data: ManagedWebview): WebviewInitializationScript[
   if (rules.size === 0) {
     rules.add("*");
   }
-  const shim: WebviewInitializationScript = {
-    script: KEY_SYNTHESIS_SHIM,
+  const keyScript: WebviewInitializationScript = {
+    script: NATIVE_KEY_INIT_SCRIPT,
     scriptRules: Array.from(rules),
   };
-  return base.concat([shim]);
+  return [keyScript].concat(base);
 }
 
 function handleControllerAttached(data: ManagedWebview): void {
@@ -1708,6 +2091,14 @@ function handleControllerAttached(data: ManagedWebview): void {
     }
     if (data.userAgent !== undefined && data.userAgent !== null) {
       data.controller.setCustomUserAgent(data.userAgent);
+    }
+    data.asyncEvaluator.attach(data.controller);
+    if (data.forwardKeys && data.keyProxy) {
+      data.controller.registerJavaScriptProxy(data.keyProxy, NATIVE_KEY_PROXY_NAME, [
+        "onTabOut",
+        "onKey",
+      ]);
+      data.keyProxyRegistered = true;
     }
     setupDownloadDelegate(data);
     data.notifyNativeControllerAttached();
@@ -1742,10 +2133,9 @@ function handleControllerAttached(data: ManagedWebview): void {
       );
     }
 
-    // ohos-webview-key-synthesis: register the controller (ALL windows incl.
-    // main — unlike the sub-window-only WindowManager map above) so
-    // MainPage.onKeyPreIme can dispatch synthetic DOM key events into it.
-    if (data.nativeTarget === null) {
+    // ohos-webview-key-synthesis: register the controller (legacy main-window
+    // hosts only) so MainPage.onKeyPreIme can dispatch synthetic DOM key events into it.
+    if (usesLegacyWebviewKeyboard(data.nativeKeyboard, data.nativeTarget, wid, data.forwardKeys)) {
       notifyKeySynthesisController(wid, data.controller as webview.WebviewController);
     }
 
@@ -1793,11 +2183,20 @@ function handleLoadIntercept(data: ManagedWebview, url: string): boolean {
     return true; // block navigation
   }
   // file:// interception: ArkWeb consumes OS file drops by navigating to
-  // file://<dropped file>, which preempts onDrop. Intercept and forward as drag-drop.
+  // file://<dropped file>, which preempts onDrop. Allow explicit loadUrl("file://...")
+  // while blocking unapproved file:// navigations (or routing them to onDrop / navigation callback).
   if (url && url.startsWith("file://")) {
-    const path = pathFromFileUrl(url);
-    data.onDrop(0, 0, [path]);
-    return true; // block navigation
+    if (data.allowedFileUrl !== url) {
+      if (data.eventOptions.dragDrop === true) {
+        const path = pathFromFileUrl(url);
+        data.onDrop(0, 0, [path]);
+        return true; // block navigation
+      }
+      if (data.eventOptions.navigationIntercept === true) {
+        return data.onNavigationRequest(url);
+      }
+      return true;
+    }
   }
   return data.onNavigationRequest(url);
 }
@@ -1862,6 +2261,8 @@ function handleWebviewInterceptRequest(
 
 /** pageBegin/pageEnd JS-callback dispatch, gated on the event options. */
 function handleWebviewPageBegin(data: ManagedWebview, url: string): void {
+  data.pending.clearNavigationPending();
+  data.asyncEvaluator.onNavigationStart();
   data.nativeNotify("start");
   if (data.eventOptions.pageBegin === true) {
     data.onPageBegin(url);
@@ -1983,6 +2384,7 @@ class WebviewSurface {
     callContext: BridgeCallContext,
     nativeTarget: number | null = null,
     nativeSettings: NativeWebviewSettings | null = null,
+    nativeKeyboard: boolean = false,
   ): Promise<void> {
     if (nativeTarget === null) {
       if (
@@ -1991,13 +2393,13 @@ class WebviewSurface {
       ) {
         return this.serializeNative(
           payload.id,
-          (): Promise<void> => this.createEntry(payload, callContext),
+          (): Promise<void> => this.createEntry(payload, callContext, null, null, nativeKeyboard),
         );
       }
-      return this.createEntry(payload, callContext);
+      return this.createEntry(payload, callContext, null, null, nativeKeyboard);
     }
     return this.serializeNative(payload.id, async (): Promise<void> => {
-      await this.createEntry(payload, callContext, nativeTarget, nativeSettings);
+      await this.createEntry(payload, callContext, nativeTarget, nativeSettings, nativeKeyboard);
     });
   }
 
@@ -2006,6 +2408,7 @@ class WebviewSurface {
     callContext: BridgeCallContext,
     nativeTarget: number | null = null,
     nativeSettings: NativeWebviewSettings | null = null,
+    nativeKeyboard: boolean = false,
   ): Promise<void> {
     this.assertActive();
     this.assertCallActive(callContext);
@@ -2058,7 +2461,66 @@ class WebviewSurface {
     // onWindowNew Allow branch, which lives in a `@Builder` free function with no `this`.
     // Same source as the BuilderNode construction below (`this.pluginContext.getUIContext()`).
     const newWindowUiCtx = this.pluginContext.getUIContext();
+    const forwardKeys = shouldForwardWebviewKeys(
+      eventOptions.keyEvent,
+      nativeSettings?.forwardKeyEvents,
+    );
+    const nativeKeyDispatch = (
+      kind: string,
+      key: string,
+      code: string,
+      keyCode: number,
+      shift: boolean,
+      ctrl: boolean,
+      alt: boolean,
+      meta: boolean,
+      repeat: boolean,
+    ): void => {
+      if (this.disposed || this.entries.get(payload.id)?.data !== data || !data.nativeActive) {
+        return;
+      }
+      try {
+        notifyNative(
+          this.pluginContext,
+          "native-key-event",
+          NATIVE_KEY_EVENT_TYPE,
+          new WebviewNativeKeyEventPayload(
+            payload.id,
+            nativeTag,
+            nativeTarget ?? 0,
+            kind,
+            key,
+            code,
+            keyCode,
+            shift,
+            ctrl,
+            alt,
+            meta,
+            repeat,
+          ) as ESObject,
+        );
+      } catch (error) {
+        console.error("WebView native-key-event failed: " + String(error));
+      }
+    };
     const data: ManagedWebview = {
+      nativeKeyboard,
+      forwardKeys,
+      incognito: payload.incognito === true,
+      allowedFileUrl: payload.url && payload.url.startsWith("file://") ? payload.url : null,
+      keyProxyRegistered: false,
+      keyProxy: forwardKeys ? new NativeKeyJsProxy(nativeKeyDispatch) : undefined,
+      pending: new WebviewPendingHandlers(),
+      asyncEvaluator: new WebviewAsyncEvaluator(),
+      pointerEvents: new WebviewPointerEvents(
+        payload.id,
+        nativeTag,
+        (): boolean =>
+          !this.disposed && this.entries.get(payload.id)?.data === data && data.nativeActive,
+        (event: WebviewPointerEvent): void => {
+          notifyNative(this.pluginContext, "pointer-down", POINTER_EVENT_TYPE, event as ESObject);
+        },
+      ),
       id: payload.id,
       windowId: payload.windowId ?? null,
       mountParentHandle: parentHandle,
@@ -2192,8 +2654,190 @@ class WebviewSurface {
           console.error("WebView title notification failed: " + String(error));
         }
       },
-      onDownloadStart: (url: string, tempPath: string | null): WebviewDownloadStartResponse => {
-        return downloadStartDecision(this.pluginContext, payload.id, nativeTag, url, tempPath);
+      onDownloadStart: (
+        url: string,
+        tempPath: string | null,
+        suggestedName: string | undefined,
+        downloadId: string | undefined,
+      ): WebviewDownloadStartResponse => {
+        return downloadStartDecision(
+          this.pluginContext,
+          payload.id,
+          nativeTag,
+          url,
+          tempPath,
+          suggestedName,
+          downloadId,
+        );
+      },
+      onLoadError: (url: string, code: number, description: string): void => {
+        try {
+          notifyNative(
+            this.pluginContext,
+            "load-error",
+            LOAD_ERROR_EVENT_TYPE,
+            new WebviewLoadErrorEventPayload(
+              payload.id,
+              nativeTag,
+              url,
+              code,
+              description,
+            ) as ESObject,
+          );
+        } catch (error) {
+          console.error("WebView load-error notification failed: " + String(error));
+        }
+      },
+      onAudioStateChanged: (playing: boolean): void => {
+        try {
+          notifyNative(
+            this.pluginContext,
+            "audio-state-changed",
+            AUDIO_STATE_EVENT_TYPE,
+            new WebviewAudioStateEventPayload(payload.id, nativeTag, playing) as ESObject,
+          );
+        } catch (error) {
+          console.error("WebView audio-state-changed notification failed: " + String(error));
+        }
+      },
+      onWindowExit: (): void => {
+        try {
+          notifyNative(
+            this.pluginContext,
+            "window-exit",
+            CONTROLLER_EVENT_TYPE,
+            new WebviewControllerEvent(payload.id, nativeTag) as ESObject,
+          );
+        } catch (error) {
+          console.error("WebView window-exit notification failed: " + String(error));
+        }
+      },
+      onRenderExited: (reasonCode: number): void => {
+        let reason = "unknown";
+        if (reasonCode === 0) {
+          reason = "abnormal";
+        } else if (reasonCode === 1) {
+          reason = "killed";
+        } else if (reasonCode === 2) {
+          reason = "crashed";
+        } else if (reasonCode === 3) {
+          reason = "oom";
+        }
+        try {
+          notifyNative(
+            this.pluginContext,
+            "render-exited",
+            RENDER_EXITED_EVENT_TYPE,
+            new WebviewRenderExitedEventPayload(
+              payload.id,
+              nativeTag,
+              reason,
+              reasonCode,
+            ) as ESObject,
+          );
+        } catch (error) {
+          console.error("WebView render-exited notification failed: " + String(error));
+        }
+      },
+      onPermissionRequest: (request: PermissionRequest): void => {
+        const requestId = nextBridgeRequestId("perm");
+        data.pending.trackPermission(requestId, request);
+        try {
+          const origin = request.getOrigin() ?? "";
+          const resources = request.getAccessibleResource() ?? [];
+          notifyNative(
+            this.pluginContext,
+            "permission-request",
+            PERMISSION_REQUEST_EVENT_TYPE,
+            new WebviewPermissionRequestEventPayload(
+              payload.id,
+              nativeTag,
+              requestId,
+              origin,
+              resources,
+            ) as ESObject,
+          );
+        } catch (error) {
+          data.pending.deletePermission(requestId);
+          try {
+            request.deny();
+          } catch {}
+          console.error("WebView permission-request notification failed: " + String(error));
+        }
+      },
+      onHttpAuthRequest: (host: string, realm: string, handler: HttpAuthHandler): boolean => {
+        const requestId = nextBridgeRequestId("auth");
+        data.pending.trackHttpAuth(requestId, handler);
+        try {
+          notifyNative(
+            this.pluginContext,
+            "http-auth-request",
+            HTTP_AUTH_REQUEST_EVENT_TYPE,
+            new WebviewHttpAuthRequestEventPayload(
+              payload.id,
+              nativeTag,
+              requestId,
+              host,
+              realm,
+            ) as ESObject,
+          );
+          return true;
+        } catch (error) {
+          data.pending.deleteHttpAuth(requestId);
+          console.error("WebView http-auth-request notification failed: " + String(error));
+          return false;
+        }
+      },
+      onSslError: (event: SslErrorEvent): void => {
+        const requestId = nextBridgeRequestId("ssl");
+        data.pending.trackSslError(requestId, event.handler);
+        const errorCode = Number(event.error ?? 0);
+        let errorName = "invalid";
+        if (errorCode === 1) {
+          errorName = "host-mismatch";
+        } else if (errorCode === 2) {
+          errorName = "date-invalid";
+        } else if (errorCode === 3) {
+          errorName = "untrusted";
+        }
+        let certDerBase64: string | undefined = undefined;
+        try {
+          if (
+            deviceInfo.sdkApiVersion >= 20 &&
+            event.certChainData &&
+            event.certChainData.length > 0
+          ) {
+            const leaf = event.certChainData[0];
+            if (leaf && leaf.byteLength > 0) {
+              certDerBase64 = buffer
+                .from(leaf.buffer, leaf.byteOffset, leaf.byteLength)
+                .toString("base64");
+            }
+          }
+        } catch {}
+        try {
+          notifyNative(
+            this.pluginContext,
+            "ssl-error",
+            SSL_ERROR_EVENT_TYPE,
+            new WebviewSslErrorEventPayload(
+              payload.id,
+              nativeTag,
+              requestId,
+              event.url ?? event.originalUrl ?? "",
+              errorCode,
+              errorName,
+              Boolean(event.isMainFrame),
+              certDerBase64,
+            ) as ESObject,
+          );
+        } catch (error) {
+          data.pending.deleteSslError(requestId);
+          try {
+            event.handler.handleCancel();
+          } catch {}
+          console.error("WebView ssl-error notification failed: " + String(error));
+        }
       },
       onDownloadEnd: (url: string, tempPath: string | null, success: boolean): void => {
         if (eventOptions.downloadEnd !== true) {
@@ -2338,7 +2982,7 @@ class WebviewSurface {
         windowId,
       );
       WindowManager.onComponentRootRegistered(windowId, (): void => {
-        this.create(payload, callContext);
+        this.create(payload, callContext, nativeTarget, nativeSettings, nativeKeyboard);
       });
       return;
     }
@@ -2354,7 +2998,7 @@ class WebviewSurface {
     );
     const builderUiCtx = isSubWindow && subUiCtx ? subUiCtx : this.pluginContext.getUIContext();
     const node = new BuilderNode<[ManagedWebview]>(builderUiCtx);
-    const entry = new WebviewEntry(data, node);
+    const entry = new WebviewEntry(data, node, builderUiCtx);
     // Wire up close-window callback: when the webview navigates to close-window.invalid,
     // destroy the Float sub-window via WindowManager. Notify Rust FIRST (mirrors menu.ets
     // closeWindow and FloatPage × button) so the tauri manager drains PENDING_WINDOW_CLOSES
@@ -2545,6 +3189,23 @@ class WebviewSurface {
   ): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
     try {
+      const needsFileAccessEnable = entry.data.allowedFileUrl === null && url.startsWith("file://");
+      if (url.startsWith("file://")) {
+        if (entry.data.allowedFileUrl !== url) {
+          entry.data.allowedFileUrl = url;
+          entry.node.update(entry.data);
+        }
+      } else if (entry.data.allowedFileUrl !== null) {
+        entry.data.allowedFileUrl = null;
+        entry.node.update(entry.data);
+      }
+      if (needsFileAccessEnable) {
+        // Yield one frame so ArkUI flushes `.fileAccess(true)` before loadUrl runs.
+        await new Promise<void>((resolve) => {
+          setTimeout(() => resolve(), 16);
+        });
+        this.assertCurrentEntry(id, entry, callContext);
+      }
       entry.data.controller.loadUrl(url, headersOf(headers));
     } catch (error) {
       throw new Error(`Unable to load WebView URL: ${String(error)}`);
@@ -2586,9 +3247,30 @@ class WebviewSurface {
     }
   }
 
+  async setPointerEvents(
+    id: string,
+    enabled: boolean,
+    callContext: BridgeCallContext,
+  ): Promise<void> {
+    const entry = await this.controllerEntry(id, callContext);
+    entry.data.pointerEvents.enabled = enabled;
+  }
+
   async focus(id: string, callContext: BridgeCallContext): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
     try {
+      const componentId = webviewComponentId(entry.data);
+      try {
+        entry.uiContext.getFocusController().requestFocus(componentId);
+      } catch (focusError) {
+        hilog.warn(
+          0x1999,
+          "WebviewSurface",
+          "FocusController.requestFocus failed for %{public}s: %{public}s",
+          componentId,
+          String(focusError),
+        );
+      }
       entry.data.controller.requestFocus();
     } catch (error) {
       throw new Error(`Unable to focus WebView: ${String(error)}`);
@@ -2596,9 +3278,9 @@ class WebviewSurface {
   }
 
   async cookiesWithUrl(id: string, url: string, callContext: BridgeCallContext): Promise<string> {
-    await this.controllerEntry(id, callContext);
+    const entry = await this.controllerEntry(id, callContext);
     try {
-      return webview.WebCookieManager.fetchCookieSync(url);
+      return webview.WebCookieManager.fetchCookieSync(url, entry.data.incognito === true);
     } catch (error) {
       throw new Error(`Unable to get WebView cookies: ${String(error)}`);
     }
@@ -2607,11 +3289,19 @@ class WebviewSurface {
   async cookiesDetails(
     id: string,
     callContext: BridgeCallContext,
+    incognitoOverride?: boolean,
   ): Promise<WebviewCookiesResponse> {
-    if (id) {
-      await this.controllerEntry(id, callContext);
+    if (deviceInfo.sdkApiVersion < 23) {
+      throw new Error("fetchAllCookies requires API 23 or later");
     }
-    const cookies = await webview.WebCookieManager.fetchAllCookies(false);
+    let incognito = incognitoOverride === true;
+    if (id) {
+      const entry = await this.controllerEntry(id, callContext);
+      if (incognitoOverride === undefined) {
+        incognito = entry.data.incognito === true;
+      }
+    }
+    const cookies = await webview.WebCookieManager.fetchAllCookies(incognito);
     if (!callContext.isActive()) {
       throw new Error("Cookie query was cancelled");
     }
@@ -2637,18 +3327,27 @@ class WebviewSurface {
     );
   }
 
-  async clearCookies(id: string, callContext: BridgeCallContext): Promise<void> {
+  async clearCookies(
+    id: string,
+    callContext: BridgeCallContext,
+    incognitoOverride?: boolean,
+  ): Promise<void> {
+    let incognito = incognitoOverride === true;
     if (id) {
-      await this.controllerEntry(id, callContext);
+      const entry = await this.controllerEntry(id, callContext);
+      if (incognitoOverride === undefined) {
+        incognito = entry.data.incognito === true;
+      }
     }
-    webview.WebCookieManager.clearAllCookiesSync(false);
+    webview.WebCookieManager.clearAllCookiesSync(incognito);
   }
 
   async clearAllBrowsingData(id: string, callContext: BridgeCallContext): Promise<void> {
     const entry = await this.controllerEntry(id, callContext);
+    const incognito = entry.data.incognito === true;
     try {
-      webview.WebCookieManager.clearAllCookiesSync(false);
-      webview.WebStorage.deleteAllData(false);
+      webview.WebCookieManager.clearAllCookiesSync(incognito);
+      webview.WebStorage.deleteAllData(incognito);
       webview.WebDataBase.deleteHttpAuthCredentials();
       entry.data.controller.removeCache(true);
       entry.data.controller.clearHistory();
@@ -2657,11 +3356,27 @@ class WebviewSurface {
     }
   }
 
+  setCookieFor(id: string, url: string, value: string): boolean {
+    const incognito = this.entries.get(id)?.data.incognito === true;
+    return this.setCookie(url, value, incognito);
+  }
+
   async remove(id: string): Promise<boolean> {
     if (this.nativeOperations.has(id) || this.entries.get(id)?.data.nativeTarget != null) {
       return this.serializeNative(id, (): Promise<boolean> => this.removeEntry(id));
     }
     return this.removeEntry(id);
+  }
+
+  private cleanupPending(data: ManagedWebview): void {
+    data.asyncEvaluator.detach(data.controller);
+    if (data.keyProxyRegistered) {
+      data.keyProxyRegistered = false;
+      try {
+        data.controller.deleteJavaScriptRegister(NATIVE_KEY_PROXY_NAME);
+      } catch {}
+    }
+    data.pending.clearAll();
   }
 
   private async removeEntry(
@@ -2674,6 +3389,8 @@ class WebviewSurface {
     if (!entry || (expected !== undefined && entry !== expected)) {
       return false;
     }
+    entry.data.pointerEvents.enabled = false;
+    this.cleanupPending(entry.data);
     // Unregister runtime blur refresh callback (sub-window webviews only).
     const wid = entry.data.windowId ?? 0;
     if (wid > 0) {
@@ -2736,6 +3453,100 @@ class WebviewSurface {
     } catch (error) {
       throw new Error(`Unable to evaluate WebView JavaScript: ${String(error)}`);
     }
+  }
+
+  async evaluateAsyncScript(
+    id: string,
+    script: string,
+    callContext: BridgeCallContext,
+    timeoutMs?: number | null,
+  ): Promise<WebviewAsyncScriptResponse> {
+    const entry = await this.controllerEntry(id, callContext);
+    return await entry.data.asyncEvaluator.evaluate(
+      entry.data.controller,
+      script,
+      (): boolean => callContext.isActive() && this.entries.get(id) === entry,
+      callContext.onCancel,
+      timeoutMs,
+    );
+  }
+
+  async reloadIgnoreCache(id: string, callContext: BridgeCallContext): Promise<void> {
+    const entry = await this.controllerEntry(id, callContext);
+    try {
+      if (deviceInfo.sdkApiVersion >= 24) {
+        entry.data.controller.refresh(true);
+      } else {
+        entry.data.controller.refresh();
+      }
+    } catch (error) {
+      throw new Error(`Unable to reload WebView ignoring cache: ${String(error)}`);
+    }
+  }
+
+  async serializeState(id: string, callContext: BridgeCallContext): Promise<WebviewStateResponse> {
+    const entry = await this.controllerEntry(id, callContext);
+    try {
+      const bytes = entry.data.controller.serializeWebState();
+      if (!bytes || bytes.byteLength === 0) {
+        return new WebviewStateResponse(undefined);
+      }
+      const b64 = buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
+      return new WebviewStateResponse(b64);
+    } catch (error) {
+      throw new Error(`Unable to serialize WebView state: ${String(error)}`);
+    }
+  }
+
+  async restoreState(
+    id: string,
+    stateBase64: string,
+    callContext: BridgeCallContext,
+  ): Promise<boolean> {
+    const entry = await this.controllerEntry(id, callContext);
+    if (!stateBase64) {
+      return false;
+    }
+    try {
+      const buf = buffer.from(stateBase64, "base64");
+      const bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.length);
+      if (bytes.byteLength === 0) {
+        return false;
+      }
+      entry.data.controller.restoreWebState(bytes);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  async setAudioMuted(id: string, muted: boolean, callContext: BridgeCallContext): Promise<void> {
+    const entry = await this.controllerEntry(id, callContext);
+    try {
+      entry.data.controller.setAudioMuted(muted);
+    } catch (error) {
+      throw new Error(`Unable to set WebView audio muted: ${String(error)}`);
+    }
+  }
+
+  resolveDownload(request: WebviewResolveDownloadPayload): boolean {
+    const entry = this.entries.get(request.id);
+    return entry ? entry.data.pending.resolveDownload(request) : false;
+  }
+
+  resolvePermissionRequest(request: WebviewResolvePermissionPayload): boolean {
+    const entry = this.entries.get(request.id);
+    return entry ? entry.data.pending.resolvePermission(request) : false;
+  }
+
+  resolveHttpAuth(request: WebviewResolveHttpAuthPayload): boolean {
+    const entry = this.entries.get(request.id);
+    return entry ? entry.data.pending.resolveHttpAuth(request) : false;
+  }
+
+  resolveSslError(request: WebviewResolveSslErrorPayload): boolean {
+    const entry = this.entries.get(request.id);
+    return entry ? entry.data.pending.resolveSslError(request) : false;
   }
 
   async createPdf(
@@ -3023,9 +3834,13 @@ class WebviewSurface {
     return true;
   }
 
-  setCookie(url: string, value: string): boolean {
+  setCookie(url: string, value: string, incognito: boolean = false): boolean {
     try {
-      webview.WebCookieManager.configCookieSync(url, value, false, true);
+      if (deviceInfo.sdkApiVersion >= 14) {
+        webview.WebCookieManager.configCookieSync(url, value, incognito, true);
+      } else {
+        webview.WebCookieManager.configCookieSync(url, value, incognito);
+      }
       return true;
     } catch (error) {
       console.error("WebView set-cookie failed: " + String(error));
@@ -3431,21 +4246,55 @@ export class WebviewPlugin extends AsyncPluginBase {
       throw new Error("Bridge session is no longer active");
     }
     const surface = this.requireSurface();
-    if (action === "default-cookies" || action === "default-clear-cookies") {
+    if (action === "set-pointer-events") {
+      const request = parsePointerEvents(payload);
+      await surface.setPointerEvents(request.id, request.enabled, context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+    if (
+      action === "default-cookies" ||
+      action === "default-clear-cookies" ||
+      action === "default-clear-resource-cache" ||
+      action === "default-clear-web-storage" ||
+      action === "default-clear-http-auth"
+    ) {
       if (
         payload.typeName !== "ohos.webview.DefaultStoreRequest" ||
         !payload.value ||
         typeof payload.value !== "object"
       ) {
-        throw new Error("Default cookie store requires ohos.webview.DefaultStoreRequest");
+        throw new Error("Default store requires ohos.webview.DefaultStoreRequest");
       }
+      const storePayload = payload.value as WebviewDefaultStorePayload;
+      const incognito = storePayload.incognito === true;
+      ensureWebEngineInitialized(context);
       if (action === "default-cookies") {
         return {
           typeName: "ohos.webview.CookiesResponse",
-          value: await surface.cookiesDetails("", context),
+          value: await surface.cookiesDetails("", context, incognito),
         };
       }
-      await surface.clearCookies("", context);
+      if (action === "default-clear-cookies") {
+        await surface.clearCookies("", context, incognito);
+      } else if (action === "default-clear-resource-cache") {
+        if (incognito) {
+          throw new Error("Incognito resource cache deletion is not supported separately");
+        }
+        if (deviceInfo.sdkApiVersion < 18) {
+          throw new Error("Default resource cache deletion requires API 18");
+        }
+        webview.WebviewController.removeAllCache(true);
+      } else if (action === "default-clear-web-storage") {
+        webview.WebStorage.deleteAllData(incognito);
+      } else {
+        if (incognito) {
+          throw new Error("Incognito HTTP auth deletion is not supported separately");
+        }
+        webview.WebDataBase.deleteHttpAuthCredentials();
+      }
+      if (!context.isActive()) {
+        throw new Error("Default store operation was cancelled");
+      }
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new WebviewAcceptedResponse(true) };
     }
     if (action === "create-native") {
@@ -3496,7 +4345,13 @@ export class WebviewPlugin extends AsyncPluginBase {
     }
     if (action === "create") {
       const createPayload = ensureCreatePayload(parseCreatePayload(payload));
-      await surface.create(createPayload, context);
+      await surface.create(
+        createPayload,
+        context,
+        null,
+        null,
+        createPayload.nativeKeyboard === true,
+      );
       if (!context.isActive()) {
         throw new Error(
           "Bridge session is no longer active after WebView controller initialization",
@@ -3514,6 +4369,70 @@ export class WebviewPlugin extends AsyncPluginBase {
       return {
         typeName: SCRIPT_RESPONSE_TYPE,
         value: new WebviewScriptResponse(result),
+      };
+    }
+
+    if (action === "evaluate-async-script") {
+      const scriptPayload = parseScriptPayload(payload);
+      return {
+        typeName: ASYNC_SCRIPT_RESPONSE_TYPE,
+        value: await surface.evaluateAsyncScript(
+          scriptPayload.id,
+          scriptPayload.script,
+          context,
+          scriptPayload.timeoutMs,
+        ),
+      };
+    }
+
+    if (action === "restore-state") {
+      const request = parseRestoreStatePayload(payload);
+      return {
+        typeName: BOOLEAN_RESPONSE_TYPE,
+        value: new WebviewBooleanResponse(
+          await surface.restoreState(request.id, request.stateBase64, context),
+        ),
+      };
+    }
+
+    if (action === "set-audio-muted") {
+      const request = parseAudioMutedPayload(payload);
+      await surface.setAudioMuted(request.id, request.muted, context);
+      return {
+        typeName: ACKNOWLEDGEMENT_TYPE,
+        value: new WebviewAcceptedResponse(true),
+      };
+    }
+
+    if (action === "resolve-download") {
+      const request = parseResolveDownloadPayload(payload);
+      return {
+        typeName: ACKNOWLEDGEMENT_TYPE,
+        value: new WebviewAcceptedResponse(surface.resolveDownload(request)),
+      };
+    }
+
+    if (action === "resolve-permission-request") {
+      const request = parseResolvePermissionPayload(payload);
+      return {
+        typeName: ACKNOWLEDGEMENT_TYPE,
+        value: new WebviewAcceptedResponse(surface.resolvePermissionRequest(request)),
+      };
+    }
+
+    if (action === "resolve-http-auth") {
+      const request = parseResolveHttpAuthPayload(payload);
+      return {
+        typeName: ACKNOWLEDGEMENT_TYPE,
+        value: new WebviewAcceptedResponse(surface.resolveHttpAuth(request)),
+      };
+    }
+
+    if (action === "resolve-ssl-error") {
+      const request = parseResolveSslErrorPayload(payload);
+      return {
+        typeName: ACKNOWLEDGEMENT_TYPE,
+        value: new WebviewAcceptedResponse(surface.resolveSslError(request)),
       };
     }
 
@@ -3593,7 +4512,13 @@ export class WebviewPlugin extends AsyncPluginBase {
       if (typeof request.value !== "string") {
         throw new Error("WebView set-cookie value must be a string");
       }
-      const accepted = surface.setCookie(request.url, request.value);
+      if (action === "default-set-cookie") {
+        ensureWebEngineInitialized(context);
+      }
+      const accepted =
+        action === "default-set-cookie"
+          ? surface.setCookie(request.url, request.value, request.incognito === true)
+          : surface.setCookieFor(request.id, request.url, request.value);
       return {
         typeName: ACKNOWLEDGEMENT_TYPE,
         value: new WebviewAcceptedResponse(accepted),
@@ -3708,6 +4633,14 @@ export class WebviewPlugin extends AsyncPluginBase {
     } else if (action === "reload") {
       await surface.reload(controllerPayload.id, context);
       accepted = true;
+    } else if (action === "reload-ignore-cache") {
+      await surface.reloadIgnoreCache(controllerPayload.id, context);
+      accepted = true;
+    } else if (action === "serialize-state") {
+      return {
+        typeName: STATE_RESPONSE_TYPE,
+        value: await surface.serializeState(controllerPayload.id, context),
+      };
     } else if (action === "focus") {
       await surface.focus(controllerPayload.id, context);
       accepted = true;

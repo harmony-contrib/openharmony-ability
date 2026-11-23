@@ -37,4 +37,6 @@ Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
 
 ## Toolkit contract additions
 
-`show-with-options` adds grouping, a decoded image, sender display name and the silent content-information slot. System notification preferences still apply. `parse-response` recognizes the configured response URI for cold and warm starts; `dismiss-all` also removes notifications from previous runs. Sender identity/avatar and communication-notification semantics are not synthesized.
+The unified `show` action (`ohos.notification.ShowRequest`) supports optional `silent` (API 23+ sound/vibration disable flags), `group`, `senderName`, `image`, `avatar`, and `slot` (`"default"` or `"social"`, mapping to `SOCIAL_COMMUNICATION`). `parse-response` recognizes the configured response URI for cold and warm starts; `dismiss-all` also removes notifications from previous runs. Stable sender/contact identity and system conversation identity are not synthesized.
+
+Sender display names appear in the visible body unless already equal to the title; `additionalText` alone is not visible in the notification center. Attachments use `NotificationPictureContent`, preserving aspect ratio with a longest edge of 512 pixels, no upscaling, and RGBA8888 pixels within the public picture byte limit. They do not rely on custom application-icon display policy.

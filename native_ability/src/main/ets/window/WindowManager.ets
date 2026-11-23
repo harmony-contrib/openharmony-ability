@@ -1735,6 +1735,14 @@ export class WindowManager {
     if (opts.displayId !== undefined && deviceInfo.sdkApiVersion < 15) {
       throw new Error("Moving a sub-window to a display requires API 15");
     }
+    if (opts.displayId !== undefined) {
+      if (!Number.isSafeInteger(opts.displayId) || opts.displayId < 0) {
+        throw new Error("Invalid sub-window display ID");
+      }
+      // The native move API silently uses the current display for unknown IDs.
+      // Creation must not succeed on a different monitor from the requested one.
+      display.getDisplayByIdSync(opts.displayId);
+    }
     if (this.windows.has(windowId) || this.uiAbilityStages.has(windowId)) {
       throw new Error(`Window ${windowId} already exists`);
     }

@@ -32,7 +32,10 @@ mod protocol;
 
 pub use callbacks::WebviewCallbacksBuilder;
 pub use js_proxy::WebviewJavascriptProxyBuilder;
-pub use native::{NativeWebviewEvent, NativeWebviewEvents, NativeWebviewSettings};
+pub use native::{
+    NativeWebviewEvent, NativeWebviewEvents, NativeWebviewKeyEvent, NativeWebviewKeyEvents,
+    NativeWebviewSettings,
+};
 pub use protocol::{
     bind_custom_protocol, bind_custom_protocol_async, WebviewProtocol, WebviewProtocolOptions,
     WebviewProtocolRequest, WebviewProtocolResponder, WebviewProtocolResponse,
@@ -46,6 +49,7 @@ const CONTROLLER_ATTACHED_EVENT: &str = "controller-attached";
 #[derive(Default)]
 pub struct WebviewBridgePlugin {
     native_events: std::sync::Arc<native_routes::NativeEvents<NativeWebviewEvent>>,
+    native_key_events: std::sync::Arc<native_routes::NativeEvents<NativeWebviewKeyEvent>>,
 }
 
 impl WebviewBridgePlugin {
@@ -96,6 +100,20 @@ impl BridgePlugin for WebviewBridgePlugin {
                     self.native_events
                         .dispatch(notification.target_id, notification)
                 })?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "native-key-event" => {
+                let notification = event.decode::<NativeWebviewKeyEvent>()?;
+                if controller::is_current(&notification.id, &notification.native_tag)? {
+                    if notification.target_id != 0 {
+                        let target_id = notification.target_id;
+                        let dispatched = notification.clone();
+                        NativeAttachment::dispatch(target_id, || {
+                            self.native_key_events.dispatch(target_id, dispatched)
+                        })?;
+                    }
+                    callbacks::dispatch_key_event(notification)?;
+                }
                 event.respond(WebviewEventAcknowledgement { accepted: true })
             }
             "native-controller-attached" | "native-controller-removed" => {
@@ -181,6 +199,11 @@ impl BridgePlugin for WebviewBridgePlugin {
                 let request = event.decode::<WebviewNewWindowRequest>()?;
                 event.respond(callbacks::new_window_decision(request)?)
             }
+            "pointer-down" => {
+                let pointer = event.decode::<WebviewPointerEvent>()?;
+                callbacks::dispatch_pointer_down(pointer)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
             "page-begin" => {
                 let page_event = event.decode::<WebviewPageEvent>()?;
                 callbacks::dispatch_page_begin(page_event)?;
@@ -226,6 +249,41 @@ impl BridgePlugin for WebviewBridgePlugin {
                 // worker thread (never recv on the main thread — deadlock precedent).
                 let notification = event.decode::<WebviewPrintStateEvent>()?;
                 let _ = print_state_channel().0.send(notification);
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "audio-state-changed" => {
+                let notification = event.decode::<WebviewAudioStateEvent>()?;
+                callbacks::dispatch_audio_state(notification)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "window-exit" => {
+                let notification = event.decode::<WebviewControllerEvent>()?;
+                callbacks::dispatch_window_exit(notification)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "render-exited" => {
+                let notification = event.decode::<WebviewRenderExitedEvent>()?;
+                callbacks::dispatch_render_exited(notification)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "permission-request" => {
+                let notification = event.decode::<WebviewPermissionRequestEvent>()?;
+                callbacks::dispatch_permission_request(notification)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "http-auth-request" => {
+                let notification = event.decode::<WebviewHttpAuthRequestEvent>()?;
+                callbacks::dispatch_http_auth_request(notification)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "ssl-error" => {
+                let notification = event.decode::<WebviewSslErrorEvent>()?;
+                callbacks::dispatch_ssl_error(notification)?;
+                event.respond(WebviewEventAcknowledgement { accepted: true })
+            }
+            "load-error" => {
+                let notification = event.decode::<WebviewLoadErrorEvent>()?;
+                callbacks::dispatch_load_error(notification)?;
                 event.respond(WebviewEventAcknowledgement { accepted: true })
             }
             _ => Err(Error::from_reason(format!(
@@ -413,6 +471,14 @@ pub struct WebviewCallbackOptions {
     pub page_begin: bool,
     /// True when a page-end callback is registered.
     pub page_end: bool,
+    pub load_error: bool,
+    pub key_event: bool,
+    pub audio_state: bool,
+    pub window_exit: bool,
+    pub render_exited: bool,
+    pub permission_request: bool,
+    pub http_auth_request: bool,
+    pub ssl_error: bool,
 }
 
 /// A document-start script and the URL rules for pages where ArkWeb may inject it.
@@ -465,6 +531,12 @@ pub struct WebviewCreateRequest {
     /// `arkweb-error://webdata/` → `isSecureContext=false`. Late `register_https_intercept`
     /// remains as a runtime add path (Set.add is idempotent).
     pub https_intercept_protocol_list: Option<Vec<String>>,
+    /// Enables ArkWeb ephemeral/incognito browsing mode (`incognitoMode: true`).
+    pub incognito: Option<bool>,
+    /// Uses ArkWeb's native keyboard input directly instead of MainPage's legacy
+    /// pre-IME synthetic key shim. Custom hosts without MainPage's synthesizer
+    /// should set this to `true`.
+    pub native_keyboard: Option<bool>,
     #[doc(hidden)]
     pub event_options: WebviewCallbackOptions,
 }
@@ -505,6 +577,8 @@ impl WebviewCreateRequest {
             zoom_hotkeys: None,
             drag_drop_overlay: None,
             https_intercept_protocol_list: None,
+            incognito: None,
+            native_keyboard: None,
             event_options: WebviewCallbackOptions::default(),
         }
     }
@@ -540,6 +614,16 @@ impl WebviewCreateRequest {
     /// Enables ArkWeb DOM storage (localStorage/sessionStorage).
     pub fn dom_storage_access(mut self, enabled: bool) -> Self {
         self.dom_storage_access = Some(enabled);
+        self
+    }
+
+    pub fn incognito(mut self, incognito: bool) -> Self {
+        self.incognito = Some(incognito);
+        self
+    }
+
+    pub fn native_keyboard(mut self, enabled: bool) -> Self {
+        self.native_keyboard = Some(enabled);
         self
     }
 
@@ -594,6 +678,8 @@ pub struct WebviewDownloadStartRequest {
     pub native_tag: String,
     pub url: String,
     pub temp_path: Option<String>,
+    pub suggested_name: Option<String>,
+    pub download_id: Option<String>,
 }
 
 impl_bridge_napi_type!(
@@ -607,6 +693,7 @@ impl_bridge_napi_type!(
 pub struct WebviewDownloadStartResponse {
     pub allow: bool,
     pub temp_path: Option<String>,
+    pub defer_start: Option<bool>,
 }
 
 impl_bridge_napi_type!(
@@ -619,6 +706,7 @@ impl WebviewDownloadStartResponse {
         Self {
             allow: true,
             temp_path,
+            defer_start: None,
         }
     }
 
@@ -626,9 +714,32 @@ impl WebviewDownloadStartResponse {
         Self {
             allow: false,
             temp_path: None,
+            defer_start: None,
+        }
+    }
+
+    pub fn defer() -> Self {
+        Self {
+            allow: true,
+            temp_path: None,
+            defer_start: Some(true),
         }
     }
 }
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewResolveDownloadRequest {
+    pub id: String,
+    pub download_id: String,
+    pub allow: bool,
+    pub path: Option<String>,
+}
+
+impl_bridge_napi_type!(
+    WebviewResolveDownloadRequest,
+    "ohos.webview.ResolveDownloadRequest"
+);
 
 // ── https-intercept ─────────────────────────────────────────────────────────────
 
@@ -722,6 +833,117 @@ pub struct WebviewTitleChangeEvent {
 
 impl_bridge_napi_type!(WebviewDownloadEndEvent, "ohos.webview.DownloadEndEvent");
 impl_bridge_napi_type!(WebviewTitleChangeEvent, "ohos.webview.TitleChangeEvent");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewLoadErrorEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub url: String,
+    pub code: i32,
+    pub description: String,
+}
+impl_bridge_napi_type!(WebviewLoadErrorEvent, "ohos.webview.LoadErrorEvent");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewAudioStateEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub playing: bool,
+}
+impl_bridge_napi_type!(WebviewAudioStateEvent, "ohos.webview.AudioStateEvent");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewRenderExitedEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub reason: String,
+    pub reason_code: i32,
+}
+impl_bridge_napi_type!(WebviewRenderExitedEvent, "ohos.webview.RenderExitedEvent");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPermissionRequestEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub request_id: String,
+    pub origin: String,
+    pub resources: Vec<String>,
+}
+impl_bridge_napi_type!(
+    WebviewPermissionRequestEvent,
+    "ohos.webview.PermissionRequestEvent"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewResolvePermissionRequest {
+    pub id: String,
+    pub request_id: String,
+    pub allow: bool,
+    pub resources: Vec<String>,
+}
+impl_bridge_napi_type!(
+    WebviewResolvePermissionRequest,
+    "ohos.webview.ResolvePermissionRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewHttpAuthRequestEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub request_id: String,
+    pub host: String,
+    pub realm: String,
+}
+impl_bridge_napi_type!(
+    WebviewHttpAuthRequestEvent,
+    "ohos.webview.HttpAuthRequestEvent"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewResolveHttpAuthRequest {
+    pub id: String,
+    pub request_id: String,
+    pub action: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+impl_bridge_napi_type!(
+    WebviewResolveHttpAuthRequest,
+    "ohos.webview.ResolveHttpAuthRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewSslErrorEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub request_id: String,
+    pub url: String,
+    pub error_code: i32,
+    pub error_name: String,
+    pub is_main_frame: bool,
+    pub cert_der_base64: Option<String>,
+}
+impl_bridge_napi_type!(WebviewSslErrorEvent, "ohos.webview.SslErrorEvent");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewResolveSslErrorRequest {
+    pub id: String,
+    pub request_id: String,
+    pub allow: bool,
+}
+impl_bridge_napi_type!(
+    WebviewResolveSslErrorRequest,
+    "ohos.webview.ResolveSslErrorRequest"
+);
 
 /// Response used by one-way named N-API notifications sent directly from ArkTS.
 #[napi(object)]
@@ -950,7 +1172,9 @@ impl_bridge_napi_type!(WebviewPickColorResponse, "ohos.webview.PickColorResponse
 /// are not implied by this facade.
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
-pub struct WebviewDefaultStoreRequest {}
+pub struct WebviewDefaultStoreRequest {
+    pub incognito: Option<bool>,
+}
 impl_bridge_napi_type!(
     WebviewDefaultStoreRequest,
     "ohos.webview.DefaultStoreRequest"
@@ -960,6 +1184,7 @@ impl_bridge_napi_type!(
 pub struct WebviewDefaultSetCookieRequest {
     pub url: String,
     pub value: String,
+    pub incognito: Option<bool>,
 }
 impl_bridge_napi_type!(
     WebviewDefaultSetCookieRequest,
@@ -968,35 +1193,111 @@ impl_bridge_napi_type!(
 #[derive(Clone)]
 pub struct WebviewDefaultStoreClient {
     bridge: BridgeRuntime,
+    incognito: bool,
 }
 impl WebviewDefaultStoreClient {
     pub fn new(app: &OpenHarmonyApp) -> Result<Self> {
         Ok(Self {
             bridge: app.bridge()?,
+            incognito: false,
         })
     }
+
+    /// Targets ArkWeb's incognito cookie and web-storage store when `true`.
+    pub fn incognito(mut self, incognito: bool) -> Self {
+        self.incognito = incognito;
+        self
+    }
+
+    pub fn is_incognito(&self) -> bool {
+        self.incognito
+    }
+
+    fn store_request(&self) -> WebviewDefaultStoreRequest {
+        WebviewDefaultStoreRequest {
+            incognito: self.incognito.then_some(true),
+        }
+    }
+
     pub async fn cookies(&self) -> Result<Vec<WebviewCookie>> {
         let response = self
             .bridge
             .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewCookiesResponse>(
                 "default-cookies",
-                WebviewDefaultStoreRequest {},
+                self.store_request(),
                 BridgeCallOptions::default(),
             )
             .await?;
         Ok(response.cookies)
     }
+
     pub async fn clear_cookies(&self) -> Result<bool> {
         let response = self
             .bridge
             .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
                 "default-clear-cookies",
-                WebviewDefaultStoreRequest {},
+                self.store_request(),
                 BridgeCallOptions::default(),
             )
             .await?;
         Ok(response.accepted)
     }
+
+    /// Deletes the default resource cache in RAM and on disk (API 18+).
+    /// Does not promise CacheStorage, service worker registrations or HSTS deletion.
+    /// Rejects when targeting an incognito store because ArkWeb does not expose
+    /// separate incognito resource cache deletion.
+    pub async fn clear_resource_cache(&self) -> Result<bool> {
+        if self.incognito {
+            return Err(Error::from_reason(
+                "Incognito resource cache deletion is not supported separately by ArkWeb",
+            ));
+        }
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
+                "default-clear-resource-cache",
+                self.store_request(),
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
+    }
+
+    /// Deletes JavaScript storage using WebStorage.deleteAllData(incognito).
+    /// This is one platform-wide operation, not a selective per-storage-type mask.
+    pub async fn clear_web_storage(&self) -> Result<bool> {
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
+                "default-clear-web-storage",
+                self.store_request(),
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
+    }
+
+    /// Deletes saved HTTP authentication credentials, without deleting cookies.
+    /// Rejects when targeting an incognito store because ArkWeb does not expose
+    /// separate incognito HTTP auth credential deletion.
+    pub async fn clear_http_auth(&self) -> Result<bool> {
+        if self.incognito {
+            return Err(Error::from_reason(
+                "Incognito HTTP auth deletion is not supported separately by ArkWeb",
+            ));
+        }
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultStoreRequest, WebviewAcknowledgement>(
+                "default-clear-http-auth",
+                self.store_request(),
+                BridgeCallOptions::default(),
+            )
+            .await?;
+        Ok(response.accepted)
+    }
+
     pub async fn set_cookie(&self, url: String, value: String) -> Result<bool> {
         if url.trim().is_empty()
             || url.chars().any(char::is_control)
@@ -1004,8 +1305,18 @@ impl WebviewDefaultStoreClient {
         {
             return Err(Error::from_reason("Invalid default-store cookie"));
         }
-        let response = self.bridge.call_async::<WebviewBridgePlugin, WebviewDefaultSetCookieRequest, WebviewAcknowledgement>(
-            "default-set-cookie", WebviewDefaultSetCookieRequest { url, value }, BridgeCallOptions::default()).await?;
+        let response = self
+            .bridge
+            .call_async::<WebviewBridgePlugin, WebviewDefaultSetCookieRequest, WebviewAcknowledgement>(
+                "default-set-cookie",
+                WebviewDefaultSetCookieRequest {
+                    url,
+                    value,
+                    incognito: self.incognito.then_some(true),
+                },
+                BridgeCallOptions::default(),
+            )
+            .await?;
         Ok(response.accepted)
     }
 }
@@ -1130,6 +1441,33 @@ pub struct WebviewPageEvent {
 
 impl_bridge_napi_type!(WebviewPageEvent, "ohos.webview.PageEvent");
 
+/// Enables passive pointer-down notifications without changing the create/callback ABI.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPointerEventsRequest {
+    pub id: String,
+    pub enabled: bool,
+}
+impl_bridge_napi_type!(
+    WebviewPointerEventsRequest,
+    "ohos.webview.PointerEventsRequest"
+);
+
+/// Pointer position in component-local vp; buttons: primary=0, secondary=1,
+/// middle=2, back=3, forward=4. Modifiers: Shift=1, Ctrl=2, Alt=4.
+/// ArkUI's public pointer callback does not expose the Super modifier.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewPointerEvent {
+    pub id: String,
+    pub native_tag: String,
+    pub x: f64,
+    pub y: f64,
+    pub button: i32,
+    pub modifiers: u32,
+}
+impl_bridge_napi_type!(WebviewPointerEvent, "ohos.webview.PointerEvent");
+
 #[derive(Clone)]
 pub struct WebviewClient {
     bridge: BridgeRuntime,
@@ -1195,7 +1533,9 @@ impl WebviewClient {
         // named create request so ArkTS can bind ArkWeb hooks without retaining Rust closures.
         request.event_options = callbacks::options_for(&request.id)?;
         let request_id = request.id.clone();
-        let response: WebviewCreateResponse = self.call("create", request).await?;
+        let response: WebviewCreateResponse = self
+            .call::<WebviewCreateRequest, WebviewCreateResponse>("create", request)
+            .await?;
         if response.id != request_id {
             return Err(Error::from_reason(
                 "WebView plugin returned a mismatched controller ID",
@@ -1205,6 +1545,17 @@ impl WebviewClient {
             client: self.clone(),
             id: response.id,
         })
+    }
+
+    /// Creates a WebView using ArkWeb's native keyboard input, without the
+    /// MainPage-only synthetic DOM event shim. Custom hosts must use this path
+    /// (or set [`WebviewCreateRequest::native_keyboard`]) because they do not
+    /// provide MainPage's paired pre-IME synthesizer.
+    pub async fn create_with_native_keyboard(
+        &self,
+        request: WebviewCreateRequest,
+    ) -> Result<WebviewHandle> {
+        self.create(request.native_keyboard(true)).await
     }
 
     /// Reopens a controller-ID facade for a WebView already created in this module/session.
@@ -1268,6 +1619,45 @@ impl WebviewClient {
             )
             .await?
             .ensure()
+    }
+
+    pub async fn resolve_download(&self, request: WebviewResolveDownloadRequest) -> Result<()> {
+        self.call::<WebviewResolveDownloadRequest, WebviewAcknowledgement>(
+            "resolve-download",
+            request,
+        )
+        .await?
+        .ensure()
+    }
+
+    pub async fn resolve_permission_request(
+        &self,
+        request: WebviewResolvePermissionRequest,
+    ) -> Result<()> {
+        self.call::<WebviewResolvePermissionRequest, WebviewAcknowledgement>(
+            "resolve-permission-request",
+            request,
+        )
+        .await?
+        .ensure()
+    }
+
+    pub async fn resolve_http_auth(&self, request: WebviewResolveHttpAuthRequest) -> Result<()> {
+        self.call::<WebviewResolveHttpAuthRequest, WebviewAcknowledgement>(
+            "resolve-http-auth",
+            request,
+        )
+        .await?
+        .ensure()
+    }
+
+    pub async fn resolve_ssl_error(&self, request: WebviewResolveSslErrorRequest) -> Result<()> {
+        self.call::<WebviewResolveSslErrorRequest, WebviewAcknowledgement>(
+            "resolve-ssl-error",
+            request,
+        )
+        .await?
+        .ensure()
     }
 
     /// Rolls back the per-WebView registry entries installed while preparing a
@@ -1334,6 +1724,10 @@ impl WebviewClient {
 /// precedent of 60s for heavy actions).
 fn snapshot_call_options() -> BridgeCallOptions {
     BridgeCallOptions::default().with_timeout_ms(60_000)
+}
+
+fn async_script_call_options(js_timeout_ms: u32) -> BridgeCallOptions {
+    BridgeCallOptions::default().with_timeout_ms(js_timeout_ms.saturating_add(5_000))
 }
 
 /// Returns the active ArkWeb engine version, e.g. `"M132"` / `"M132 (evergreen)"`.
@@ -1705,6 +2099,21 @@ impl WebviewHandle {
         self.acknowledge("reload", self.controller_request()).await
     }
 
+    /// Opts into passive mouse/primary-touch notifications. Register
+    /// `WebviewCallbacksBuilder::on_pointer_down` before enabling.
+    pub async fn set_pointer_events(&self, enabled: bool) -> Result<()> {
+        self.client
+            .call::<WebviewPointerEventsRequest, WebviewAcknowledgement>(
+                "set-pointer-events",
+                WebviewPointerEventsRequest {
+                    id: self.id.clone(),
+                    enabled,
+                },
+            )
+            .await?
+            .ensure()
+    }
+
     pub async fn focus(&self) -> Result<()> {
         self.acknowledge("focus", self.controller_request()).await
     }
@@ -1752,6 +2161,8 @@ impl WebviewHandle {
             .await
     }
 
+    /// Clears cookies, JavaScript storage, HTTP auth, resource cache and this view
+    /// history. The legacy name does not imply HSTS, DRM or service worker removal.
     pub async fn clear_all_browsing_data(&self) -> Result<()> {
         self.acknowledge("clear-all-browsing-data", self.controller_request())
             .await
@@ -1956,6 +2367,7 @@ impl WebviewHandle {
                 WebviewScriptRequest {
                     id: self.id.clone(),
                     script: script.into(),
+                    timeout_ms: None,
                 },
             )
             .await?;
@@ -1974,6 +2386,81 @@ impl WebviewHandle {
         callback(self.evaluate_script(script).await?);
         Ok(())
     }
+
+    pub async fn evaluate_async_script(
+        &self,
+        script: impl Into<String>,
+    ) -> Result<WebviewAsyncScriptResponse> {
+        self.evaluate_async_script_with_timeout(script, 55_000)
+            .await
+    }
+
+    pub async fn evaluate_async_script_with_timeout(
+        &self,
+        script: impl Into<String>,
+        timeout_ms: u32,
+    ) -> Result<WebviewAsyncScriptResponse> {
+        if timeout_ms == 0 {
+            return Err(Error::from_reason(
+                "WebView async script timeout must be positive",
+            ));
+        }
+        let clamped = timeout_ms.clamp(100, 300_000);
+        self.client
+            .call_with_options::<WebviewScriptRequest, WebviewAsyncScriptResponse>(
+                "evaluate-async-script",
+                WebviewScriptRequest {
+                    id: self.id.clone(),
+                    script: script.into(),
+                    timeout_ms: Some(clamped),
+                },
+                async_script_call_options(clamped),
+            )
+            .await
+    }
+
+    pub async fn reload_ignore_cache(&self) -> Result<()> {
+        self.acknowledge("reload-ignore-cache", self.controller_request())
+            .await
+    }
+
+    pub async fn serialize_state(&self) -> Result<Option<String>> {
+        Ok(self
+            .client
+            .call::<WebviewControllerRequest, WebviewStateResponse>(
+                "serialize-state",
+                self.controller_request(),
+            )
+            .await?
+            .state_base64)
+    }
+
+    pub async fn restore_state(&self, state_base64: impl Into<String>) -> Result<bool> {
+        Ok(self
+            .client
+            .call::<WebviewRestoreStateRequest, WebviewBooleanResponse>(
+                "restore-state",
+                WebviewRestoreStateRequest {
+                    id: self.id.clone(),
+                    state_base64: state_base64.into(),
+                },
+            )
+            .await?
+            .value)
+    }
+
+    pub async fn set_audio_muted(&self, muted: bool) -> Result<()> {
+        self.client
+            .call::<WebviewAudioMutedRequest, WebviewAcknowledgement>(
+                "set-audio-muted",
+                WebviewAudioMutedRequest {
+                    id: self.id.clone(),
+                    muted,
+                },
+            )
+            .await?
+            .ensure()
+    }
 }
 
 #[napi(object)]
@@ -1989,6 +2476,8 @@ impl_bridge_napi_type!(WebviewCreateResponse, "ohos.webview.CreateResponse");
 pub struct WebviewScriptRequest {
     pub id: String,
     pub script: String,
+    /// Optional execution timeout in milliseconds (used by `evaluate-async-script`).
+    pub timeout_ms: Option<u32>,
 }
 
 impl_bridge_napi_type!(WebviewScriptRequest, "ohos.webview.ScriptRequest");
@@ -2000,6 +2489,49 @@ pub struct WebviewScriptResponse {
 }
 
 impl_bridge_napi_type!(WebviewScriptResponse, "ohos.webview.ScriptResponse");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewAsyncScriptResponse {
+    pub ok: bool,
+    pub value: Option<String>,
+    pub error: Option<String>,
+    pub is_syntax_error: bool,
+}
+
+impl_bridge_napi_type!(
+    WebviewAsyncScriptResponse,
+    "ohos.webview.AsyncScriptResponse"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewStateResponse {
+    pub state_base64: Option<String>,
+}
+
+impl_bridge_napi_type!(WebviewStateResponse, "ohos.webview.StateResponse");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewRestoreStateRequest {
+    pub id: String,
+    pub state_base64: String,
+}
+
+impl_bridge_napi_type!(
+    WebviewRestoreStateRequest,
+    "ohos.webview.RestoreStateRequest"
+);
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct WebviewAudioMutedRequest {
+    pub id: String,
+    pub muted: bool,
+}
+
+impl_bridge_napi_type!(WebviewAudioMutedRequest, "ohos.webview.AudioMutedRequest");
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -2120,6 +2652,8 @@ mod tests {
             .parent_node(7)
             .transparent(true)
             .dom_storage_access(true)
+            .incognito(true)
+            .native_keyboard(true)
             .url("https://example.test");
         assert_eq!(request.id, "webview");
         assert_eq!(request.parent_handle, Some(7));
@@ -2128,6 +2662,8 @@ mod tests {
         assert!(request.headers.is_none());
         assert_eq!(request.transparent, Some(true));
         assert_eq!(request.dom_storage_access, Some(true));
+        assert_eq!(request.incognito, Some(true));
+        assert_eq!(request.native_keyboard, Some(true));
     }
 
     #[test]
@@ -2190,6 +2726,14 @@ mod tests {
 
     #[test]
     fn webview_actions_have_named_napi_contracts() {
+        assert_eq!(
+            <WebviewPointerEventsRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PointerEventsRequest"
+        );
+        assert_eq!(
+            <WebviewPointerEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PointerEvent"
+        );
         assert_eq!(
             WebviewDocumentOptionsRequest::TYPE_NAME,
             "ohos.webview.DocumentOptionsRequest"
@@ -2313,6 +2857,66 @@ mod tests {
         assert_eq!(
             <WebviewRegisterHttpsInterceptRequest as BridgeNapiType>::TYPE_NAME,
             "ohos.webview.RegisterHttpsInterceptRequest"
+        );
+        assert_eq!(
+            <WebviewAsyncScriptResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.AsyncScriptResponse"
+        );
+        assert_eq!(
+            <WebviewStateResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.StateResponse"
+        );
+        assert_eq!(
+            <WebviewRestoreStateRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.RestoreStateRequest"
+        );
+        assert_eq!(
+            <WebviewAudioMutedRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.AudioMutedRequest"
+        );
+        assert_eq!(
+            <WebviewLoadErrorEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.LoadErrorEvent"
+        );
+        assert_eq!(
+            <NativeWebviewKeyEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.NativeKeyEvent"
+        );
+        assert_eq!(
+            <WebviewAudioStateEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.AudioStateEvent"
+        );
+        assert_eq!(
+            <WebviewRenderExitedEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.RenderExitedEvent"
+        );
+        assert_eq!(
+            <WebviewPermissionRequestEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.PermissionRequestEvent"
+        );
+        assert_eq!(
+            <WebviewResolvePermissionRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.ResolvePermissionRequest"
+        );
+        assert_eq!(
+            <WebviewHttpAuthRequestEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.HttpAuthRequestEvent"
+        );
+        assert_eq!(
+            <WebviewResolveHttpAuthRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.ResolveHttpAuthRequest"
+        );
+        assert_eq!(
+            <WebviewSslErrorEvent as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.SslErrorEvent"
+        );
+        assert_eq!(
+            <WebviewResolveSslErrorRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.ResolveSslErrorRequest"
+        );
+        assert_eq!(
+            <WebviewResolveDownloadRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.webview.ResolveDownloadRequest"
         );
     }
 

@@ -12,10 +12,13 @@ use std::{
 use napi_ohos::{Error, Result};
 
 use super::{
-    controller, WebviewCallbackOptions, WebviewDownloadEndEvent, WebviewDownloadStartRequest,
-    WebviewDownloadStartResponse, WebviewDragEvent, WebviewDropEvent, WebviewHttpsInterceptRequest,
-    WebviewHttpsInterceptResponse, WebviewNavigationRequest, WebviewNavigationResponse,
-    WebviewNewWindowRequest, WebviewNewWindowResponse, WebviewPageEvent, WebviewTitleChangeEvent,
+    controller, NativeWebviewKeyEvent, WebviewAudioStateEvent, WebviewCallbackOptions,
+    WebviewControllerEvent, WebviewDownloadEndEvent, WebviewDownloadStartRequest,
+    WebviewDownloadStartResponse, WebviewDragEvent, WebviewDropEvent, WebviewHttpAuthRequestEvent,
+    WebviewHttpsInterceptRequest, WebviewHttpsInterceptResponse, WebviewLoadErrorEvent,
+    WebviewNavigationRequest, WebviewNavigationResponse, WebviewNewWindowRequest,
+    WebviewNewWindowResponse, WebviewPageEvent, WebviewPermissionRequestEvent, WebviewPointerEvent,
+    WebviewRenderExitedEvent, WebviewSslErrorEvent, WebviewTitleChangeEvent,
 };
 
 type NavigationCallback = Arc<dyn Fn(WebviewNavigationRequest) -> bool + Send + Sync + 'static>;
@@ -29,12 +32,21 @@ type DragOverCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
 type DragDropCallback = Arc<dyn Fn(WebviewDropEvent) + Send + Sync + 'static>;
 type DragLeaveCallback = Arc<dyn Fn(WebviewDragEvent) + Send + Sync + 'static>;
 type NewWindowCallback = Arc<dyn Fn(WebviewNewWindowRequest) -> bool + Send + Sync + 'static>;
+type PointerDownCallback = Arc<dyn Fn(WebviewPointerEvent) + Send + Sync + 'static>;
 type PageBeginCallback = Arc<dyn Fn(WebviewPageEvent) + Send + Sync + 'static>;
 type PageEndCallback = Arc<dyn Fn(WebviewPageEvent) + Send + Sync + 'static>;
 type CloseWindowCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 type HttpsInterceptCallback = Arc<
     dyn Fn(WebviewHttpsInterceptRequest) -> WebviewHttpsInterceptResponse + Send + Sync + 'static,
 >;
+type LoadErrorCallback = Arc<dyn Fn(WebviewLoadErrorEvent) + Send + Sync + 'static>;
+type KeyEventCallback = Arc<dyn Fn(NativeWebviewKeyEvent) + Send + Sync + 'static>;
+type AudioStateCallback = Arc<dyn Fn(WebviewAudioStateEvent) + Send + Sync + 'static>;
+type WindowExitCallback = Arc<dyn Fn(WebviewControllerEvent) + Send + Sync + 'static>;
+type RenderExitedCallback = Arc<dyn Fn(WebviewRenderExitedEvent) + Send + Sync + 'static>;
+type PermissionRequestCallback = Arc<dyn Fn(WebviewPermissionRequestEvent) + Send + Sync + 'static>;
+type HttpAuthRequestCallback = Arc<dyn Fn(WebviewHttpAuthRequestEvent) + Send + Sync + 'static>;
+type SslErrorCallback = Arc<dyn Fn(WebviewSslErrorEvent) + Send + Sync + 'static>;
 
 /// URL prefixes that route to the close-window callback instead of the navigation callback.
 const CLOSE_WINDOW_URL_PREFIXES: &[&str] = &["close-window.invalid", "http://close-window.invalid"];
@@ -50,10 +62,19 @@ struct WebviewCallbacks {
     drag_drop: Option<DragDropCallback>,
     drag_leave: Option<DragLeaveCallback>,
     new_window: Option<NewWindowCallback>,
+    pointer_down: Option<PointerDownCallback>,
     page_begin: Option<PageBeginCallback>,
     page_end: Option<PageEndCallback>,
     close_window: Option<CloseWindowCallback>,
     https_intercept: Option<HttpsInterceptCallback>,
+    load_error: Option<LoadErrorCallback>,
+    key_event: Option<KeyEventCallback>,
+    audio_state: Option<AudioStateCallback>,
+    window_exit: Option<WindowExitCallback>,
+    render_exited: Option<RenderExitedCallback>,
+    permission_request: Option<PermissionRequestCallback>,
+    http_auth_request: Option<HttpAuthRequestCallback>,
+    ssl_error: Option<SslErrorCallback>,
 }
 
 impl WebviewCallbacks {
@@ -70,6 +91,14 @@ impl WebviewCallbacks {
             new_window: self.new_window.is_some(),
             page_begin: self.page_begin.is_some(),
             page_end: self.page_end.is_some(),
+            load_error: self.load_error.is_some(),
+            key_event: self.key_event.is_some(),
+            audio_state: self.audio_state.is_some(),
+            window_exit: self.window_exit.is_some(),
+            render_exited: self.render_exited.is_some(),
+            permission_request: self.permission_request.is_some(),
+            http_auth_request: self.http_auth_request.is_some(),
+            ssl_error: self.ssl_error.is_some(),
         }
     }
 
@@ -83,10 +112,19 @@ impl WebviewCallbacks {
             && self.drag_drop.is_none()
             && self.drag_leave.is_none()
             && self.new_window.is_none()
+            && self.pointer_down.is_none()
             && self.page_begin.is_none()
             && self.page_end.is_none()
             && self.close_window.is_none()
             && self.https_intercept.is_none()
+            && self.load_error.is_none()
+            && self.key_event.is_none()
+            && self.audio_state.is_none()
+            && self.window_exit.is_none()
+            && self.render_exited.is_none()
+            && self.permission_request.is_none()
+            && self.http_auth_request.is_none()
+            && self.ssl_error.is_none()
     }
 }
 
@@ -198,6 +236,15 @@ impl WebviewCallbacksBuilder {
         self
     }
 
+    /// Receives passive pointer-down notifications after `set_pointer_events(true)`.
+    pub fn on_pointer_down<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewPointerEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.pointer_down = Some(Arc::new(callback));
+        self
+    }
+
     /// Receives page-begin (navigation started) notifications.
     pub fn on_page_begin<F>(mut self, callback: F) -> Self
     where
@@ -239,6 +286,70 @@ impl WebviewCallbacksBuilder {
             + 'static,
     {
         self.callbacks.https_intercept = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_load_error<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewLoadErrorEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.load_error = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_key_event<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(NativeWebviewKeyEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.key_event = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_audio_state<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewAudioStateEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.audio_state = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_window_exit<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewControllerEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.window_exit = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_render_exited<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewRenderExitedEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.render_exited = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_permission_request<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewPermissionRequestEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.permission_request = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_http_auth_request<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewHttpAuthRequestEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.http_auth_request = Some(Arc::new(callback));
+        self
+    }
+
+    pub fn on_ssl_error<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(WebviewSslErrorEvent) + Send + Sync + 'static,
+    {
+        self.callbacks.ssl_error = Some(Arc::new(callback));
         self
     }
 
@@ -372,68 +483,47 @@ pub(crate) fn https_intercept_decision(
         }))
 }
 
-pub(crate) fn dispatch_drag_enter(event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
+fn dispatch_webview_event<E, F>(id: &str, native_tag: &str, select: F, event: E) -> Result<()>
+where
+    F: FnOnce(&WebviewCallbacks) -> Option<&Arc<dyn Fn(E) + Send + Sync + 'static>>,
+{
+    if !controller::is_current(id, native_tag)? {
         return Ok(());
     }
     let callback = CALLBACKS
         .read()
         .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.drag_enter.as_ref())
+        .get(id)
+        .and_then(select)
         .cloned();
     if let Some(callback) = callback {
         callback(event);
     }
     Ok(())
+}
+
+pub(crate) fn dispatch_drag_enter(event: WebviewDragEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.drag_enter.as_ref(), event)
 }
 
 pub(crate) fn dispatch_drag_over(event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.drag_over.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.drag_over.as_ref(), event)
 }
 
 pub(crate) fn dispatch_drag_drop(event: WebviewDropEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.drag_drop.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.drag_drop.as_ref(), event)
 }
 
 pub(crate) fn dispatch_drag_leave(event: WebviewDragEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.drag_leave.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.drag_leave.as_ref(), event)
 }
 
 pub(crate) fn new_window_decision(
@@ -453,68 +543,92 @@ pub(crate) fn new_window_decision(
     })
 }
 
-pub(crate) fn dispatch_page_begin(event: WebviewPageEvent) -> Result<()> {
+pub(crate) fn dispatch_pointer_down(event: WebviewPointerEvent) -> Result<()> {
     if !controller::is_current(&event.id, &event.native_tag)? {
         return Ok(());
     }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.page_begin.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
+    if !event.x.is_finite()
+        || !event.y.is_finite()
+        || !(0..=4).contains(&event.button)
+        || event.modifiers > 7
+    {
+        return Err(Error::from_reason("Invalid WebView pointer event"));
     }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.pointer_down.as_ref(), event)
+}
+
+pub(crate) fn dispatch_page_begin(event: WebviewPageEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.page_begin.as_ref(), event)
 }
 
 pub(crate) fn dispatch_page_end(event: WebviewPageEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.page_end.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.page_end.as_ref(), event)
 }
 
 pub(crate) fn dispatch_download_end(event: WebviewDownloadEndEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.download_end.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.download_end.as_ref(), event)
 }
 
 pub(crate) fn dispatch_title_change(event: WebviewTitleChangeEvent) -> Result<()> {
-    if !controller::is_current(&event.id, &event.native_tag)? {
-        return Ok(());
-    }
-    let callback = CALLBACKS
-        .read()
-        .map_err(|_| Error::from_reason("Failed to lock WebView callback registry"))?
-        .get(&event.id)
-        .and_then(|callbacks| callbacks.title_change.as_ref())
-        .cloned();
-    if let Some(callback) = callback {
-        callback(event);
-    }
-    Ok(())
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.title_change.as_ref(), event)
+}
+
+pub(crate) fn dispatch_load_error(event: WebviewLoadErrorEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.load_error.as_ref(), event)
+}
+
+pub(crate) fn dispatch_key_event(event: NativeWebviewKeyEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.key_event.as_ref(), event)
+}
+
+pub(crate) fn dispatch_audio_state(event: WebviewAudioStateEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.audio_state.as_ref(), event)
+}
+
+pub(crate) fn dispatch_window_exit(event: WebviewControllerEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.window_exit.as_ref(), event)
+}
+
+pub(crate) fn dispatch_render_exited(event: WebviewRenderExitedEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.render_exited.as_ref(), event)
+}
+
+pub(crate) fn dispatch_permission_request(event: WebviewPermissionRequestEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.permission_request.as_ref(), event)
+}
+
+pub(crate) fn dispatch_http_auth_request(event: WebviewHttpAuthRequestEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.http_auth_request.as_ref(), event)
+}
+
+pub(crate) fn dispatch_ssl_error(event: WebviewSslErrorEvent) -> Result<()> {
+    let id = event.id.clone();
+    let tag = event.native_tag.clone();
+    dispatch_webview_event(&id, &tag, |c| c.ssl_error.as_ref(), event)
 }
 
 #[cfg(test)]
@@ -612,6 +726,41 @@ mod tests {
     }
 
     // ─── S7 纯变换批：options 派生 + 三个 decision 函数的全分支 ─────────────────
+
+    #[test]
+    fn pointer_only_subscription_drops_stale_generations() {
+        use super::{dispatch_pointer_down, remove};
+        use crate::WebviewPointerEvent;
+        let count = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&count);
+        WebviewCallbacksBuilder::new("pointer-test")
+            .on_pointer_down(move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+            })
+            .build()
+            .unwrap();
+        controller::on_attached("pointer-test", "new").unwrap();
+        let mut event = WebviewPointerEvent {
+            id: "pointer-test".into(),
+            native_tag: "old".into(),
+            x: 1.5,
+            y: -2.0,
+            button: 0,
+            modifiers: 7,
+        };
+        dispatch_pointer_down(event.clone()).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 0);
+        event.native_tag = "new".into();
+        dispatch_pointer_down(event.clone()).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+        let mut invalid = event.clone();
+        invalid.x = f64::NAN;
+        assert!(dispatch_pointer_down(invalid).is_err());
+        controller::on_removed("pointer-test", "new").unwrap();
+        dispatch_pointer_down(event).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+        remove("pointer-test").unwrap();
+    }
 
     #[test]
     fn options_and_is_empty_derive_from_callback_presence() {
@@ -733,6 +882,8 @@ mod tests {
             native_tag: "native-old".to_owned(),
             url: "https://stale.example".to_owned(),
             temp_path: None,
+            suggested_name: None,
+            download_id: None,
         })
         .unwrap();
         assert!(!stale.allow);
@@ -743,6 +894,8 @@ mod tests {
             native_tag: "native-d1".to_owned(),
             url: "https://current.example".to_owned(),
             temp_path: None,
+            suggested_name: None,
+            download_id: None,
         })
         .unwrap();
         assert!(!no_cb.allow);
@@ -762,6 +915,8 @@ mod tests {
             native_tag: "native-d2".to_owned(),
             url: "https://dl.example/file".to_owned(),
             temp_path: None,
+            suggested_name: None,
+            download_id: None,
         })
         .unwrap();
         assert!(allowed.allow);
@@ -809,5 +964,46 @@ mod tests {
         };
         assert!(new_window_decision(req).unwrap().allow);
         controller::on_removed("nw-allow-test", "native-n2").unwrap();
+    }
+
+    #[test]
+    fn key_event_dispatch_rejects_stale_generations() {
+        use super::{dispatch_key_event, remove};
+        use crate::NativeWebviewKeyEvent;
+        let count = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&count);
+        WebviewCallbacksBuilder::new("key-event-test")
+            .on_key_event(move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+            })
+            .build()
+            .unwrap();
+        controller::on_attached("key-event-test", "tag-current").unwrap();
+
+        let make = |tag: &str| NativeWebviewKeyEvent {
+            id: "key-event-test".to_owned(),
+            native_tag: tag.to_owned(),
+            target_id: 0,
+            kind: "key".to_owned(),
+            key: "Escape".to_owned(),
+            code: "Escape".to_owned(),
+            key_code: 27,
+            shift: false,
+            ctrl: false,
+            alt: false,
+            meta: false,
+            repeat: false,
+        };
+
+        dispatch_key_event(make("tag-stale")).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 0);
+
+        dispatch_key_event(make("tag-current")).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+
+        controller::on_removed("key-event-test", "tag-current").unwrap();
+        dispatch_key_event(make("tag-current")).unwrap();
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+        remove("key-event-test").unwrap();
     }
 }

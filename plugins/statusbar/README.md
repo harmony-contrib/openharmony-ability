@@ -65,3 +65,5 @@ See the [plugin source](src/main/ets/StatusbarPlugin.ets) and the [plugin develo
 ## License
 
 Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
+
+On API 26+, `add` and `add-items` query `isStatusBarCapabilitySupported` before allocating icons or registering handlers. An unsupported device state or a failed query rejects the call. A session destroyed while the query is pending does not add an icon. Systems without the query retain the existing add path. The public add/request contracts are unchanged.

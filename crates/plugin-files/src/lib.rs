@@ -168,6 +168,59 @@ pub struct FileDialogResponse {
 
 impl_bridge_napi_type!(FileDialogResponse, "ohos.files.DialogResponse");
 
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct TrashItemRequest {
+    pub path: String,
+}
+
+impl_bridge_napi_type!(TrashItemRequest, "ohos.files.TrashItemRequest");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct TrashItemResponse {
+    pub trashed_uri: String,
+}
+
+impl_bridge_napi_type!(TrashItemResponse, "ohos.files.TrashItemResponse");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct FileIconRequest {
+    pub path: Option<String>,
+    pub extension: Option<String>,
+    pub size_px: i32,
+}
+
+impl_bridge_napi_type!(FileIconRequest, "ohos.files.FileIconRequest");
+
+impl FileIconRequest {
+    fn validate(&self) -> Result<()> {
+        let has_path = self.path.as_ref().is_some_and(|p| !p.trim().is_empty());
+        let has_ext = self
+            .extension
+            .as_ref()
+            .is_some_and(|e| !e.trim().is_empty());
+        if !has_path && !has_ext {
+            return Err(Error::from_reason(
+                "file-icon requires either path or extension",
+            ));
+        }
+        if self.size_px <= 0 || self.size_px > 1024 {
+            return Err(Error::from_reason("file-icon size_px must be 1..=1024"));
+        }
+        Ok(())
+    }
+}
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct FileIconResponse {
+    pub png_base64: String,
+}
+
+impl_bridge_napi_type!(FileIconResponse, "ohos.files.FileIconResponse");
+
 /// Extension trait supplied by the capability package, never by `openharmony-ability` core.
 pub trait FilesExt {
     /// Shows the system file dialog (open / save / folder). Returns selected file URIs.
@@ -175,6 +228,22 @@ pub trait FilesExt {
         &self,
         options: FileDialogOptions,
     ) -> Pin<Box<dyn Future<Output = Result<FileDialogResponse>> + Send>>;
+
+    /// Moves a local file or directory into the system trash (FileManagerService).
+    fn trash_item(
+        &self,
+        path: impl Into<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<TrashItemResponse>> + Send>>;
+
+    /// Queries the system icon for a local path, `file://` URI, or filename extension as a PNG image.
+    ///
+    /// Requires API 17+, `SystemCapability.FileManagement.FileManagerService.Core`, and the
+    /// `ohos.permission.GET_FILE_ICON` permission in `module.json5` (otherwise the platform
+    /// returns error code 201). Non-square icons preserve their aspect ratio within `size_px`.
+    fn file_icon(
+        &self,
+        request: FileIconRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<FileIconResponse>> + Send>>;
 }
 
 impl FilesExt for OpenHarmonyApp {
@@ -196,11 +265,55 @@ impl FilesExt for OpenHarmonyApp {
                 .await
         })
     }
+
+    fn trash_item(
+        &self,
+        path: impl Into<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<TrashItemResponse>> + Send>> {
+        let path = path.into();
+        if path.trim().is_empty() {
+            return Box::pin(async {
+                Err(Error::from_reason("trash-item path must not be empty"))
+            });
+        }
+        let bridge = self.bridge();
+        Box::pin(async move {
+            bridge?
+                .call_async::<FilesBridgePlugin, TrashItemRequest, TrashItemResponse>(
+                    "trash-item",
+                    TrashItemRequest { path },
+                    BridgeCallOptions::default(),
+                )
+                .await
+        })
+    }
+
+    fn file_icon(
+        &self,
+        request: FileIconRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<FileIconResponse>> + Send>> {
+        if let Err(error) = request.validate() {
+            return Box::pin(async move { Err(error) });
+        }
+        let bridge = self.bridge();
+        Box::pin(async move {
+            bridge?
+                .call_async::<FilesBridgePlugin, FileIconRequest, FileIconResponse>(
+                    "get-file-icon",
+                    request,
+                    BridgeCallOptions::default(),
+                )
+                .await
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{dialog_type, FileDialogFilter, FileDialogOptions, FileDialogResponse};
+    use super::{
+        dialog_type, FileDialogFilter, FileDialogOptions, FileDialogResponse, FileIconRequest,
+        FileIconResponse, TrashItemRequest, TrashItemResponse,
+    };
     use openharmony_ability::BridgeNapiType;
 
     #[test]
@@ -217,6 +330,54 @@ mod tests {
             <FileDialogFilter as BridgeNapiType>::TYPE_NAME,
             "ohos.files.DialogFilter"
         );
+        assert_eq!(
+            <TrashItemRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.files.TrashItemRequest"
+        );
+        assert_eq!(
+            <TrashItemResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.files.TrashItemResponse"
+        );
+        assert_eq!(
+            <FileIconRequest as BridgeNapiType>::TYPE_NAME,
+            "ohos.files.FileIconRequest"
+        );
+        assert_eq!(
+            <FileIconResponse as BridgeNapiType>::TYPE_NAME,
+            "ohos.files.FileIconResponse"
+        );
+    }
+
+    #[test]
+    fn file_icon_request_validation() {
+        assert!(FileIconRequest {
+            path: None,
+            extension: Some("rs".to_owned()),
+            size_px: 64,
+        }
+        .validate()
+        .is_ok());
+        assert!(FileIconRequest {
+            path: None,
+            extension: None,
+            size_px: 64,
+        }
+        .validate()
+        .is_err());
+        assert!(FileIconRequest {
+            path: Some("/tmp/a.txt".to_owned()),
+            extension: None,
+            size_px: 0,
+        }
+        .validate()
+        .is_err());
+        assert!(FileIconRequest {
+            path: Some("/tmp/a.txt".to_owned()),
+            extension: None,
+            size_px: 1025,
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

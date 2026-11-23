@@ -54,19 +54,19 @@ struct MainPage {
         // (ui-context requirement), so a construction-time snapshot would
         // never see the registration.
         MenuBarSlotHost({ windowId: this.windowId })
-        Row() {
-          Column() {
-            if (this.resolvedModuleName !== "") {
-              DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: this.windowId });
-            } else {
-              Text("Loading Main Window...")
-                .fontSize($r("sys.float.Body_L"))
-                .fontColor($r("sys.color.font_secondary"));
-            }
-          }.width("100%")
+        Stack({ alignContent: Alignment.Center }) {
+          if (this.resolvedModuleName !== "") {
+            DefaultXComponent({ moduleName: this.resolvedModuleName, windowId: this.windowId })
+              .width("100%")
+              .height("100%");
+          } else {
+            Text("Loading Main Window...")
+              .fontSize($r("sys.float.Body_L"))
+              .fontColor($r("sys.color.font_secondary"));
+          }
         }
         .layoutWeight(1)
-        .height("100%")
+        .width("100%")
       }
       .width("100%")
       .height("100%")

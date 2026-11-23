@@ -1,4 +1,6 @@
 import window from "@ohos.window";
+import display from "@ohos.display";
+import { WindowDisplayGeometry } from "./DisplayGeometry";
 import pointer from "@ohos.multimodalInput.pointer";
 import { image } from "@kit.ImageKit";
 import { setWindowIcon } from "./WindowIcon";
@@ -22,6 +24,7 @@ import {
   AsyncPluginBase,
   DOMAIN,
   WindowManager,
+  expectBridgeRequestType,
 } from "@ohos-rs/ability";
 
 import { PromptDialogs, WindowPromptRequest } from "./PromptDialogs";
@@ -47,6 +50,8 @@ const FULLSCREEN_REQUEST_TYPE = "ohos.window.FullscreenRequest";
 const COLOR_REQUEST_TYPE = "ohos.window.ColorRequest";
 const BLUR_REQUEST_TYPE = "ohos.window.BlurRequest";
 const MOVE_REQUEST_TYPE = "ohos.window.MoveRequest";
+const DISPLAY_BOUNDS_REQUEST_TYPE = "ohos.window.DisplayBoundsRequest";
+const DISPLAY_GEOMETRY_TYPE = "ohos.window.DisplayGeometry";
 const RESIZE_REQUEST_TYPE = "ohos.window.ResizeRequest";
 const FOCUSABLE_REQUEST_TYPE = "ohos.window.FocusableRequest";
 const TOUCHABLE_REQUEST_TYPE = "ohos.window.TouchableRequest";
@@ -59,6 +64,10 @@ const KEEP_SCREEN_ON_REQUEST_TYPE = "ohos.window.KeepScreenOnRequest";
 const CURSOR_ICON_REQUEST_TYPE = "ohos.window.CursorIconRequest";
 const CURSOR_VISIBLE_REQUEST_TYPE = "ohos.window.CursorVisibleRequest";
 const DECORATION_FLAGS_REQUEST_TYPE = "ohos.window.DecorationFlagsRequest";
+const PRIVACY_REQUEST_TYPE = "ohos.window.PrivacyRequest";
+const SHADOW_REQUEST_TYPE = "ohos.window.ShadowRequest";
+const TITLE_BUTTON_RECT_RESPONSE_TYPE = "ohos.window.TitleButtonRectResponse";
+const INPUT_REGION_REQUEST_TYPE = "ohos.window.InputRegionRequest";
 const STATUS_BAR_REQUEST_TYPE = "ohos.window.StatusBarRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.window.Acknowledgement";
 const STATE_RESPONSE_TYPE = "ohos.window.StateResponse";
@@ -137,6 +146,42 @@ interface WindowMoveRequest {
   y: number;
 }
 
+interface WindowDisplayBoundsRequest {
+  windowId: number;
+  displayId: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function parseDisplayBounds(payload: BridgeTypedValue): WindowDisplayBoundsRequest {
+  if (payload.typeName !== DISPLAY_BOUNDS_REQUEST_TYPE || typeof payload.value !== "object") {
+    throw new Error(`ohos.window requires bridge type ${DISPLAY_BOUNDS_REQUEST_TYPE}`);
+  }
+  const request = payload.value as WindowDisplayBoundsRequest;
+  if (
+    !request ||
+    !isWindowId(request.windowId) ||
+    !isWindowId(request.displayId) ||
+    !Number.isInteger(request.x) ||
+    request.x < -2147483648 ||
+    request.x > 2147483647 ||
+    !Number.isInteger(request.y) ||
+    request.y < -2147483648 ||
+    request.y > 2147483647 ||
+    !Number.isInteger(request.width) ||
+    request.width < 1 ||
+    request.width > 2147483647 ||
+    !Number.isInteger(request.height) ||
+    request.height < 1 ||
+    request.height > 2147483647
+  ) {
+    throw new Error("Invalid display window bounds");
+  }
+  return request;
+}
+
 interface WindowResizeRequest {
   windowId: number;
   width: number;
@@ -151,6 +196,55 @@ interface WindowFocusableRequest {
 interface WindowTouchableRequest {
   windowId: number;
   touchable: boolean;
+}
+
+interface WindowPrivacyRequest {
+  windowId: number;
+  enabled: boolean;
+}
+
+interface WindowShadowRequest {
+  windowId: number;
+  enabled: boolean;
+  radius: number;
+}
+
+class TitleButtonRectResponse {
+  readonly available: boolean;
+  readonly right: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+
+  constructor(available: boolean, right: number, top: number, width: number, height: number) {
+    this.available = available;
+    this.right = right;
+    this.top = top;
+    this.width = width;
+    this.height = height;
+  }
+}
+
+interface InputRawRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+interface WindowInputRegionRequest {
+  windowId: number;
+  rects: InputRawRect[];
+  reset: boolean;
+}
+
+interface WindowShadowApi {
+  setWindowShadowEnabled?: (enable: boolean) => Promise<void>;
+  setWindowShadowRadius?: (radius: number) => void;
+}
+
+interface WindowTouchableAreasApi {
+  setTouchableAreas?: (rects: window.Rect[]) => Promise<void>;
 }
 
 interface WindowTopmostRequest {
@@ -998,6 +1092,52 @@ export class WindowPlugin extends AsyncPluginBase {
       }
     }
 
+    if (action === "get-geometry-on-display") {
+      const request = parseWindowIdRequest(payload);
+      const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
+      const root =
+        request.windowId === 0
+          ? context.getRootFrameNode()
+          : WindowManager.getInstance().getComponentRoot(request.windowId);
+      return { typeName: DISPLAY_GEOMETRY_TYPE, value: new WindowDisplayGeometry(win, root) };
+    }
+
+    if (action === "set-bounds-on-display") {
+      const request = parseDisplayBounds(payload);
+      if (deviceInfo.sdkApiVersion < 15) {
+        throw new Error("set-bounds-on-display requires API 15");
+      }
+      // An unknown target otherwise silently falls back to the current display.
+      display.getDisplayByIdSync(request.displayId);
+      const manager = WindowManager.getInstance();
+      if (
+        manager.configureDeferredWindow(request.windowId, (options): void => {
+          options.displayId = request.displayId;
+          options.x = request.x;
+          options.y = request.y;
+          options.width = request.width;
+          options.height = request.height;
+        })
+      ) {
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
+      const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
+      await manager.serializeOp(
+        request.windowId,
+        async (): Promise<void> => {
+          this.assertCallActive(context);
+          await win.moveWindowToGlobal(request.x, request.y, { displayId: request.displayId });
+          this.assertCallActive(context);
+          await win.resize(request.width, request.height);
+        },
+        win,
+      );
+      this.assertCallActive(context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
     if (action === "move-to") {
       const request = parseMoveRequest(payload);
       if (
@@ -1154,7 +1294,7 @@ export class WindowPlugin extends AsyncPluginBase {
                 DOMAIN,
                 TAG,
                 "request-user-attention: requestEnableNotification failed: %{public}s",
-                JSON.stringify(e2),
+                String(e2),
               );
             }
           }
@@ -1320,6 +1460,194 @@ export class WindowPlugin extends AsyncPluginBase {
       const request = parseDecorationFlagsRequest(payload);
       WindowManager.getInstance().setDecorationFlags(request.windowId, request.flags);
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
+    if (action === "set-privacy-mode") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        PRIVACY_REQUEST_TYPE,
+      ) as WindowPrivacyRequest;
+      if (!isWindowId(request?.windowId) || typeof request?.enabled !== "boolean") {
+        throw new Error("set-privacy-mode requires a valid windowId and boolean enabled");
+      }
+      const win = await this.requireWindow(request.windowId, context);
+      await win.setWindowPrivacyMode(request.enabled);
+      this.assertCallActive(context);
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+    }
+
+    if (action === "set-shadow") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        SHADOW_REQUEST_TYPE,
+      ) as WindowShadowRequest;
+      if (
+        !isWindowId(request?.windowId) ||
+        typeof request?.enabled !== "boolean" ||
+        typeof request?.radius !== "number" ||
+        !Number.isFinite(request.radius) ||
+        request.radius < 0
+      ) {
+        throw new Error("set-shadow requires a valid windowId, enabled, and radius >= 0");
+      }
+      const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
+      const shadowApi = win as ESObject as WindowShadowApi;
+      let accepted = false;
+      if (WindowManager.getInstance().isUIAbilityMainWindow(request.windowId)) {
+        if (
+          deviceInfo.sdkApiVersion >= 20 &&
+          typeof shadowApi.setWindowShadowEnabled === "function"
+        ) {
+          try {
+            await shadowApi.setWindowShadowEnabled(request.enabled);
+            this.assertCallActive(context);
+            accepted = true;
+          } catch (error) {
+            const code = (error as BusinessError).code;
+            if (code !== 201 && code !== 801 && code !== 1300004) {
+              throw error as Error;
+            }
+          }
+        }
+      } else if (
+        deviceInfo.sdkApiVersion >= 17 &&
+        typeof shadowApi.setWindowShadowRadius === "function"
+      ) {
+        try {
+          shadowApi.setWindowShadowRadius(request.enabled ? request.radius : 0.0);
+          accepted = true;
+        } catch (error) {
+          const code = (error as BusinessError).code;
+          if (code !== 801 && code !== 1300004) {
+            throw error as Error;
+          }
+        }
+      }
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(accepted) };
+    }
+
+    if (action === "get-title-button-rect") {
+      const request = parseWindowIdRequest(payload);
+      const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
+      try {
+        const rect = win.getTitleButtonRect();
+        return {
+          typeName: TITLE_BUTTON_RECT_RESPONSE_TYPE,
+          value: new TitleButtonRectResponse(true, rect.right, rect.top, rect.width, rect.height),
+        };
+      } catch (error) {
+        const code = (error as BusinessError).code;
+        if (code === 801 || code === 1300004) {
+          return {
+            typeName: TITLE_BUTTON_RECT_RESPONSE_TYPE,
+            value: new TitleButtonRectResponse(false, 0, 0, 0, 0),
+          };
+        }
+        throw error as Error;
+      }
+    }
+
+    if (action === "set-input-region") {
+      const request = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        INPUT_REGION_REQUEST_TYPE,
+      ) as WindowInputRegionRequest;
+      if (
+        !isWindowId(request?.windowId) ||
+        !Array.isArray(request?.rects) ||
+        request.rects.length > 256 ||
+        typeof request?.reset !== "boolean"
+      ) {
+        throw new Error("set-input-region requires a valid windowId, rects array, and reset");
+      }
+      for (const rect of request.rects) {
+        if (
+          !rect ||
+          !Number.isInteger(rect.left) ||
+          !Number.isInteger(rect.top) ||
+          !Number.isInteger(rect.width) ||
+          !Number.isInteger(rect.height) ||
+          rect.width < 0 ||
+          rect.height < 0
+        ) {
+          throw new Error(
+            "set-input-region rectangles require integer coordinates and non-negative sizes",
+          );
+        }
+      }
+      const win = await this.requireWindow(request.windowId, context);
+      this.assertCallActive(context);
+      if (!request.reset && request.rects.length === 0) {
+        await win.setWindowTouchable(false);
+        this.assertCallActive(context);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
+      await win.setWindowTouchable(true);
+      this.assertCallActive(context);
+      const manager = WindowManager.getInstance();
+      const rootNode =
+        request.windowId === 0
+          ? context.getRootFrameNode?.()
+          : manager.getComponentRoot(request.windowId);
+      const touchAreasApi = win as ESObject as WindowTouchableAreasApi;
+      if (
+        deviceInfo.sdkApiVersion >= 26 &&
+        typeof touchAreasApi.setTouchableAreas === "function" &&
+        (request.reset || request.rects.length <= 10)
+      ) {
+        const windowRect = win.getWindowProperties().windowRect;
+        const areas: window.Rect[] = request.reset
+          ? [{ left: 0, top: 0, width: windowRect.width, height: windowRect.height }]
+          : request.rects.map(
+              (r: InputRawRect): window.Rect => ({
+                left: r.left,
+                top: r.top,
+                width: r.width,
+                height: r.height,
+              }),
+            );
+        try {
+          await touchAreasApi.setTouchableAreas(areas);
+          this.assertCallActive(context);
+          if (rootNode !== undefined) {
+            const fullRegion: Rectangle[] = [{ x: 0, y: 0, width: "100%", height: "100%" }];
+            rootNode.commonAttribute.responseRegion(fullRegion).mouseResponseRegion(fullRegion);
+          }
+          return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+        } catch (error) {
+          const code = (error as BusinessError).code;
+          if (code !== 201 && code !== 801) {
+            throw error as Error;
+          }
+        }
+      }
+      if (rootNode !== undefined) {
+        let regions: Rectangle[];
+        if (request.reset) {
+          regions = [{ x: 0, y: 0, width: "100%", height: "100%" }];
+        } else {
+          const uiCtx = win.getUIContext();
+          regions = request.rects.map(
+            (r: InputRawRect): Rectangle => ({
+              x: uiCtx.px2vp(r.left),
+              y: uiCtx.px2vp(r.top),
+              width: uiCtx.px2vp(r.width),
+              height: uiCtx.px2vp(r.height),
+            }),
+          );
+        }
+        rootNode.commonAttribute.responseRegion(regions).mouseResponseRegion(regions);
+        return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(true) };
+      }
+      return { typeName: ACKNOWLEDGEMENT_TYPE, value: new BridgeAcknowledgement(request.reset) };
     }
 
     throw new Error(`Unsupported ohos.window action '${action}'`);

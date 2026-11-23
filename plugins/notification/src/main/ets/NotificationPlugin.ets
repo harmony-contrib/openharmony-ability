@@ -14,6 +14,7 @@ import {
 const SHOW_REQUEST_TYPE = "ohos.notification.ShowRequest";
 const DISMISS_REQUEST_TYPE = "ohos.notification.DismissRequest";
 const ACKNOWLEDGEMENT_TYPE = "ohos.notification.Acknowledgement";
+const MAX_IMAGE_BYTES = 16 * 1024 * 1024;
 
 export interface NotificationPluginOptions {
   /** URI scheme consumed by the application's onNewWant handler, without ':'. */
@@ -34,21 +35,18 @@ interface ShowRequest {
   title: string;
   body: string;
   actions: NotificationAction[];
+  silent?: boolean | null;
+  group?: string | null;
+  senderName?: string | null;
+  image?: number[] | null;
+  avatar?: number[] | null;
+  slot?: string | null;
 }
 
-interface ShowOptionsRequest extends ShowRequest {
-  silent: boolean;
-  group: string;
-  image: number[];
-  senderName: string;
-}
-interface ShowAvatarRequest {
-  options: ShowOptionsRequest;
-  avatar: number[];
-}
 interface NotificationResponseRequest {
   uri: string;
 }
+
 class NotificationResponse {
   matched: boolean = false;
   tag: string = "";
@@ -155,21 +153,13 @@ export class NotificationPlugin extends AsyncPluginBase {
       await notificationManager.cancelAll();
       return { typeName: ACKNOWLEDGEMENT_TYPE, value: new NotificationAcknowledgement(true) };
     }
-    if (action === "show" || action === "show-with-options" || action === "show-with-avatar") {
-      const value = expectBridgeRequestType(
+    if (action === "show") {
+      const request = expectBridgeRequestType(
         payload,
         this.id,
         action,
-        action === "show"
-          ? SHOW_REQUEST_TYPE
-          : action === "show-with-avatar"
-            ? "ohos.notification.ShowAvatarRequest"
-            : "ohos.notification.ShowOptionsRequest",
-      ) as ShowRequest | ShowAvatarRequest;
-      const request: ShowRequest =
-        action === "show-with-avatar"
-          ? (value as ShowAvatarRequest).options
-          : (value as ShowRequest);
+        SHOW_REQUEST_TYPE,
+      ) as ShowRequest;
       if (
         !request ||
         typeof request.tag !== "string" ||
@@ -197,11 +187,25 @@ export class NotificationPlugin extends AsyncPluginBase {
       ) {
         throw new Error("Notification actions require an id and label");
       }
+      const silent = request.silent ?? false;
+      const group = request.group ?? "";
+      const senderName = request.senderName ?? "";
+      const imageBytes = request.image ?? [];
+      const avatarBytes = request.avatar ?? [];
+      const slot = request.slot ?? "default";
       if (
-        action !== "show" &&
-        (request as ShowOptionsRequest).silent &&
-        deviceInfo.sdkApiVersion < 23
+        typeof silent !== "boolean" ||
+        typeof group !== "string" ||
+        typeof senderName !== "string" ||
+        !Array.isArray(imageBytes) ||
+        imageBytes.length > MAX_IMAGE_BYTES ||
+        !Array.isArray(avatarBytes) ||
+        avatarBytes.length > MAX_IMAGE_BYTES ||
+        (slot !== "default" && slot !== "social")
       ) {
+        throw new Error("Invalid notification presentation options");
+      }
+      if (silent && deviceInfo.sdkApiVersion < 23) {
         throw new Error("Silent notification flags require API 23 or later");
       }
       if (!(await notificationManager.isNotificationEnabled())) {
@@ -232,62 +236,77 @@ export class NotificationPlugin extends AsyncPluginBase {
           wantAgent: await agentFor(responseUri(this.responseScheme, request.tag, item.id)),
         });
       }
+      // additionalText is not rendered by the notification center. Keep
+      // the sender visible without repeating a name already in the title.
+      const bodyText =
+        senderName && senderName !== request.title
+          ? `${senderName}\n${request.body}`
+          : request.body;
+      const normal: notificationManager.NotificationBasicContent = {
+        title: request.title,
+        text: bodyText,
+        additionalText: senderName || undefined,
+      };
       const notification: notificationManager.NotificationRequest = {
         id: requestCode(request.tag),
         label: notificationLabel(request.tag),
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-          normal: { title: request.title, text: request.body },
+          normal,
         },
         wantAgent: await agentFor(responseUri(this.responseScheme, request.tag)),
         actionButtons: buttons,
       };
+      if (group.length > 0) {
+        notification.groupName = group;
+      }
+      if (slot === "social") {
+        notification.notificationSlotType = notificationManager.SlotType.SOCIAL_COMMUNICATION;
+      }
+      if (silent) {
+        // API 23+ explicitly disables both audible and vibrating alerts.
+        notification.notificationFlags = { soundEnabled: 2, vibrationEnabled: 2 };
+      }
+
       let avatar: image.PixelMap | undefined;
       let avatarSource: image.ImageSource | undefined;
       let icon: image.PixelMap | undefined;
       let source: image.ImageSource | undefined;
       try {
-        if (action !== "show") {
-          const options = request as ShowOptionsRequest;
-          if (
-            typeof options.silent !== "boolean" ||
-            typeof options.group !== "string" ||
-            typeof options.senderName !== "string" ||
-            !Array.isArray(options.image) ||
-            options.image.length > 16 * 1024 * 1024
-          ) {
-            throw new Error("Invalid notification presentation options");
+        if (imageBytes.length > 0) {
+          source = image.createImageSource(new Uint8Array(imageBytes).buffer as ArrayBuffer);
+          const info = await source.getImageInfo();
+          if (info.size.width <= 0 || info.size.height <= 0) {
+            throw new Error("Invalid notification image dimensions");
           }
-          notification.groupName = options.group;
-          if (options.silent) {
-            // API 23+ explicitly disables both audible and vibrating alerts.
-            notification.notificationFlags = { soundEnabled: 2, vibrationEnabled: 2 };
-          }
-          if (options.senderName) {
-            notification.content.normal = {
-              title: request.title,
-              text: request.body,
-              additionalText: options.senderName,
-            };
-          }
-          if (options.image.length > 0) {
-            source = image.createImageSource(new Uint8Array(options.image).buffer as ArrayBuffer);
-            icon = await source.createPixelMap({ desiredSize: { width: 192, height: 192 } });
-            notification.largeIcon = icon;
-          }
+          const scale = Math.min(1, 512 / info.size.width, 512 / info.size.height);
+          icon = await source.createPixelMap({
+            desiredSize: {
+              width: Math.max(1, Math.floor(info.size.width * scale)),
+              height: Math.max(1, Math.floor(info.size.height * scale)),
+            },
+            desiredPixelFormat: image.PixelMapFormat.RGBA_8888,
+          });
+          // Picture content is the public attachment presentation. It avoids
+          // relying on the optional large application icon's device policy.
+          notification.content = {
+            notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_PICTURE,
+            picture: {
+              title: normal.title,
+              text: normal.text,
+              additionalText: normal.additionalText,
+              briefText: request.body,
+              expandedTitle: request.title,
+              picture: icon,
+            },
+          };
         }
-        if (action === "show-with-avatar") {
-          const bytes = (value as ShowAvatarRequest).avatar;
-          if (!Array.isArray(bytes) || bytes.length > 16 * 1024 * 1024) {
-            throw new Error("Invalid notification avatar");
-          }
-          if (bytes.length > 0) {
-            avatarSource = image.createImageSource(new Uint8Array(bytes).buffer as ArrayBuffer);
-            avatar = await avatarSource.createPixelMap({
-              desiredSize: { width: 128, height: 128 },
-            });
-            notification.smallIcon = avatar;
-          }
+        if (avatarBytes.length > 0) {
+          avatarSource = image.createImageSource(new Uint8Array(avatarBytes).buffer as ArrayBuffer);
+          avatar = await avatarSource.createPixelMap({
+            desiredSize: { width: 128, height: 128 },
+          });
+          notification.smallIcon = avatar;
         }
         if (!context.isActive()) {
           throw new Error("Notification session ended before publish");

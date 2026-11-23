@@ -255,190 +255,262 @@ export struct MenuBarComponent {
       const hostContext = this.getUIContext().getHostContext();
       if (hostContext) {
         const cardBg = hostContext.resourceManager.getColorSync(
-          $r("sys.color.ohos_id_color_card_bg").id,
+          $r("sys.color.comp_background_primary").id,
         );
         return ((cardBg & 0x00ffffff) | 0x1a000000) >>> 0;
       }
     } catch (error) {
       hilog.warn(0x1999, "MenuBar", "Cannot resolve menu surface color: %{public}s", String(error));
     }
-    return $r("sys.color.checkbox_container_focus_color_unselected");
+    return $r("sys.color.comp_background_tertiary");
   }
 
   // --- Menu builders ---
+
+  @Builder
+  RenderStandardMenuItem(item: MenuItemData, data: MenuRenderData) {
+    if (item.type === "submenu") {
+      MenuItem({
+        content: item.text ?? "",
+        // ArkUI MenuItemOptions.startIcon only accepts ResourceStr (not PixelMap).
+        startIcon: item.icon ? "data:image/png;base64," + item.icon : undefined,
+        builder: (): void =>
+          this.SubmenuContent({
+            items: item.submenuItems ?? [],
+            revision: data.revision,
+            menubarId: data.menubarId,
+          }),
+        symbolStartIcon: item.nativeIcon ? this.nativeIconSymbol(item.nativeIcon) : undefined,
+      }).enabled(item.enabled ?? true);
+    } else if (item.type === "check") {
+      MenuItem({
+        content: item.text ?? "",
+        startIcon: item.icon ? "data:image/png;base64," + item.icon : undefined,
+        labelInfo: item.accelerator,
+        symbolStartIcon: item.nativeIcon ? this.nativeIconSymbol(item.nativeIcon) : undefined,
+      })
+        .enabled(item.enabled ?? true)
+        .selected(item.checked ?? false)
+        .selectIcon(true)
+        .onChange((checked: boolean) => {
+          item.checked = checked;
+          const handler = getMenuClickHandler(this.registryKey());
+          if (handler) {
+            handler(item);
+          }
+        });
+    } else if (item.type === "icon" && this.iconPixelMaps.has(item.id)) {
+      MenuItem() {
+        Row() {
+          Image(this.iconPixelMaps.get(item.id))
+            .width(20)
+            .height(20)
+            .objectFit(ImageFit.Contain)
+            .margin({ right: 8 })
+          Text(item.text ?? "")
+            .fontSize($r("sys.float.Body_L"))
+            .fontWeight(FontWeight.Regular)
+            .fontColor($r("sys.color.font_primary"))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          if (item.accelerator) {
+            Text(item.accelerator)
+              .fontSize($r("sys.float.Body_L"))
+              .fontWeight(FontWeight.Regular)
+              .fontColor($r("sys.color.font_secondary"))
+              .margin({ left: 16 });
+          }
+        }
+        .width("100%")
+        .constraintSize({ minHeight: $r("sys.float.option_min_height") })
+        .padding({
+          left: $r("sys.float.padding_level6"),
+          right: $r("sys.float.padding_level6"),
+        })
+        .opacity((item.enabled ?? true) ? 1.0 : $r("sys.float.interactive_disable"))
+        .alignItems(VerticalAlign.Center)
+      }
+      .enabled(item.enabled ?? true)
+      .onClick(() => {
+        const handler = getMenuClickHandler(this.registryKey());
+        if (handler) {
+          handler(item);
+        }
+      });
+    } else {
+      MenuItem({
+        content: item.text ?? item.predefinedType ?? "",
+        labelInfo: item.accelerator,
+        symbolStartIcon: item.nativeIcon ? this.nativeIconSymbol(item.nativeIcon) : undefined,
+      })
+        .enabled(item.enabled ?? true)
+        .onClick(() => {
+          const handler = getMenuClickHandler(this.registryKey());
+          hilog.info(
+            0x1999,
+            "MenuBar",
+            "menuItem onClick id=%{public}s windowId=%{public}d handler=%{public}s",
+            item.id,
+            this.windowId,
+            handler ? "found" : "NULL",
+          );
+          if (handler) {
+            handler(item);
+          }
+        });
+    }
+  }
+
+  @Builder
+  RenderPasteMenuItem(item: MenuItemData) {
+    // MenuItem is a focus leaf; a nested button cannot receive keyboard authorization,
+    // and MenuItemGroup only allows MenuItem children. Render the accelerator above a
+    // full-width PasteButton with HitTestMode.None directly inside Menu so hover/press/focus
+    // states and click authorization cover the entire row while keeping shortcut text crisp.
+    Stack({ alignContent: Alignment.End }) {
+      PasteButton({ text: PasteDescription.PASTE, buttonType: ButtonType.Normal })
+        .id(`native-paste-${this.windowId}-${item.id}`)
+        .width("100%")
+        .height($r("sys.float.option_min_height"))
+        .align(Alignment.Start)
+        .fontSize($r("sys.float.Body_L"))
+        .fontWeight(FontWeight.Regular)
+        .fontColor($r("sys.color.font_primary"))
+        // Lower alpha values are forced opaque by the security component.
+        .backgroundColor(this.pasteButtonBackgroundColor())
+        .borderRadius($r("sys.float.inner_border_radius_token"))
+        .padding({
+          left: $r("sys.float.padding_level6"),
+          right: $r("sys.float.padding_level6"),
+          top: $r("sys.float.padding_level2"),
+          bottom: $r("sys.float.padding_level2"),
+        })
+        .enabled(item.enabled ?? true)
+        .onClick((_event: ClickEvent, result: PasteButtonOnClickResult) => {
+          if (result !== PasteButtonOnClickResult.SUCCESS) {
+            hilog.warn(0x1999, "MenuBar", "Native paste authorization failed: %{public}d", result);
+            try {
+              this.getUIContext()
+                .getPromptAction()
+                .showToast({ message: "Clipboard access was denied" });
+            } catch (error) {
+              hilog.warn(0x1999, "MenuBar", "Cannot show paste error: %{public}s", String(error));
+            }
+            return;
+          }
+          this.menuShown = false;
+          this.activeDropdownShown = false;
+          const handler = getMenuClickHandler(this.registryKey());
+          if (handler) {
+            handler(item);
+          }
+        })
+      if (item.accelerator) {
+        Text(item.accelerator)
+          .fontSize($r("sys.float.Body_L"))
+          .fontWeight(FontWeight.Regular)
+          .fontColor($r("sys.color.font_secondary"))
+          .textAlign(TextAlign.End)
+          .margin({ right: $r("sys.float.padding_level6") })
+          .opacity((item.enabled ?? true) ? 1.0 : $r("sys.float.interactive_disable"))
+          .hitTestBehavior(HitTestMode.None);
+      }
+    }.width("100%");
+  }
+
+  private estimateMenuWidth(items: MenuItemData[]): number {
+    let maxWidth = 224;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (
+        item.type === "separator" ||
+        (item.type === "predefined" && item.predefinedType === "separator")
+      ) {
+        continue;
+      }
+      const label = item.text ?? item.predefinedType ?? "";
+      let rowWidth = 48;
+      if (item.icon || item.nativeIcon || item.type === "check") {
+        rowWidth += 28;
+      }
+      for (let j = 0; j < label.length; j++) {
+        rowWidth += label.charCodeAt(j) > 0x7f ? 16 : 9;
+      }
+      if (item.accelerator) {
+        rowWidth += 24 + item.accelerator.length * 8.5;
+      }
+      if (item.type === "submenu") {
+        rowWidth += 24;
+      }
+      if (rowWidth > maxWidth) {
+        maxWidth = rowWidth;
+      }
+    }
+    return Math.min(360, Math.ceil(maxWidth));
+  }
+
+  private activeMenuContentItems(): MenuItemData[] {
+    if (!this.applicationMenu) {
+      return this.menuItems;
+    }
+    if (this.applicationMenuName === undefined) {
+      return this.menubarItems;
+    }
+    return (
+      this.menubarItems.find((item: MenuItemData) => item.text === this.applicationMenuName)
+        ?.submenuItems ?? []
+    );
+  }
+
+  private groupHasPaste(group: MenuItemData[]): boolean {
+    for (let i = 0; i < group.length; i++) {
+      if (group[i].predefinedType === "paste") {
+        return true;
+      }
+    }
+    return false;
+  }
 
   @Builder
   RenderMenuItems(data: MenuRenderData) {
     ForEach(
       this.splitByDivider(data.items),
       (group: MenuItemData[], index: number) => {
-        if (index > 0) {
-          Divider()
-            // An unconstrained divider measures against the popup window width.
-            .width(256)
-            .color($r("sys.color.ohos_id_color_list_separator"))
-            .margin({ left: 12, right: 12 });
-        }
-        ForEach(
-          group,
-          (item: MenuItemData) => {
-            if (item.type === "submenu") {
-              MenuItem({
-                content: item.text ?? "",
-                startIcon: item.icon ? "data:image/png;base64," + item.icon : undefined,
-                builder: (): void =>
-                  this.SubmenuContent({
-                    items: item.submenuItems ?? [],
-                    revision: data.revision,
-                    menubarId: data.menubarId,
-                  }),
-                symbolStartIcon: item.nativeIcon
-                  ? this.nativeIconSymbol(item.nativeIcon)
-                  : undefined,
-              }).enabled(item.enabled ?? true);
-            } else if (item.predefinedType === "paste") {
-              // MenuItem is a focus leaf; a nested button cannot receive keyboard authorization.
-              // Render the accelerator behind a full-width PasteButton so hover/press/focus
-              // states and click authorization cover the entire 280vp menu item row.
-              Stack({ alignContent: Alignment.End }) {
-                if (item.accelerator) {
-                  Text(item.accelerator)
-                    .fontSize($r("sys.float.Body_L"))
-                    .fontWeight(FontWeight.Regular)
-                    .fontColor($r("sys.color.font_secondary"))
-                    .textAlign(TextAlign.End)
-                    .margin({ right: $r("sys.float.padding_level6") })
-                    .opacity((item.enabled ?? true) ? 1.0 : $r("sys.float.interactive_disable"))
-                    .hitTestBehavior(HitTestMode.None);
-                }
-                PasteButton({ text: PasteDescription.PASTE, buttonType: ButtonType.Normal })
-                  .id(`native-paste-${this.windowId}-${item.id}`)
-                  .width("100%")
-                  .height($r("sys.float.option_min_height"))
-                  .align(Alignment.Start)
-                  .fontSize($r("sys.float.Body_L"))
-                  .fontWeight(FontWeight.Regular)
-                  .fontColor($r("sys.color.font_primary"))
-                  // Lower alpha values are forced opaque by the security component.
-                  .backgroundColor(this.pasteButtonBackgroundColor())
-                  .borderRadius($r("sys.float.inner_border_radius_token"))
-                  .padding({
-                    left: $r("sys.float.padding_level6"),
-                    right: $r("sys.float.padding_level6"),
-                    top: $r("sys.float.padding_level2"),
-                    bottom: $r("sys.float.padding_level2"),
-                  })
-                  .enabled(item.enabled ?? true)
-                  .onClick((_event: ClickEvent, result: PasteButtonOnClickResult) => {
-                    if (result !== PasteButtonOnClickResult.SUCCESS) {
-                      hilog.warn(
-                        0x1999,
-                        "MenuBar",
-                        "Native paste authorization failed: %{public}d",
-                        result,
-                      );
-                      try {
-                        this.getUIContext()
-                          .getPromptAction()
-                          .showToast({ message: "Clipboard access was denied" });
-                      } catch (error) {
-                        hilog.warn(
-                          0x1999,
-                          "MenuBar",
-                          "Cannot show paste error: %{public}s",
-                          String(error),
-                        );
-                      }
-                      return;
-                    }
-                    this.menuShown = false;
-                    this.activeDropdownShown = false;
-                    const handler = getMenuClickHandler(this.registryKey());
-                    if (handler) {
-                      handler(item);
-                    }
-                  })
-              }.width(280);
-            } else if (item.type === "check") {
-              MenuItem({
-                content: item.text ?? "",
-                startIcon: item.icon ? "data:image/png;base64," + item.icon : undefined,
-                labelInfo: item.accelerator,
-                symbolStartIcon: item.nativeIcon
-                  ? this.nativeIconSymbol(item.nativeIcon)
-                  : undefined,
-              })
-                .enabled(item.enabled ?? true)
-                .selected(item.checked ?? false)
-                .selectIcon(true)
-                .onChange((checked: boolean) => {
-                  item.checked = checked;
-                  const handler = getMenuClickHandler(this.registryKey());
-                  if (handler) {
-                    handler(item);
-                  }
-                });
-            } else if (item.type === "icon" && this.iconPixelMaps.has(item.id)) {
-              MenuItem() {
-                Row() {
-                  Image(this.iconPixelMaps.get(item.id))
-                    .width(24)
-                    .height(24)
-                    .margin({ right: 8 })
-                  Text(item.text ?? "")
-                    .fontSize($r("sys.float.Body_L"))
-                    .fontWeight(FontWeight.Regular)
-                    .fontColor($r("sys.color.font_primary"))
-                  if (item.accelerator) {
-                    Blank();
-                    Text(item.accelerator)
-                      .fontSize($r("sys.float.Body_L"))
-                      .fontWeight(FontWeight.Regular)
-                      .fontColor($r("sys.color.font_secondary"))
-                      .margin({ left: 16 });
-                  }
-                }
-                .constraintSize({ minHeight: $r("sys.float.option_min_height") })
-                .padding({
-                  left: $r("sys.float.padding_level6"),
-                  right: $r("sys.float.padding_level6"),
-                })
-                .alignItems(VerticalAlign.Center)
-              }
-              .enabled(item.enabled ?? true)
-              .onClick(() => {
-                const handler = getMenuClickHandler(this.registryKey());
-                if (handler) {
-                  handler(item);
-                }
+        if (!this.groupHasPaste(group)) {
+          MenuItemGroup() {
+            ForEach(
+              group,
+              (item: MenuItemData) => {
+                this.RenderStandardMenuItem(item, data);
+              },
+              (item: MenuItemData) => item.id,
+            )
+          };
+        } else {
+          if (index > 0) {
+            Divider()
+              .strokeWidth("1px")
+              .color($r("sys.color.comp_divider"))
+              .margin({
+                left: $r("sys.float.padding_level6"),
+                right: $r("sys.float.padding_level6"),
+                top: 4,
+                bottom: 4,
               });
-            } else {
-              MenuItem({
-                content: item.text ?? item.predefinedType ?? "",
-                labelInfo: item.accelerator,
-                symbolStartIcon: item.nativeIcon
-                  ? this.nativeIconSymbol(item.nativeIcon)
-                  : undefined,
-              })
-                .enabled(item.enabled ?? true)
-                .onClick(() => {
-                  const handler = getMenuClickHandler(this.registryKey());
-                  hilog.info(
-                    0x1999,
-                    "MenuBar",
-                    "menuItem onClick id=%{public}s windowId=%{public}d handler=%{public}s",
-                    item.id,
-                    this.windowId,
-                    handler ? "found" : "NULL",
-                  );
-                  if (handler) {
-                    handler(item);
-                  }
-                });
-            }
-          },
-          (item: MenuItemData) => item.id,
-        );
+          }
+          ForEach(
+            group,
+            (item: MenuItemData) => {
+              if (item.predefinedType === "paste") {
+                this.RenderPasteMenuItem(item);
+              } else {
+                this.RenderStandardMenuItem(item, data);
+              }
+            },
+            (item: MenuItemData) => item.id,
+          );
+        }
       },
       (_group: MenuItemData[], index: number) => `${data.revision}:group_${index}`,
     );
@@ -471,6 +543,7 @@ export struct MenuBarComponent {
     Menu() {
       this.RenderMenuItems(data)
     }
+    .width(this.estimateMenuWidth(data.items))
     .onKeyPreIme(() => this.isMenuClosing(data.menubarId));
   }
 
@@ -478,16 +551,11 @@ export struct MenuBarComponent {
   MenuContent() {
     Menu() {
       this.RenderMenuItems({
-        items: this.applicationMenu
-          ? this.applicationMenuName === undefined
-            ? this.menubarItems
-            : (this.menubarItems.find(
-                (item: MenuItemData) => item.text === this.applicationMenuName,
-              )?.submenuItems ?? [])
-          : this.menuItems,
+        items: this.activeMenuContentItems(),
         revision: this.applicationMenu ? this.menubarRevision : this.popupRevision,
       })
     }
+    .width(this.estimateMenuWidth(this.activeMenuContentItems()))
     .id(`native-application-menu-${this.windowId}`)
     .focusable(true)
     .onKeyPreIme(() => this.isMenuClosing());
@@ -495,144 +563,161 @@ export struct MenuBarComponent {
 
   @Builder
   MenuBarRow() {
-    Row() {
-      ForEach(
-        this.menubarItems.map((item: MenuItemData) => item.id),
-        (itemId: string) => {
-          Row() {
-            if (this.getMenubarItem(itemId)?.icon && this.iconPixelMaps.has(itemId)) {
-              Image(this.iconPixelMaps.get(itemId)).width(16).height(16).margin({ right: 4 });
-            } else if (this.nativeIconResource(this.getMenubarItem(itemId)?.nativeIcon ?? "")) {
-              // Top-level nativeIcon: render as a system symbol, mirroring the
-              // Image branch above (submenu icon and nativeIcon are mutually exclusive)
-              SymbolGlyph(
-                this.nativeIconResource(this.getMenubarItem(itemId)?.nativeIcon ?? "") as Resource,
-              )
-                .fontSize(16)
-                .fontColor([$r("sys.color.icon_primary")])
-                .margin({ right: 4 });
+    Scroll() {
+      Row({ space: 2 }) {
+        ForEach(
+          this.menubarItems.map((item: MenuItemData) => item.id),
+          (itemId: string) => {
+            Row() {
+              if (this.getMenubarItem(itemId)?.icon && this.iconPixelMaps.has(itemId)) {
+                Image(this.iconPixelMaps.get(itemId))
+                  .width(16)
+                  .height(16)
+                  .objectFit(ImageFit.Contain)
+                  .margin({ right: 4 });
+              } else if (this.nativeIconResource(this.getMenubarItem(itemId)?.nativeIcon ?? "")) {
+                // Top-level nativeIcon: render as a system symbol, mirroring the
+                // Image branch above (submenu icon and nativeIcon are mutually exclusive)
+                SymbolGlyph(
+                  this.nativeIconResource(
+                    this.getMenubarItem(itemId)?.nativeIcon ?? "",
+                  ) as Resource,
+                )
+                  .fontSize(16)
+                  .fontColor([$r("sys.color.icon_primary")])
+                  .margin({ right: 4 });
+              }
+              Text(this.getMenubarItem(itemId)?.text ?? "")
+                .fontSize($r("sys.float.Body_M"))
+                .fontColor($r("sys.color.font_primary"))
+                .maxLines(1)
             }
-            Text(this.getMenubarItem(itemId)?.text ?? "")
-              .fontSize($r("sys.float.Body_M"))
-              .fontColor($r("sys.color.font_primary"))
-          }
-          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-          .borderRadius($r("sys.float.corner_radius_level2"))
-          .enabled(this.getMenubarItem(itemId)?.enabled ?? true)
-          .opacity(
-            (this.getMenubarItem(itemId)?.enabled ?? true)
-              ? 1.0
-              : $r("sys.float.interactive_disable"),
-          )
-          .backgroundColor(
-            this.activeDropdownId === itemId
-              ? $r("sys.color.interactive_pressed")
-              : this.hoveredItemId === itemId
-                ? $r("sys.color.interactive_hover")
-                : Color.Transparent,
-          )
-          .onAreaChange((_oldArea: Area, area: Area) => {
-            this.menubarItemAreas.set(itemId, area);
-          })
-          .onTouch((event: TouchEvent) => {
-            if (event.type === TouchType.Down) {
-              this.headingPressId = itemId;
-              this.headingPressAt = event.timestamp;
-            } else if (event.type === TouchType.Cancel) {
+            .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+            .borderRadius($r("sys.float.corner_radius_level2"))
+            .enabled(this.getMenubarItem(itemId)?.enabled ?? true)
+            .opacity(
+              (this.getMenubarItem(itemId)?.enabled ?? true)
+                ? 1.0
+                : $r("sys.float.interactive_disable"),
+            )
+            .backgroundColor(
+              this.activeDropdownId === itemId
+                ? $r("sys.color.interactive_pressed")
+                : this.hoveredItemId === itemId
+                  ? $r("sys.color.interactive_hover")
+                  : Color.Transparent,
+            )
+            .onAreaChange((_oldArea: Area, area: Area) => {
+              this.menubarItemAreas.set(itemId, area);
+            })
+            .onTouch((event: TouchEvent) => {
+              if (event.type === TouchType.Down) {
+                this.headingPressId = itemId;
+                this.headingPressAt = event.timestamp;
+              } else if (event.type === TouchType.Cancel) {
+                this.headingPressId = "";
+              }
+            })
+            .onMouse((event: MouseEvent) => {
+              if (event.action === MouseAction.Press) {
+                this.headingPressId = itemId;
+                this.headingPressAt = event.timestamp;
+              }
+            })
+            .onClick((event: ClickEvent) => {
+              // Native dismissal can finish before its triggering press reaches the anchor.
+              // Compare that press with dismissal so a later, separate press can still reopen.
+              const pressedDuringDismissal =
+                this.headingPressId === itemId &&
+                this.headingPressAt > 0 &&
+                this.headingPressAt <= this.dismissedDropdownAt &&
+                (event.source === SourceType.Mouse || event.source === SourceType.TouchScreen);
+              const dismissedByPress =
+                pressedDuringDismissal && this.dismissedDropdownId === itemId;
               this.headingPressId = "";
-            }
-          })
-          .onMouse((event: MouseEvent) => {
-            if (event.action === MouseAction.Press) {
-              this.headingPressId = itemId;
-              this.headingPressAt = event.timestamp;
-            }
-          })
-          .onClick((event: ClickEvent) => {
-            // Native dismissal can finish before its triggering press reaches the anchor.
-            // Compare that press with dismissal so a later, separate press can still reopen.
-            const pressedDuringDismissal =
-              this.headingPressId === itemId &&
-              this.headingPressAt > 0 &&
-              this.headingPressAt <= this.dismissedDropdownAt &&
-              (event.source === SourceType.Mouse || event.source === SourceType.TouchScreen);
-            const dismissedByPress = pressedDuringDismissal && this.dismissedDropdownId === itemId;
-            this.headingPressId = "";
-            hilog.info(
-              0x1999,
-              "MenuBar",
-              "dropdown onClick id=%{public}s prevShown=%{public}s prevActive=%{public}s",
-              itemId,
-              this.activeDropdownShown,
-              this.activeDropdownId,
-            );
-            if (
-              (this.activeDropdownShown && this.activeDropdownId === itemId) ||
-              dismissedByPress
-            ) {
-              this.activeDropdownShown = false;
-              this.activeDropdownId = "";
-              return;
-            }
-            // Validation covers the whole menubar and requires the application's focus.
-            // Switching an open menu must retain that snapshot while ArkUI owns focus.
-            if (!this.activeDropdownShown && !pressedDuringDismissal) {
-              notifyMenuWillOpen(this.windowId, this.registryKey());
-            }
-            this.activeDropdownId = itemId;
-            this.activeDropdownShown = true;
-          })
-          .onHover((isHover: boolean) => {
-            this.hoveredItemId = isHover ? itemId : "";
-            if (isHover) {
-              this.switchMenubarOnHover(itemId);
-            }
-          })
-          .bindMenu(
-            this.activeDropdownShown && this.activeDropdownId === itemId,
-            this.MenubarDropdownContent(itemId),
-            {
-              // Keep title dropdowns in their owning window to retain native content focus.
-              showInSubWindow: false,
-              transition: TransitionEffect.IDENTITY.animation({ duration: 0 }),
-              aboutToAppear: () => this.observeDropdownMouse(itemId),
-              onAppear: () => {
-                this.observeDropdownMouse(itemId);
-                this.focusDropdown(itemId);
-              },
-              aboutToDisappear: () => {
-                this.releaseDropdownMouse(itemId);
-                hilog.info(
-                  0x1999,
-                  "MenuBar",
-                  "aboutToDisappear activeId=%{public}s",
-                  this.activeDropdownId,
-                );
-                if (this.activeDropdownId === itemId) {
-                  this.dismissedDropdownId = itemId;
-                  this.dismissedDropdownAt = systemDateTime.getUptime(
-                    systemDateTime.TimeType.ACTIVE,
-                    true,
+              hilog.info(
+                0x1999,
+                "MenuBar",
+                "dropdown onClick id=%{public}s prevShown=%{public}s prevActive=%{public}s",
+                itemId,
+                this.activeDropdownShown,
+                this.activeDropdownId,
+              );
+              if (
+                (this.activeDropdownShown && this.activeDropdownId === itemId) ||
+                dismissedByPress
+              ) {
+                this.activeDropdownShown = false;
+                this.activeDropdownId = "";
+                return;
+              }
+              // Validation covers the whole menubar and requires the application's focus.
+              // Switching an open menu must retain that snapshot while ArkUI owns focus.
+              if (!this.activeDropdownShown && !pressedDuringDismissal) {
+                notifyMenuWillOpen(this.windowId, this.registryKey());
+              }
+              this.activeDropdownId = itemId;
+              this.activeDropdownShown = true;
+            })
+            .onHover((isHover: boolean) => {
+              if (isHover) {
+                this.hoveredItemId = itemId;
+                this.switchMenubarOnHover(itemId);
+              } else if (this.hoveredItemId === itemId) {
+                this.hoveredItemId = "";
+              }
+            })
+            .bindMenu(
+              this.activeDropdownShown && this.activeDropdownId === itemId,
+              this.MenubarDropdownContent(itemId),
+              {
+                // Keep title dropdowns in their owning window to retain native content focus.
+                showInSubWindow: false,
+                transition: TransitionEffect.IDENTITY.animation({ duration: 0 }),
+                aboutToAppear: () => this.observeDropdownMouse(itemId),
+                onAppear: () => {
+                  this.observeDropdownMouse(itemId);
+                  this.focusDropdown(itemId);
+                },
+                aboutToDisappear: () => {
+                  this.releaseDropdownMouse(itemId);
+                  hilog.info(
+                    0x1999,
+                    "MenuBar",
+                    "aboutToDisappear activeId=%{public}s",
+                    this.activeDropdownId,
                   );
-                  this.activeDropdownShown = false;
-                }
+                  if (this.activeDropdownId === itemId) {
+                    this.dismissedDropdownId = itemId;
+                    this.dismissedDropdownAt = systemDateTime.getUptime(
+                      systemDateTime.TimeType.ACTIVE,
+                      true,
+                    );
+                    this.activeDropdownShown = false;
+                  }
+                },
+                onDisappear: () => {
+                  if (!this.activeDropdownShown && this.activeDropdownId === itemId) {
+                    this.activeDropdownId = "";
+                  }
+                },
               },
-              onDisappear: () => {
-                if (!this.activeDropdownShown && this.activeDropdownId === itemId) {
-                  this.activeDropdownId = "";
-                }
-              },
-            },
-          )
-          .focusable(false);
-        },
-        (itemId: string) => itemId,
-      )
+            )
+            .focusable(false);
+          },
+          (itemId: string) => itemId,
+        )
+      }
+      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .constraintSize({ minHeight: 36 })
+      .alignItems(VerticalAlign.Center)
     }
     .width("100%")
-    .height(40)
-    .backgroundColor($r("sys.color.comp_background_primary"))
-    .alignItems(VerticalAlign.Center)
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+    .align(Alignment.Start)
+    .backgroundColor($r("sys.color.container_modal_background"))
+    .border({ width: { bottom: "1px" }, color: $r("sys.color.comp_divider") })
     .focusable(false);
   }
 
@@ -712,6 +797,7 @@ export struct MenuBarComponent {
         menubarId: itemId,
       })
     }
+    .width(this.estimateMenuWidth(this.getMenubarItem(itemId)?.submenuItems ?? []))
     .id(this.dropdownNodeId(itemId))
     .focusable(true)
     .onKeyPreIme(() => this.isMenuClosing(itemId));
@@ -965,7 +1051,7 @@ export struct MenuBarComponent {
       }
     }
     .width("100%")
-    .height(this.showMenuBar && this.menubarVisible && this.menubarItems.length > 0 ? 40 : 0)
+    .height(this.showMenuBar && this.menubarVisible && this.menubarItems.length > 0 ? undefined : 0)
     .focusable(false);
   }
 }

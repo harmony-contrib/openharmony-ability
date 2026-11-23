@@ -41,9 +41,9 @@ Register `WindowBridgePlugin` in Rust and use the matching window facade. See th
 | `id` | `ohos.window` |
 | `execution` | `async` |
 | `requires` | `["ui-context"]` |
-| Queries | `get-avoid-area`, `is-maximized`, `is-minimized` |
+| Queries | `get-avoid-area`, `is-maximized`, `is-minimized`, `get-geometry-on-display`, `get-title-button-rect` |
 | Status bar | `set-status-bar` → `ohos.window.Acknowledgement`; API12, targeted status-bar presentation |
-| Window actions | `create-os-window`, decorations/background/shadow, focus, move/resize, minimize/maximize/restore/show/destroy |
+| Window actions | `create-os-window`, decorations/background/privacy/`set-shadow`/`set-input-region`, focus, move/resize/`set-bounds-on-display`, minimize/maximize/restore/show/destroy |
 
 `get-avoid-area` returns the complete `{ visible, leftRect, topRect, rightRect, bottomRect }`. Creation returns a platform `windowId`; later operations route by that handle, not native-module configuration.
 
@@ -65,3 +65,13 @@ Choose either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
 ## Toolkit contract additions
 
 `show-prompt-choice` adds a real ArkUI checkbox to a window-scoped prompt and returns both the button index and checked state. The request has a distinct named contract; existing prompts remain compatible. Cancellation and plugin disposal close active dialogs and retire their callbacks.
+
+### Explicit display geometry
+
+`get-geometry-on-display` returns the owning display ID and physical display-local
+rectangles for the outer window and drawable content, including scaled-window
+geometry. `set-bounds-on-display` positions and resizes a floating window on an
+explicit display (API 15+); an unknown display is rejected. Hidden independent
+windows retain these creation parameters without being foregrounded. Native
+window modes and placement limits still apply. The existing `move-to` action
+keeps its original coordinate semantics.

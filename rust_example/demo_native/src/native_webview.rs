@@ -69,6 +69,7 @@ pub fn demo_native_webview(env: &Env) -> Result<Object<'_>> {
                 scroll_enabled: true,
                 injected_javascript: None,
                 html_base_url: Some("https://example.invalid/".into()),
+                forward_key_events: None,
             },
         )) {
             log::error!("native WebView creation failed: {error}");

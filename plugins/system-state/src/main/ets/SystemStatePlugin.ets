@@ -4,7 +4,11 @@ import commonEventManager from "@ohos.commonEventManager";
 import thermal from "@ohos.thermal";
 import runningLock from "@ohos.runningLock";
 import display from "@ohos.display";
+import { batteryInfo, deviceInfo } from "@kit.BasicServicesKit";
+import { bundleManager } from "@kit.AbilityKit";
+import { backgroundTaskManager } from "@kit.BackgroundTasksKit";
 import { ThermalSubscriptions } from "./ThermalSubscriptions";
+import { NowPlayingController, SetNowPlayingRequest } from "./NowPlayingController";
 import {
   AsyncPluginBase,
   BridgeCallContext,
@@ -53,6 +57,33 @@ class PreventSleepResponse {
 }
 class ReleaseSleepResponse {
   readonly accepted: boolean = true;
+}
+
+interface SuspendDelayRequest {
+  reason: string;
+}
+class SuspendDelayResponse {
+  readonly id: string;
+  constructor(id: string) {
+    this.id = id;
+  }
+}
+interface CancelSuspendDelayRequest {
+  id: string;
+}
+class CancelSuspendDelayResponse {
+  readonly accepted: boolean = true;
+}
+
+function validateReason(reason: string, label: string): void {
+  if (
+    typeof reason !== "string" ||
+    !reason.trim() ||
+    Array.from(reason).length > 256 ||
+    /[\u0000-\u001f\u007f]/.test(reason)
+  ) {
+    throw new Error(`Invalid ${label} reason`);
+  }
 }
 
 class GetThermalLevelResponse {
@@ -107,6 +138,86 @@ class GetDisplaysResponse {
   }
 }
 
+class GetLocaleRegionResponse {
+  readonly locale: string;
+  readonly firstWeekday: number;
+  readonly hourCycle: number;
+  readonly appPreferredLanguage: string;
+
+  constructor(
+    locale: string,
+    firstWeekday: number,
+    hourCycle: number,
+    appPreferredLanguage: string,
+  ) {
+    this.locale = locale;
+    this.firstWeekday = firstWeekday;
+    this.hourCycle = hourCycle;
+    this.appPreferredLanguage = appPreferredLanguage;
+  }
+}
+
+interface SetAppPreferredLanguageRequest {
+  tag: string;
+}
+
+class SetAppPreferredLanguageResponse {
+  readonly kept: boolean;
+
+  constructor(kept: boolean) {
+    this.kept = kept;
+  }
+}
+
+class GetPackageInfoResponse {
+  readonly identifier: string;
+  readonly name: string;
+  readonly version: string;
+
+  constructor(identifier: string, name: string, version: string) {
+    this.identifier = identifier;
+    this.name = name;
+    this.version = version;
+  }
+}
+
+class GetNetworkStatusResponse {
+  readonly online: boolean;
+  readonly metered: boolean;
+
+  constructor(online: boolean, metered: boolean) {
+    this.online = online;
+    this.metered = metered;
+  }
+}
+
+class GetPowerStatusResponse {
+  readonly onBattery: boolean;
+  readonly hasBattery: boolean;
+
+  constructor(onBattery: boolean, hasBattery: boolean) {
+    this.onBattery = onBattery;
+    this.hasBattery = hasBattery;
+  }
+}
+
+class SetNowPlayingResponse {
+  readonly accepted: boolean;
+
+  constructor(accepted: boolean) {
+    this.accepted = accepted;
+  }
+}
+
+interface I18nFirstDayApi {
+  getFirstDayOfWeek?: () => number;
+}
+
+interface I18nAppLanguageApi {
+  getAppPreferredLanguage?: () => string;
+  setAppPreferredLanguage?: (language: string) => void;
+}
+
 export class SystemStatePlugin extends AsyncPluginBase {
   readonly id = "ohos.system-state";
   readonly requires: BridgeContextRequirement[] = ["ability"];
@@ -121,12 +232,18 @@ export class SystemStatePlugin extends AsyncPluginBase {
   private currentDisplay: display.Display | null = null;
   private availableAreaCallback: (area: display.Rect) => void = () => {};
   private displayChangeCallback: (id: number) => void = () => {};
+  private netConn: connection.NetConnection | null = null;
+  private suspendDelays: Map<string, number> = new Map();
+  private hookContext: BridgePluginHookContext | null = null;
+  private readonly nowPlaying = new NowPlayingController();
 
   onInstall(context: BridgePluginHookContext): void {
     if (this.active) {
       return;
     }
     this.active = true;
+    this.hookContext = context;
+    this.nowPlaying.reset();
     try {
       this.unsubscribeThermal = ThermalSubscriptions.subscribe(
         (level: thermal.ThermalLevel): void => {
@@ -164,6 +281,11 @@ export class SystemStatePlugin extends AsyncPluginBase {
         commonEventManager.Support.COMMON_EVENT_SCREEN_ON,
         commonEventManager.Support.COMMON_EVENT_ENTER_FORCE_SLEEP,
         commonEventManager.Support.COMMON_EVENT_EXIT_FORCE_SLEEP,
+        commonEventManager.Support.COMMON_EVENT_SCREEN_LOCKED,
+        commonEventManager.Support.COMMON_EVENT_SCREEN_UNLOCKED,
+        commonEventManager.Support.COMMON_EVENT_LOCALE_CHANGED,
+        commonEventManager.Support.COMMON_EVENT_POWER_CONNECTED,
+        commonEventManager.Support.COMMON_EVENT_POWER_DISCONNECTED,
       ],
     };
     commonEventManager
@@ -197,6 +319,17 @@ export class SystemStatePlugin extends AsyncPluginBase {
             event === commonEventManager.Support.COMMON_EVENT_EXIT_FORCE_SLEEP
           ) {
             this.emit(context, "wake");
+          } else if (event === commonEventManager.Support.COMMON_EVENT_SCREEN_LOCKED) {
+            this.emit(context, "lock-screen");
+          } else if (event === commonEventManager.Support.COMMON_EVENT_SCREEN_UNLOCKED) {
+            this.emit(context, "unlock-screen");
+          } else if (event === commonEventManager.Support.COMMON_EVENT_LOCALE_CHANGED) {
+            this.emit(context, "locale");
+          } else if (
+            event === commonEventManager.Support.COMMON_EVENT_POWER_CONNECTED ||
+            event === commonEventManager.Support.COMMON_EVENT_POWER_DISCONNECTED
+          ) {
+            this.emit(context, "power-source");
           }
         });
         this.subscriber = subscriber;
@@ -204,11 +337,40 @@ export class SystemStatePlugin extends AsyncPluginBase {
       .catch((error: Error) => {
         console.warn(`[SystemState] common event registration failed: ${String(error)}`);
       });
+
+    try {
+      const netConn = connection.createNetConnection();
+      netConn.on("netAvailable", () => this.emit(context, "network"));
+      netConn.on("netCapabilitiesChange", () => this.emit(context, "network"));
+      netConn.on("netLost", () => this.emit(context, "network"));
+      netConn.on("netUnavailable", () => this.emit(context, "network"));
+      netConn.register((err) => {
+        if (err) {
+          console.warn(`[SystemState] netConnection register failed: ${String(err)}`);
+        }
+      });
+      this.netConn = netConn;
+    } catch (error) {
+      console.warn(`[SystemState] netConnection creation failed: ${String(error)}`);
+    }
   }
 
   async onDispose(): Promise<void> {
     this.active = false;
+    this.hookContext = null;
     this.releaseAllSleep();
+    for (const reqId of Array.from(this.suspendDelays.values())) {
+      try {
+        backgroundTaskManager.cancelSuspendDelay(reqId);
+      } catch {}
+    }
+    this.suspendDelays.clear();
+    if (this.netConn !== null) {
+      const conn = this.netConn;
+      this.netConn = null;
+      conn.unregister(() => {});
+    }
+    await this.nowPlaying.dispose();
     try {
       this.unsubscribeThermal?.();
     } catch (error) {
@@ -325,14 +487,7 @@ export class SystemStatePlugin extends AsyncPluginBase {
         action,
         "ohos.system-state.PreventSleepRequest",
       ) as PreventSleepRequest;
-      if (
-        typeof request.reason !== "string" ||
-        !request.reason.trim() ||
-        Array.from(request.reason).length > 256 ||
-        /[\u0000-\u001f\u007f]/.test(request.reason)
-      ) {
-        throw new Error("Invalid sleep prevention reason");
-      }
+      validateReason(request.reason, "sleep prevention");
       // A forced-sleep listener is required by the running-lock contract.
       const epoch = this.sleepEpoch;
       if (
@@ -415,6 +570,176 @@ export class SystemStatePlugin extends AsyncPluginBase {
       return {
         typeName: GET_DISPLAYS_RESPONSE_TYPE,
         value: new GetDisplaysResponse(await this.loadDisplays()),
+      };
+    }
+    if (action === "get-locale-region") {
+      expectBridgeRequestType(payload, this.id, action, "ohos.system-state.GetLocaleRegionRequest");
+      const sys = i18n.System;
+      let locale = "";
+      try {
+        locale = sys.getSystemLocale() || sys.getSystemLanguage();
+      } catch {
+        locale = sys.getSystemLanguage();
+      }
+      let firstWeekday = -1;
+      const firstDayApi = sys as ESObject as I18nFirstDayApi;
+      if (deviceInfo.sdkApiVersion >= 18 && typeof firstDayApi.getFirstDayOfWeek === "function") {
+        try {
+          firstWeekday = firstDayApi.getFirstDayOfWeek() % 7;
+        } catch {}
+      }
+      const hourCycle = sys.is24HourClock() ? 24 : 12;
+      let appLang = "";
+      const appLangApi = sys as ESObject as I18nAppLanguageApi;
+      if (typeof appLangApi.getAppPreferredLanguage === "function") {
+        try {
+          const val = appLangApi.getAppPreferredLanguage();
+          if (val && val !== "default") {
+            appLang = val;
+          }
+        } catch {}
+      }
+      return {
+        typeName: "ohos.system-state.GetLocaleRegionResponse",
+        value: new GetLocaleRegionResponse(locale, firstWeekday, hourCycle, appLang),
+      };
+    }
+    if (action === "set-app-preferred-language") {
+      const req = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.SetAppPreferredLanguageRequest",
+      ) as SetAppPreferredLanguageRequest;
+      const appLangApi = i18n.System as ESObject as I18nAppLanguageApi;
+      if (typeof appLangApi.setAppPreferredLanguage !== "function") {
+        return {
+          typeName: "ohos.system-state.SetAppPreferredLanguageResponse",
+          value: new SetAppPreferredLanguageResponse(false),
+        };
+      }
+      appLangApi.setAppPreferredLanguage(req.tag === "" ? "default" : req.tag);
+      return {
+        typeName: "ohos.system-state.SetAppPreferredLanguageResponse",
+        value: new SetAppPreferredLanguageResponse(true),
+      };
+    }
+    if (action === "get-package-info") {
+      expectBridgeRequestType(payload, this.id, action, "ohos.system-state.GetPackageInfoRequest");
+      const info = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION,
+      );
+      let name = info.appInfo.label || info.name;
+      if (info.appInfo.labelId > 0) {
+        try {
+          name = context.abilityContext.resourceManager.getStringSync(info.appInfo.labelId) || name;
+        } catch {}
+      }
+      return {
+        typeName: "ohos.system-state.GetPackageInfoResponse",
+        value: new GetPackageInfoResponse(info.name, name, info.versionName),
+      };
+    }
+    if (action === "get-network-status") {
+      expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.GetNetworkStatusRequest",
+      );
+      let online = false;
+      let metered = false;
+      try {
+        if (connection.hasDefaultNetSync()) {
+          const net = connection.getDefaultNetSync();
+          const caps = connection.getNetCapabilitiesSync(net);
+          const list = caps.networkCap ?? [];
+          online =
+            list.includes(connection.NetCap.NET_CAPABILITY_INTERNET) ||
+            list.includes(connection.NetCap.NET_CAPABILITY_VALIDATED);
+          metered = online && !list.includes(connection.NetCap.NET_CAPABILITY_NOT_METERED);
+        }
+      } catch (error) {
+        console.warn(`[SystemState] network status query failed: ${String(error)}`);
+      }
+      return {
+        typeName: "ohos.system-state.GetNetworkStatusResponse",
+        value: new GetNetworkStatusResponse(online, metered),
+      };
+    }
+    if (action === "get-power-status") {
+      expectBridgeRequestType(payload, this.id, action, "ohos.system-state.GetPowerStatusRequest");
+      const hasBattery =
+        typeof batteryInfo.isBatteryPresent === "boolean"
+          ? batteryInfo.isBatteryPresent
+          : batteryInfo.batterySOC >= 0;
+      const onBattery =
+        hasBattery && batteryInfo.pluggedType === batteryInfo.BatteryPluggedType.NONE;
+      return {
+        typeName: "ohos.system-state.GetPowerStatusResponse",
+        value: new GetPowerStatusResponse(onBattery, hasBattery),
+      };
+    }
+    if (action === "request-suspend-delay") {
+      const req = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.SuspendDelayRequest",
+      ) as SuspendDelayRequest;
+      validateReason(req.reason, "suspend delay");
+      const key = `suspend-${++this.nextSleepLock}`;
+      let requestId = -1;
+      const info = backgroundTaskManager.requestSuspendDelay(req.reason, () => {
+        const activeId = this.suspendDelays.get(key) ?? requestId;
+        this.suspendDelays.delete(key);
+        if (activeId >= 0) {
+          try {
+            backgroundTaskManager.cancelSuspendDelay(activeId);
+          } catch {}
+        }
+        if (this.hookContext !== null) {
+          this.emit(this.hookContext, "suspend-delay-expired");
+        }
+      });
+      requestId = info.requestId;
+      this.suspendDelays.set(key, info.requestId);
+      return {
+        typeName: "ohos.system-state.SuspendDelayResponse",
+        value: new SuspendDelayResponse(key),
+      };
+    }
+    if (action === "cancel-suspend-delay") {
+      const req = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.CancelSuspendDelayRequest",
+      ) as CancelSuspendDelayRequest;
+      if (typeof req.id !== "string" || !req.id) {
+        throw new Error("Invalid suspend delay id");
+      }
+      const reqId = this.suspendDelays.get(req.id);
+      if (reqId !== undefined) {
+        this.suspendDelays.delete(req.id);
+        backgroundTaskManager.cancelSuspendDelay(reqId);
+      }
+      return {
+        typeName: "ohos.system-state.CancelSuspendDelayResponse",
+        value: new CancelSuspendDelayResponse(),
+      };
+    }
+    if (action === "set-now-playing") {
+      const req = expectBridgeRequestType(
+        payload,
+        this.id,
+        action,
+        "ohos.system-state.SetNowPlayingRequest",
+      ) as SetNowPlayingRequest;
+      const accepted = await this.nowPlaying.apply(req, context.abilityContext, this.hookContext);
+      return {
+        typeName: "ohos.system-state.SetNowPlayingResponse",
+        value: new SetNowPlayingResponse(accepted),
       };
     }
     throw new Error(`Unsupported ${this.id} action '${action}'`);

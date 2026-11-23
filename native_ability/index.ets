@@ -37,7 +37,7 @@ export { invokeNativeBackPressInterceptor } from "./src/main/ets/runtime/BackPre
 export { WindowManager } from "./src/main/ets/window/WindowManager";
 
 // ─── Menubar extension seam (consumed by the menu plugin package) ────────────
-// The menu UI cluster (MenuBarComponent / MenuPopup / menu.ets / menu_types /
+// The menu UI cluster (MenuBarComponent / menu.ets / menu_types /
 // accelerator matcher) lives in plugins/menu (@ohos-rs/ability-plugin-menu,
 // mirroring crates/plugin-menu). Core pages compose the menubar through this
 // registered slot and notify the menu plugin through this port — the core

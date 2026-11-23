@@ -65,3 +65,10 @@ Rust 侧注册和调用示例见[Rust facade README](../../crates/plugin-window/
 ## Toolkit contract additions
 
 `show-prompt-choice` 在指定窗口的提示框中显示真正的 ArkUI 复选框，同时返回按钮索引和勾选状态。使用独立具名契约，与旧提示框兼容；取消或插件销毁关闭对话框并清理回调。
+
+### 指定显示器的窗口几何
+
+`get-geometry-on-display` 返回窗口所属显示器 ID，以及该显示器内的物理像素外框和
+可绘制内容矩形，包含系统缩放后的实际几何。`set-bounds-on-display` 在指定显示器上
+移动和调整浮动窗口大小（API 15+）；目标不存在时明确拒绝。隐藏独立窗口保存创建
+参数，不因此前台启动；系统窗口模式和位置限制仍适用。旧 `move-to` 坐标语义保持不变。

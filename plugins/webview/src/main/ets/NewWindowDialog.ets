@@ -1,19 +1,72 @@
 import web_webview from "@ohos.web.webview";
 import { hilog } from "@kit.PerformanceAnalysisKit";
-import { ComponentContent } from "@kit.ArkUI";
+import { ComponentContent, PromptAction } from "@kit.ArkUI";
 import { BusinessError } from "@kit.BasicServicesKit";
 import { DOMAIN } from "@ohos-rs/ability";
 
 // Module-level single-instance dialog references.
 // Limitation: only one new-window dialog can exist at a time. Opening a second
 // dialog force-closes the first. This matches typical browser popup behavior.
-// If multi-dialog support is needed, refactor to a Map<number, DialogSession>.
-let currentPrompt: Object | null = null;
+let currentPrompt: PromptAction | null = null;
 let currentNode: ComponentContent<NewWindowDialogParams> | null = null;
 
 interface NewWindowDialogParams {
   controller: web_webview.WebviewController;
   url: string;
+}
+
+@Component
+struct NewWindowCloseButton {
+  onActivate: () => void = () => {};
+  @State private hovered: boolean = false;
+  @State private pressed: boolean = false;
+
+  private buttonBackgroundColor(): ResourceColor {
+    if (this.pressed) {
+      return $r("sys.color.alert");
+    }
+    if (this.hovered) {
+      return $r("sys.color.warning");
+    }
+    return Color.Transparent;
+  }
+
+  private iconColor(): Resource {
+    if (this.hovered || this.pressed) {
+      return $r("sys.color.icon_on_primary");
+    }
+    return $r("sys.color.icon_primary");
+  }
+
+  build() {
+    Button({ type: ButtonType.Normal, stateEffect: false }) {
+      SymbolGlyph($r("sys.symbol.xmark"))
+        .fontSize(16)
+        .fontColor([this.iconColor()])
+    }
+    .width(28)
+    .height(28)
+    .margin({ left: 8 })
+    .padding(0)
+    .borderRadius($r("sys.float.corner_radius_level2"))
+    .backgroundColor(this.buttonBackgroundColor())
+    .hoverEffect(HoverEffect.None)
+    .accessibilityText("Close")
+    .onHover((hovered: boolean) => {
+      this.hovered = hovered;
+      if (!hovered) {
+        this.pressed = false;
+      }
+    })
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        this.pressed = true;
+      } else if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+        this.pressed = false;
+      }
+    })
+    .onClick(() => this.onActivate());
+  }
 }
 
 /**
@@ -32,26 +85,19 @@ export function newWindowDialogBuilder(params: NewWindowDialogParams) {
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)
-      Button({ type: ButtonType.Normal, stateEffect: true }) {
-        SymbolGlyph($r("sys.symbol.xmark"))
-          .fontSize(16)
-          .fontColor([$r("sys.color.icon_primary")])
-      }
-      .width(28)
-      .height(28)
-      .margin({ left: 8 })
-      .borderRadius($r("sys.float.corner_radius_level2"))
-      .backgroundColor(Color.Transparent)
-      .onClick(() => {
-        hilog.info(DOMAIN, "NewWindowDialog", "Close button clicked");
-        closeDialog();
+      NewWindowCloseButton({
+        onActivate: () => {
+          hilog.info(DOMAIN, "NewWindowDialog", "Close button clicked");
+          closeDialog();
+        },
       })
     }
     .width("100%")
-    .height(36)
-    .padding({ left: 12, right: 8 })
+    .constraintSize({ minHeight: 40 })
+    .padding({ left: 16, right: 8, top: 6, bottom: 6 })
     .alignItems(VerticalAlign.Center)
     .backgroundColor($r("sys.color.comp_background_secondary"))
+    .border({ width: { bottom: "1px" }, color: $r("sys.color.comp_divider") })
 
     // Web content — loads the target URL directly. ArkWeb's own popup is
     // cancelled (`setWebController(null)` in onWindowNew) to avoid deadlocking the
@@ -65,7 +111,6 @@ export function newWindowDialogBuilder(params: NewWindowDialogParams) {
       .javaScriptAccess(true)
       .domStorageAccess(true)
       .multiWindowAccess(false)
-      // Prevent infinite nesting
       .onWindowExit(() => {
         hilog.info(DOMAIN, "NewWindowDialog", "onWindowExit fired, closing dialog");
         closeDialog();
@@ -73,22 +118,48 @@ export function newWindowDialogBuilder(params: NewWindowDialogParams) {
   }
   .width("90%")
   .height("80%")
+  .constraintSize({ minWidth: 360, maxWidth: 960, minHeight: 280, maxHeight: 720 })
   .backgroundColor($r("sys.color.comp_background_primary"))
   .borderRadius($r("sys.float.corner_radius_level8"))
-  .shadow(ShadowStyle.OUTER_FLOATING_SM)
+  .border({ width: "1px", color: $r("sys.color.comp_divider") })
+  .shadow(ShadowStyle.OUTER_FLOATING_MD)
   .clip(true);
 }
 
-function closeDialog(): void {
-  if (currentPrompt && currentNode) {
-    try {
-      (currentPrompt as ESObject).closeCustomDialog(currentNode);
-    } catch (e) {
-      hilog.warn(DOMAIN, "NewWindowDialog", "closeCustomDialog failed: %{public}s", String(e));
-    }
+function disposeDialogNode(node: ComponentContent<NewWindowDialogParams>): void {
+  if (currentNode === node) {
+    currentNode = null;
+    currentPrompt = null;
   }
+  try {
+    node.dispose();
+  } catch {}
+}
+
+function closeDialog(): void {
+  const prompt = currentPrompt;
+  const node = currentNode;
   currentPrompt = null;
   currentNode = null;
+  if (prompt && node) {
+    prompt
+      .closeCustomDialog(node)
+      .then(() => {
+        try {
+          node.dispose();
+        } catch {}
+      })
+      .catch((e: BusinessError) => {
+        hilog.warn(DOMAIN, "NewWindowDialog", "closeCustomDialog failed: %{public}s", String(e));
+        try {
+          node.dispose();
+        } catch {}
+      });
+  } else if (node) {
+    try {
+      node.dispose();
+    } catch {}
+  }
 }
 
 /**
@@ -96,18 +167,12 @@ function closeDialog(): void {
  * component, so the controller has a host BEFORE it is passed to
  * `setWebController`. Returns the built content node (the `Web` component object
  * exists synchronously after `new ComponentContent(...)`).
- *
- * ArkWeb blocks `setWebController(controller)` if the controller has no `Web`
- * component host yet — the host must exist at the moment of the call. Building the
- * `ComponentContent` here constructs that host synchronously; the dialog is only
- * made visible afterwards (asynchronously) via `showNewWindowDialog`.
  */
 export function buildNewWindowContent(
   uiContext: UIContext,
   controller: web_webview.WebviewController,
   url: string,
 ): ComponentContent<NewWindowDialogParams> {
-  // Close any existing dialog first.
   closeDialog();
   const params: NewWindowDialogParams = {
     controller: controller,
@@ -132,38 +197,29 @@ export function showNewWindowDialog(
 
     prompt
       .openCustomDialog(contentNode, {
-        isModal: false,
+        isModal: true,
+        maskColor: $r("sys.color.mask_secondary"),
         autoCancel: true,
         alignment: DialogAlignment.Center,
+        onDidDisappear: () => {
+          disposeDialogNode(contentNode);
+        },
       })
       .then(() => {
         hilog.info(DOMAIN, "NewWindowDialog", "Dialog opened successfully");
       })
       .catch((err: BusinessError) => {
-        currentPrompt = null;
-        currentNode = null;
-        hilog.error(
-          DOMAIN,
-          "NewWindowDialog",
-          "Failed to open dialog: %{public}s",
-          JSON.stringify(err),
-        );
+        disposeDialogNode(contentNode);
+        hilog.error(DOMAIN, "NewWindowDialog", "Failed to open dialog: %{public}s", String(err));
       });
   } catch (e) {
-    hilog.error(
-      DOMAIN,
-      "NewWindowDialog",
-      "Exception opening dialog: %{public}s",
-      JSON.stringify(e),
-    );
+    disposeDialogNode(contentNode);
+    hilog.error(DOMAIN, "NewWindowDialog", "Exception opening dialog: %{public}s", String(e));
   }
 }
 
 /**
- * Legacy single-step entry retained for compatibility: builds + shows the dialog.
- * NOTE: in the onWindowNew path use `buildNewWindowContent` (synchronous, before
- * setWebController) + `showNewWindowDialog` (after) separately, to guarantee the
- * controller is hosted before setWebController runs.
+ * Single-step entry: builds + shows the dialog.
  */
 export function openNewWindowDialog(
   uiContext: UIContext,

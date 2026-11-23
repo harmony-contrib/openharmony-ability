@@ -7,7 +7,15 @@ use openharmony_ability::{
     BridgeRuntime, OpenHarmonyApp,
 };
 
+const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
+
 pub struct NotificationBridgePlugin;
+
+/// Supported notification slot classifications.
+pub mod notification_slot {
+    pub const DEFAULT: &str = "default";
+    pub const SOCIAL: &str = "social";
+}
 
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -31,6 +39,12 @@ pub struct NotificationAction {
     pub label: String,
 }
 
+/// Unified system notification request.
+///
+/// Optional presentation fields (`silent`, `group`, `sender_name`, `image`, `avatar`, `slot`)
+/// are omitted when unused. `avatar` maps to the notification `smallIcon` (not a system contact
+/// identity); `slot = "social"` routes to `SlotType.SOCIAL_COMMUNICATION`; `silent = true`
+/// disables sound and vibration on API 23+.
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct ShowNotificationRequest {
@@ -38,11 +52,71 @@ pub struct ShowNotificationRequest {
     pub title: String,
     pub body: String,
     pub actions: Vec<NotificationAction>,
+    pub silent: Option<bool>,
+    pub group: Option<String>,
+    pub sender_name: Option<String>,
+    pub image: Option<Vec<u8>>,
+    pub avatar: Option<Vec<u8>>,
+    pub slot: Option<String>,
 }
 
 impl_bridge_napi_type!(ShowNotificationRequest, "ohos.notification.ShowRequest");
 
 impl ShowNotificationRequest {
+    pub fn new(tag: impl Into<String>, title: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            tag: tag.into(),
+            title: title.into(),
+            body: body.into(),
+            actions: Vec::new(),
+            silent: None,
+            group: None,
+            sender_name: None,
+            image: None,
+            avatar: None,
+            slot: None,
+        }
+    }
+
+    pub fn actions(mut self, actions: Vec<NotificationAction>) -> Self {
+        self.actions = actions;
+        self
+    }
+
+    pub fn silent(mut self, silent: bool) -> Self {
+        self.silent = Some(silent);
+        self
+    }
+
+    pub fn group(mut self, group: impl Into<String>) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
+    pub fn sender_name(mut self, sender_name: impl Into<String>) -> Self {
+        self.sender_name = Some(sender_name.into());
+        self
+    }
+
+    pub fn image(mut self, image: Vec<u8>) -> Self {
+        self.image = Some(image);
+        self
+    }
+
+    pub fn avatar(mut self, avatar: Vec<u8>) -> Self {
+        self.avatar = Some(avatar);
+        self
+    }
+
+    pub fn social(mut self, social: bool) -> Self {
+        self.slot = Some(if social {
+            notification_slot::SOCIAL.to_owned()
+        } else {
+            notification_slot::DEFAULT.to_owned()
+        });
+        self
+    }
+
     fn validate(&self) -> Result<()> {
         if self.actions.len() > 3 {
             return Err(Error::from_reason(
@@ -60,6 +134,24 @@ impl ShowNotificationRequest {
             return Err(Error::from_reason(
                 "Invalid notification tag, title, body or action",
             ));
+        }
+        if self
+            .image
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() > MAX_IMAGE_BYTES)
+            || self
+                .avatar
+                .as_ref()
+                .is_some_and(|bytes| bytes.len() > MAX_IMAGE_BYTES)
+        {
+            return Err(Error::from_reason("Notification image exceeds 16 MiB"));
+        }
+        if let Some(slot) = self.slot.as_deref() {
+            if slot != notification_slot::DEFAULT && slot != notification_slot::SOCIAL {
+                return Err(Error::from_reason(format!(
+                    "Unsupported notification slot '{slot}'"
+                )));
+            }
         }
         Ok(())
     }
@@ -87,36 +179,6 @@ impl_bridge_napi_type!(
     "ohos.notification.Acknowledgement"
 );
 
-/// Sender avatars use the system small icon; this does not declare a conversation identity.
-#[napi(object)]
-#[derive(Clone, Debug)]
-pub struct ShowNotificationAvatarRequest {
-    pub options: ShowNotificationOptionsRequest,
-    pub avatar: Vec<u8>,
-}
-impl_bridge_napi_type!(
-    ShowNotificationAvatarRequest,
-    "ohos.notification.ShowAvatarRequest"
-);
-
-/// Extended presentation uses a new action so existing ShowRequest callers retain their ABI.
-#[napi(object)]
-#[derive(Clone, Debug)]
-pub struct ShowNotificationOptionsRequest {
-    pub tag: String,
-    pub title: String,
-    pub body: String,
-    pub actions: Vec<NotificationAction>,
-    pub silent: bool,
-    pub group: String,
-    pub image: Vec<u8>,
-    pub sender_name: String,
-}
-impl_bridge_napi_type!(
-    ShowNotificationOptionsRequest,
-    "ohos.notification.ShowOptionsRequest"
-);
-
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct NotificationResponseRequest {
@@ -126,6 +188,7 @@ impl_bridge_napi_type!(
     NotificationResponseRequest,
     "ohos.notification.ResponseRequest"
 );
+
 #[napi(object)]
 #[derive(Clone, Debug)]
 pub struct NotificationResponse {
@@ -134,6 +197,7 @@ pub struct NotificationResponse {
     pub action: String,
 }
 impl_bridge_napi_type!(NotificationResponse, "ohos.notification.Response");
+
 #[napi(object)]
 #[derive(Clone, Debug, Default)]
 pub struct NotificationEmptyRequest {}
@@ -171,50 +235,33 @@ impl NotificationClient {
         let response = self
             .bridge
             .call_async::<NotificationBridgePlugin, ShowNotificationRequest, NotificationAcknowledgement>(
-                "show", request, BridgeCallOptions::default().with_timeout_ms(120_000),
+                "show",
+                request,
+                BridgeCallOptions::default().with_timeout_ms(120_000),
             )
             .await?;
         Ok(response.accepted)
     }
 
-    pub async fn show_with_options(&self, request: ShowNotificationOptionsRequest) -> Result<bool> {
-        ShowNotificationRequest {
-            tag: request.tag.clone(),
-            title: request.title.clone(),
-            body: request.body.clone(),
-            actions: request.actions.clone(),
-        }
-        .validate()?;
-        if request.image.len() > 16 * 1024 * 1024 {
-            return Err(Error::from_reason("Notification image exceeds 16 MiB"));
-        }
-        let response = self.bridge.call_async::<NotificationBridgePlugin, ShowNotificationOptionsRequest, NotificationAcknowledgement>("show-with-options", request, BridgeCallOptions::default().with_timeout_ms(120_000)).await?;
-        Ok(response.accepted)
-    }
-
-    pub async fn show_with_avatar(&self, request: ShowNotificationAvatarRequest) -> Result<bool> {
-        if request.avatar.len() > 16 * 1024 * 1024 || request.options.image.len() > 16 * 1024 * 1024
-        {
-            return Err(Error::from_reason("Notification image exceeds 16 MiB"));
-        }
-        ShowNotificationRequest {
-            tag: request.options.tag.clone(),
-            title: request.options.title.clone(),
-            body: request.options.body.clone(),
-            actions: request.options.actions.clone(),
-        }
-        .validate()?;
-        let response = self.bridge.call_async::<NotificationBridgePlugin, ShowNotificationAvatarRequest, NotificationAcknowledgement>(
-            "show-with-avatar", request, BridgeCallOptions::default().with_timeout_ms(120_000)).await?;
-        Ok(response.accepted)
-    }
-
     pub async fn parse_response(&self, uri: String) -> Result<NotificationResponse> {
-        self.bridge.call_async::<NotificationBridgePlugin, NotificationResponseRequest, NotificationResponse>("parse-response", NotificationResponseRequest { uri }, BridgeCallOptions::default()).await
+        self.bridge
+            .call_async::<NotificationBridgePlugin, NotificationResponseRequest, NotificationResponse>(
+                "parse-response",
+                NotificationResponseRequest { uri },
+                BridgeCallOptions::default(),
+            )
+            .await
     }
 
     pub async fn dismiss_all(&self) -> Result<bool> {
-        let response = self.bridge.call_async::<NotificationBridgePlugin, NotificationEmptyRequest, NotificationAcknowledgement>("dismiss-all", NotificationEmptyRequest {}, BridgeCallOptions::default()).await?;
+        let response = self
+            .bridge
+            .call_async::<NotificationBridgePlugin, NotificationEmptyRequest, NotificationAcknowledgement>(
+                "dismiss-all",
+                NotificationEmptyRequest {},
+                BridgeCallOptions::default(),
+            )
+            .await?;
         Ok(response.accepted)
     }
 
@@ -222,7 +269,9 @@ impl NotificationClient {
         let response = self
             .bridge
             .call_async::<NotificationBridgePlugin, DismissNotificationRequest, NotificationAcknowledgement>(
-                "dismiss", DismissNotificationRequest { tag }, BridgeCallOptions::default(),
+                "dismiss",
+                DismissNotificationRequest { tag },
+                BridgeCallOptions::default(),
             )
             .await?;
         Ok(response.accepted)
@@ -231,26 +280,23 @@ impl NotificationClient {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn badge_contract_is_named() {
-        assert_eq!(<super::ShowNotificationAvatarRequest as openharmony_ability::BridgeNapiType>::TYPE_NAME, "ohos.notification.ShowAvatarRequest");
-        assert_eq!(
-            <super::SetBadgeRequest as openharmony_ability::BridgeNapiType>::TYPE_NAME,
-            "ohos.notification.SetBadgeRequest"
-        );
-    }
     use super::{
-        DismissNotificationRequest, NotificationAcknowledgement, NotificationBridgePlugin,
-        ShowNotificationRequest,
+        DismissNotificationRequest, NotificationAcknowledgement, NotificationAction,
+        NotificationBridgePlugin, NotificationEmptyRequest, NotificationResponse,
+        NotificationResponseRequest, SetBadgeRequest, ShowNotificationRequest,
     };
     use openharmony_ability::{BridgeContextRequirement, BridgeNapiType, BridgePlugin};
 
     #[test]
-    fn bridge_types_are_named() {
+    fn notification_contracts_are_named() {
         assert_eq!(NotificationBridgePlugin::ID, "ohos.notification");
         assert_eq!(
             NotificationBridgePlugin::REQUIRED_CONTEXTS,
             &[BridgeContextRequirement::Ability]
+        );
+        assert_eq!(
+            SetBadgeRequest::TYPE_NAME,
+            "ohos.notification.SetBadgeRequest"
         );
         assert_eq!(
             ShowNotificationRequest::TYPE_NAME,
@@ -264,28 +310,46 @@ mod tests {
             NotificationAcknowledgement::TYPE_NAME,
             "ohos.notification.Acknowledgement"
         );
+        assert_eq!(
+            NotificationResponseRequest::TYPE_NAME,
+            "ohos.notification.ResponseRequest"
+        );
+        assert_eq!(
+            NotificationResponse::TYPE_NAME,
+            "ohos.notification.Response"
+        );
+        assert_eq!(
+            NotificationEmptyRequest::TYPE_NAME,
+            "ohos.notification.EmptyRequest"
+        );
     }
 
     #[test]
-    fn notification_rejects_excess_actions() {
-        let mut request = ShowNotificationRequest {
-            tag: "tag".into(),
-            title: "title".into(),
-            body: "body".into(),
-            actions: vec![],
-        };
-        assert!(request.validate().is_ok());
-        request.actions = (0..3)
-            .map(|id| super::NotificationAction {
-                id: id.to_string(),
-                label: "Action".into(),
+    fn show_request_validates_fields_and_presentation_options() {
+        let valid = ShowNotificationRequest::new("t1", "Title", "Body")
+            .actions(vec![NotificationAction {
+                id: "reply".to_owned(),
+                label: "Reply".to_owned(),
+            }])
+            .silent(true)
+            .group("chat")
+            .sender_name("Alice")
+            .image(vec![1, 2, 3])
+            .avatar(vec![4, 5, 6])
+            .social(true);
+        assert!(valid.validate().is_ok());
+
+        let mut bad_slot = valid.clone();
+        bad_slot.slot = Some("invalid".to_owned());
+        assert!(bad_slot.validate().is_err());
+
+        let mut too_many_actions = ShowNotificationRequest::new("t1", "Title", "Body");
+        too_many_actions.actions = (0..4)
+            .map(|i| NotificationAction {
+                id: format!("a{i}"),
+                label: format!("Action {i}"),
             })
             .collect();
-        assert!(request.validate().is_ok());
-        request.actions.push(super::NotificationAction {
-            id: "four".into(),
-            label: "Fourth".into(),
-        });
-        assert!(request.validate().is_err());
+        assert!(too_many_actions.validate().is_err());
     }
 }

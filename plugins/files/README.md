@@ -48,10 +48,10 @@ This is host configuration; the named N-API request/response contract is unchang
 | `id` | `ohos.files` |
 | `execution` | `async` |
 | `requires` | `["ability"]` |
-| Actions | `file-dialog` |
-| request → response | `ohos.files.DialogOptions` → `ohos.files.DialogResponse` |
+| Actions | `file-dialog`, `trash-item`, `get-file-icon` |
+| request → response | `DialogOptions` → `DialogResponse`; `TrashItemRequest` → `TrashItemResponse`; `FileIconRequest` → `FileIconResponse` |
 
-`DialogOptions` includes `dialogType` (open/save/folder), `allowMany`, `defaultLocation` and `filters` (name/pattern pairs). `DialogResponse` returns `{ files: string[] }`, empty on cancellation.
+`DialogOptions` includes `dialogType` (open/save/folder), `allowMany`, `defaultLocation` and `filters` (name/pattern pairs). `DialogResponse` returns `{ files: string[] }`, empty on cancellation. `trash-item` moves a file or directory to the system trash. `get-file-icon` returns a PNG-encoded file/UTD icon (using offscreen snapshots and a bounded 64-entry LRU cache; querying `filePreview` / system file icons on some devices may require `ohos.permission.GET_FILE_ICON`).
 
 ## Behavior
 
