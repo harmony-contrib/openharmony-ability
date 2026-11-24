@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [1.0.0-beta.7] - 2026-11-23
+
+- feat: extend WebView input, window geometry and notifications (#128)
+
 ## [1.0.0-beta.6] - 2026-11-15
 
 - Add typed viewport, cookie, notification and prompt choice capabilities
