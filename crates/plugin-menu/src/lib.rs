@@ -96,6 +96,7 @@ pub struct MenuItemData {
 
 static MENU_EVENT_SENDER: OnceLock<Sender<String>> = OnceLock::new();
 static MENU_OPEN_EVENT_SENDER: OnceLock<Sender<MenuOpenEvent>> = OnceLock::new();
+static MENU_CLOSE_EVENT_SENDER: OnceLock<Sender<MenuCloseEvent>> = OnceLock::new();
 
 /// Called by the menu consumer at startup to register its menu event channel sender.
 /// Idempotent: the first registration wins, later calls are ignored.
@@ -106,6 +107,11 @@ pub fn register_menu_event_sender(sender: Sender<String>) {
 /// Register the menu-open channel, preserving the originating window identity.
 pub fn register_menu_open_event_sender(sender: Sender<MenuOpenEvent>) {
     let _ = MENU_OPEN_EVENT_SENDER.set(sender);
+}
+
+/// Register the menu-close channel, preserving the originating window identity.
+pub fn register_menu_close_event_sender(sender: Sender<MenuCloseEvent>) {
+    let _ = MENU_CLOSE_EVENT_SENDER.set(sender);
 }
 
 // ─── Per-window visibility / content state cache ──────────────────────────────
@@ -144,6 +150,13 @@ impl BridgePlugin for MenuBridgePlugin {
                 let open: MenuOpenEvent = event.decode()?;
                 if let Some(sender) = MENU_OPEN_EVENT_SENDER.get() {
                     let _ = sender.send(open);
+                }
+                event.respond(true)
+            }
+            "menu-close" => {
+                let close: MenuCloseEvent = event.decode()?;
+                if let Some(sender) = MENU_CLOSE_EVENT_SENDER.get() {
+                    let _ = sender.send(close);
                 }
                 event.respond(true)
             }
@@ -317,6 +330,14 @@ pub struct MenuOpenEvent {
 }
 
 impl_bridge_napi_type!(MenuOpenEvent, "ohos.menu.MenuOpenEvent");
+
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct MenuCloseEvent {
+    pub window_id: String,
+}
+
+impl_bridge_napi_type!(MenuCloseEvent, "ohos.menu.MenuCloseEvent");
 
 // ─── Worker-safe client facade ───────────────────────────────────────────────
 

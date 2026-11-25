@@ -14,6 +14,7 @@ import { deviceInfo, systemDateTime } from "@kit.BasicServicesKit";
 import {
   MenuDataCallback,
   getMenuClickHandler,
+  notifyMenuDidClose,
   notifyMenuWillOpen,
   registerMenuDataCallback,
   unregisterMenuDataCallback,
@@ -25,6 +26,7 @@ export {
   setMenuClickHandler,
   unregisterMenuClickHandler,
   setMenuWillOpenHandler,
+  setMenuDidCloseHandler,
   getMenuBarRecoverFn,
   setMenuBarRecoverFn,
   unregisterMenuBarRecoverFn,
@@ -86,6 +88,10 @@ export struct MenuBarComponent {
   private headingPressId: string = "";
   private headingPressAt: number = 0;
   private restoreFocusId: string | undefined = undefined;
+  private popupActive: boolean = false;
+  private popupToken: number = 0;
+  private shownPopupToken: number = 0;
+  private popupTimerId: number = -1;
 
   private iconPixelMaps: Map<string, image.PixelMap> = new Map();
   private popupIconIds: Set<string> = new Set();
@@ -294,10 +300,7 @@ export struct MenuBarComponent {
         .selectIcon(true)
         .onChange((checked: boolean) => {
           item.checked = checked;
-          const handler = getMenuClickHandler(this.registryKey());
-          if (handler) {
-            handler(item);
-          }
+          this.handleMenuItemSelection(item, data);
         });
     } else if (item.type === "icon" && this.iconPixelMaps.has(item.id)) {
       MenuItem() {
@@ -333,10 +336,7 @@ export struct MenuBarComponent {
       }
       .enabled(item.enabled ?? true)
       .onClick(() => {
-        const handler = getMenuClickHandler(this.registryKey());
-        if (handler) {
-          handler(item);
-        }
+        this.handleMenuItemSelection(item, data);
       });
     } else {
       MenuItem({
@@ -355,9 +355,7 @@ export struct MenuBarComponent {
             this.windowId,
             handler ? "found" : "NULL",
           );
-          if (handler) {
-            handler(item);
-          }
+          this.handleMenuItemSelection(item, data);
         });
     }
   }
@@ -853,16 +851,60 @@ export struct MenuBarComponent {
 
   // --- Lifecycle ---
 
+  private clearPopupTimer(): void {
+    if (this.popupTimerId >= 0) {
+      clearTimeout(this.popupTimerId);
+      this.popupTimerId = -1;
+    }
+  }
+
+  private closeActivePopup(): void {
+    this.clearPopupTimer();
+    if (this.popupActive) {
+      this.popupActive = false;
+      notifyMenuDidClose(this.windowId, this.registryKey());
+    }
+  }
+
+  private handleMenuItemSelection(item: MenuItemData, data: MenuRenderData): void {
+    const handler = getMenuClickHandler(this.registryKey());
+    if (
+      handler &&
+      data.menubarId === undefined &&
+      !this.applicationMenu &&
+      !this.commandMenu &&
+      item.type !== "predefined" &&
+      this.popupActive &&
+      this.shownPopupToken === this.popupToken
+    ) {
+      this.popupActive = false;
+    }
+    if (handler) {
+      handler(item);
+    }
+  }
+
   private showMenuPopup(x: number, y: number): void {
+    this.closeActivePopup();
     this.restoreFocusId = undefined;
     this.applicationMenu = false;
     this.commandMenu = false;
     this.menuX = x;
     this.menuY = y;
+    const token = ++this.popupToken;
     // Close first, then reopen to re-trigger bindMenu.
     this.menuShown = false;
-    setTimeout(() => {
-      this.menuShown = true;
+    if (this.menuItems.length === 0) {
+      notifyMenuDidClose(this.windowId, this.registryKey());
+      return;
+    }
+    this.popupActive = true;
+    this.popupTimerId = setTimeout(() => {
+      this.popupTimerId = -1;
+      if (this.popupToken === token && this.popupActive) {
+        this.shownPopupToken = token;
+        this.menuShown = true;
+      }
     }, 0);
   }
 
@@ -913,9 +955,13 @@ export struct MenuBarComponent {
         this.showMenuPopup(x, y);
       },
       onMenuShown: (shown: boolean) => {
+        if (!shown && this.popupTimerId >= 0) {
+          this.closeActivePopup();
+        }
         this.menuShown = shown;
       },
       onMenuCommands: (items: MenuItemData[], x: number, y: number, restoreFocusId?: string) => {
+        this.closeActivePopup();
         this.restoreFocusId = restoreFocusId;
         this.applicationMenu = false;
         this.commandMenu = true;
@@ -940,6 +986,7 @@ export struct MenuBarComponent {
         ) {
           throw new Error(`Application menu '${menuName ?? "all"}' is not available`);
         }
+        this.closeActivePopup();
         notifyMenuWillOpen(this.windowId, this.registryKey());
         this.restoreFocusId = restoreFocusId;
         this.applicationMenu = true;
@@ -954,6 +1001,7 @@ export struct MenuBarComponent {
   }
 
   aboutToDisappear(): void {
+    this.closeActivePopup();
     this.restoreFocusId = undefined;
     for (const itemId of this.dropdownMouseNodes.keys()) {
       this.releaseDropdownMouse(itemId);
@@ -1012,6 +1060,10 @@ export struct MenuBarComponent {
       },
       onDisappear: () => {
         this.restorePopupFocus(true);
+        if (this.popupActive && this.shownPopupToken === this.popupToken) {
+          this.popupActive = false;
+          notifyMenuDidClose(this.windowId, this.registryKey());
+        }
       },
     };
   }

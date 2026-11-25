@@ -5,6 +5,7 @@ import { hilog } from "@kit.PerformanceAnalysisKit";
 // --- Per-window click handler registry (MW-1) ---
 const windowMenuClickHandlers: Map<string, (item: MenuItemData) => void> = new Map();
 const menuWillOpenHandlers: Map<string, (windowId: number) => void> = new Map();
+const menuDidCloseHandlers: Map<string, (windowId: number) => void> = new Map();
 
 export function setMenuWillOpenHandler(
   handler: ((windowId: number) => void) | null,
@@ -16,6 +17,18 @@ export function setMenuWillOpenHandler(
 
 export function notifyMenuWillOpen(windowId: number, key: string): void {
   menuWillOpenHandlers.get(key)?.(windowId);
+}
+
+export function setMenuDidCloseHandler(
+  handler: ((windowId: number) => void) | null,
+  key: string = "main",
+): void {
+  if (handler) menuDidCloseHandlers.set(key, handler);
+  else menuDidCloseHandlers.delete(key);
+}
+
+export function notifyMenuDidClose(windowId: number, key: string): void {
+  menuDidCloseHandlers.get(key)?.(windowId);
 }
 
 export function setMenuClickHandler(

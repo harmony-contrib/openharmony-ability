@@ -37,6 +37,7 @@ import {
   isMenubarVisible,
   setMenuClickHandler,
   setMenuWillOpenHandler,
+  setMenuDidCloseHandler,
   setMenuBarRecoverFn,
   unregisterMenuClickHandler,
   unregisterMenuBarRecoverFn,
@@ -268,6 +269,7 @@ export class MenuPlugin extends AsyncPluginBase {
     if (binding.release()) {
       cancelMenuDataWaiters(binding.key);
       setMenuWillOpenHandler(null, binding.key);
+      setMenuDidCloseHandler(null, binding.key);
       unregisterMenuClickHandler(binding.key);
       unregisterMenuBarRecoverFn(binding.key);
     }
@@ -330,6 +332,18 @@ export class MenuPlugin extends AsyncPluginBase {
         });
       } catch (error) {
         hilog.warn(DOMAIN, "MenuPlugin", "menu-open forward failed: %{public}s", String(error));
+      }
+    }, key);
+    setMenuDidCloseHandler((): void => {
+      if (!context.isActive()) {
+        return;
+      }
+      try {
+        context.invokeNativeSync("menu-close", "ohos.menu.MenuCloseEvent", "std.bool", {
+          windowId: windowId === 0 ? "main" : String(windowId),
+        });
+      } catch (error) {
+        hilog.warn(DOMAIN, "MenuPlugin", "menu-close forward failed: %{public}s", String(error));
       }
     }, key);
     const emitMenuEventFn: (menuId: string, windowId?: string) => void = (menuId, windowId) => {
